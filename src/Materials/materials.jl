@@ -461,51 +461,55 @@ function Base.show(io::IO, ::MIME"text/plain", m::Material{NC,NR}) where {NC,NR}
 end
 
 # ============================================================================
-# Generated Functions for Type-Stable Iteration over Heterogeneous Components
+# Dry pyrolysis gases
 # ============================================================================
-#
-# These functions use @generated to unroll loops at compile time, avoiding
-# the type instability that occurs when indexing heterogeneous tuples at runtime.
-# This is critical for performance in hot paths like RHS evaluation.
 
 """
-	dry_pyrolysis_gas_indices(material::Material{NC}) where NC
+	dry_gas_flags(material::Material{NC}) -> NTuple{NC,Bool}
 
-Return a tuple of indices of gas components representing dry-pyrolysis gases —
-i.e. all GAS-phase components except water vapor / moisture-derived gases.
+Flag the dry pyrolysis gases: the gases the solids give off through the
+reaction graph. The lineage starts with every solid component and takes in,
+until nothing changes, the products (yield > 0) of every reaction with a
+reactant in it; its gases are the dry gases. Water released by decomposition
+is dry gas, the vapour a liquid evaporates into is not, and a gas no reaction
+produces is not.
 
-Used by the variable cross-section model: only dry-pyrolysis-gas mass efflux
-drives the radial shrinkage progress variable χ_i. Moisture loss does not
-contribute to χ.
-
-Recognized water-vapor names (case-insensitive substring match): `:water_vapor`,
-`:WATER_VAPOR`, `:H2O`, anything containing `H2O` or `water`.
+A lineage gas that a reaction without a reactant in the lineage also produces
+has no single origin, and the function throws an `ArgumentError` naming the
+gas and the reactions; model it as two species, one per lineage.
 """
-@generated function dry_pyrolysis_gas_indices(material::Material{NC}) where {NC}
-    return quote
-        _collect_dry_pyrolysis_gas_indices(material.components)
+function dry_gas_flags(material::Material{NC}) where {NC}
+    comps = material.components
+    rxns = material.reactions
+    lineage = Set(j for j = 1:NC if is_solid(comps[j]))
+    from_lineage(r) = any(p -> first(p) in lineage, r.reactants)
+    produces(r, j) = any(p -> first(p) == j && last(p) > 0, r.products)
+    grown = true
+    while grown
+        grown = false
+        for r in rxns
+            from_lineage(r) || continue
+            for (j, y) in r.products
+                if y > 0 && !(j in lineage)
+                    push!(lineage, j)
+                    grown = true
+                end
+            end
+        end
     end
-end
-
-# Compile-time recursive collector for dry-pyrolysis-gas indices.
-# Phase check is type-level via `is_gas`; the water-vapor name filter remains runtime.
-@inline _collect_dry_pyrolysis_gas_indices(::Tuple{}) = ()
-@inline function _collect_dry_pyrolysis_gas_indices(comps::Tuple)
-    first_comp = comps[1]
-    rest = Base.tail(comps)
-    rest_indices = _collect_dry_pyrolysis_gas_indices(rest)
-    if is_gas(first_comp) && !_is_water_vapor_name(first_comp.name)
-        return (1, map(x -> x + 1, rest_indices)...)
-    else
-        return map(x -> x + 1, rest_indices)
+    for j = 1:NC
+        (is_gas(comps[j]) && j in lineage) || continue
+        outside = [r.name for r in rxns if !from_lineage(r) && produces(r, j)]
+        isempty(outside) && continue
+        inside = [r.name for r in rxns if from_lineage(r) && produces(r, j)]
+        throw(
+            ArgumentError(
+                "gas :$(comps[j].name) is produced from the solids (reactions " *
+                "$(join(repr.(inside), ", "))) and from outside their lineage " *
+                "(reactions $(join(repr.(outside), ", "))), so whether it is dry " *
+                "pyrolysis gas is ambiguous; split it into one species per lineage",
+            ),
+        )
     end
-end
-
-@inline function _is_water_vapor_name(name::Symbol)
-    s = String(name)
-    if occursin("H2O", s)
-        return true
-    end
-    ls = lowercase(s)
-    return occursin("water", ls) || ls == "h2o"
+    return ntuple(j -> is_gas(comps[j]) && j in lineage, Val(NC))
 end

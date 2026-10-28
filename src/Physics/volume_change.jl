@@ -9,29 +9,27 @@ allocations from indexing heterogeneous tuples with runtime indices.
 # ============================================================================
 # Dispatch-based volume change rate helpers (allocation-free)
 # ============================================================================
+#
+# `is_gas` resolves from the component type, so a gas term is folded away at
+# compile time and its reference density is never evaluated.
 
 @inline function _volume_change_rate(dξ, T, comps::Tuple{C}, ::Val{1}) where {C}
     W = promote_type(typeof(T), eltype(dξ))
     comp = comps[1]
-    γ = comp.swelling_factor
-    if γ > 0
-        ρⱼ = comp.density(T)
-        return convert(W, γ * dξ[1] / ρⱼ)
-    end
-    return zero(W)
+    is_gas(comp) && return zero(W)
+    ρⱼ = comp.density(T)
+    return convert(W, dξ[1] / ρⱼ)
 end
 
 @inline function _volume_change_rate(dξ, T, comps::Tuple{C1,C2}, ::Val{2}) where {C1,C2}
     θ = zero(promote_type(typeof(T), eltype(dξ)))
-    γ1 = comps[1].swelling_factor
-    if γ1 > 0
+    if !is_gas(comps[1])
         ρ1 = comps[1].density(T)
-        θ += γ1 * dξ[1] / ρ1
+        θ += dξ[1] / ρ1
     end
-    γ2 = comps[2].swelling_factor
-    if γ2 > 0
+    if !is_gas(comps[2])
         ρ2 = comps[2].density(T)
-        θ += γ2 * dξ[2] / ρ2
+        θ += dξ[2] / ρ2
     end
     return θ
 end
@@ -43,20 +41,17 @@ end
     ::Val{3},
 ) where {C1,C2,C3}
     θ = zero(promote_type(typeof(T), eltype(dξ)))
-    γ1 = comps[1].swelling_factor
-    if γ1 > 0
+    if !is_gas(comps[1])
         ρ1 = comps[1].density(T)
-        θ += γ1 * dξ[1] / ρ1
+        θ += dξ[1] / ρ1
     end
-    γ2 = comps[2].swelling_factor
-    if γ2 > 0
+    if !is_gas(comps[2])
         ρ2 = comps[2].density(T)
-        θ += γ2 * dξ[2] / ρ2
+        θ += dξ[2] / ρ2
     end
-    γ3 = comps[3].swelling_factor
-    if γ3 > 0
+    if !is_gas(comps[3])
         ρ3 = comps[3].density(T)
-        θ += γ3 * dξ[3] / ρ3
+        θ += dξ[3] / ρ3
     end
     return θ
 end
@@ -72,14 +67,12 @@ end
     exprs = Expr[]
     push!(exprs, :(θ = zero(promote_type(typeof(T), eltype(dξ)))))
     for i = 1:NC
-        γ_sym = Symbol("γ_", i)
         ρ_sym = Symbol("ρ_", i)
         push!(exprs, quote
             @inbounds begin
-                $γ_sym = comps[$i].swelling_factor
-                if $γ_sym > 0
+                if !is_gas(comps[$i])
                     $ρ_sym = comps[$i].density(T)
-                    θ += $γ_sym * dξ[$i] / $ρ_sym
+                    θ += dξ[$i] / $ρ_sym
                 end
             end
         end)
@@ -93,13 +86,12 @@ end
 
 Compute relative volume change rate [(m³/m³)/s].
 
-dV/dt / V = Σⱼ (γⱼ/ρⱼ) (dξⱼ/dt)
+dV/dt / V = Σⱼ (dξⱼ/dt) / ρⱼ, summed over the condensed components
 
-Every component is weighted by its swelling factor γⱼ — the same universal
-γ-weighted bulk occupancy used by
-`Properties.solid_volume_fractions`: γⱼ is the fraction of
-component j's intrinsic volume that contributes to the bulk volume.
-Canonical values are γ = 0 (gas, escapes the matrix) and γ = 1 (condensed).
+A condensed (solid or liquid) component holds the volume ξⱼ/ρⱼ of its bulk
+density, so its source changes the cell volume by dξⱼ/ρⱼ; the same bulk
+occupancy weights the property mixing (`Properties.condensed_volume_fractions`).
+Gases never enter the strain.
 
 PERFORMANCE: Uses dispatch-based helpers to avoid allocations from heterogeneous tuple access.
 """

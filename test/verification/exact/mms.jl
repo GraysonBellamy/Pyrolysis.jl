@@ -65,7 +65,7 @@ using ForwardDiff
 using LinearAlgebra: SymTridiagonal, eigen
 using OrdinaryDiffEq
 using Pyrolysis
-using Pyrolysis.Materials: is_gas, n_components, n_reactions
+using Pyrolysis.Materials: is_gas, n_components, n_reactions, participates_in_transport
 using Pyrolysis: Properties, Physics
 
 # ----------------------------------------------------------------------------
@@ -108,14 +108,8 @@ function mms_gas_flux(material, fields::MMSFields, j::Int, z, t)
         error("this MMS reference requires lumped transport")
     T = fields.T(z, t)
     ξ = mms_xi_tuple(fields, z, t)
-    ids = [
-        k for k in eachindex(ξ) if
-        !is_gas(material.components[k]) && material.components[k].swelling_factor>0
-    ]
-    weights = [
-        material.components[k].swelling_factor*ξ[k]/material.components[k].density(T)
-        for k in ids
-    ]
+    ids = [k for k in eachindex(ξ) if participates_in_transport(material.components[k])]
+    weights = [ξ[k]/material.components[k].density(T) for k in ids]
     weights ./= sum(weights)
     values = [material.components[k].gas_transfer_coeff(T) for k in ids]
     spec = material.mixing.λ
@@ -254,12 +248,12 @@ end
 # Under REACTION-DRIVEN motion (no `w_override`) the mesh velocity is the
 # prefix sum of the volumetric strain rate θ computed from the REACTION rates
 # (`Physics.volume_change_rate` on `dξ_rxn`). The manufactured counterparts
-# below mirror that chain exactly — same kinetics calls, same γ/ρ weighting —
+# below mirror that chain exactly — same kinetics calls, same 1/ρ weighting —
 # per driver design decision 2 (never re-derive coefficients by hand).
 
 """
 Continuous volumetric strain rate θ*(z,t) [1/s] on the manufactured fields:
-θ* = Σⱼ (γⱼ/ρⱼ(T*))·dξⱼ_rxn — REACTION rates only, via the same
+θ* = Σⱼ dξⱼ_rxn/ρⱼ(T*) over the condensed components — REACTION rates only, via the same
 `Physics.volume_change_rate` the mesh closure's strain rates use.
 """
 function mms_theta(material, fields::MMSFields, z, t)

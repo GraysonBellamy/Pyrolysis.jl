@@ -27,14 +27,15 @@ function endpoint_problem(n, width; dusty = false)
         components = (
             SolidComponent(
                 :matrix;
-                ρ = 500.0,
-                φ = 0.5,
+                ρ = 1000.0,
+                ρ_intrinsic = 1000.0,
                 c = 1000.0,
                 k = 0.2,
-                γ = 0.5,
                 λ = 1e-5,
             ),
-            SolidComponent(:residue; ρ = 500.0, φ = 0.5, c = 1000.0, k = 0.2, γ = 0.0),
+            # A residue outside the transport matrix (it declares neither λ
+            # nor κ) that still occupies skeletal volume.
+            LiquidComponent(:residue; ρ = 500.0, φ = 0.5, c = 1000.0, k = 0.2),
             GaseousComponent(:gas; M = 0.03, c = 1000.0, k = 0.03),
         ),
         reactions = (
@@ -84,7 +85,7 @@ end
         ξ=Tuple(sol.ξ[:, i, end])
         q, _=transport_matrix_state(ξ, sol.T[i, end], p.material)
         @test q<0.01
-        @test ξ[2] / 1000.0 > 0.09  # surviving γ=0 skeleton occupies pore space
+        @test ξ[2] / 1000.0 > 0.09  # the surviving residue occupies pore space
         @test transport_coefficients(
             ξ,
             sol.T[i, end],

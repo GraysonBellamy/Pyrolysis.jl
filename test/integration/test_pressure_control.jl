@@ -84,7 +84,7 @@ end
 
 # A closed gas inventory compressed by a mass-conserving condensed reaction.
 # m_A=m_A0 exp(-kt), V/V0=e^(-kt)+(ρ_A/ρ_B)(1-e^(-kt));
-# the pore volume follows the two intrinsic densities independently of γ.
+# the pore volume follows the two intrinsic densities.
 function compressing_pores()
     T=600.0
     P=1e5

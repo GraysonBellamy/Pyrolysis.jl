@@ -1,24 +1,21 @@
 using Test
 using Pyrolysis
 
-# A solid→gas material, with a lateral shrinkage law on request, on a uniform
-# 1 cm column under a 10 kW/m² flux with lumped wall venting at the top.
+# A solid that converts to a light foam and gas, so the column swells as it
+# converts, with a lateral shrinkage law on request, on a uniform 1 cm column
+# under a 10 kW/m² flux with lumped wall venting at the top.
 function _cross_section_problem(; lateral::Bool, tspan = (0.0, 0.02))
-    solid = SolidComponent(
-        :solid;
-        φ = 0.25,
-        λ = 0.0,
-        ρ = 1000.0,
-        c = 1000.0,
-        k = 0.2,
-        ε = 0.9,
-        γ = 1.0,
-    )
-    gas = GaseousComponent(:gas; M = 0.050, c = 1000.0, k = 0.02, γ = 1.0)
+    solid =
+        SolidComponent(:solid; φ = 0.25, λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9)
+    foam =
+        SolidComponent(:foam; φ = 0.25, λ = 0.0, ρ = 100.0, c = 1000.0, k = 0.05, ε = 0.9)
+    gas = GaseousComponent(:gas; M = 0.050, c = 1000.0, k = 0.02)
     material = Material(
         name = :cross_section_test,
-        components = (solid, gas),
-        reactions = (Reaction(:decomp, 1 => 2, A = 1e5, E = 5e4, h = 1e5),),
+        components = (solid, foam, gas),
+        reactions = (
+            Reaction(:decomp, 1 => (2, 3), A = 1e5, E = 5e4, h = 1e5, yields = (0.5, 0.5)),
+        ),
         lateral_shrinkage_law = lateral ? (χ -> 1.0 - 0.2 * χ) : nothing,
     )
     return PyrolysisProblem(
@@ -32,7 +29,7 @@ function _cross_section_problem(; lateral::Bool, tspan = (0.0, 0.02))
             ),
         ),
         T_initial = z -> 300.0,
-        ξ_initial = [z -> 1000.0, z -> 0.0],
+        ξ_initial = [z -> 1000.0, z -> 0.0, z -> 0.0],
         tspan = tspan,
     )
 end
@@ -45,9 +42,9 @@ end
         n = Pyrolysis.States.n_cells(layout)
         @test n == 5
         @test Pyrolysis.States.has_chi(layout)
-        # Per cell T, two masses and the history pair; per node position and
-        # velocity; the area and the lateral rate.
-        @test length(cp.u0) == 5 * (1 + 2 + 2) + 6 * 2 + 2
+        # Per cell T, three masses and the history pair; per node position
+        # and velocity; the area and the lateral rate.
+        @test length(cp.u0) == 5 * (1 + 3 + 2) + 6 * 2 + 2
         area = Pyrolysis.States.area_index(layout)
         A0 = cp.u0[area]
 
@@ -77,7 +74,7 @@ end
             use_ale = true,
         )
         @test !Pyrolysis.States.has_chi(cp.def.layout)
-        @test length(cp.u0) == 5 * (1 + 2) + 6 * 2
+        @test length(cp.u0) == 5 * (1 + 3) + 6 * 2
     end
 
     # Only a moving mesh evolves the cross section, so a lateral shrinkage

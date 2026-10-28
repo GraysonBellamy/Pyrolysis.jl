@@ -32,8 +32,9 @@ using Pyrolysis.Properties:
 const _EA_GAS = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03)
 
 # Two condensed components with constant bulk densities, so the mixing
-# weights v_j = γ_j ξ_j / ρ_j (normalised over the matrix) are independent of
-# T and the only temperature dependence is the component emissivity.
+# weights v_j = ξ_j / ρ_j (normalised over the condensed components) are
+# independent of T and the only temperature dependence is the component
+# emissivity.
 _ε_lin(T) = 0.95 - 1e-4 * T
 _ε_fun(T) = 0.80 + 5e-5 * (T - 300.0)
 
@@ -64,8 +65,8 @@ function _ea_material(; a_virgin = nothing, a_char = nothing, ε_virgin = (0.95,
     return Material(name = :ea, components = (virgin, char, _EA_GAS), reactions = ())
 end
 
-# Documented weights: v_j = γ_j ξ_j / ρ_j normalised over the contributing
-# (γ > 0) components; the gas has γ = 0.
+# Documented weights: v_j = ξ_j / ρ_j normalised over the condensed
+# components; the gas carries no weight.
 function _hand_weights(ξ)
     w = (ξ[1] / 500.0, ξ[2] / 150.0)
     s = w[1] + w[2]

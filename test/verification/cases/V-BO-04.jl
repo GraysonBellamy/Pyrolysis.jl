@@ -2,8 +2,8 @@
 # V-BO-04 — uniform zero-order burnout (exact L(t) through the deactivation event)
 # =============================================================================
 #
-# An adiabatic slab at uniform T₀ with one zero-order reaction solid → gas,
-# γ_gas = 0 and no heat of reaction. The temperature stays at T₀ exactly (no
+# An adiabatic slab at uniform T₀ with one zero-order reaction solid → gas
+# and no heat of reaction. The temperature stays at T₀ exactly (no
 # heat source, no gradient), so the volumetric rate r = A·exp(−E/RT₀) is a
 # constant and every cell loses the same fraction r/ρ_s of its current
 # volume per unit time. Under ALE the solid concentration stays at ρ_s

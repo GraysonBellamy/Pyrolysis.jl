@@ -5,7 +5,7 @@ function validate_transport_support(material, ξ0; moving_support = false)
     has_gas(material) || return nothing
     participating=[
         j for j in eachindex(material.components) if
-        !is_gas(material.components[j]) && material.components[j].swelling_factor>0
+        participates_in_transport(material.components[j])
     ]
     for channel in (:λ, :κ)
         channel===:λ && material.gas_transport isa DustyGas && continue

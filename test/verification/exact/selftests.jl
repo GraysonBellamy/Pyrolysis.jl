@@ -581,14 +581,14 @@ end
         # kinetics θ*, the Gauss–Legendre w* = ∫θ*, and the material-frame
         # condensed source are each verified against an independently
         # hand-derived closed form. Design mirrors the case: constant ρ_s,
-        # γ_s = 1 / γ_g = 0, single first-order s → g, depletion limiter
+        # the gas outside the strain, single first-order s → g, depletion limiter
         # numerically inactive (tanh(ξ_s/1.0) ≡ 1.0 in Float64 for
         # ξ_s ≳ 20 kg/m³ — here ξ_s ≥ 500).
         L = 0.01
         ρs = 800.0
         A_r, E_r = 5.0e4, 80.0e3
-        solid = SolidComponent(:s, ρ = ρs, c = 1200.0, k = 0.2, λ = 2.0e-5, γ = 1.0)
-        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03)  # γ = 0
+        solid = SolidComponent(:s, ρ = ρs, c = 1200.0, k = 0.2, λ = 2.0e-5)
+        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03)
         rxn = Reaction(:r, 1 => 2; A = A_r, E = E_r, h = 5.0e4)
         mat = Material(name = :MMSSelfIM, components = (solid, gas), reactions = (rxn,))
 
@@ -603,7 +603,7 @@ end
         R = Pyrolysis.Materials.R_GAS
         k_hand(t) = A_r * exp(-E_r / (R * T_f(0.0, t)))
         rate_hand(z, t) = k_hand(t) * ξs_f(z, t)          # limiter ≡ 1 here
-        θ_hand(z, t) = -rate_hand(z, t) / ρs               # γ_g = 0 drops the gas term
+        θ_hand(z, t) = -rate_hand(z, t) / ρs               # the gas never enters θ
         # w* = ∫₀ᶻ θ* dζ, closed form for the sin profile:
         w_hand(z, t) =
             -(k_hand(t) / ρs) * (a_f(t) * z + b_f(t) * (L / π) * (1.0 - cos(π * z / L)))

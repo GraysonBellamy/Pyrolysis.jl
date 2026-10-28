@@ -25,7 +25,8 @@ row's own rate is exactly `θ_A A`. `χ̄_c` is `χ̄` smoothly clamped into
 is smoothly floored at `M_floor`. Both rows read every cell's history pair,
 the lateral one also its rates: they are the system's two dense rows.
 
-`dry_gas` flags the dry pyrolysis gases (every gas but water vapour).
+`dry_gas` flags the dry pyrolysis gases, the gases the solids give off
+through the reaction graph ([`dry_gas_flags`](@ref)).
 """
 struct LateralShrinkage{F,NC}
     law::F
@@ -40,7 +41,8 @@ end
 The cross section of initial area `A₀` [m²] of a column holding the initial
 dry solid mass `M₀` [kg]. The material's law must be positive and finite on
 `[−w, 1 + w]` and equal one at zero conversion, and the column must hold dry
-solid.
+solid. The dry gases are those of [`dry_gas_flags`](@ref), which throws when a
+gas descends from the solids and from another reactant as well.
 """
 function LateralShrinkage(material::Material{NC}, A₀::Real, M₀::Real) where {NC}
     law = material.lateral_shrinkage_law
@@ -67,8 +69,7 @@ function LateralShrinkage(material::Material{NC}, A₀::Real, M₀::Real) where 
             "$(law(0.0))",
         ),
     )
-    dry = dry_pyrolysis_gas_indices(material)
-    return LateralShrinkage(law, Float64(A₀), ntuple(j -> j in dry, Val(NC)), 1e-8 * M₀)
+    return LateralShrinkage(law, Float64(A₀), dry_gas_flags(material), 1e-8 * M₀)
 end
 
 @inline _clamped_conversion(χ) =

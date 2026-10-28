@@ -15,7 +15,7 @@ const POROSITY_FLOOR = 1e-12
 
 Central ideal-gas pore state from nonnegative property concentrations [kg/m³
 bulk] and an admissible property temperature [K]. Raw porosity is one minus
-condensed skeletal occupancy, independent of γ. The common C¹ divisor guard
+condensed skeletal occupancy. The common C¹ divisor guard
 is an identity for φ ≥ 2 POROSITY_FLOOR. Its use on trial states does not make
 zero physical pore volume admissible. Vacuum has exactly zero pressures,
 intrinsic densities and fractions, without an imposed background species.

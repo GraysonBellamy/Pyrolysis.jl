@@ -73,8 +73,9 @@ end
     LumpedTransfer(; endpoint=nothing, blend=(1e-4,1e-3))
 
 Superficial partial-pressure transfer with condensed-component `λ`, plus
-Darcy advection with condensed-component `κ`. The matrix occupancy is
-`q = Σ_condensed γ ξ/ρ_bulk`. Coefficients blend to the explicit endpoint on
+Darcy advection with condensed-component `κ`. The matrix is every solid and
+each liquid that declares `λ` or `κ` ([`participates_in_transport`](@ref)); its
+occupancy is `q = Σ_matrix ξ/ρ_bulk`. Coefficients blend to the explicit endpoint on
 `blend`. Without an endpoint the supported domain is `q ≥ blend[2]`;
 crossing it terminates integration with `:matrix_exhausted`.
 """
@@ -151,8 +152,7 @@ function _validate_transport_inputs(components, model, mixing)
         ArgumentError("NoGasTransport is only valid for materials without gas components"),
     )
     for c in components
-        is_gas(c) && continue
-        if c.swelling_factor > 0 &&
+        if participates_in_transport(c) &&
            model isa LumpedTransfer &&
            c.gas_transfer_coeff === nothing
             throw(
@@ -169,7 +169,7 @@ function _validate_transport_inputs(components, model, mixing)
     if model isa DustyGas &&
        model.pore_diameter === nothing &&
        model.capillary_regularization == 0
-        cs = filter(c -> !is_gas(c) && c.swelling_factor > 0, components)
+        cs = filter(participates_in_transport, components)
         laws = map(c -> c.permeability, cs)
         # Constant, uniformly positive data or an identically closed channel
         # cannot cross the square-root singularity. Other paths need explicit data.

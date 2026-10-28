@@ -9,8 +9,8 @@
 #
 #   v_ss = q″/(ρ[c(T_p − T₀) + ΔH_p]),  T(ζ) = T₀ + (T_p − T₀)e^(−v_ss ζ/α)
 #
-# Realization: single reaction solid → gas with γ_gas = 0 (volume loss at
-# intrinsic density ⇒ surface regression) under ALE with cell
+# Realization: single reaction solid → gas, the gas outside the strain
+# (volume loss at the solid density ⇒ surface regression) under ALE with cell
 # deactivation. The kinetics-controlled front approximates the fixed-T_p
 # ablation limit; (A, E) are chosen on the leading-order Laplace locus
 #
@@ -138,8 +138,8 @@ function _verification_case_vcpl02()
                 # at the CI mesh the observed is 2.2e-4, but the identity's
                 # floor is NOT monotone in Δz once Δz < δ_r (n=240 rung), so a
                 # CI-mesh 3× pin would fail finer meshes. Guard target is O(1)
-                # γ_gas bookkeeping breakage — 2.1e-3 suffices.
-                comment = "γ_gas = 0 ⇒ dL/dt = −ṁ‴_gas/ρ exactly",
+                # strain bookkeeping breakage — 2.1e-3 suffices.
+                comment = "gas outside the strain ⇒ dL/dt = −ṁ‴_gas/ρ exactly",
             ),
         )
 
@@ -384,7 +384,7 @@ function _verification_case_vcpl02b()
                 exact = m.v_ggr,
                 error = err_int,
                 tol = 1.7e-3,  # measured <4.1e-4 on the 200/320-cell ladder
-                comment = "γ_gas = 0 ⇒ dL/dt = −ṁ‴_gas/ρ exactly",
+                comment = "gas outside the strain ⇒ dL/dt = −ṁ‴_gas/ρ exactly",
             ),
             QoIResult(
                 name = "stationary far-field temperature",

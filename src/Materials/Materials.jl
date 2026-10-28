@@ -81,6 +81,7 @@ export Phase, SOLID, LIQUID, GAS
 export SolidComponent, GaseousComponent, LiquidComponent
 export phase, molar_mass, is_gas, is_solid, is_liquid  # Type-dispatch accessors
 export get_permeability, has_permeability  # Permeability accessors for components
+export participates_in_transport  # Gas-transport matrix membership
 export get_intrinsic_density  # Skeletal density accessor
 export get_emissivity, get_absorptivity, surface_absorptivity  # Radiative surface accessors
 
@@ -98,7 +99,7 @@ export AbstractDepletionLimiter, DepletionLimiter
 export Material, MixingRule, PARALLEL, SERIES, WEIGHTED, BRUGGEMAN, CARMAN_KOZENY
 export MixingSpec, MaterialMixing
 export n_components, n_reactions
-export dry_pyrolysis_gas_indices
+export dry_gas_flags
 
 # Gas transport (component-based permeability)
 export gas_component_indices

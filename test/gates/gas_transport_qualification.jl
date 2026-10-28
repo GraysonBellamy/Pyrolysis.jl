@@ -32,7 +32,6 @@ function pore_component(c, φ)
         ε = c.emissivity,
         absorptivity = c.surface_absorptivity,
         α = c.absorption_coeff,
-        γ = c.swelling_factor,
     )
 end
 function dense_variant(base, φ, n; t_end = base.tspan[2])

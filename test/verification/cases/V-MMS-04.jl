@@ -11,7 +11,7 @@
 #
 # ## Manufactured design (see exact/mms.jl, "Induced mesh motion")
 #
-# Constant intrinsic densities, γ_solid = 1 / γ_gas = 0 (canonical), single
+# Constant intrinsic densities, the gas outside the strain, single
 # first-order reaction s → g with the depletion limiter numerically inactive
 # over the manufactured range (tanh(ξ_s/1.0) ≡ 1.0 in Float64 for
 # ξ_s ≳ 20 kg/m³; here ξ_s ≥ 500). T* is spatially UNIFORM (time-varying):
@@ -55,8 +55,8 @@ function _verification_case_vmms04()
     fields = MMSFields(T_f, (ξs_f, ξg_f))
 
     function make_material()
-        solid = SolidComponent(:s, ρ = ρ_s, c = 1200.0, k = 0.2, λ = 2.0e-5, γ = 1.0)
-        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03)  # γ = 0
+        solid = SolidComponent(:s, ρ = ρ_s, c = 1200.0, k = 0.2, λ = 2.0e-5)
+        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03)
         rxn = Reaction(:pyro, 1 => 2, A = A_rxn, E = E_rxn, h = 5.0e4)
         return Material(name = :VMMS04, components = (solid, gas), reactions = (rxn,))
     end

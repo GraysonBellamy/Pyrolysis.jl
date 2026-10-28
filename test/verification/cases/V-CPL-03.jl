@@ -6,31 +6,26 @@
 # permutations. Under OUR volumetric-strain model the endpoint follows from
 # (technical reference Ch. 10/11; src/Physics/volume_change.jl):
 #
-#   V̇/V = θ = Σⱼ (γⱼ/ρⱼ) ω̇ⱼ
+#   V̇/V = θ = Σⱼ ω̇ⱼ/ρⱼ      (condensed components; gases never enter)
 #
 # with ω̇ⱼ the reaction mass rates [kg/m³/s]. For a single reaction
 # A → Σⱼ yⱼ Bⱼ (Σyⱼ = 1) at rate r: ω̇_A = −r, ω̇_Bⱼ = +yⱼ r, so per cell
 #
-#   dV = (γ_A/ρ_A − Σⱼ yⱼ γⱼ/ρⱼ) dm_A        (r V dt = −dm_A)
+#   dV = (1/ρ_A − Σⱼ yⱼ/ρⱼ) dm_A    (condensed Bⱼ; r V dt = −dm_A)
 #
 # — LINEAR in the converted mass, hence path-independent: the endpoint is
 # exact regardless of rate history, temperature, or spatial distribution.
 # Integrating from m_A = ξ_A0·V₀ to 0, with the standard initialization
-# ξ_A0 = ρ_A (bulk density) and γ_A = 1:
+# ξ_A0 = ρ_A (bulk density):
 #
-#   V_f/V₀ = 1 − γ_A + Σⱼ yⱼ γⱼ ρ_A/ρⱼ  =  Σⱼ yⱼ γⱼ ρ_A/ρⱼ
+#   V_f/V₀ = Σⱼ yⱼ ρ_A/ρⱼ      (condensed Bⱼ)
 #
-# and a pure solid product ends exactly at bulk density ρ_B/γ_B. All ρ here
+# and a pure solid product ends exactly at its bulk density ρ_B. All ρ here
 # are the components' BULK densities (the strain kernel uses bulk ρ, not
-# ρ_intrinsic — see the SolidComponent docstring note).
+# ρ_intrinsic — see the SolidComponent docstring note). Swelling is a
+# product of lower bulk density (P1).
 #
-# NOTE a γ > 1 intumescent branch is NOT representable: γ is
-# validated to [0, 1] (universal volume-fraction semantics shared with
-# volume-fraction and conductivity mixing). Swelling is exercised through
-# ρ_B < ρ_A (P1) and the partial-contribution branch through γ_B ∈ (0, 1)
-# (P6). Documented as a model limitation.
-#
-# Permutations (ρ_A = 1000, γ_A = 1, isothermal via E = 0, h = 0, everything
+# Permutations (ρ_A = 1000, isothermal via E = 0, h = 0, everything
 # impermeable). Mass QoIs: EVERY permutation asserts total-mass conservation
 # to integrator tolerance — every component's mass is a state that rides the
 # mesh, so its concentration ξ = m/V follows the cell volume (tech-ref
@@ -45,8 +40,7 @@
 #   P3 neutral:          A → B(ρ=1000)              V_f/V₀ = 1
 #   P4 char + gas:       A → 0.3 C(ρ=1000) + 0.7 G  V_f/V₀ = 0.3
 #   P5 mass loss, ΔV=0:  A → 0.5 C(ρ=500)  + 0.5 G  V_f/V₀ = 1
-#   P6 partial γ:        A → B(ρ=1000, γ=0.5)       V_f/V₀ = 1/2
-#   P7 lateral law:      P5 chemistry + lateral law A/A₀ = 1 − 0.5·χ̄
+#   P6 lateral law:      P5 chemistry + lateral law A/A₀ = 1 − 0.5·χ̄
 #        χ̄_f = 0.5 (released dry-mass fraction) ⇒ A_f/A₀ = 0.75 exactly,
 #        L_f/L₀ = (V_f/V₀)/(A_f/A₀) = 4/3.
 #
@@ -116,24 +110,6 @@ function _vcpl03_problem(perm; n_cells = 8, n_outputs = 3)
         (
             (
                 solidA,
-                SolidComponent(
-                    :B,
-                    ρ = 1000.0,
-                    c = 1000.0,
-                    k = 0.5,
-                    γ = 0.5,
-                    φ = 0.6,
-                    λ = 0.0,
-                ),
-            ),
-            Reaction(:r, 1 => 2; A = A_r, E = 0.0, h = 0.0),
-            0.5,
-            nothing,
-        )
-    elseif perm == :P7
-        (
-            (
-                solidA,
                 SolidComponent(:C, ρ = 500.0, c = 1000.0, k = 0.5, φ = 0.6, λ = 0.0),
                 gasG(),
             ),
@@ -187,7 +163,7 @@ function _vcpl03_qois_for(r, out::Vector{QoIResult}; tol_thick, tol_mass)
     A_ratio =
         sol.extras.cross_section_area_history[end] /
         sol.extras.cross_section_area_history[1]
-    exact_L = r.perm == :P7 ? r.exact_Vf / 0.75 : r.exact_Vf
+    exact_L = r.perm == :P6 ? r.exact_Vf / 0.75 : r.exact_Vf
     err_th = abs(th_ratio - exact_L) / exact_L
     push!(
         out,
@@ -197,7 +173,7 @@ function _vcpl03_qois_for(r, out::Vector{QoIResult}; tol_thick, tol_mass)
             exact = exact_L,
             error = err_th,
             tol = tol_thick,
-            comment = "path-independent endpoint of θ = Σγⱼω̇ⱼ/ρⱼ (case header)",
+            comment = "path-independent endpoint of θ = Σⱼω̇ⱼ/ρⱼ (case header)",
         ),
     )
     # Total-mass conservation: exact for every permutation — impermeable
@@ -213,15 +189,15 @@ function _vcpl03_qois_for(r, out::Vector{QoIResult}; tol_thick, tol_mass)
             exact = sol.extras.total_mass[1],
             error = mass_err,
             tol = tol_mass,
-            comment = r.perm in (:P4, :P5, :P7) ?
+            comment = r.perm in (:P4, :P5, :P6) ?
                       "held gas compresses with its cell under collapse; " *
                       "the sealed P4 corner anchors the dilation bookkeeping" :
                       "solid-only permutation; impermeable everywhere",
         ),
     )
-    if r.perm in (:P4, :P5, :P7)
+    if r.perm in (:P4, :P5, :P6)
         # Solid ledger: final char mass per unit initial area = y_char·m_A0.
-        y_char = 0.5 * (r.perm == :P4 ? 0.6 : 1.0)  # P4: 0.3, P5/P7: 0.5
+        y_char = 0.5 * (r.perm == :P4 ? 0.6 : 1.0)  # P4: 0.3, P5/P6: 0.5
         nodes = filter(!isnan, @view sol.z[:, size(sol.z, 2)])
         A_end = sol.extras.cross_section_area_history[end]
         m_char =
@@ -242,12 +218,12 @@ function _vcpl03_qois_for(r, out::Vector{QoIResult}; tol_thick, tol_mass)
             ),
         )
     end
-    if r.perm == :P7
+    if r.perm == :P6
         err_A = abs(A_ratio - 0.75) / 0.75
         push!(
             out,
             QoIResult(
-                name = "P7: final lateral area ratio A_f/A₀ = law(χ̄ = 1/2)",
+                name = "P6: final lateral area ratio A_f/A₀ = law(χ̄ = 1/2)",
                 value = A_ratio,
                 exact = 0.75,
                 error = err_A,
@@ -272,7 +248,7 @@ function _verification_case_vcpl03()
         # P1 from the harness solve
         r1 = (; sol, exact_Vf = 2.0, L = 2e-3, ρ_A = 1000.0, perm = :P1)
         _vcpl03_qois_for(r1, out; tol_thick = tol_thick, tol_mass = tol_mass)
-        for perm in (:P2, :P3, :P4, :P5, :P6, :P7)
+        for perm in (:P2, :P3, :P4, :P5, :P6)
             r = _vcpl03_solve(perm)
             if r.sol.retcode != :Success
                 push!(
@@ -294,7 +270,7 @@ function _verification_case_vcpl03()
 
     return VerificationCase(
         id = "V-CPL-03",
-        title = "shrink/swell exact endpoints (6 permutations + lateral law)",
+        title = "shrink/swell exact endpoints (5 permutations + lateral law)",
         tags = [:ale, :volume_change, :swelling, :chi, :mass_conservation],
         references = [
             "FDS Verification Guide `shrink_swell` (endpoint concept)",
@@ -308,27 +284,27 @@ function _verification_case_vcpl03()
             reltol = 1e-8,
         ),
         qois = qois,
-        ci = CIConfig(n_cells = 8, budget_s = 60.0),  # 7 solves; dominated by
+        ci = CIConfig(n_cells = 8, budget_s = 60.0),  # 6 solves; dominated by
         # per-permutation compile (each (NC, chi) trait combo specializes)
         report = (
             qoi_curves = (:thickness_histories,),
             # The endpoint derivation is linear in the converted mass (case
             # header), so the WHOLE thickness path is exact, not just the
             # endpoint: L(t)/L₀ = 1 + (V_f/V₀ − 1)·X(t) with the first-order
-            # isothermal conversion X(t) = 1 − e^(−A_r·t) (P7 additionally
+            # isothermal conversion X(t) = 1 − e^(−A_r·t) (P6 additionally
             # divides by the lateral law A/A₀ = 1 − 0.25·X). Every permutation
             # is re-solved with dense outputs; the harness-provided P1 solve
             # only carries the 3 assert-mode snapshots.
             curves = _ -> begin
                 series = CurveSeries[]
-                for perm in (:P1, :P2, :P3, :P4, :P5, :P6, :P7)
+                for perm in (:P1, :P2, :P3, :P4, :P5, :P6)
                     r = _vcpl03_solve(perm; n_outputs = 33)
                     r.sol.retcode == :Success || continue
-                    ex = let A_r = r.A_r, Vf = r.exact_Vf, isP7 = (r.perm === :P7)
+                    ex = let A_r = r.A_r, Vf = r.exact_Vf, isP6 = (r.perm === :P6)
                         t -> begin
                             X = 1.0 - exp(-A_r * t)
                             V = 1.0 + (Vf - 1.0) * X
-                            isP7 ? V / (1.0 - 0.25 * X) : V
+                            isP6 ? V / (1.0 - 0.25 * X) : V
                         end
                     end
                     push!(

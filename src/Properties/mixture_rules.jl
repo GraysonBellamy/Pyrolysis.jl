@@ -128,16 +128,14 @@ Uses dispatch-based unrolling to avoid allocation from heterogeneous tuple index
 end
 
 # ============================================================================
-# Swelling-weighted (matrix) volume fractions
-# One universal γ semantics: every component contributes
-# v_j = γ_j·ξ_j/ρ_j of bulk volume — the same weighting used by the dilation
-# rate θ (Physics/volume_change.jl). For
-# canonical materials (γ = 0 gas, γ = 1 condensed) this is a binary
-# include/exclude; a partial-γ component contributes the same volume fraction
-# here as it does to θ.
+# Condensed (matrix) volume fractions
+# Every condensed (solid or liquid) component contributes its bulk occupancy
+# v_j = ξ_j/ρ_j — the volume it holds in the dilation rate θ
+# (Physics/volume_change.jl). Gases never contribute; `is_gas` resolves from
+# the component type, so a gas term is folded away at compile time.
 # ============================================================================
 
-# Sum of swelling-weighted specific volumes Σ γ_j·ξ_j/ρ_j
+# Sum of condensed specific volumes Σ ξ_j/ρ_j
 @generated function _sum_solid_specific_vol(ξ, T, comps::Tuple, ::Val{NC}) where {NC}
     expr = quote
         v = zero(_prop_type(ξ, T))
@@ -145,11 +143,10 @@ end
     for i = 1:NC
         push!(expr.args, quote
             c = comps[$i]
-            γ = c.swelling_factor
-            if γ > 0.0
+            if !is_gas(c)
                 ρ = c.density(T)
                 if ξ[$i] > 0.0 && ρ > 0.0
-                    v += γ * ξ[$i] / ρ
+                    v += ξ[$i] / ρ
                 end
             end
         end)
@@ -158,7 +155,7 @@ end
     return expr
 end
 
-# Swelling-weighted volume fractions tuple v_j = γ_j·ξ_j/ρ_j / v_total
+# Condensed volume fractions tuple v_j = ξ_j/ρ_j / v_total
 @generated function _solid_vol_fracs(ξ, T, inv_v_total, comps::Tuple, ::Val{NC}) where {NC}
     var_exprs = []
     for i = 1:NC
@@ -167,11 +164,10 @@ end
             var_exprs,
             quote
                 c = comps[$i]
-                γ = c.swelling_factor
-                if γ > 0.0
+                if !is_gas(c)
                     ρ = c.density(T)
                     $sym =
-                        ξ[$i] > 0.0 && ρ > 0.0 ? convert(W, γ * ξ[$i] / ρ * inv_v_total) :
+                        ξ[$i] > 0.0 && ρ > 0.0 ? convert(W, ξ[$i] / ρ * inv_v_total) :
                         zero(W)
                 else
                     $sym = zero(W)
@@ -191,36 +187,29 @@ end
 end
 
 """
-	solid_volume_fractions(ξ::NTuple{NC,Float64}, T::Float64, material::Material) -> NTuple{NC,Float64}
+	condensed_volume_fractions(ξ::NTuple{NC,Float64}, T::Float64, material::Material) -> NTuple{NC,Float64}
 
-Compute swelling-weighted (matrix) volume fractions: vⱼ = γⱼ·ξⱼ/ρⱼ,
-normalized to sum to 1 over the contributing components.
+Compute condensed (matrix) volume fractions: vⱼ = ξⱼ/ρⱼ over the solid and
+liquid components, normalized to sum to 1; gases get zero.
 
-The swelling factor γ has **one** meaning everywhere: the fraction of a
-component's intrinsic volume that contributes to the bulk (matrix) volume.
-This function shares its weights with the dilation rate θ = Σγⱼ(dξⱼ/dt)/ρⱼ.
-Skeletal occupancy and pore volume are separate quantities. Consequences:
-
-- Canonical gas (γ = 0): excluded — matches ThermaKin "when γ = 0, gaseous
-  components do not contribute to the thermal conductivity" (ThermaKin2Ds
-  Reference, Eqs. 8–10).
-- Canonical condensed (γ = 1): full ξ/ρ weight.
-- Partial γ: contributes the same γ-fraction of its volume here as it does
-  to θ. A γ = 0 condensed phase has no dilation or matrix conductivity weight;
-  it still occupies skeletal volume.
-
-This gas-exclusion limit does not identify our per-component gamma with
-ThermaKin's mixture gas swelling factor; in particular its liquid volume is
-not removed by `L SWELLING: 0` (ThermaKin Eqs. 3–4).
+Each condensed component enters by its bulk occupancy ξ/ρ, the volume it
+holds in the dilation rate θ = Σ(dξⱼ/dt)/ρⱼ. A bulk property law (k, ε)
+already includes the pores of the measured phase, so the gas in those pores
+is not weighted again. Skeletal occupancy and pore volume are separate
+quantities.
 
 Used for:
 - Effective thermal conductivity
-- Effective emissivity
+- Effective emissivity and surface absorptivity
 
-Gas transport uses `transport_matrix_state`, which excludes gases even when
-a gas component has nonzero γ, and has its own explicit endpoint closure.
+Gas transport uses `transport_matrix_state`, whose matrix is the solids plus
+the liquids that declare λ or κ, and has its own explicit endpoint closure.
 """
-@inline function solid_volume_fractions(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
+@inline function condensed_volume_fractions(
+    ξ::NTuple{NC,<:Real},
+    T::Real,
+    material,
+) where {NC}
     comps = material.components
     v_total = _sum_solid_specific_vol(ξ, T, comps, Val(NC))
 
@@ -241,8 +230,8 @@ const MIXING_BLEND_HI = 1.0e-3
 """
 	matrix_volume_fraction(ξ::NTuple{NC,<:Real}, T::Real, material) -> Real
 
-Matrix volume fraction `φ_m = Σⱼ γⱼ ξⱼ/ρⱼ(T)` of a cell: the share of its
-volume held by the swelling-weighted condensed matrix. A cell with
+Matrix volume fraction `φ_m = Σⱼ ξⱼ/ρⱼ(T)` over the condensed components of a
+cell: the share of its volume the condensed matrix holds. A cell with
 `φ_m < MIXING_BLEND_LO` is a void to the property model
 ([`mixing_volume_fractions`](@ref)).
 """
@@ -253,12 +242,12 @@ volume held by the swelling-weighted condensed matrix. A cell with
 	mixing_volume_fractions(ξ::NTuple{NC,<:Real}, T::Real, material) -> NTuple{NC}
 
 Volume-fraction weights for conductivity/emissivity mixing: the
-swelling-weighted matrix fractions ([`solid_volume_fractions`](@ref)) while
+condensed matrix fractions ([`condensed_volume_fractions`](@ref)) while
 matrix volume remains, blending smoothly into the all-phase occupancy
 ([`volume_fractions`](@ref)) as the matrix vanishes.
 
 The blend weight is a cubic smoothstep of the matrix volume fraction
-`φ_m = Σⱼ γⱼ ξⱼ/ρⱼ` over `[MIXING_BLEND_LO, MIXING_BLEND_HI]`; above the
+`φ_m = Σⱼ ξⱼ/ρⱼ` (condensed) over `[MIXING_BLEND_LO, MIXING_BLEND_HI]`; above the
 window the weights are exactly the matrix fractions, below it exactly the
 occupancy. Without the occupancy limit a fully converted cell gets
 k_eff = ε_eff = 0 — a perfect non-emitting insulator — which the harmonic
@@ -272,10 +261,10 @@ the system on a fixed mesh.
 """
 @inline function mixing_volume_fractions(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
     φ_m = matrix_volume_fraction(ξ, T, material)
-    φ_m >= MIXING_BLEND_HI && return solid_volume_fractions(ξ, T, material)
+    φ_m >= MIXING_BLEND_HI && return condensed_volume_fractions(ξ, T, material)
     v_full = volume_fractions(ξ, T, material)
     φ_m <= MIXING_BLEND_LO && return v_full
-    v_solid = solid_volume_fractions(ξ, T, material)
+    v_solid = condensed_volume_fractions(ξ, T, material)
     s = (φ_m - MIXING_BLEND_LO) / (MIXING_BLEND_HI - MIXING_BLEND_LO)
     w = s * s * (3 - 2 * s)
     return ntuple(j -> w * v_solid[j] + (1 - w) * v_full[j], Val(NC))

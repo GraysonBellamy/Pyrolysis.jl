@@ -16,16 +16,15 @@ using Pyrolysis.Physics: pore_state
     )
     b = SolidComponent(
         :b;
-        ρ = 200.0,
+        ρ = 400.0,
         ρ_intrinsic = 1000.0,
         c = 1000.0,
         k = 0.2,
-        γ = 0.5,
         λ = 6e-5,
         κ = 3e-14,
     )
-    water = LiquidComponent(:water; ρ = 1000.0, c = 4000.0, k = 0.5, γ = 0.0)
-    gas = GaseousComponent(:gas; M = 0.028, c = 1000.0, k = 0.03, γ = 1.0)
+    water = LiquidComponent(:water; ρ = 1000.0, c = 4000.0, k = 0.5)
+    gas = GaseousComponent(:gas; M = 0.028, c = 1000.0, k = 0.03)
     mat = Material(
         name = :test,
         components = (a, b, water, gas),
@@ -44,17 +43,27 @@ using Pyrolysis.Physics: pore_state
         @test ps.p[4] ≈ ξg*R_GAS*500/(0.028*0.64)
         @test ps.P == sum(ps.p)
     end
+    # Water that declares λ joins the matrix by its bulk occupancy.
+    wet = Material(
+        name = :wet,
+        components = (
+            a,
+            b,
+            LiquidComponent(:water; ρ = 1000.0, c = 4000.0, k = 0.5, λ = 3e-5),
+            gas,
+        ),
+        mixing = MaterialMixing(λ = PARALLEL, κ = PARALLEL),
+    )
+    ξ = (250.0, 100.0, 10.0, 1.0)
+    q, w = transport_matrix_state(ξ, 500.0, wet)
+    @test q ≈ 0.76
+    @test collect(w) ≈ [0.5, 0.25, 0.01, 0.0] ./ 0.76
+    co = transport_coefficients(ξ, 500.0, wet, 0.64)
+    @test co.λ ≈ (0.5*2e-5+0.25*6e-5+0.01*3e-5)/0.76
+    @test co.κ ≈ (0.5*1e-14+0.25*3e-14)/0.76
     @test_throws ArgumentError Material(
         name = :missing,
         components = (SolidComponent(:s; ρ = 1.0, c = 1.0, k = 1.0), gas),
-    )
-    @test_throws ArgumentError LiquidComponent(
-        :ignored;
-        ρ = 1.0,
-        c = 1.0,
-        k = 1.0,
-        γ = 0.0,
-        λ = 1.0,
     )
     @test_throws MethodError GaseousComponent(
         :ignored;
@@ -72,7 +81,7 @@ using Pyrolysis.Physics: pore_state
 end
 
 @testset "matrix endpoint accounts for remaining skeleton" begin
-    water = LiquidComponent(:water; ρ = 1000.0, c = 4000.0, k = 0.5, γ = 0.0)
+    water = LiquidComponent(:water; ρ = 1000.0, c = 4000.0, k = 0.5)
     gas = GaseousComponent(:gas; M = 0.028, c = 1000.0, k = 0.03)
     endpoint = LumpedEndpoint(λ = 1e-4, κ = 0.0, max_skeletal_occupancy = 0.5)
     mat = Material(

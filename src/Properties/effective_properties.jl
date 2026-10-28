@@ -400,15 +400,13 @@ Uses the mixing rule specified in the material:
 - WEIGHTED: k = β·k_parallel + (1-β)·k_series
 - BRUGGEMAN: Σⱼ vⱼ(kⱼ - k_eff)/(kⱼ + 2k_eff) = 0
 
-Note: Uses `mixing_volume_fractions` — the swelling-weighted (matrix) volume
-fractions, excluding γ ≈ 0 components. For conventional non-swelling gases,
-this matches a ThermaKin limiting case: "when
-γ = 0, gaseous components do not contribute to the thermal conductivity"
-(ThermaKin2Ds Reference, Equations 8-10). Our per-component swelling weights
-are not its mixture gas swelling rule; its liquid volume remains at zero
-liquid swelling. For a fully depleted cell (no
-matrix volume left) it falls back to the actual phase occupancy so k_eff
-degrades to the gas-mixture conductivity instead of 0.
+Note: Uses `mixing_volume_fractions` — the condensed (matrix) volume
+fractions ξⱼ/ρⱼ of the solid and liquid components; gases carry no weight.
+This matches a ThermaKin limiting case: "when γ = 0, gaseous components do not
+contribute to the thermal conductivity" (ThermaKin2Ds Reference, Equations
+8-10). For a fully depleted cell (no matrix volume left) it falls back to the
+actual phase occupancy so k_eff degrades to the gas-mixture conductivity
+instead of 0.
 
 With `skip_absent = Val(true)` the parallel, series and weighted rules do not
 evaluate the conductivity of a component whose volume fraction is exactly
@@ -458,7 +456,7 @@ end
 # Emissivity and surface-absorptivity helpers
 # ============================================================================
 #
-# Both sums share the weights `v` (swelling-weighted matrix volume fractions)
+# Both sums share the weights `v` (condensed matrix volume fractions)
 # and the cell temperature. `get_absorptivity` returns `get_emissivity(comp, T)`
 # for a component without an explicit surface absorptivity, so with none set
 # the two sums are the same floating-point operations in the same order and

@@ -1,15 +1,16 @@
 _property_primal(x) = x
 _property_primal(x::ForwardDiff.Dual) = _property_primal(ForwardDiff.value(x))
-# Matrix transport data use gas-filtered bulk occupancy. This choice does not
-# change the independent thermal-property or skeletal-porosity mixture rules.
+# Matrix transport data use the bulk occupancy of the transport matrix (the
+# components `participates_in_transport` selects). This choice does not change
+# the independent thermal-property or skeletal-porosity mixture rules.
 @inline _transport_occupancy(c::GaseousComponent, ξ, T) = zero(ξ+T)
 @inline _transport_occupancy(c::Union{SolidComponent,LiquidComponent}, ξ, T) =
-    c.swelling_factor*ξ/c.density(T)+zero(T)
+    participates_in_transport(c) ? ξ/c.density(T)+zero(T) : zero(ξ+T)
 @inline _matrix_λ(c::GaseousComponent, T) = zero(T)
 @inline _matrix_λ(c::Union{SolidComponent,LiquidComponent}, T) =
     c.gas_transfer_coeff === nothing ? zero(T) : c.gas_transfer_coeff(T)
 
-"""Return `(q,w)` for gas-filtered γ-weighted condensed bulk occupancy."""
+"""Return `(q,w)` for the bulk occupancy of the transport matrix."""
 @inline function transport_matrix_state(ξ::NTuple{NC}, T, material) where {NC}
     qj = map((c, x)->_transport_occupancy(c, x, T), material.components, ξ)
     q = sum(qj)
@@ -144,7 +145,7 @@ function closed_transport_channel(material)
         ) &&
         return false
     material.mixing.κ.rule==CARMAN_KOZENY && return false
-    cs=filter(c->!is_gas(c) && c.swelling_factor>0, material.components)
+    cs=filter(participates_in_transport, material.components)
     all(c->identically_zero(c.permeability), cs) || return false
     if model isa DustyGas
         return model.pore_diameter===nothing || identically_zero(model.pore_diameter)

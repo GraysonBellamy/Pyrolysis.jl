@@ -17,7 +17,7 @@ include("effective_properties.jl")
 include("gas_transport.jl")
 
 # Exports
-export volume_fractions, solid_volume_fractions
+export volume_fractions, condensed_volume_fractions
 export skeletal_volume_fraction
 export effective_conductivity
 export effective_absorption
