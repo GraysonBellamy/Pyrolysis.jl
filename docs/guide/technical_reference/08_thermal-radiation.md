@@ -161,6 +161,17 @@ penetrates beyond cell $n$. It adds no unknowns and no Jacobian entries beyond t
 boundary cell's own, and it is the recommended choice for charring solids and fast
 cone-calorimeter analysis.
 
+Every radiation model treats the material's own emission as a surface process at $T_s$
+(§8.4). That holds while the mean free path of that emission, $1/\kappa_R(T)$ with
+$\kappa_R$ the Rosseland mean of the absorption spectrum over the material's own emission
+band, is short against the thermal-gradient scale; the in-depth transport it carries is a
+radiative conductivity $16n^2\sigma T^3/3\kappa_R$ that the surface treatment omits. For wood
+and char the mean free path is below 0.1 mm. For black PMMA the spectral windows at 2–3 µm
+and 4–5 µm give $\kappa_R\approx4\times10^{3}$ m⁻¹ at 650 K, a mean free path of 0.25 mm and
+a radiative conductivity of 0.045 W·m⁻¹·K⁻¹, about a sixth of the measured conductivity; in
+the 25 kW·m⁻² cone case it changes the surface temperature by 6 K, the back-face temperature
+by 15 K and the mass loss rate by 5 %, within the scatter of those measurements.
+
 ---
 
 ## 8.3 The Beer–Lambert In-Depth Model

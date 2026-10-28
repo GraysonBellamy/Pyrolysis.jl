@@ -765,7 +765,11 @@ $$
 encoded as a closure over the moisture index (src/Materials/property_functions.jl).
 Because the closure is passed $\boldsymbol{\xi}$ at evaluation, the
 sorption heat self-consistently rises as the wood dries — a behaviour impossible
-to represent with a temperature-only property. Calling a `StateDependentProperty`
+to represent with a temperature-only property. A heat that depends on the composition
+makes the enthalpy of the liquid depend on the drying path; the accounting stays exact
+because the reaction runs one way, so the path is monotone. Under the local-temperature
+convention of §6.6.3 the base of an evaporation heat is the latent heat at the evaporation
+temperature, about 2.26 MJ·kg⁻¹ at 373 K, with the differential heat of sorption added to it. Calling a `StateDependentProperty`
 with only $T$ raises an error (src/Materials/property_functions.jl),
 guaranteeing the state argument is never silently dropped.
 
@@ -789,7 +793,14 @@ A heat of reaction is only defined relative to a **datum**: $h_i$ may be quoted
 - **at the fixed ambient datum** $T_{\text{ref}} = 298.15$ K —
   $h_i = \sum_j \nu_{i,j}\,h_j(T_{\text{ref}})$, the formation-enthalpy style.
 
-The energy equation (§3.3) uses the first. With heats at the local reaction
+The energy equation (§3.3) uses the first, as do ThermaKin (its temperature-form
+balance), Gpyro (a heat of volatilization "at whatever temperature the reaction occurs")
+and FDS (a heat of reaction at temperature): heats fitted in those codes, and heats read
+from DSC peak areas, are supplied unchanged. A constant heat then assumes that the
+reactant's and the products' heat capacities match,
+$h_i(T) = h_i(T_{\text{peak}}) + \int_{T_{\text{peak}}}^{T}\Delta c_p\,\mathrm{d}T'$; the difference is of
+order 50 kJ·kg⁻¹ for $\Delta c_p$ = 0.5 kJ·kg⁻¹·K⁻¹ over 100 K, and a temperature-dependent
+heat (§6.6.2) carries it where it matters. With heats at the local reaction
 temperature, subtracting the species equations from the total-enthalpy balance
 gives the **exact** temperature equation
 $\rho c_p\,\partial_t T = -\nabla\cdot q - \sum_g c_{p,g}\,\mathbf J_g\cdot\nabla T

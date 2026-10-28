@@ -239,7 +239,10 @@ $k_j(T)$ under one of four mixing rules selected by `material.mixing.k.rule`:
 `effective_conductivity(ξ, T, material; skip_absent)` builds
 `v = mixing_volume_fractions(…)` (those weights, with the void blend of
 §5.1.2) then dispatches to `_conductivity_from_v` (`effective_properties.jl`).
-The default rule is `WEIGHTED` with $\beta = 0.5$ (`materials.jl`).
+The default rule is `WEIGHTED` with $\beta = 0.5$ (`materials.jl`). A condensed component's
+$k_j$ is the conductivity of that component as a porous bulk, pore gas included, so the
+conductivity of a `GaseousComponent` is not added to it: it enters $k_{\mathrm{eff}}$ only through
+the all-phase blend below a matrix occupancy of $10^{-3}$ (§5.1.2), where the matrix has gone.
 
 The state mapping evaluates `k_i = effective_conductivity(ξ⁺_i, T_trial,i,
 material; skip_absent = Val(true))` and keeps it twice: smoothly floored at

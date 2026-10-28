@@ -77,7 +77,15 @@ $$
   is a *one-temperature* model: the gas and the matrix are assumed in local thermal
   equilibrium at each point, justified by the fast heat exchange between the pore
   gas and the pore walls relative to the matrix thermal-diffusion time. Every
-  component, gas included, stores sensible heat at that temperature (§3.3).
+  component, gas included, stores sensible heat at that temperature (§3.3). The
+  assumption holds while the gas–wall equilibration time $d^2/\alpha_g$ of a pore or
+  crack of size $d$ is short against the gas's residence time $\delta/v_g$ across the
+  heated layer $\delta$, i.e. while the Sparrow number $Sp = 2k_g\delta^2/(k_{\mathrm{eff}}d^2)$
+  exceeds about 100: in the cell-wall pores of wood and char ($d\lesssim50$ µm) the
+  gas lags the matrix by hundredths of a kelvin, in millimetre cracks or a bubbling
+  melt by a few kelvin. The energy error of a violation is at most that lag, relative
+  to the temperature drop across the layer, times the share of the heat flux the gas
+  carries — below one percent of the incident flux in a cone test.
 - $\xi_j$ [kg·m⁻³] is the **mass concentration** of component $j$ — mass of $j$ per
   unit *bulk* volume of the column. This is the canonical constitutive species
   variable, *not* the mass fraction $Y_j = \xi_j/\rho$. Choosing $\xi_j$ avoids ever
@@ -234,7 +242,13 @@ where $\mathbf J_j$ is the **mass flux** of component $j$ *relative to the skele
 The decisive modeling choice is *which components transport*. In Pyrolysis.jl the
 matrix is rigid relative to itself: solids and liquids do **not** flux between cells
 — they are consumed/produced in place by reactions and (on a moving mesh) carried by
-the mesh, never by molecular transport. Only gas components diffuse and advect through
+the mesh, never by molecular transport. A liquid component is water bound in the
+cell wall: it rides the skeleton and leaves only by evaporation. Below the fibre
+saturation point (a moisture content of about 0.3 on a dry basis) that is the physics,
+bound-water diffusion spreading only $\sqrt{D_bt}\approx0.1$–$0.3$ mm over a cone test;
+above it, capillary water flows and the vapour driven inward recondenses a few
+millimetres behind the drying front, which an irreversible evaporation reaction cannot
+represent (§1.8.1). Only gas components diffuse and advect through
 the pore network, and they do so *relative to the skeleton*: the wall-friction, molecular-friction and Darcy closures return fluxes relative to the
 pore walls, so the laboratory-frame gas flux is $\xi_g\mathbf v_s + \mathbf J_g$ and the
 pore gas is carried with the pores it occupies (§11.1.2). Hence the **gas-vs-solid
@@ -413,13 +427,34 @@ the temperature equation of §3.3.1. Three things follow:
 3. **The skeleton-following derivative $\partial_t T + \mathbf v_s\!\cdot\!\nabla T$ is
    the mesh-frame rate on a mesh that moves with the skeleton** (§3.6, §11). The
    temperature equation then carries no advection term of any kind, and the statement
-   holds unchanged on a fixed mesh with $\mathbf v_s = 0$. Where an equidistribution
+   holds unchanged on a fixed mesh with $\mathbf v_s = 0$. On a fixed mesh (`use_ale = false`)
+   the condensed phase is not advected at all: a change of condensed volume, by reaction
+   or drying, happens in place and raises the porosity, and the geometry does not recede.
+   That is the constant-volume model of degradation; it suits inert layers and charring
+   solids whose char keeps its volume, and a material that recedes or swells needs
+   `use_ale = true` (§11). Where an equidistribution
    correction moves the mesh relative to the skeleton, the inventories, and the
    enthalpy they carry, cross the faces at the relative velocity (§11.2.2, §11.6).
 
 The storage and gas temperature-advection terms correspond to ThermaKin Eq. 17
 in 1D when the other closures match. Gpyro V2's `FULL_QSG` also retains gas
 conduction, so it is not generally the same equation (§3.8).
+
+**Terms the one-temperature balance drops.** The total balance of §1.4.1 is the sum of the
+phase energy equations of the porous medium: the exchange terms at the pore walls cancel in
+that sum by the energy jump condition, and the sum also produces the gas's pressure work $\varphi\,\partial_t P + \mathbf v_g\!\cdot\!\nabla P$,
+the viscous dissipation $\Phi$ of the pore flow, its kinetic and body-force work, a Dufour
+heat flux and the thermal dispersion of the flowing gas. For creeping flow through a rigid
+matrix the work the pressure gradient does on the gas is the heat its friction at the pore
+walls releases, $\mathbf v_g\!\cdot\!\nabla P + \Phi = 0$, so of the pressure work only the
+transient part $\varphi\,\partial_t P$ remains: at most $2\times10^{-3}$ of the storage term
+$\rho c_p^{\mathrm{eff}}\,\partial_t T$ at a pore overpressure of a few bar, and the balance drops
+it. The two members of the cancelling pair are not individually small — each reaches a fifth
+of the storage term in a layer of permeability $10^{-15}$ m² passing 20 g·m⁻²·s⁻¹ of gas — so
+adding one without the other would inject a sink or source of that size. The kinetic energy
+and gravity work of the gas are below $10^{-7}$ of the retained terms, the Dufour flux below
+$10^{-3}$ of the carried enthalpy flux, and dispersion adds under $10^{-3}$ W·m⁻¹·K⁻¹ to
+$k_{\mathrm{eff}}$ at the pore Péclet numbers of a cone test.
 
 > **Implementation notes.** The heat-capacity sum is `heat_capacity_sum`
 > (`src/States/caloric.jl`), which has no phase branch and skips only a component
@@ -492,9 +527,9 @@ enthalpy for every signed species flux. Thus
 $E_{out}=H_r-q_r=H_s-q_s$. Without a thermal film, imposed heat and donor
 enthalpy enter directly, including cold gas entering an adiabatic wall.
 Chapter 9 states the conditional coupling and supported blowing domains.
-No additional incoming-gas heating term is added. The internal-energy and
-pressure-work storage convention is as stated in §1.4 and is independent of
-this carried-enthalpy balance.
+No additional incoming-gas heating term is added. The pressure work and the
+pore-flow dissipation are absent from the balance as a cancelling pair (§3.3.2);
+this carried-enthalpy balance does not depend on them.
 
 ---
 

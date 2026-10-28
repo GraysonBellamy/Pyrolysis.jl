@@ -81,6 +81,7 @@ The scope boundary is as important as the scope itself. The following are explic
 
 - **Multi-dimensional geometry.** Full solves are one-dimensional in $z$. The cross-section $A$ is a scalar gauge, not a resolved 2-D/3-D field; lateral shrinkage is a column-global area scaling driven by an empirical law (§10), not a resolved lateral transport. Meshes of two and three dimensions (`box_mesh`, `cell_mesh`) exist at the residual level — a potential closure of the mesh motion, conductivity tensors and element death are implemented and tested there (§11.3.5, §14.5) — but `setup` refuses gas transport, in-depth radiation, the variable cross section, the equidistribution correction and cell deactivation on them, and they are not a supported path for full solves.
 - **Full two-temperature gas.** The gas phase is *not* given its own energy equation with a separate gas temperature. Gas is assumed to be in local thermal equilibrium with the matrix at the cell temperature $T$: it stores sensible heat like every other phase, and its flux relative to the skeleton carries its sensible enthalpy across the cell faces (§1.4.3, §7).
+- **Liquid-water transport.** Moisture is water bound in the cell wall: it rides the skeleton and leaves only by evaporation. Below the fibre saturation point (a moisture content of about 0.3, dry basis) that is the physics; above it, capillary flow and the recondensation of inward vapour are missing (§1.8.1, §3.2.3).
 - **Multi-reactant reactions.** Each `Reaction` supports exactly one reactant ($N_{\text{in}}=1$; a reaction with more is rejected by problem validation; `_apply_reaction_source!` in `src/Physics/kinetics.jl` also guards source evaluation). The reactant is consumed with unit mass stoichiometry and products are explicit yields summing to 1.0 (§6). ThermaKin supports bimolecular reactions and Gpyro V2 supports gas-consuming oxidative schemes; these cannot generally be reproduced by sequences of single-reactant steps. Extending the reactant tuple to a 3-ary `(idx, order, mass_stoich)` form is an open item (§1.8.1).
 - **Pressure- or oxygen-dependent kinetics, and distributed activation energy.** The Arrhenius pre-exponential $A_i$ is temperature-independent, the rate has no explicit pressure or oxygen factor, and there is no built-in distributed-activation-energy (DAEM) tooling (§6).
 
@@ -494,7 +495,7 @@ The physics below is absent from the model. It is ordered by its expected effect
 
 **Niche or future**
 
-- Spectral (two-band) radiation and in-depth emission from glowing char; a model of that kind would add further algebraic intensity rows to the state, as the Beer–Lambert face intensities do (§8).
+- Spectral (two-band) radiation and in-depth emission from glowing char or from a semi-transparent polymer (for black PMMA the radiative conductivity it would add is about 0.045 W·m⁻¹·K⁻¹ at 650 K, a sixth of the measured conductivity, §8.2.2); a model of that kind would add further algebraic intensity rows to the state, as the Beer–Lambert face intensities do (§8).
 - Substrate reflection; scattering ($\sigma_s$ is not modeled); view-factor edge fall-off.
 - Species-pair-dependent molecular diffusivities and thermal-transpiration effects beyond the declared common-diffusivity dusty-gas closure.
 - Liquid free-water capillarity (relevant only above the fiber-saturation point, about 30 % moisture content) and bound-water diffusion ($\sqrt{Dt} \approx 0.25$ mm over a cone test, negligible at fire heating rates).
@@ -1173,7 +1174,15 @@ $$
   is a *one-temperature* model: the gas and the matrix are assumed in local thermal
   equilibrium at each point, justified by the fast heat exchange between the pore
   gas and the pore walls relative to the matrix thermal-diffusion time. Every
-  component, gas included, stores sensible heat at that temperature (§3.3).
+  component, gas included, stores sensible heat at that temperature (§3.3). The
+  assumption holds while the gas–wall equilibration time $d^2/\alpha_g$ of a pore or
+  crack of size $d$ is short against the gas's residence time $\delta/v_g$ across the
+  heated layer $\delta$, i.e. while the Sparrow number $Sp = 2k_g\delta^2/(k_{\mathrm{eff}}d^2)$
+  exceeds about 100: in the cell-wall pores of wood and char ($d\lesssim50$ µm) the
+  gas lags the matrix by hundredths of a kelvin, in millimetre cracks or a bubbling
+  melt by a few kelvin. The energy error of a violation is at most that lag, relative
+  to the temperature drop across the layer, times the share of the heat flux the gas
+  carries — below one percent of the incident flux in a cone test.
 - $\xi_j$ [kg·m⁻³] is the **mass concentration** of component $j$ — mass of $j$ per
   unit *bulk* volume of the column. This is the canonical constitutive species
   variable, *not* the mass fraction $Y_j = \xi_j/\rho$. Choosing $\xi_j$ avoids ever
@@ -1330,7 +1339,13 @@ where $\mathbf J_j$ is the **mass flux** of component $j$ *relative to the skele
 The decisive modeling choice is *which components transport*. In Pyrolysis.jl the
 matrix is rigid relative to itself: solids and liquids do **not** flux between cells
 — they are consumed/produced in place by reactions and (on a moving mesh) carried by
-the mesh, never by molecular transport. Only gas components diffuse and advect through
+the mesh, never by molecular transport. A liquid component is water bound in the
+cell wall: it rides the skeleton and leaves only by evaporation. Below the fibre
+saturation point (a moisture content of about 0.3 on a dry basis) that is the physics,
+bound-water diffusion spreading only $\sqrt{D_bt}\approx0.1$–$0.3$ mm over a cone test;
+above it, capillary water flows and the vapour driven inward recondenses a few
+millimetres behind the drying front, which an irreversible evaporation reaction cannot
+represent (§1.8.1). Only gas components diffuse and advect through
 the pore network, and they do so *relative to the skeleton*: the wall-friction, molecular-friction and Darcy closures return fluxes relative to the
 pore walls, so the laboratory-frame gas flux is $\xi_g\mathbf v_s + \mathbf J_g$ and the
 pore gas is carried with the pores it occupies (§11.1.2). Hence the **gas-vs-solid
@@ -1509,13 +1524,34 @@ the temperature equation of §3.3.1. Three things follow:
 3. **The skeleton-following derivative $\partial_t T + \mathbf v_s\!\cdot\!\nabla T$ is
    the mesh-frame rate on a mesh that moves with the skeleton** (§3.6, §11). The
    temperature equation then carries no advection term of any kind, and the statement
-   holds unchanged on a fixed mesh with $\mathbf v_s = 0$. Where an equidistribution
+   holds unchanged on a fixed mesh with $\mathbf v_s = 0$. On a fixed mesh (`use_ale = false`)
+   the condensed phase is not advected at all: a change of condensed volume, by reaction
+   or drying, happens in place and raises the porosity, and the geometry does not recede.
+   That is the constant-volume model of degradation; it suits inert layers and charring
+   solids whose char keeps its volume, and a material that recedes or swells needs
+   `use_ale = true` (§11). Where an equidistribution
    correction moves the mesh relative to the skeleton, the inventories, and the
    enthalpy they carry, cross the faces at the relative velocity (§11.2.2, §11.6).
 
 The storage and gas temperature-advection terms correspond to ThermaKin Eq. 17
 in 1D when the other closures match. Gpyro V2's `FULL_QSG` also retains gas
 conduction, so it is not generally the same equation (§3.8).
+
+**Terms the one-temperature balance drops.** The total balance of §1.4.1 is the sum of the
+phase energy equations of the porous medium: the exchange terms at the pore walls cancel in
+that sum by the energy jump condition, and the sum also produces the gas's pressure work $\varphi\,\partial_t P + \mathbf v_g\!\cdot\!\nabla P$,
+the viscous dissipation $\Phi$ of the pore flow, its kinetic and body-force work, a Dufour
+heat flux and the thermal dispersion of the flowing gas. For creeping flow through a rigid
+matrix the work the pressure gradient does on the gas is the heat its friction at the pore
+walls releases, $\mathbf v_g\!\cdot\!\nabla P + \Phi = 0$, so of the pressure work only the
+transient part $\varphi\,\partial_t P$ remains: at most $2\times10^{-3}$ of the storage term
+$\rho c_p^{\mathrm{eff}}\,\partial_t T$ at a pore overpressure of a few bar, and the balance drops
+it. The two members of the cancelling pair are not individually small — each reaches a fifth
+of the storage term in a layer of permeability $10^{-15}$ m² passing 20 g·m⁻²·s⁻¹ of gas — so
+adding one without the other would inject a sink or source of that size. The kinetic energy
+and gravity work of the gas are below $10^{-7}$ of the retained terms, the Dufour flux below
+$10^{-3}$ of the carried enthalpy flux, and dispersion adds under $10^{-3}$ W·m⁻¹·K⁻¹ to
+$k_{\mathrm{eff}}$ at the pore Péclet numbers of a cone test.
 
 > **Implementation notes.** The heat-capacity sum is `heat_capacity_sum`
 > (`src/States/caloric.jl`), which has no phase branch and skips only a component
@@ -1588,9 +1624,9 @@ enthalpy for every signed species flux. Thus
 $E_{out}=H_r-q_r=H_s-q_s$. Without a thermal film, imposed heat and donor
 enthalpy enter directly, including cold gas entering an adiabatic wall.
 Chapter 9 states the conditional coupling and supported blowing domains.
-No additional incoming-gas heating term is added. The internal-energy and
-pressure-work storage convention is as stated in §1.4 and is independent of
-this carried-enthalpy balance.
+No additional incoming-gas heating term is added. The pressure work and the
+pore-flow dissipation are absent from the balance as a cancelling pair (§3.3.2);
+this carried-enthalpy balance does not depend on them.
 
 ---
 
@@ -3204,7 +3240,10 @@ $k_j(T)$ under one of four mixing rules selected by `material.mixing.k.rule`:
 `effective_conductivity(ξ, T, material; skip_absent)` builds
 `v = mixing_volume_fractions(…)` (those weights, with the void blend of
 §5.1.2) then dispatches to `_conductivity_from_v` (`effective_properties.jl`).
-The default rule is `WEIGHTED` with $\beta = 0.5$ (`materials.jl`).
+The default rule is `WEIGHTED` with $\beta = 0.5$ (`materials.jl`). A condensed component's
+$k_j$ is the conductivity of that component as a porous bulk, pore gas included, so the
+conductivity of a `GaseousComponent` is not added to it: it enters $k_{\mathrm{eff}}$ only through
+the all-phase blend below a matrix occupancy of $10^{-3}$ (§5.1.2), where the matrix has gone.
 
 The state mapping evaluates `k_i = effective_conductivity(ξ⁺_i, T_trial,i,
 material; skip_absent = Val(true))` and keeps it twice: smoothly floored at
@@ -4789,7 +4828,11 @@ $$
 encoded as a closure over the moisture index (src/Materials/property_functions.jl).
 Because the closure is passed $\boldsymbol{\xi}$ at evaluation, the
 sorption heat self-consistently rises as the wood dries — a behaviour impossible
-to represent with a temperature-only property. Calling a `StateDependentProperty`
+to represent with a temperature-only property. A heat that depends on the composition
+makes the enthalpy of the liquid depend on the drying path; the accounting stays exact
+because the reaction runs one way, so the path is monotone. Under the local-temperature
+convention of §6.6.3 the base of an evaporation heat is the latent heat at the evaporation
+temperature, about 2.26 MJ·kg⁻¹ at 373 K, with the differential heat of sorption added to it. Calling a `StateDependentProperty`
 with only $T$ raises an error (src/Materials/property_functions.jl),
 guaranteeing the state argument is never silently dropped.
 
@@ -4813,7 +4856,14 @@ A heat of reaction is only defined relative to a **datum**: $h_i$ may be quoted
 - **at the fixed ambient datum** $T_{\text{ref}} = 298.15$ K —
   $h_i = \sum_j \nu_{i,j}\,h_j(T_{\text{ref}})$, the formation-enthalpy style.
 
-The energy equation (§3.3) uses the first. With heats at the local reaction
+The energy equation (§3.3) uses the first, as do ThermaKin (its temperature-form
+balance), Gpyro (a heat of volatilization "at whatever temperature the reaction occurs")
+and FDS (a heat of reaction at temperature): heats fitted in those codes, and heats read
+from DSC peak areas, are supplied unchanged. A constant heat then assumes that the
+reactant's and the products' heat capacities match,
+$h_i(T) = h_i(T_{\text{peak}}) + \int_{T_{\text{peak}}}^{T}\Delta c_p\,\mathrm{d}T'$; the difference is of
+order 50 kJ·kg⁻¹ for $\Delta c_p$ = 0.5 kJ·kg⁻¹·K⁻¹ over 100 K, and a temperature-dependent
+heat (§6.6.2) carries it where it matters. With heats at the local reaction
 temperature, subtracting the species equations from the total-enthalpy balance
 gives the **exact** temperature equation
 $\rho c_p\,\partial_t T = -\nabla\cdot q - \sum_g c_{p,g}\,\mathbf J_g\cdot\nabla T
@@ -6243,6 +6293,17 @@ $\tau_n=\alpha_{\text{eff}}\Delta z_n\gg 1$, so that essentially no radiation
 penetrates beyond cell $n$. It adds no unknowns and no Jacobian entries beyond the
 boundary cell's own, and it is the recommended choice for charring solids and fast
 cone-calorimeter analysis.
+
+Every radiation model treats the material's own emission as a surface process at $T_s$
+(§8.4). That holds while the mean free path of that emission, $1/\kappa_R(T)$ with
+$\kappa_R$ the Rosseland mean of the absorption spectrum over the material's own emission
+band, is short against the thermal-gradient scale; the in-depth transport it carries is a
+radiative conductivity $16n^2\sigma T^3/3\kappa_R$ that the surface treatment omits. For wood
+and char the mean free path is below 0.1 mm. For black PMMA the spectral windows at 2–3 µm
+and 4–5 µm give $\kappa_R\approx4\times10^{3}$ m⁻¹ at 650 K, a mean free path of 0.25 mm and
+a radiative conductivity of 0.045 W·m⁻¹·K⁻¹, about a sixth of the measured conductivity; in
+the 25 kW·m⁻² cone case it changes the surface temperature by 6 K, the back-face temperature
+by 15 K and the mass loss rate by 5 %, within the scatter of those measurements.
 
 ---
 

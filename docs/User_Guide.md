@@ -1058,7 +1058,7 @@ code, also with other parameter values (UG 15).
 |---|---|---|
 | `abstol` / `reltol` | `1e-8` / `1e-6` | error tolerances: `abstol` is the temperature tolerance [K]; condensed mass rows use initial condensed mass and `threshold`; gas rows and proposed-state pressure errors use `pressure_tolerance` |
 | `dtmin` | `1e-12` | smallest step the integrator may take [s] |
-| `use_ale` | `false` | moves the mesh with the solid (surface recession) |
+| `use_ale` | `false` | moves the mesh with the solid (surface recession); with `false` the condensed phase degrades at constant volume: the porosity rises and the geometry does not recede |
 | `radiation_model` | `NO_RADIATION` | `SURFACE_ABSORPTION` absorbs the cone flux at the surface |
 | `min_thickness` | `1e-6` | on a moving mesh, ends the solve when the thickness falls below it [m] |
 | `deactivation` | `false` | deactivates a cell once its condensed mass falls below `threshold` (default `1e-2`) of its initial condensed mass |
