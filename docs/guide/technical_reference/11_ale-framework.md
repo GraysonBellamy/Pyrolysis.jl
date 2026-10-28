@@ -1045,6 +1045,7 @@ and remapping; the material volume laws are compared in §10.11.
 | Motion | node positions and velocities in the coupled system | element thickness changes | axial thickness reconstructed from mass/density | solid-cell thickness and coordinates updated |
 | Size control | optional equidistribution correction | splitting and partial combination | selected deformation mode | layer remeshing |
 | Inventory transfer | relative fluxes when mesh and skeleton differ | conservative mixing during size adjustment | condensed inventories follow material cells | inventory remapping on the solid grid |
+| Match before comparing | correction setting; profiles in current coordinates | element-size adjustment; primary-coordinate deformation | selected `SOLVER_DEFORMATION_MODE` | surface fluxes, volume law and remapping |
 
 ### 11.9.1 ThermaKin2Ds
 
@@ -1073,12 +1074,9 @@ V2's deforming-grid configuration.
 FDS 6.11.0 updates solid-cell thicknesses and coordinates and remeshes
 layers (`REGRID_FACTOR`, `X_S_NEW` and `REMESH_LAYER` in `wall.f90`). This
 is motion of the internal solid grid; it is separate from the surrounding
-CFD mesh and obstruction representation.
-
-
-The wall grid is internal to the solid model. Matching it to our moving
-column does not require moving the surrounding CFD mesh, but does require
-matching surface fluxes, the volume law and remapping effects.
+CFD mesh and obstruction representation. Matching it to our moving column
+therefore does not require moving the CFD mesh, but does require matching
+surface fluxes, the volume law and remapping effects.
 
 ### 11.9.4 Sources and numerical evidence
 

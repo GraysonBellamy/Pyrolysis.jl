@@ -760,7 +760,7 @@ could be built around a solver.
 |:---|:---|:---|:---|:---|
 | Documented workflow | finite-difference solve sensitivities, sweeps and inverse examples | forward model with fitted material parameters | property-estimation search drivers | reference-temperature/rate kinetic estimates |
 | Derivative claim | state Jacobian uses automatic differentiation; whole-solve parameters use finite differences | no universal parameter-derivative method established here | search branches do not establish whole-solve derivatives | kinetic estimates do not establish whole-solve derivatives |
-| Fair comparison | same objective, perturbation checks and solver tolerances | identify the inverse-study method | record optimizer and objective | identify any surrounding inverse workflow |
+| Match before comparing | objective, perturbation checks and solver tolerances | inverse-study method used | optimizer and objective | any surrounding inverse workflow |
 
 ### 17.8.1 ThermaKin2Ds
 

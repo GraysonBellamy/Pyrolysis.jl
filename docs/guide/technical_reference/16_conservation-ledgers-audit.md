@@ -725,7 +725,7 @@ ledger defects.
 |:---|:---|:---|:---|:---|
 | Inventory scope | live condensed and pore-gas inventories | component inventories in elements | condensed inventory; gas included in total mass when pressure is solved | solid wall and external CFD gas accounted for separately |
 | Changing cells | explicit transfer and vent records | conservative element mixing | residual mass retained at consumed-cell cutoff | solid-grid remapping |
-| Output check | escape versus generation; current areas | identify the documented output and domain | check pressure option and mass-loss output definition | match wall outputs or whole-simulation energy-budget scope |
+| Match before comparing | escape versus generation; current areas | documented output and domain | pressure option and mass-loss output definition | wall outputs or whole-simulation energy-budget scope |
 
 ### 16.9.1 ThermaKin2Ds
 

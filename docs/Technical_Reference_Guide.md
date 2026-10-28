@@ -364,7 +364,7 @@ mass-fraction diffusion. Its working thermal comparison uses a common gas
 and solid temperature. The default equilibrium exchange omits gas heat
 storage and gas conduction; `FULL_QSG` includes both. The documented
 separate gas-energy equation has no corresponding solve in the pinned
-driver (§7.8.3). V2 advances condensed species masses directly with a
+driver (§7.8.2). V2 advances condensed species masses directly with a
 reaction-rate correction for overconsumption and uses a directional thermal
 solver (§§13.11 and 15.14). These choices affect both the model to be matched
 and its numerical error.
@@ -376,7 +376,7 @@ not the scope of FDS as a whole. FDS also documents an `HT3D` heat-transfer
 option. The standard model combines conduction, reactions, a changing solid
 grid, and coupling to the surrounding CFD gas. It assumes instantaneous
 release of generated gas; it does not solve pore-gas storage or transport.
-Reaction and gas/solid enthalpy accounting still matter (§7.8.4).
+Reaction and gas/solid enthalpy accounting still matter (§7.8.3).
 
 FDS permits concentration-order, oxygen and temperature factors in its reaction
 rates. Pyrolysis.jl supports the concentration-order factor but omits the explicit
@@ -388,14 +388,14 @@ discrepancy between the 6.11.0 manual and source.
 
 ### 1.6.4 Summary contrast
 
-| Aspect | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 wall model | Pyrolysis.jl |
-|---|---|---|---|---|
-| Geometry in this comparison | 1D, Cartesian/axisymmetric 2D | deforming 1D; multidimensional transport also available | standard 1D wall; `HT3D` separately documented | supported full pyrolysis solves in 1D (§1.2.2) |
-| Pore-gas heat storage | included | optional in thermal equilibrium; no separate gas-enthalpy solve | no pore-gas inventory | included |
-| Heat sign, positive | exothermic | endothermic | endothermic | endothermic |
-| Gas transport | volume-fraction-gradient law | Darcy and mass-fraction diffusion when enabled (§9.12.2) | instantaneous release | lumped superficial transfer or dusty-gas friction, each with optional Darcy flow |
-| Time integration | Crank–Nicolson in primary direction, explicit transverse terms | direct mass updates; directional semi-implicit enthalpy solve | Crank–Nicolson conduction and separate reaction/grid updates | mass-matrix DAE; `Rodas5P` default in this checkout |
-| Deforming grid | changing elements with splitting/combining | changing 1D control-volume thicknesses | thickness update and remeshing | node positions and velocities in the coupled system |
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
+|:---|:---|:---|:---|:---|
+| Geometry in this comparison | supported full pyrolysis solves in 1D (§1.2.2) | 1D, Cartesian/axisymmetric 2D | deforming 1D; multidimensional transport also available | standard 1D wall; `HT3D` separately documented |
+| Pore-gas heat storage | included | included | optional in thermal equilibrium; no separate gas-enthalpy solve | no pore-gas inventory |
+| Heat sign, positive | endothermic | exothermic | endothermic | endothermic |
+| Gas transport | lumped superficial transfer or dusty-gas friction, each with optional Darcy flow | volume-fraction-gradient law | Darcy and mass-fraction diffusion when enabled (§9.12.2) | instantaneous release |
+| Time integration | mass-matrix DAE; `Rodas5P` default in this checkout | Crank–Nicolson in primary direction, explicit transverse terms | direct mass updates; directional semi-implicit enthalpy solve | Crank–Nicolson conduction and separate reaction/grid updates |
+| Deforming grid | node positions and velocities in the coupled system | changing elements with splitting/combining | changing 1D control-volume thicknesses | thickness update and remeshing |
 
 Pyrolysis.jl forms its state Jacobian by colored automatic differentiation
 (`src/ColoredJacobian/colored.jl`). This is an implementation fact, not evidence
@@ -413,12 +413,6 @@ ThermaKin2Ds comparisons are supported by its manual; its source is not
 available in this checkout. They establish the documented formulation and
 numerical procedure, without claiming a source-level implementation check.
 A documented equation or input flag alone does not establish a working option.
-
-The chapter comparisons begin with the question being compared and an
-overview, then explain each solver in the order ThermaKin2Ds, Gpyro V2 and
-FDS. Equation correspondences state their assumptions. The closing sources
-and numerical-evidence discussion distinguishes those correspondences from
-agreement demonstrated by matched runs.
 
 The abbreviations used in the comparison sections identify these sources:
 
@@ -1883,13 +1877,14 @@ ThermaKin2Ds, and concentrations in FDS.
 | Gas release | finite-rate transport | finite-rate volume-fraction-gradient transfer | Darcy and mass-fraction diffusion when enabled | instantaneous release |
 | Energy state | temperature or sensible-enthalpy inventory | element temperature | condensed sensible enthalpy | solid temperature |
 | Material geometry | coupled moving mesh | changing elements with size adjustment | mass/density volume reconstruction | thickness update and remapping |
+| Match before comparing | gas-transport model, energy state and mesh motion | gas-transfer law, reaction extent and heat basis | condensed and pore-gas inventories separately; thermal closure | negligible gas storage and release delay in ours |
 
 ### 3.7.1 ThermaKin2Ds
 
 ThermaKin2Ds carries component masses and temperature in its numerical
 elements (TK §3). Its all-component heat storage and gas temperature-advection
 terms correspond to our 1D temperature balance when the other closures match
-(TK Eq. 17; §7.8.2). The continuum equations also contain a deformation
+(TK Eq. 17; §7.8.1). The continuum equations also contain a deformation
 term, represented numerically through changing elements (§3.6.2).
 
 The gas-transfer potential is a volume fraction (TK Eq. 13), whereas our
@@ -1908,7 +1903,7 @@ accumulates and moves by Darcy flow and mass-fraction diffusion (§9.12.2).
 V2 recovers temperature from condensed sensible enthalpy. Its driver has no
 separate gas-enthalpy solve. In thermal equilibrium, `FULL_QSG` retains both
 gas heat storage and gas conduction, so keeping gas heat capacity alone
-does not reproduce that option (§7.8.3). Compare condensed and gaseous
+does not reproduce that option (§7.8.2). Compare condensed and gaseous
 inventories separately and select the same thermal closure before interpreting
 differences in total mass or temperature.
 
@@ -1917,7 +1912,7 @@ differences in total mass or temperature.
 The standard wall model tracks condensed components and releases generated
 gas immediately to the surrounding computational fluid dynamics (CFD)
 calculation. It has no evolving pore-gas inventory. Reaction heat and
-gas/solid enthalpy accounting still enter its thermal problem (§7.8.4).
+gas/solid enthalpy accounting still enter its thermal problem (§7.8.3).
 
 Its solid grid changes thickness and can be remapped as composition changes
 (§10.11.3). Turning off our gas transport traps generated gas; it does not
@@ -1928,14 +1923,15 @@ approximation must establish negligible storage and delay (§9.12.3).
 
 TK Eqs. 6, 13–18 and §3 support the ThermaKin2Ds description. GP §§4.1, 6.5
 and 6.8 are checked against the V2 mass, mesh and thermal paths linked in
-§§3.6.2 and 7.8.3. FDS's [solid-phase equations](https://github.com/firemodels/fds/blob/FDS-6.11.0/Manuals/FDS_Technical_Reference_Guide/Solid_Chapter.tex)
+§§3.6.2 and 7.8.2. FDS's [solid-phase equations](https://github.com/firemodels/fds/blob/FDS-6.11.0/Manuals/FDS_Technical_Reference_Guide/Solid_Chapter.tex)
 and [`wall.f90`](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90) establish the wall inventory and
 gas-release scope. Our state and balance assembly are described in §§3.1–3.6.
 
 The analytical and manufactured-solution checks in §18.2 test specified
 Pyrolysis.jl balances. They do not establish whole-model agreement among
 these solvers; retained external-code datasets have the version and scope
-limits in §18.1.3.
+limits in §18.1.3. User Guide §§7.2 and 7.8 show how the problem-setup
+choices select these balances and their state rows.
 
 ---
 
@@ -2850,6 +2846,7 @@ The comparison uses the version scope of §1.6.5; §5.14 covers mixing rules.
 | Material components | solid, liquid and gas | solid, liquid and gas | condensed species and separate gas species | condensed materials; external gas species |
 | Total inventory density | $\sum_{\mathrm{all}}\xi_j$, including retained gas | $\sum_{\mathrm{all}}\xi_j$, including retained gas | $\bar\rho$, condensed mass per cell volume | $\rho_s=\sum_{S,L}\xi_j$, condensed mass per cell volume |
 | Property functions | constants, callables and tables | specified temperature function | power laws and optional thermal terms | temperature ramps for thermal properties |
+| Match before comparing | component phases and property functions over the temperature range used | property curves and the mixture swelling law | each property law and the condensed inventory it applies to | ramp units, interpolation and enthalpy datum |
 
 ### 4.8.1 ThermaKin2Ds
 
@@ -2884,7 +2881,7 @@ Gaussian melting heat-capacity contribution and a $T^3$ radiative conductivity
 term. The [component laws](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_funcs.f90#L345-L422) and
 [mixture assembly](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L184-L305) implement these
 thermal contributions. Gas heat storage follows the separate exchange option
-in §7.8.3. Match both the property law and the inventory to which it applies.
+in §7.8.2. Match both the property law and the inventory to which it applies.
 
 ### 4.8.3 FDS
 
@@ -3832,6 +3829,7 @@ state; equal initial values alone are insufficient.
 | Conductivity | selectable mixing rule | blend of parallel and series limits | condensed volume average in the aligned 1D case | condensed volume average |
 | Permeability | component mixing or Carman–Kozeny | effective gas-transfer coefficient, not our permeability input | component mixing; optional Kozeny–Carman factor | no resolved pore-flow permeability |
 | Absorption input | mass-specific, m²/kg | mass-specific, m²/kg | per length, m⁻¹ | per length, m⁻¹ |
+| Match before comparing | mixing rule, permeability model and absorption units | blend weight and volume fractions for `WEIGHTED`; gas swelling factor | volume basis for `PARALLEL`; permeability caps; effective optical depth | condensed fractions for `PARALLEL`; pore-gas storage; optical depth |
 
 ### 5.14.1 ThermaKin2Ds
 
@@ -3851,7 +3849,7 @@ radiation deposition and emission algorithms still differ (§8.7.1).
 ### 5.14.2 Gpyro V2
 
 GP Eqs. 11–12 mass-weight condensed heat capacity and enthalpy. Gas storage
-is separate (§7.8.3). In the aligned 1D formulation, GP Eqs. 7–8 and the
+is separate (§7.8.2). In the aligned 1D formulation, GP Eqs. 7–8 and the
 [thermal mixture assembly](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L184-L305)
 volume-average condensed conductivities, including an optional pore-radiation
 term. Our `PARALLEL` rule matches only on the same volume basis.
@@ -4925,12 +4923,12 @@ reactant factors, conversion history, temperature gates and enthalpy
 conventions. The table gives the main porting checks; the equations below
 state the restricted cases in which a mapping exists.
 
-| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 |
-|---|---|---|---|---|
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
+|:---|:---|:---|:---|:---|
 | Bare reactant factor | one $\xi_j^n$ | one or two concentrations | conversion model times cumulative available mass/volume | $\rho_{s,\alpha}^{n_s}=\xi_\alpha^{n_s}$ |
 | Extra rate factors | smooth gates and depletion limiter | hard temperature limits | oxygen dependence and critical temperature | oxygen and temperature powers, rate limits |
 | Positive heat | endothermic | exothermic | endothermic | endothermic |
-| Porting requirement | unit reactant consumption | normalize stoichiometry and flip heat sign | match conversion normalization and heat basis | match units, rate options and enthalpy datum |
+| Match before comparing | unit reactant consumption | normalized stoichiometry and flipped heat sign | conversion normalization and heat basis | units, rate options and enthalpy datum |
 
 ### 6.9.1 ThermaKin2Ds
 
@@ -5977,22 +5975,20 @@ concrete element type.
 
 The same heating history and reaction scheme can produce different
 temperatures if the solvers store different sensible heat or account for
-gas-carried energy differently. This comparison uses the 1D configurations
-in §1.6.5, with a common gas and solid temperature where pore gas is resolved.
-
-### 7.8.1 Comparison basis
-
-All four formulations include conduction, reaction heat and radiative exchange.
-The storage inventory and gas-energy terms must be matched before their
-temperature balances can be compared.
+gas-carried energy differently. All four formulations include conduction,
+reaction heat and radiative exchange; their storage inventory and gas-energy
+terms must be matched before their temperature balances can be compared.
+This comparison uses the 1D configurations in §1.6.5, with a common gas and
+solid temperature where pore gas is resolved.
 
 | Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
 |:---|:---|:---|:---|:---|
 | Energy state | temperature or sensible-enthalpy inventory | element temperature | condensed sensible enthalpy | solid temperature |
 | Pore-gas heat storage | included | included | optional with `FULL_QSG` in equilibrium | no pore-gas inventory |
 | Gas energy transport | conservative carried enthalpy | gas temperature-advection term | exchange depends on selected option | release and external gas/solid enthalpy accounting |
+| Match before comparing | energy state and gas-transport model | heat sign; deformation and re-radiation terms; 1D configuration | exchange option, reaction-heat basis and boundary exchange | gas/solid enthalpy accounting; a gas-removal path in ours |
 
-### 7.8.2 ThermaKin2Ds
+### 7.8.1 ThermaKin2Ds
 
 TK Eq. 17 stores $\sum_j\xi_jc_j$ and contains
 $-\sum_g c_g\mathbf J_g\cdot\nabla T$. These terms correspond to our
@@ -6002,7 +5998,7 @@ includes its own deformation and absorption-weighted re-radiation terms;
 these must be matched separately (§§8.7, 10.11). Its 2D equation contains
 transverse transport absent from a 1D Pyrolysis.jl solve.
 
-### 7.8.3 Gpyro V2
+### 7.8.2 Gpyro V2
 
 V2 advances condensed sensible enthalpy and inverts it to temperature
 (GP §6.8; [`SOLID_ENTHALPY_SOLVER`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L15-L117)).
@@ -6024,7 +6020,7 @@ GP Eq. 70 is not advanced by the
 clarification in V2 user guide §4.5. A two-temperature calculation is
 therefore outside this implementation comparison.
 
-### 7.8.4 FDS
+### 7.8.3 FDS
 
 FDS's standard solid model assumes gas is transported instantly to the
 surface (FDS solid-phase chapter, “Solid Fuels”). There is no pore-gas
@@ -6035,7 +6031,7 @@ needed to bring produced/consumed gas between solid and CFD-gas temperatures
 gas in Pyrolysis.jl with its transport switched off. The latter traps any
 generated gas unless a separate removal mechanism is supplied.
 
-### 7.8.5 Sources and numerical evidence
+### 7.8.4 Sources and numerical evidence
 
 TK Eqs. 15–18 and §3 support the documented 1D energy correspondence.
 GP Eqs. 61–70, §6.8 and V2 user guide §§4.2, 4.5 are checked against
@@ -6791,6 +6787,7 @@ temperature difference as a discretization error.
 | In-depth transport | incident Beer–Lambert beam | Beer–Lambert absorption distribution | face-normal exponential attenuation | optional hemispheric two-flux model |
 | Numerical deposition | each traversed cell | MAX or RAND element selection | each traversed cell | forward/backward flux balance |
 | Emission treatment | surface emission separately | absorption-weighted/selected-element emission | surface re-radiation subtracted before positive net-flux attenuation | surface or internal emission, according to model |
+| Match before comparing | radiation model, absorption coefficients and surface emission | deposition algorithm and absorption-weighted re-radiation | optical depth and the entering net flux, `QENET` | angular closure, optical depth and boundary reflection |
 
 ### 8.7.1 ThermaKin2Ds
 
@@ -7740,21 +7737,21 @@ but they make different choices about storage and transport. Matching a heat
 flux and a reaction scheme alone therefore does not establish the same
 gas-release problem.
 
-This comparison covers one-dimensional ThermaKin2Ds, Gpyro V2 with its
-pressure and gas-species solvers enabled, and the standard solid-wall model
-in FDS 6.11.0. Gpyro V2's guides and source are pinned in §1.6.5. The comparison
-uses a common gas and solid temperature and omits gravity. FDS's surrounding gas
-flow enters the comparison through its coupling to the solid surface. The
-equations below use this guide's notation and flux orientation; §9.12.4
-gives the supporting equations and implementations.
+This comparison uses the versions in §1.6.5: one-dimensional ThermaKin2Ds,
+Gpyro V2 with its pressure and gas-species solvers enabled, and the standard
+solid-wall model in FDS 6.11.0. It uses a common gas and solid temperature
+and omits gravity. FDS's surrounding gas flow enters the comparison through
+its coupling to the solid surface. The equations below use this guide's
+notation and flux orientation.
 
 | Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
 |:---|:---|:---|:---|:---|
-| Gas storage and pressure | Species masses; pressure from the ideal-gas law | Gas component inventories; defining-density/volume relation | Pore-gas mass and species; pressure equation derived from continuity | Instantaneous gas release; no pore-gas inventory |
-| Interior transport drive | Partial-pressure transfer or dusty-gas friction, plus total-pressure Darcy flow | Gradient of gas volume fraction, with a pressure interpretation | Gas mass-fraction diffusion plus Darcy flow | No resolved pore-transport path |
-| Pore-wall resistance | Common lumped coefficient, or species-dependent Knudsen coefficients | Effective transfer coefficient shared by gases | Common diffusivity with a tortuosity multiplier; no separate Knudsen term | No pore-wall transport law |
-| Surface exchange | Complete reservoir state; optional mass film and hydraulic resistance | Component-specific linear or exponential surface law | Species and pressure/flow boundary conditions | Gas release coupled to the surrounding gas flow |
-| Gas energy | Shared temperature, gas heat storage and conservative carried enthalpy | Shared temperature, gas heat storage and convection | Shared temperature; gas heat storage depends on the exchange option | Gas enthalpy included in solid and external-flow energy accounting |
+| Gas storage and pressure | species masses; pressure from the ideal-gas law | gas component inventories; defining-density/volume relation | pore-gas mass and species; pressure equation derived from continuity | instantaneous gas release; no pore-gas inventory |
+| Interior transport drive | partial-pressure transfer or dusty-gas friction, plus total-pressure Darcy flow | gradient of gas volume fraction, with a pressure interpretation | gas mass-fraction diffusion plus Darcy flow | no resolved pore-transport path |
+| Pore-wall resistance | common lumped coefficient, or species-dependent Knudsen coefficients | effective transfer coefficient shared by gases | common diffusivity with a tortuosity multiplier; no separate Knudsen term | no pore-wall transport law |
+| Surface exchange | complete reservoir state; optional mass film and hydraulic resistance | component-specific linear or exponential surface law | species and pressure/flow boundary conditions | gas release coupled to the surrounding gas flow |
+| Gas energy | shared temperature, gas heat storage and conservative carried enthalpy | shared temperature, gas heat storage and convection | shared temperature; gas heat storage depends on the exchange option | gas enthalpy included in solid and external-flow energy accounting |
+| Match before comparing | transport model, Darcy term, reservoir and film | uniform porosity, $\Lambda=\phi\lambda_{\mathrm{TK}}$ and zero Darcy term; boundary law | mixture molar mass, viscosity `D12`, boundary coefficient `HM0` and exchange option | negligible accumulation and release delay; energy accounting and surface mass flux |
 
 ### 9.12.1 ThermaKin2Ds
 
@@ -7798,7 +7795,7 @@ also gives a separate component-specific boundary law. Matching an interior
 flux does not automatically match our reservoir and film exchange. The
 shared LTE gas-storage and convection terms provide an energy correspondence,
 but boundary enthalpy, reaction-heat conventions and radiation still need to
-be matched (§§7.8.2 and 12.11.1). The physical consequence is that transport
+be matched (§§7.8.1 and 12.11.1). The physical consequence is that transport
 delay and gas-carried heat can differ even with identical reaction parameters.
 
 ### 9.12.2 Gpyro V2
@@ -7875,7 +7872,7 @@ heat storage and conduction terms that `FULL_QSG` retains (GP Eq. 65;
 Our model always includes gas heat storage and uses the carried-enthalpy
 convention of §9.5. V2's separate gas-energy equation has no corresponding
 solve in the pinned driver, and the user guide's `QSG_MODEL` names do not
-match its input controls (§7.8.3). Align these choices before attributing a
+match its input controls (§7.8.2). Align these choices before attributing a
 temperature difference to the mass-transport discretization.
 
 The direct condensed-species update and directional thermal solver affect
@@ -7901,21 +7898,25 @@ Gas enthalpy still matters in FDS: its
 [`PYROLYSIS` routine](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90)
 accounts for the enthalpy change between solid and external gas temperatures,
 including `Q_DOT_G_PPP`. Consequently, rapid mass release alone does not
-establish equivalent thermal behavior. Compare the energy accounting (§7.8.4)
+establish equivalent thermal behavior. Compare the energy accounting (§7.8.3)
 and the reported surface mass flux as well as total gas production.
 
 ### 9.12.4 Sources and numerical evidence
 
-The comparison above establishes correspondences between specified equations
-and implementations. The source locations supporting it are:
-
-| Source | Relevant equations or implementation |
-|:---|:---|
-| Pyrolysis.jl | `src/Physics/pressure.jl` for the pore state; `src/Physics/constitutive_transport.jl` and `interface_transport.jl` for fluxes; `src/Kernels/gas_transport.jl` and `gas_boundary.jl` for mass and carried energy. |
-| ThermaKin2Ds | Eqs. 13–14 for transfer and its pressure interpretation; Eqs. 15–18 for storage, transport and thermal-equilibrium energy; Eq. 19 for boundary mass exchange. |
-| Gpyro V2 guides | GP Eqs. 16, 58–60, 63–65 and 71–75 for gas state, balances, energy exchange and Darcy pressure; §§5.3–5.4 for gas boundaries. V2 user guide §§4.2–4.5 and 10.6 clarify thermal options, gas transport and viscosity. |
-| Gpyro V2 implementation | The linked pressure, gas-species, boundary and thermal routines at the revision in §1.6.5 establish the executable behavior, including the mixture molar-mass formula and differences from the guides. |
-| FDS 6.11.0 | The linked gas-release assumptions and `Source/wall.f90`, especially gas-production accumulation and `PYROLYSIS` enthalpy accounting. |
+TK Eqs. 13–14 give the transfer law and its pressure interpretation,
+Eqs. 15–18 storage, transport and thermal-equilibrium energy, and Eq. 19
+boundary mass exchange. GP Eqs. 16, 58–60, 63–65 and 71–75 and §§5.3–5.4
+give the gas state, balances, energy exchange, Darcy pressure and gas
+boundaries; V2 user guide §§4.2–4.5 and 10.6 clarify thermal options, gas
+transport and viscosity. These are checked against the linked pressure,
+gas-species, boundary and thermal routines, which establish the executable
+behavior, including the mixture molar-mass formula and its differences from
+the guides. FDS's gas-release assumptions are checked against
+`Source/wall.f90`, especially gas-production accumulation and `PYROLYSIS`
+enthalpy accounting. Our pore state is in `src/Physics/pressure.jl`, the
+fluxes in `src/Physics/constitutive_transport.jl` and
+`interface_transport.jl`, and mass and carried energy in
+`src/Kernels/gas_transport.jl` and `gas_boundary.jl`.
 
 The verification cases provide a separate kind of evidence. V-GT-01–04
 (§9.11) test our transport against analytical solutions and integrated
@@ -7936,12 +7937,14 @@ The FDS version used for the retained runs also differs from the 6.11.0
 formulation examined here. These distinctions keep a source-based
 correspondence separate from agreement demonstrated by a numerical experiment.
 
-For practical model setup, User Guide §7.5 covers the transport model, pore
-state and endpoint data; §§5.3–5.5 cover reservoir, film and pressure
-conditions. When comparing results, use the output definitions in User Guide
-§9.5 to distinguish gas generation from escaped mass, and §9.8 for the
-conservation-recorder setup. The species diagnostics and `gas_species_audit`
-described in §9.11 above account for gas accumulation and boundary exchange.
+The species diagnostics and `gas_species_audit` described in §9.11 account
+for gas accumulation and boundary exchange. For practical model setup, User
+Guide §7.5 covers the transport model, pore state and endpoint data;
+§§5.3–5.5 cover reservoir, film and pressure conditions. When comparing
+results, use the output definitions in User Guide §9.5 to distinguish gas
+generation from escaped mass, and §9.8 for the conservation-recorder setup.
+
+---
 
 # 10. Volume Change, Swelling, Intumescence, and Lateral Shrinkage
 
@@ -8420,7 +8423,7 @@ below use §1.6.5's versions; §11.9 separately compares their mesh updates.
 |:---|:---|:---|:---|:---|
 | Volume law | reaction-volume sum with component weights | mixture density with gas swelling | reaction yield and condensed bulk density | component-density sum with shrink/swell constraints |
 | Geometry update | coupled node positions; optional scalar area | changing elements with size adjustment | mass/density volume reconstruction | thickness/coordinate update and remeshing |
-| Porting requirement | specify component weights and lateral law | match the full density law | match yields, densities and deformation mode | match density ratios and shrink/swell flags |
+| Match before comparing | component weights and lateral law | full density law | yields, densities and deformation mode | density ratios and shrink/swell flags |
 
 ### 10.11.1 ThermaKin2Ds
 
@@ -9572,6 +9575,7 @@ and remapping; the material volume laws are compared in §10.11.
 | Motion | node positions and velocities in the coupled system | element thickness changes | axial thickness reconstructed from mass/density | solid-cell thickness and coordinates updated |
 | Size control | optional equidistribution correction | splitting and partial combination | selected deformation mode | layer remeshing |
 | Inventory transfer | relative fluxes when mesh and skeleton differ | conservative mixing during size adjustment | condensed inventories follow material cells | inventory remapping on the solid grid |
+| Match before comparing | correction setting; profiles in current coordinates | element-size adjustment; primary-coordinate deformation | selected `SOLVER_DEFORMATION_MODE` | surface fluxes, volume law and remapping |
 
 ### 11.9.1 ThermaKin2Ds
 
@@ -9600,12 +9604,9 @@ V2's deforming-grid configuration.
 FDS 6.11.0 updates solid-cell thicknesses and coordinates and remeshes
 layers (`REGRID_FACTOR`, `X_S_NEW` and `REMESH_LAYER` in `wall.f90`). This
 is motion of the internal solid grid; it is separate from the surrounding
-CFD mesh and obstruction representation.
-
-
-The wall grid is internal to the solid model. Matching it to our moving
-column does not require moving the surrounding CFD mesh, but does require
-matching surface fluxes, the volume law and remapping effects.
+CFD mesh and obstruction representation. Matching it to our moving column
+therefore does not require moving the CFD mesh, but does require matching
+surface fluxes, the volume law and remapping effects.
 
 ### 11.9.4 Sources and numerical evidence
 
@@ -10397,6 +10398,7 @@ transport are compared separately in §§8.7 and 9.12.
 | Thermal exchange | composable flux, convection and radiation laws | external heating and empirical feedback laws | thermal conditions at boundary cells | wall exchange coupled to external CFD gas |
 | Boundary temperature | one-sided surface balance | manual describes boundary exchange; no source check | active half-cell thermal path | surface/ghost-temperature treatment in wall solve |
 | Gas exchange | reservoirs, films, prescribed flux and pressure conditions | component surface-loss laws | pressure/flux and species boundary conditions | generated gas released to external flow |
+| Match before comparing | incident, absorbed and net fluxes; loss temperature; reservoir composition | incident flux after reflection; surface-absorption limit | loss temperature at the boundary cell; pressure/flux conditions and external composition | no `NET_HEAT_FLUX` with `MATL_ID`; surface versus in-depth radiation |
 
 ### 12.11.1 ThermaKin2Ds
 
@@ -10461,8 +10463,9 @@ Our surface, species and energy assembly is described in §§12.2–12.5.
 
 V-HC-01–03 exercise specified thermal boundaries, while §9.11's gas cases
 exercise our transport closures. Those checks do not establish equivalence
-of arbitrary combined boundary models. User Guide §§5.2–5.6 gives the
-corresponding setup choices; §18.1.3 documents the scope of the numerical comparisons.
+of arbitrary combined boundary models; §18.1.3 documents the scope of the
+numerical comparisons. User Guide §§5.2–5.6 gives the corresponding setup
+choices.
 
 ---
 
@@ -11559,17 +11562,17 @@ Spatial discretization determines how continuum fluxes become exchanges
 between cells. The 1D formulations in §1.6.5 share some finite-volume
 features, but differ in transported states, face laws and mesh adjustment.
 Matching a scheme name is insufficient: compare the actual flux and its
-coefficient before interpreting a convergence difference.
+coefficient before interpreting a convergence difference. FDS's stored
+component densities are the same mass-per-volume quantities as our derived
+$\xi_j$ (§3.7); the table's first row compares how each solver represents
+composition numerically.
 
 | Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
 |:---|:---|:---|:---|:---|
 | Stored cell variables | component masses and thermal state | component masses and temperature | condensed masses and enthalpy; separate gas state | condensed component concentrations, $\rho_{s,j}$, and temperature |
 | Transport across faces | harmonic coefficients; upwind Darcy advection | finite-volume heat and gas transfer | harmonic coefficients; selectable gas convection–diffusion scheme | harmonic wall conductivity; no pore-gas flux |
 | Changing geometry | coupled mesh and relative fluxes | element size adjustment | volume reconstruction | solid-grid update and remapping |
-
-FDS's stored component densities are the same mass-per-volume quantities
-as our derived $\xi_j$ (§3.7). This row distinguishes the numerical
-representation of composition.
+| Match before comparing | cell count, spacing and face laws | face laws, mesh transfer and inventory variables | `CONV_DIFF_SCHEME` and half-cell boundary nodes | cell locations, flux areas and inventories |
 
 ### 13.11.1 ThermaKin2Ds
 
@@ -12478,7 +12481,8 @@ in §1.6.5 do not share a common cell-removal or inventory-transfer algorithm.
 |:---|:---|:---|:---|:---|
 | Small-cell treatment | located mass-threshold deactivation | element splitting and partial combination | consumed-cell flag and inert residual | thin-cell/layer checks and remeshing |
 | Inventory consequence | receiver transfer and recorded vent losses | species and energy conserved during mixing | residual retained when reactions stop | wall inventories remapped; disappearance handled |
-| Meaning of burnout | specified mass threshold and event outcome | must identify the chosen run/output criterion | source uses remaining-mass ratio | wall/layer disappearance criteria |
+| Burnout criterion | specified mass threshold and event outcome | no documented threshold | remaining condensed-mass ratio `EPS` | wall/layer disappearance criteria |
+| Match before comparing | threshold; deactivation versus thickness stop | observable and termination criterion | cutoff basis and retained residual | stopping criterion and residual inventory |
 
 ### 14.8.1 ThermaKin2Ds
 
@@ -13535,7 +13539,7 @@ after the physical problem, output workload and required accuracy agree.
 |:---|:---|:---|:---|:---|
 | Thermal update | adaptive stiff mass-matrix integration | Crank–Nicolson in primary direction | directional semi-implicit enthalpy solve | Crank–Nicolson wall conduction |
 | Reaction/geometry coupling | states in the coupled system | component and element updates | direct mass update with corrections; iterative equation coupling | reaction, grid and thermal substeps |
-| Comparison controls | tolerances and step limits | time step and element sizes | time step, convergence controls and sweep direction | wall substeps and external-flow coupling |
+| Match before comparing | tolerances and step limits | time step and element sizes | time step, convergence controls and sweep direction | wall substeps and external-flow coupling |
 
 ### 15.14.1 ThermaKin2Ds
 
@@ -14372,7 +14376,7 @@ ledger defects.
 |:---|:---|:---|:---|:---|
 | Inventory scope | live condensed and pore-gas inventories | component inventories in elements | condensed inventory; gas included in total mass when pressure is solved | solid wall and external CFD gas accounted for separately |
 | Changing cells | explicit transfer and vent records | conservative element mixing | residual mass retained at consumed-cell cutoff | solid-grid remapping |
-| Output check | escape versus generation; current areas | identify the documented output and domain | check pressure option and mass-loss output definition | match wall outputs or whole-simulation energy-budget scope |
+| Match before comparing | escape versus generation; current areas | documented output and domain | pressure option and mass-loss output definition | wall outputs or whole-simulation energy-budget scope |
 
 ### 16.9.1 ThermaKin2Ds
 
@@ -15249,7 +15253,7 @@ could be built around a solver.
 |:---|:---|:---|:---|:---|
 | Documented workflow | finite-difference solve sensitivities, sweeps and inverse examples | forward model with fitted material parameters | property-estimation search drivers | reference-temperature/rate kinetic estimates |
 | Derivative claim | state Jacobian uses automatic differentiation; whole-solve parameters use finite differences | no universal parameter-derivative method established here | search branches do not establish whole-solve derivatives | kinetic estimates do not establish whole-solve derivatives |
-| Fair comparison | same objective, perturbation checks and solver tolerances | identify the inverse-study method | record optimizer and objective | identify any surrounding inverse workflow |
+| Match before comparing | objective, perturbation checks and solver tolerances | inverse-study method used | optimizer and objective | any surrounding inverse workflow |
 
 ### 17.8.1 ThermaKin2Ds
 

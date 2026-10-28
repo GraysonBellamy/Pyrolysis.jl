@@ -333,7 +333,7 @@ mass-fraction diffusion. Its working thermal comparison uses a common gas
 and solid temperature. The default equilibrium exchange omits gas heat
 storage and gas conduction; `FULL_QSG` includes both. The documented
 separate gas-energy equation has no corresponding solve in the pinned
-driver (§7.8.3). V2 advances condensed species masses directly with a
+driver (§7.8.2). V2 advances condensed species masses directly with a
 reaction-rate correction for overconsumption and uses a directional thermal
 solver (§§13.11 and 15.14). These choices affect both the model to be matched
 and its numerical error.
@@ -345,7 +345,7 @@ not the scope of FDS as a whole. FDS also documents an `HT3D` heat-transfer
 option. The standard model combines conduction, reactions, a changing solid
 grid, and coupling to the surrounding CFD gas. It assumes instantaneous
 release of generated gas; it does not solve pore-gas storage or transport.
-Reaction and gas/solid enthalpy accounting still matter (§7.8.4).
+Reaction and gas/solid enthalpy accounting still matter (§7.8.3).
 
 FDS permits concentration-order, oxygen and temperature factors in its reaction
 rates. Pyrolysis.jl supports the concentration-order factor but omits the explicit
@@ -357,14 +357,14 @@ discrepancy between the 6.11.0 manual and source.
 
 ### 1.6.4 Summary contrast
 
-| Aspect | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 wall model | Pyrolysis.jl |
-|---|---|---|---|---|
-| Geometry in this comparison | 1D, Cartesian/axisymmetric 2D | deforming 1D; multidimensional transport also available | standard 1D wall; `HT3D` separately documented | supported full pyrolysis solves in 1D (§1.2.2) |
-| Pore-gas heat storage | included | optional in thermal equilibrium; no separate gas-enthalpy solve | no pore-gas inventory | included |
-| Heat sign, positive | exothermic | endothermic | endothermic | endothermic |
-| Gas transport | volume-fraction-gradient law | Darcy and mass-fraction diffusion when enabled (§9.12.2) | instantaneous release | lumped superficial transfer or dusty-gas friction, each with optional Darcy flow |
-| Time integration | Crank–Nicolson in primary direction, explicit transverse terms | direct mass updates; directional semi-implicit enthalpy solve | Crank–Nicolson conduction and separate reaction/grid updates | mass-matrix DAE; `Rodas5P` default in this checkout |
-| Deforming grid | changing elements with splitting/combining | changing 1D control-volume thicknesses | thickness update and remeshing | node positions and velocities in the coupled system |
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
+|:---|:---|:---|:---|:---|
+| Geometry in this comparison | supported full pyrolysis solves in 1D (§1.2.2) | 1D, Cartesian/axisymmetric 2D | deforming 1D; multidimensional transport also available | standard 1D wall; `HT3D` separately documented |
+| Pore-gas heat storage | included | included | optional in thermal equilibrium; no separate gas-enthalpy solve | no pore-gas inventory |
+| Heat sign, positive | endothermic | exothermic | endothermic | endothermic |
+| Gas transport | lumped superficial transfer or dusty-gas friction, each with optional Darcy flow | volume-fraction-gradient law | Darcy and mass-fraction diffusion when enabled (§9.12.2) | instantaneous release |
+| Time integration | mass-matrix DAE; `Rodas5P` default in this checkout | Crank–Nicolson in primary direction, explicit transverse terms | direct mass updates; directional semi-implicit enthalpy solve | Crank–Nicolson conduction and separate reaction/grid updates |
+| Deforming grid | node positions and velocities in the coupled system | changing elements with splitting/combining | changing 1D control-volume thicknesses | thickness update and remeshing |
 
 Pyrolysis.jl forms its state Jacobian by colored automatic differentiation
 (`src/ColoredJacobian/colored.jl`). This is an implementation fact, not evidence
@@ -382,12 +382,6 @@ ThermaKin2Ds comparisons are supported by its manual; its source is not
 available in this checkout. They establish the documented formulation and
 numerical procedure, without claiming a source-level implementation check.
 A documented equation or input flag alone does not establish a working option.
-
-The chapter comparisons begin with the question being compared and an
-overview, then explain each solver in the order ThermaKin2Ds, Gpyro V2 and
-FDS. Equation correspondences state their assumptions. The closing sources
-and numerical-evidence discussion distinguishes those correspondences from
-agreement demonstrated by matched runs.
 
 The abbreviations used in the comparison sections identify these sources:
 

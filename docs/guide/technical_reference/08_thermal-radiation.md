@@ -703,6 +703,7 @@ temperature difference as a discretization error.
 | In-depth transport | incident Beer–Lambert beam | Beer–Lambert absorption distribution | face-normal exponential attenuation | optional hemispheric two-flux model |
 | Numerical deposition | each traversed cell | MAX or RAND element selection | each traversed cell | forward/backward flux balance |
 | Emission treatment | surface emission separately | absorption-weighted/selected-element emission | surface re-radiation subtracted before positive net-flux attenuation | surface or internal emission, according to model |
+| Match before comparing | radiation model, absorption coefficients and surface emission | deposition algorithm and absorption-weighted re-radiation | optical depth and the entering net flux, `QENET` | angular closure, optical depth and boundary reflection |
 
 ### 8.7.1 ThermaKin2Ds
 

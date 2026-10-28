@@ -1073,17 +1073,17 @@ Spatial discretization determines how continuum fluxes become exchanges
 between cells. The 1D formulations in §1.6.5 share some finite-volume
 features, but differ in transported states, face laws and mesh adjustment.
 Matching a scheme name is insufficient: compare the actual flux and its
-coefficient before interpreting a convergence difference.
+coefficient before interpreting a convergence difference. FDS's stored
+component densities are the same mass-per-volume quantities as our derived
+$\xi_j$ (§3.7); the table's first row compares how each solver represents
+composition numerically.
 
 | Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
 |:---|:---|:---|:---|:---|
 | Stored cell variables | component masses and thermal state | component masses and temperature | condensed masses and enthalpy; separate gas state | condensed component concentrations, $\rho_{s,j}$, and temperature |
 | Transport across faces | harmonic coefficients; upwind Darcy advection | finite-volume heat and gas transfer | harmonic coefficients; selectable gas convection–diffusion scheme | harmonic wall conductivity; no pore-gas flux |
 | Changing geometry | coupled mesh and relative fluxes | element size adjustment | volume reconstruction | solid-grid update and remapping |
-
-FDS's stored component densities are the same mass-per-volume quantities
-as our derived $\xi_j$ (§3.7). This row distinguishes the numerical
-representation of composition.
+| Match before comparing | cell count, spacing and face laws | face laws, mesh transfer and inventory variables | `CONV_DIFF_SCHEME` and half-cell boundary nodes | cell locations, flux areas and inventories |
 
 ### 13.11.1 ThermaKin2Ds
 

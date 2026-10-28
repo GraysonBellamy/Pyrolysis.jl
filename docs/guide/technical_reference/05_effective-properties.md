@@ -862,6 +862,7 @@ state; equal initial values alone are insufficient.
 | Conductivity | selectable mixing rule | blend of parallel and series limits | condensed volume average in the aligned 1D case | condensed volume average |
 | Permeability | component mixing or Carman–Kozeny | effective gas-transfer coefficient, not our permeability input | component mixing; optional Kozeny–Carman factor | no resolved pore-flow permeability |
 | Absorption input | mass-specific, m²/kg | mass-specific, m²/kg | per length, m⁻¹ | per length, m⁻¹ |
+| Match before comparing | mixing rule, permeability model and absorption units | blend weight and volume fractions for `WEIGHTED`; gas swelling factor | volume basis for `PARALLEL`; permeability caps; effective optical depth | condensed fractions for `PARALLEL`; pore-gas storage; optical depth |
 
 ### 5.14.1 ThermaKin2Ds
 
@@ -881,7 +882,7 @@ radiation deposition and emission algorithms still differ (§8.7.1).
 ### 5.14.2 Gpyro V2
 
 GP Eqs. 11–12 mass-weight condensed heat capacity and enthalpy. Gas storage
-is separate (§7.8.3). In the aligned 1D formulation, GP Eqs. 7–8 and the
+is separate (§7.8.2). In the aligned 1D formulation, GP Eqs. 7–8 and the
 [thermal mixture assembly](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L184-L305)
 volume-average condensed conductivities, including an optional pore-radiation
 term. Our `PARALLEL` rule matches only on the same volume basis.

@@ -475,7 +475,7 @@ below use §1.6.5's versions; §11.9 separately compares their mesh updates.
 |:---|:---|:---|:---|:---|
 | Volume law | reaction-volume sum with component weights | mixture density with gas swelling | reaction yield and condensed bulk density | component-density sum with shrink/swell constraints |
 | Geometry update | coupled node positions; optional scalar area | changing elements with size adjustment | mass/density volume reconstruction | thickness/coordinate update and remeshing |
-| Porting requirement | specify component weights and lateral law | match the full density law | match yields, densities and deformation mode | match density ratios and shrink/swell flags |
+| Match before comparing | component weights and lateral law | full density law | yields, densities and deformation mode | density ratios and shrink/swell flags |
 
 ### 10.11.1 ThermaKin2Ds
 

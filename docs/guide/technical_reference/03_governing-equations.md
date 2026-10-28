@@ -783,13 +783,14 @@ ThermaKin2Ds, and concentrations in FDS.
 | Gas release | finite-rate transport | finite-rate volume-fraction-gradient transfer | Darcy and mass-fraction diffusion when enabled | instantaneous release |
 | Energy state | temperature or sensible-enthalpy inventory | element temperature | condensed sensible enthalpy | solid temperature |
 | Material geometry | coupled moving mesh | changing elements with size adjustment | mass/density volume reconstruction | thickness update and remapping |
+| Match before comparing | gas-transport model, energy state and mesh motion | gas-transfer law, reaction extent and heat basis | condensed and pore-gas inventories separately; thermal closure | negligible gas storage and release delay in ours |
 
 ### 3.7.1 ThermaKin2Ds
 
 ThermaKin2Ds carries component masses and temperature in its numerical
 elements (TK §3). Its all-component heat storage and gas temperature-advection
 terms correspond to our 1D temperature balance when the other closures match
-(TK Eq. 17; §7.8.2). The continuum equations also contain a deformation
+(TK Eq. 17; §7.8.1). The continuum equations also contain a deformation
 term, represented numerically through changing elements (§3.6.2).
 
 The gas-transfer potential is a volume fraction (TK Eq. 13), whereas our
@@ -808,7 +809,7 @@ accumulates and moves by Darcy flow and mass-fraction diffusion (§9.12.2).
 V2 recovers temperature from condensed sensible enthalpy. Its driver has no
 separate gas-enthalpy solve. In thermal equilibrium, `FULL_QSG` retains both
 gas heat storage and gas conduction, so keeping gas heat capacity alone
-does not reproduce that option (§7.8.3). Compare condensed and gaseous
+does not reproduce that option (§7.8.2). Compare condensed and gaseous
 inventories separately and select the same thermal closure before interpreting
 differences in total mass or temperature.
 
@@ -817,7 +818,7 @@ differences in total mass or temperature.
 The standard wall model tracks condensed components and releases generated
 gas immediately to the surrounding computational fluid dynamics (CFD)
 calculation. It has no evolving pore-gas inventory. Reaction heat and
-gas/solid enthalpy accounting still enter its thermal problem (§7.8.4).
+gas/solid enthalpy accounting still enter its thermal problem (§7.8.3).
 
 Its solid grid changes thickness and can be remapped as composition changes
 (§10.11.3). Turning off our gas transport traps generated gas; it does not
@@ -828,14 +829,15 @@ approximation must establish negligible storage and delay (§9.12.3).
 
 TK Eqs. 6, 13–18 and §3 support the ThermaKin2Ds description. GP §§4.1, 6.5
 and 6.8 are checked against the V2 mass, mesh and thermal paths linked in
-§§3.6.2 and 7.8.3. FDS's [solid-phase equations](https://github.com/firemodels/fds/blob/FDS-6.11.0/Manuals/FDS_Technical_Reference_Guide/Solid_Chapter.tex)
+§§3.6.2 and 7.8.2. FDS's [solid-phase equations](https://github.com/firemodels/fds/blob/FDS-6.11.0/Manuals/FDS_Technical_Reference_Guide/Solid_Chapter.tex)
 and [`wall.f90`](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90) establish the wall inventory and
 gas-release scope. Our state and balance assembly are described in §§3.1–3.6.
 
 The analytical and manufactured-solution checks in §18.2 test specified
 Pyrolysis.jl balances. They do not establish whole-model agreement among
 these solvers; retained external-code datasets have the version and scope
-limits in §18.1.3.
+limits in §18.1.3. User Guide §§7.2 and 7.8 show how the problem-setup
+choices select these balances and their state rows.
 
 ---
 

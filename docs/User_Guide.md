@@ -4878,7 +4878,7 @@ heat storage. In the pinned source these controls are `SOLVE_PRESSURE`,
 the V2 user guide's `QSG_MODEL` name is not an accepted input in that
 revision. Its driver has no separate gas-temperature solve. Match boundary
 exchange and radiation as well as these switches (Technical Reference
-§§7.8.3, 8.7.2 and 9.12.2); copying coefficients alone does not establish
+§§7.8.2, 8.7.2 and 9.12.2); copying coefficients alone does not establish
 the same thermal problem.
 
 ### 7.7.1 Boundary energy control surface

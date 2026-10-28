@@ -898,12 +898,12 @@ reactant factors, conversion history, temperature gates and enthalpy
 conventions. The table gives the main porting checks; the equations below
 state the restricted cases in which a mapping exists.
 
-| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 |
-|---|---|---|---|---|
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
+|:---|:---|:---|:---|:---|
 | Bare reactant factor | one $\xi_j^n$ | one or two concentrations | conversion model times cumulative available mass/volume | $\rho_{s,\alpha}^{n_s}=\xi_\alpha^{n_s}$ |
 | Extra rate factors | smooth gates and depletion limiter | hard temperature limits | oxygen dependence and critical temperature | oxygen and temperature powers, rate limits |
 | Positive heat | endothermic | exothermic | endothermic | endothermic |
-| Porting requirement | unit reactant consumption | normalize stoichiometry and flip heat sign | match conversion normalization and heat basis | match units, rate options and enthalpy datum |
+| Match before comparing | unit reactant consumption | normalized stoichiometry and flipped heat sign | conversion normalization and heat basis | units, rate options and enthalpy datum |
 
 ### 6.9.1 ThermaKin2Ds
 

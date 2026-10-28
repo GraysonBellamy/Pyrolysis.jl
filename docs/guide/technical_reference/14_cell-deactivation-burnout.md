@@ -792,7 +792,8 @@ in §1.6.5 do not share a common cell-removal or inventory-transfer algorithm.
 |:---|:---|:---|:---|:---|
 | Small-cell treatment | located mass-threshold deactivation | element splitting and partial combination | consumed-cell flag and inert residual | thin-cell/layer checks and remeshing |
 | Inventory consequence | receiver transfer and recorded vent losses | species and energy conserved during mixing | residual retained when reactions stop | wall inventories remapped; disappearance handled |
-| Meaning of burnout | specified mass threshold and event outcome | must identify the chosen run/output criterion | source uses remaining-mass ratio | wall/layer disappearance criteria |
+| Burnout criterion | specified mass threshold and event outcome | no documented threshold | remaining condensed-mass ratio `EPS` | wall/layer disappearance criteria |
+| Match before comparing | threshold; deactivation versus thickness stop | observable and termination criterion | cutoff basis and retained residual | stopping criterion and residual inventory |
 
 ### 14.8.1 ThermaKin2Ds
 

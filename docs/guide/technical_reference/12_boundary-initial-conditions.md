@@ -716,6 +716,7 @@ transport are compared separately in §§8.7 and 9.12.
 | Thermal exchange | composable flux, convection and radiation laws | external heating and empirical feedback laws | thermal conditions at boundary cells | wall exchange coupled to external CFD gas |
 | Boundary temperature | one-sided surface balance | manual describes boundary exchange; no source check | active half-cell thermal path | surface/ghost-temperature treatment in wall solve |
 | Gas exchange | reservoirs, films, prescribed flux and pressure conditions | component surface-loss laws | pressure/flux and species boundary conditions | generated gas released to external flow |
+| Match before comparing | incident, absorbed and net fluxes; loss temperature; reservoir composition | incident flux after reflection; surface-absorption limit | loss temperature at the boundary cell; pressure/flux conditions and external composition | no `NET_HEAT_FLUX` with `MATL_ID`; surface versus in-depth radiation |
 
 ### 12.11.1 ThermaKin2Ds
 
@@ -780,8 +781,9 @@ Our surface, species and energy assembly is described in §§12.2–12.5.
 
 V-HC-01–03 exercise specified thermal boundaries, while §9.11's gas cases
 exercise our transport closures. Those checks do not establish equivalence
-of arbitrary combined boundary models. User Guide §§5.2–5.6 gives the
-corresponding setup choices; §18.1.3 documents the scope of the numerical comparisons.
+of arbitrary combined boundary models; §18.1.3 documents the scope of the
+numerical comparisons. User Guide §§5.2–5.6 gives the corresponding setup
+choices.
 
 ---
 

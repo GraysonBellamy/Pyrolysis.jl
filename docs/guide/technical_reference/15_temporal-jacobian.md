@@ -928,7 +928,7 @@ after the physical problem, output workload and required accuracy agree.
 |:---|:---|:---|:---|:---|
 | Thermal update | adaptive stiff mass-matrix integration | Crank–Nicolson in primary direction | directional semi-implicit enthalpy solve | Crank–Nicolson wall conduction |
 | Reaction/geometry coupling | states in the coupled system | component and element updates | direct mass update with corrections; iterative equation coupling | reaction, grid and thermal substeps |
-| Comparison controls | tolerances and step limits | time step and element sizes | time step, convergence controls and sweep direction | wall substeps and external-flow coupling |
+| Match before comparing | tolerances and step limits | time step and element sizes | time step, convergence controls and sweep direction | wall substeps and external-flow coupling |
 
 ### 15.14.1 ThermaKin2Ds
 

@@ -823,6 +823,7 @@ The comparison uses the version scope of §1.6.5; §5.14 covers mixing rules.
 | Material components | solid, liquid and gas | solid, liquid and gas | condensed species and separate gas species | condensed materials; external gas species |
 | Total inventory density | $\sum_{\mathrm{all}}\xi_j$, including retained gas | $\sum_{\mathrm{all}}\xi_j$, including retained gas | $\bar\rho$, condensed mass per cell volume | $\rho_s=\sum_{S,L}\xi_j$, condensed mass per cell volume |
 | Property functions | constants, callables and tables | specified temperature function | power laws and optional thermal terms | temperature ramps for thermal properties |
+| Match before comparing | component phases and property functions over the temperature range used | property curves and the mixture swelling law | each property law and the condensed inventory it applies to | ramp units, interpolation and enthalpy datum |
 
 ### 4.8.1 ThermaKin2Ds
 
@@ -857,7 +858,7 @@ Gaussian melting heat-capacity contribution and a $T^3$ radiative conductivity
 term. The [component laws](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_funcs.f90#L345-L422) and
 [mixture assembly](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L184-L305) implement these
 thermal contributions. Gas heat storage follows the separate exchange option
-in §7.8.3. Match both the property law and the inventory to which it applies.
+in §7.8.2. Match both the property law and the inventory to which it applies.
 
 ### 4.8.3 FDS
 

@@ -823,21 +823,21 @@ but they make different choices about storage and transport. Matching a heat
 flux and a reaction scheme alone therefore does not establish the same
 gas-release problem.
 
-This comparison covers one-dimensional ThermaKin2Ds, Gpyro V2 with its
-pressure and gas-species solvers enabled, and the standard solid-wall model
-in FDS 6.11.0. Gpyro V2's guides and source are pinned in §1.6.5. The comparison
-uses a common gas and solid temperature and omits gravity. FDS's surrounding gas
-flow enters the comparison through its coupling to the solid surface. The
-equations below use this guide's notation and flux orientation; §9.12.4
-gives the supporting equations and implementations.
+This comparison uses the versions in §1.6.5: one-dimensional ThermaKin2Ds,
+Gpyro V2 with its pressure and gas-species solvers enabled, and the standard
+solid-wall model in FDS 6.11.0. It uses a common gas and solid temperature
+and omits gravity. FDS's surrounding gas flow enters the comparison through
+its coupling to the solid surface. The equations below use this guide's
+notation and flux orientation.
 
 | Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
 |:---|:---|:---|:---|:---|
-| Gas storage and pressure | Species masses; pressure from the ideal-gas law | Gas component inventories; defining-density/volume relation | Pore-gas mass and species; pressure equation derived from continuity | Instantaneous gas release; no pore-gas inventory |
-| Interior transport drive | Partial-pressure transfer or dusty-gas friction, plus total-pressure Darcy flow | Gradient of gas volume fraction, with a pressure interpretation | Gas mass-fraction diffusion plus Darcy flow | No resolved pore-transport path |
-| Pore-wall resistance | Common lumped coefficient, or species-dependent Knudsen coefficients | Effective transfer coefficient shared by gases | Common diffusivity with a tortuosity multiplier; no separate Knudsen term | No pore-wall transport law |
-| Surface exchange | Complete reservoir state; optional mass film and hydraulic resistance | Component-specific linear or exponential surface law | Species and pressure/flow boundary conditions | Gas release coupled to the surrounding gas flow |
-| Gas energy | Shared temperature, gas heat storage and conservative carried enthalpy | Shared temperature, gas heat storage and convection | Shared temperature; gas heat storage depends on the exchange option | Gas enthalpy included in solid and external-flow energy accounting |
+| Gas storage and pressure | species masses; pressure from the ideal-gas law | gas component inventories; defining-density/volume relation | pore-gas mass and species; pressure equation derived from continuity | instantaneous gas release; no pore-gas inventory |
+| Interior transport drive | partial-pressure transfer or dusty-gas friction, plus total-pressure Darcy flow | gradient of gas volume fraction, with a pressure interpretation | gas mass-fraction diffusion plus Darcy flow | no resolved pore-transport path |
+| Pore-wall resistance | common lumped coefficient, or species-dependent Knudsen coefficients | effective transfer coefficient shared by gases | common diffusivity with a tortuosity multiplier; no separate Knudsen term | no pore-wall transport law |
+| Surface exchange | complete reservoir state; optional mass film and hydraulic resistance | component-specific linear or exponential surface law | species and pressure/flow boundary conditions | gas release coupled to the surrounding gas flow |
+| Gas energy | shared temperature, gas heat storage and conservative carried enthalpy | shared temperature, gas heat storage and convection | shared temperature; gas heat storage depends on the exchange option | gas enthalpy included in solid and external-flow energy accounting |
+| Match before comparing | transport model, Darcy term, reservoir and film | uniform porosity, $\Lambda=\phi\lambda_{\mathrm{TK}}$ and zero Darcy term; boundary law | mixture molar mass, viscosity `D12`, boundary coefficient `HM0` and exchange option | negligible accumulation and release delay; energy accounting and surface mass flux |
 
 ### 9.12.1 ThermaKin2Ds
 
@@ -881,7 +881,7 @@ also gives a separate component-specific boundary law. Matching an interior
 flux does not automatically match our reservoir and film exchange. The
 shared LTE gas-storage and convection terms provide an energy correspondence,
 but boundary enthalpy, reaction-heat conventions and radiation still need to
-be matched (§§7.8.2 and 12.11.1). The physical consequence is that transport
+be matched (§§7.8.1 and 12.11.1). The physical consequence is that transport
 delay and gas-carried heat can differ even with identical reaction parameters.
 
 ### 9.12.2 Gpyro V2
@@ -958,7 +958,7 @@ heat storage and conduction terms that `FULL_QSG` retains (GP Eq. 65;
 Our model always includes gas heat storage and uses the carried-enthalpy
 convention of §9.5. V2's separate gas-energy equation has no corresponding
 solve in the pinned driver, and the user guide's `QSG_MODEL` names do not
-match its input controls (§7.8.3). Align these choices before attributing a
+match its input controls (§7.8.2). Align these choices before attributing a
 temperature difference to the mass-transport discretization.
 
 The direct condensed-species update and directional thermal solver affect
@@ -984,21 +984,25 @@ Gas enthalpy still matters in FDS: its
 [`PYROLYSIS` routine](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90)
 accounts for the enthalpy change between solid and external gas temperatures,
 including `Q_DOT_G_PPP`. Consequently, rapid mass release alone does not
-establish equivalent thermal behavior. Compare the energy accounting (§7.8.4)
+establish equivalent thermal behavior. Compare the energy accounting (§7.8.3)
 and the reported surface mass flux as well as total gas production.
 
 ### 9.12.4 Sources and numerical evidence
 
-The comparison above establishes correspondences between specified equations
-and implementations. The source locations supporting it are:
-
-| Source | Relevant equations or implementation |
-|:---|:---|
-| Pyrolysis.jl | `src/Physics/pressure.jl` for the pore state; `src/Physics/constitutive_transport.jl` and `interface_transport.jl` for fluxes; `src/Kernels/gas_transport.jl` and `gas_boundary.jl` for mass and carried energy. |
-| ThermaKin2Ds | Eqs. 13–14 for transfer and its pressure interpretation; Eqs. 15–18 for storage, transport and thermal-equilibrium energy; Eq. 19 for boundary mass exchange. |
-| Gpyro V2 guides | GP Eqs. 16, 58–60, 63–65 and 71–75 for gas state, balances, energy exchange and Darcy pressure; §§5.3–5.4 for gas boundaries. V2 user guide §§4.2–4.5 and 10.6 clarify thermal options, gas transport and viscosity. |
-| Gpyro V2 implementation | The linked pressure, gas-species, boundary and thermal routines at the revision in §1.6.5 establish the executable behavior, including the mixture molar-mass formula and differences from the guides. |
-| FDS 6.11.0 | The linked gas-release assumptions and `Source/wall.f90`, especially gas-production accumulation and `PYROLYSIS` enthalpy accounting. |
+TK Eqs. 13–14 give the transfer law and its pressure interpretation,
+Eqs. 15–18 storage, transport and thermal-equilibrium energy, and Eq. 19
+boundary mass exchange. GP Eqs. 16, 58–60, 63–65 and 71–75 and §§5.3–5.4
+give the gas state, balances, energy exchange, Darcy pressure and gas
+boundaries; V2 user guide §§4.2–4.5 and 10.6 clarify thermal options, gas
+transport and viscosity. These are checked against the linked pressure,
+gas-species, boundary and thermal routines, which establish the executable
+behavior, including the mixture molar-mass formula and its differences from
+the guides. FDS's gas-release assumptions are checked against
+`Source/wall.f90`, especially gas-production accumulation and `PYROLYSIS`
+enthalpy accounting. Our pore state is in `src/Physics/pressure.jl`, the
+fluxes in `src/Physics/constitutive_transport.jl` and
+`interface_transport.jl`, and mass and carried energy in
+`src/Kernels/gas_transport.jl` and `gas_boundary.jl`.
 
 The verification cases provide a separate kind of evidence. V-GT-01–04
 (§9.11) test our transport against analytical solutions and integrated
@@ -1019,9 +1023,9 @@ The FDS version used for the retained runs also differs from the 6.11.0
 formulation examined here. These distinctions keep a source-based
 correspondence separate from agreement demonstrated by a numerical experiment.
 
-For practical model setup, User Guide §7.5 covers the transport model, pore
-state and endpoint data; §§5.3–5.5 cover reservoir, film and pressure
-conditions. When comparing results, use the output definitions in User Guide
-§9.5 to distinguish gas generation from escaped mass, and §9.8 for the
-conservation-recorder setup. The species diagnostics and `gas_species_audit`
-described in §9.11 above account for gas accumulation and boundary exchange.
+The species diagnostics and `gas_species_audit` described in §9.11 account
+for gas accumulation and boundary exchange. For practical model setup, User
+Guide §7.5 covers the transport model, pore state and endpoint data;
+§§5.3–5.5 cover reservoir, film and pressure conditions. When comparing
+results, use the output definitions in User Guide §9.5 to distinguish gas
+generation from escaped mass, and §9.8 for the conservation-recorder setup.

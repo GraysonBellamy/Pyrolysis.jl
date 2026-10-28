@@ -863,22 +863,20 @@ concrete element type.
 
 The same heating history and reaction scheme can produce different
 temperatures if the solvers store different sensible heat or account for
-gas-carried energy differently. This comparison uses the 1D configurations
-in §1.6.5, with a common gas and solid temperature where pore gas is resolved.
-
-### 7.8.1 Comparison basis
-
-All four formulations include conduction, reaction heat and radiative exchange.
-The storage inventory and gas-energy terms must be matched before their
-temperature balances can be compared.
+gas-carried energy differently. All four formulations include conduction,
+reaction heat and radiative exchange; their storage inventory and gas-energy
+terms must be matched before their temperature balances can be compared.
+This comparison uses the 1D configurations in §1.6.5, with a common gas and
+solid temperature where pore gas is resolved.
 
 | Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
 |:---|:---|:---|:---|:---|
 | Energy state | temperature or sensible-enthalpy inventory | element temperature | condensed sensible enthalpy | solid temperature |
 | Pore-gas heat storage | included | included | optional with `FULL_QSG` in equilibrium | no pore-gas inventory |
 | Gas energy transport | conservative carried enthalpy | gas temperature-advection term | exchange depends on selected option | release and external gas/solid enthalpy accounting |
+| Match before comparing | energy state and gas-transport model | heat sign; deformation and re-radiation terms; 1D configuration | exchange option, reaction-heat basis and boundary exchange | gas/solid enthalpy accounting; a gas-removal path in ours |
 
-### 7.8.2 ThermaKin2Ds
+### 7.8.1 ThermaKin2Ds
 
 TK Eq. 17 stores $\sum_j\xi_jc_j$ and contains
 $-\sum_g c_g\mathbf J_g\cdot\nabla T$. These terms correspond to our
@@ -888,7 +886,7 @@ includes its own deformation and absorption-weighted re-radiation terms;
 these must be matched separately (§§8.7, 10.11). Its 2D equation contains
 transverse transport absent from a 1D Pyrolysis.jl solve.
 
-### 7.8.3 Gpyro V2
+### 7.8.2 Gpyro V2
 
 V2 advances condensed sensible enthalpy and inverts it to temperature
 (GP §6.8; [`SOLID_ENTHALPY_SOLVER`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L15-L117)).
@@ -910,7 +908,7 @@ GP Eq. 70 is not advanced by the
 clarification in V2 user guide §4.5. A two-temperature calculation is
 therefore outside this implementation comparison.
 
-### 7.8.4 FDS
+### 7.8.3 FDS
 
 FDS's standard solid model assumes gas is transported instantly to the
 surface (FDS solid-phase chapter, “Solid Fuels”). There is no pore-gas
@@ -921,7 +919,7 @@ needed to bring produced/consumed gas between solid and CFD-gas temperatures
 gas in Pyrolysis.jl with its transport switched off. The latter traps any
 generated gas unless a separate removal mechanism is supplied.
 
-### 7.8.5 Sources and numerical evidence
+### 7.8.4 Sources and numerical evidence
 
 TK Eqs. 15–18 and §3 support the documented 1D energy correspondence.
 GP Eqs. 61–70, §6.8 and V2 user guide §§4.2, 4.5 are checked against
