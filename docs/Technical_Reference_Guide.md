@@ -409,9 +409,11 @@ Solver comparisons in both guides use **Gpyro V2** at commit
 Gpyro V2 and FDS comparisons check the relevant guide equations against
 active source paths. Where they disagree, the text identifies the difference
 and follows the implementation for claims about executable behavior.
-ThermaKin2Ds comparisons are supported by its manual; its source is not
-available in this checkout. They establish the documented formulation and
-numerical procedure, without claiming a source-level implementation check.
+ThermaKin2Ds comparisons are supported by its manual. Its source is not
+redistributable and is not in the repository, and the formulation statements
+here are not checked against it. Behavior measured in the matched
+ThermaKin2Ds 7 runs (§18.1.3), such as where its boundary conditions act, is
+identified as measured.
 A documented equation or input flag alone does not establish a working option.
 
 The abbreviations used in the comparison sections identify these sources:
@@ -432,8 +434,9 @@ chapter. Equation mappings state their assumptions and do not establish
 whole-model equivalence. Numerical agreement requires matched runs; performance
 claims also require matched workloads and timing boundaries.
 
-All Gpyro verification overlays use the pinned V2 revision (§18.1.3).
-The comparisons include independent time/space refinements, with mesh spacing
+All Gpyro verification overlays use the pinned V2 revision, and all
+ThermaKin2Ds overlays use ThermaKin2Ds 7 built from its source with only a
+start-time-banner portability change (§18.1.3). The comparisons include independent time/space refinements, with mesh spacing
 and observation conventions documented for each case. They provide accuracy
 evidence; no runtime pair is qualified at a shared achieved accuracy.
 
@@ -7929,12 +7932,12 @@ they are not matched runs of the three external solvers.
 
 Numerical agreement between the complete gas-transport models is **not
 established** by the retained reference datasets. The pinned Gpyro V2
-GT-07/08 runs check the specified diffusion and Darcy reductions; the other
-FDS 6.11.1 and Gpyro V2 overlays in §18.6.4 address their stated cases.
-ThermaKin example overlays have the provenance limitations recorded in
-`test/verification/reference/README.md`.
-The FDS version used for the retained runs also differs from the 6.11.0
-formulation examined here. These distinctions keep a source-based
+GT-07/08 runs check the specified diffusion and Darcy reductions. The
+ThermaKin2Ds 7 GT-01 and GT-07a/b runs check sealed and film-bounded
+diffusion; its volume-fraction law has no pressure or Darcy term, so GT-02–06
+and GT-08 have no ThermaKin2Ds counterpart. No gas-transport case is compared
+with FDS, and its other overlays in §18.6.4 use FDS 6.11.1, which differs
+from the 6.11.0 formulation examined here. These distinctions keep a source-based
 correspondence separate from agreement demonstrated by a numerical experiment.
 
 The species diagnostics and `gas_species_audit` described in §9.11 account
@@ -10396,9 +10399,9 @@ transport are compared separately in §§8.7 and 9.12.
 | Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
 |:---|:---|:---|:---|:---|
 | Thermal exchange | composable flux, convection and radiation laws | external heating and empirical feedback laws | thermal conditions at boundary cells | wall exchange coupled to external CFD gas |
-| Boundary temperature | one-sided surface balance | manual describes boundary exchange; no source check | active half-cell thermal path | surface/ghost-temperature treatment in wall solve |
+| Boundary temperature | one-sided surface balance | boundary-element center, $\Delta x/2$ inside the face (measured) | active half-cell thermal path | surface/ghost-temperature treatment in wall solve |
 | Gas exchange | reservoirs, films, prescribed flux and pressure conditions | component surface-loss laws | pressure/flux and species boundary conditions | generated gas released to external flow |
-| Match before comparing | incident, absorbed and net fluxes; loss temperature; reservoir composition | incident flux after reflection; surface-absorption limit | loss temperature at the boundary cell; pressure/flux conditions and external composition | no `NET_HEAT_FLUX` with `MATL_ID`; surface versus in-depth radiation |
+| Match before comparing | incident, absorbed and net fluxes; loss temperature; reservoir composition | incident flux after reflection; surface-absorption limit; element-center boundary | loss temperature at the boundary cell; pressure/flux conditions and external composition | no `NET_HEAT_FLUX` with `MATL_ID`; surface versus in-depth radiation |
 
 ### 12.11.1 ThermaKin2Ds
 
@@ -10413,8 +10416,12 @@ TK Eqs. 12 and 23 and its MAX/RAND algorithm use absorption-weighted or
 selected-element radiation properties. Only an appropriate surface-absorption
 limit resembles our `RadiativeFluxBC + RadiativeBC + ConvectiveBC` balance;
 the general TK model is not exactly that surface equation (§8.7.1).
-The manual does not establish that TK uses our separate surface-temperature
-Newton solve or an equivalent surface-node construction.
+The manual does not establish a separate surface-temperature solve or
+surface-node construction like ours. In the matched
+ThermaKin2Ds 7 runs, fixed temperatures, films and fluxes act at the boundary
+element's center, $\Delta x/2$ inside the face, and the reported surface
+temperature is that center value (§18.1.3). Fixed-temperature and film cases
+therefore carry a first-order boundary offset that halves under refinement.
 
 ### 12.11.2 Gpyro V2
 
@@ -10454,7 +10461,8 @@ versions cannot impose a net flux.
 
 ### 12.11.4 Sources and numerical evidence
 
-TK §§2–3 support the documented heating and surface-loss laws. GP §§4.1.1,
+TK §§2–3 support the documented heating and surface-loss laws; the
+boundary location is measured in the matched runs. GP §§4.1.1,
 5 and V2 user guide §8 are checked against the linked grid and boundary
 routines. FDS's solid-phase boundary equations are checked against the
 [wall thermal solve](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2849-L2936) and
@@ -15641,13 +15649,18 @@ revision, retain raw numerical outputs and refinement checks, and omit timings.
 Their source and transformations are documented in
 `test/verification/reference/gpyro/v2_accuracy/README.md`.
 The conduction, reaction and deformation comparisons use the same pinned
-Gpyro V2 revision and FDS 6.11.1, with native base and independent time/space refinement outputs and executable
-hashes under `test/verification/reference/matched/`. These runs contain no timing measurements.
+Gpyro V2 revision, FDS 6.11.1 and ThermaKin2Ds 7, with native base and independent time/space refinement outputs and executable
+hashes under `test/verification/reference/matched/`. That dataset also holds
+the ThermaKin2Ds V-HC-01, V-HC-03, V-RX-01, V-GT-01 and V-GT-07a/b runs.
+ThermaKin2Ds is built from its source, which is not redistributable and is
+not committed, with only a start-time-banner portability change; the build
+script and the source and executable hashes are retained with the outputs.
+These runs contain no timing measurements.
 In particular, FDS V-RX-05a–b uses `ADJUST_H=F` to match the specified local
 reaction heat. No gas-transport comparison is attributed to FDS, and the
 V-CPL-04 comparison does not extend to the upper-temperature-gated runaway branch.
 
-The reports compare accuracy. Runtime comparisons require a shared achieved-accuracy target; no pair is qualified under this criterion. See the [comparison basis](guide/verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions, independent time refinement, and runtime qualification. ThermaKin2Ds has no verification overlay here; the locally supplied executable is a Windows console binary. This is a limitation of this dataset, not of all ThermaKin distributions.
+The reports compare accuracy. Runtime comparisons require a shared achieved-accuracy target; no pair is qualified under this criterion. See the [comparison basis](guide/verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions, independent time refinement, and runtime qualification. ThermaKin2Ds cannot express V-RAD-01, V-CPL-01, V-RX-02a/c or the pressure-driven V-GT-02–06 and V-GT-08; the [coverage matrix](guide/verification/comparison_coverage.md) gives the reasons.
 
 ---
 
@@ -16419,8 +16432,12 @@ can arise from either, from input transcription, or from output definitions.
   gas-transport and radiation algorithms (§§6.9, 8.7, 9.2). Its bimolecular
   kinetics and general 2D configurations are not represented by our
   single-reactant 1D solves. Replacing a bimolecular reaction by a sequence
-  is a new model, not an exact conversion. The optional example overlays
-  are distinct from a reproducible ThermaKin verification dataset.
+  is a new model, not an exact conversion. The ThermaKin2Ds 7 overlays
+  cover matched conduction, reaction, volume-change, thermal-feedback and
+  gas-diffusion cases (§18.1.3). Its boundary conditions act at element
+  centers, so its fixed-temperature and film cases carry a first-order
+  boundary offset (§12.11.1). The cone examples' ThermaKin overlays read
+  separately supplied outputs and are not part of that dataset.
 - **Gpyro V2:** this is the reference for formulation comparisons (§1.6.5).
   Match condensed/gas density definitions, conversion-rate normalization,
   diffusion, thermal exchange and volume-change laws. All active overlays,
@@ -16719,6 +16736,8 @@ The V&V coverage above has gaps that a user should weigh:
    estimates and the empirical shrinkage laws are unvalidated or simplified, and cases that
    lean on them inherit that uncertainty.
 
-7. **Cross-code coverage.** ThermaKin2Ds is not among the verification overlays
-   (the executable supplied locally is a Windows console binary), and the MaCFP-2 PMMA community submissions, committed under
+7. **Cross-code coverage.** ThermaKin2Ds cannot express V-RAD-01, V-CPL-01,
+   V-RX-02a/c or the pressure-driven gas cases, and its runs can be reproduced
+   only where its non-redistributable source is available. FDS has no
+   gas-transport comparison. The MaCFP-2 PMMA community submissions, committed under
    `test/verification/reference/macfp/`, are read by no case.

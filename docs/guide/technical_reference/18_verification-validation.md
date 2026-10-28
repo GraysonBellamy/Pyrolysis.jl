@@ -289,13 +289,18 @@ revision, retain raw numerical outputs and refinement checks, and omit timings.
 Their source and transformations are documented in
 `test/verification/reference/gpyro/v2_accuracy/README.md`.
 The conduction, reaction and deformation comparisons use the same pinned
-Gpyro V2 revision and FDS 6.11.1, with native base and independent time/space refinement outputs and executable
-hashes under `test/verification/reference/matched/`. These runs contain no timing measurements.
+Gpyro V2 revision, FDS 6.11.1 and ThermaKin2Ds 7, with native base and independent time/space refinement outputs and executable
+hashes under `test/verification/reference/matched/`. That dataset also holds
+the ThermaKin2Ds V-HC-01, V-HC-03, V-RX-01, V-GT-01 and V-GT-07a/b runs.
+ThermaKin2Ds is built from its source, which is not redistributable and is
+not committed, with only a start-time-banner portability change; the build
+script and the source and executable hashes are retained with the outputs.
+These runs contain no timing measurements.
 In particular, FDS V-RX-05a–b uses `ADJUST_H=F` to match the specified local
 reaction heat. No gas-transport comparison is attributed to FDS, and the
 V-CPL-04 comparison does not extend to the upper-temperature-gated runaway branch.
 
-The reports compare accuracy. Runtime comparisons require a shared achieved-accuracy target; no pair is qualified under this criterion. See the [comparison basis](../verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions, independent time refinement, and runtime qualification. ThermaKin2Ds has no verification overlay here; the locally supplied executable is a Windows console binary. This is a limitation of this dataset, not of all ThermaKin distributions.
+The reports compare accuracy. Runtime comparisons require a shared achieved-accuracy target; no pair is qualified under this criterion. See the [comparison basis](../verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions, independent time refinement, and runtime qualification. ThermaKin2Ds cannot express V-RAD-01, V-CPL-01, V-RX-02a/c or the pressure-driven V-GT-02–06 and V-GT-08; the [coverage matrix](../verification/comparison_coverage.md) gives the reasons.
 
 ---
 
@@ -1067,8 +1072,12 @@ can arise from either, from input transcription, or from output definitions.
   gas-transport and radiation algorithms (§§6.9, 8.7, 9.2). Its bimolecular
   kinetics and general 2D configurations are not represented by our
   single-reactant 1D solves. Replacing a bimolecular reaction by a sequence
-  is a new model, not an exact conversion. The optional example overlays
-  are distinct from a reproducible ThermaKin verification dataset.
+  is a new model, not an exact conversion. The ThermaKin2Ds 7 overlays
+  cover matched conduction, reaction, volume-change, thermal-feedback and
+  gas-diffusion cases (§18.1.3). Its boundary conditions act at element
+  centers, so its fixed-temperature and film cases carry a first-order
+  boundary offset (§12.11.1). The cone examples' ThermaKin overlays read
+  separately supplied outputs and are not part of that dataset.
 - **Gpyro V2:** this is the reference for formulation comparisons (§1.6.5).
   Match condensed/gas density definitions, conversion-rate normalization,
   diffusion, thermal exchange and volume-change laws. All active overlays,
@@ -1367,6 +1376,8 @@ The V&V coverage above has gaps that a user should weigh:
    estimates and the empirical shrinkage laws are unvalidated or simplified, and cases that
    lean on them inherit that uncertainty.
 
-7. **Cross-code coverage.** ThermaKin2Ds is not among the verification overlays
-   (the executable supplied locally is a Windows console binary), and the MaCFP-2 PMMA community submissions, committed under
+7. **Cross-code coverage.** ThermaKin2Ds cannot express V-RAD-01, V-CPL-01,
+   V-RX-02a/c or the pressure-driven gas cases, and its runs can be reproduced
+   only where its non-redistributable source is available. FDS has no
+   gas-transport comparison. The MaCFP-2 PMMA community submissions, committed under
    `test/verification/reference/macfp/`, are read by no case.

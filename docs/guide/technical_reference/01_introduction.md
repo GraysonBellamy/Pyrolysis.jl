@@ -378,9 +378,11 @@ Solver comparisons in both guides use **Gpyro V2** at commit
 Gpyro V2 and FDS comparisons check the relevant guide equations against
 active source paths. Where they disagree, the text identifies the difference
 and follows the implementation for claims about executable behavior.
-ThermaKin2Ds comparisons are supported by its manual; its source is not
-available in this checkout. They establish the documented formulation and
-numerical procedure, without claiming a source-level implementation check.
+ThermaKin2Ds comparisons are supported by its manual. Its source is not
+redistributable and is not in the repository, and the formulation statements
+here are not checked against it. Behavior measured in the matched
+ThermaKin2Ds 7 runs (§18.1.3), such as where its boundary conditions act, is
+identified as measured.
 A documented equation or input flag alone does not establish a working option.
 
 The abbreviations used in the comparison sections identify these sources:
@@ -401,8 +403,9 @@ chapter. Equation mappings state their assumptions and do not establish
 whole-model equivalence. Numerical agreement requires matched runs; performance
 claims also require matched workloads and timing boundaries.
 
-All Gpyro verification overlays use the pinned V2 revision (§18.1.3).
-The comparisons include independent time/space refinements, with mesh spacing
+All Gpyro verification overlays use the pinned V2 revision, and all
+ThermaKin2Ds overlays use ThermaKin2Ds 7 built from its source with only a
+start-time-banner portability change (§18.1.3). The comparisons include independent time/space refinements, with mesh spacing
 and observation conventions documented for each case. They provide accuracy
 evidence; no runtime pair is qualified at a shared achieved accuracy.
 

@@ -1015,12 +1015,12 @@ they are not matched runs of the three external solvers.
 
 Numerical agreement between the complete gas-transport models is **not
 established** by the retained reference datasets. The pinned Gpyro V2
-GT-07/08 runs check the specified diffusion and Darcy reductions; the other
-FDS 6.11.1 and Gpyro V2 overlays in §18.6.4 address their stated cases.
-ThermaKin example overlays have the provenance limitations recorded in
-`test/verification/reference/README.md`.
-The FDS version used for the retained runs also differs from the 6.11.0
-formulation examined here. These distinctions keep a source-based
+GT-07/08 runs check the specified diffusion and Darcy reductions. The
+ThermaKin2Ds 7 GT-01 and GT-07a/b runs check sealed and film-bounded
+diffusion; its volume-fraction law has no pressure or Darcy term, so GT-02–06
+and GT-08 have no ThermaKin2Ds counterpart. No gas-transport case is compared
+with FDS, and its other overlays in §18.6.4 use FDS 6.11.1, which differs
+from the 6.11.0 formulation examined here. These distinctions keep a source-based
 correspondence separate from agreement demonstrated by a numerical experiment.
 
 The species diagnostics and `gas_species_audit` described in §9.11 account

@@ -714,9 +714,9 @@ transport are compared separately in §§8.7 and 9.12.
 | Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
 |:---|:---|:---|:---|:---|
 | Thermal exchange | composable flux, convection and radiation laws | external heating and empirical feedback laws | thermal conditions at boundary cells | wall exchange coupled to external CFD gas |
-| Boundary temperature | one-sided surface balance | manual describes boundary exchange; no source check | active half-cell thermal path | surface/ghost-temperature treatment in wall solve |
+| Boundary temperature | one-sided surface balance | boundary-element center, $\Delta x/2$ inside the face (measured) | active half-cell thermal path | surface/ghost-temperature treatment in wall solve |
 | Gas exchange | reservoirs, films, prescribed flux and pressure conditions | component surface-loss laws | pressure/flux and species boundary conditions | generated gas released to external flow |
-| Match before comparing | incident, absorbed and net fluxes; loss temperature; reservoir composition | incident flux after reflection; surface-absorption limit | loss temperature at the boundary cell; pressure/flux conditions and external composition | no `NET_HEAT_FLUX` with `MATL_ID`; surface versus in-depth radiation |
+| Match before comparing | incident, absorbed and net fluxes; loss temperature; reservoir composition | incident flux after reflection; surface-absorption limit; element-center boundary | loss temperature at the boundary cell; pressure/flux conditions and external composition | no `NET_HEAT_FLUX` with `MATL_ID`; surface versus in-depth radiation |
 
 ### 12.11.1 ThermaKin2Ds
 
@@ -731,8 +731,12 @@ TK Eqs. 12 and 23 and its MAX/RAND algorithm use absorption-weighted or
 selected-element radiation properties. Only an appropriate surface-absorption
 limit resembles our `RadiativeFluxBC + RadiativeBC + ConvectiveBC` balance;
 the general TK model is not exactly that surface equation (§8.7.1).
-The manual does not establish that TK uses our separate surface-temperature
-Newton solve or an equivalent surface-node construction.
+The manual does not establish a separate surface-temperature solve or
+surface-node construction like ours. In the matched
+ThermaKin2Ds 7 runs, fixed temperatures, films and fluxes act at the boundary
+element's center, $\Delta x/2$ inside the face, and the reported surface
+temperature is that center value (§18.1.3). Fixed-temperature and film cases
+therefore carry a first-order boundary offset that halves under refinement.
 
 ### 12.11.2 Gpyro V2
 
@@ -772,7 +776,8 @@ versions cannot impose a net flux.
 
 ### 12.11.4 Sources and numerical evidence
 
-TK §§2–3 support the documented heating and surface-loss laws. GP §§4.1.1,
+TK §§2–3 support the documented heating and surface-loss laws; the
+boundary location is measured in the matched runs. GP §§4.1.1,
 5 and V2 user guide §8 are checked against the linked grid and boundary
 routines. FDS's solid-phase boundary equations are checked against the
 [wall thermal solve](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2849-L2936) and
