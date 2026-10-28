@@ -1075,7 +1075,7 @@ features, but differ in transported states, face laws and mesh adjustment.
 Matching a scheme name is insufficient: compare the actual flux and its
 coefficient before interpreting a convergence difference. FDS's stored
 component densities are the same mass-per-volume quantities as our derived
-$\xi_j$ (§3.7); the table's first row compares how each solver represents
+$\xi_j$ (§3.8); the table's first row compares how each solver represents
 composition numerically.
 
 | Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |

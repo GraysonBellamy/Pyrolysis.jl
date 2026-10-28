@@ -730,7 +730,7 @@ marches along the coordinate normal to the irradiated face, transmitting
 $q_{i+1}=q_i\exp(-\bar\kappa_i\Delta_i)$ and depositing the difference
 in each cell. It has no internal emission term. This attenuation law
 corresponds to our incident-beam model when optical depth and entering
-flux match. The component units and mixture weights require §5.14's conversion.
+flux match. The component units and mixture weights require §5.15's conversion.
 
 The entering flux needs a separate check. In the active
 [thermal boundary path](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L1239-L1312),

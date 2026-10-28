@@ -39,7 +39,7 @@ Conventions:
   current cell volume. For a condensed component, `ρ_{s,j} = ξ_j = m_j/V`.
   FDS's total condensed density is `ρ_s = Σ_{S,L} ξ_j`. These inventory
   densities are distinct from the material density properties `ρ_j` and
-  `ρ_{i,j}` (§§3.7, 4.8).
+  `ρ_{i,j}` (§§3.8, 4.8).
 - The chapters write their mathematics in LaTeX; this table gives each symbol in
   Unicode. Two pairs of glyphs are distinct symbols and must not be interchanged:
   porosity is **`φ`** (U+03C6, LaTeX `\varphi`) and the potential-closure

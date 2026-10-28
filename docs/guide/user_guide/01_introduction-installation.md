@@ -64,7 +64,7 @@ When transferring an existing model, work through the checks in this order:
 
 | Check | User Guide setup | Technical Reference comparison |
 |:---|:---|:---|
-| Composition, material density properties and mixing | §§1.3, 3.2–3.5 | §§2, 4.8 and 5.14 |
+| Composition, material density properties and mixing | §§1.3, 3.2–3.5 | §§2, 4.8 and 5.15 |
 | Reaction rate, yields and heat basis | §§4.4–4.9 | §6.9 |
 | Thermal boundaries and radiation | §§5.2–5.6 | §§7.8, 8.7, 12.11 |
 | Gas transport, storage and carried energy | §§7.5–7.7 | §9.12 |

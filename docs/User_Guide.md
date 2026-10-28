@@ -93,7 +93,7 @@ When transferring an existing model, work through the checks in this order:
 
 | Check | User Guide setup | Technical Reference comparison |
 |:---|:---|:---|
-| Composition, material density properties and mixing | §§1.3, 3.2–3.5 | §§2, 4.8 and 5.14 |
+| Composition, material density properties and mixing | §§1.3, 3.2–3.5 | §§2, 4.8 and 5.15 |
 | Reaction rate, yields and heat basis | §§4.4–4.9 | §6.9 |
 | Thermal boundaries and radiation | §§5.2–5.6 | §§7.8, 8.7, 12.11 |
 | Gas transport, storage and carried energy | §§7.5–7.7 | §9.12 |
@@ -2070,7 +2070,7 @@ state and at representative heated and reacted states. ThermaKin2Ds volume
 fractions depend on its swelling law; Gpyro V2 and FDS thermal mixing uses
 condensed volume fractions. Their per-length absorption coefficients also
 need conversion before use as our mass-specific `α` (Technical Reference
-§5.14). Matching conductivity or optical depth only at the initial state
+§5.15). Matching conductivity or optical depth only at the initial state
 does not establish the same evolving material.
 
 ### 3.5.4 Inspecting effective properties
@@ -2119,7 +2119,7 @@ Two physics notes worth remembering (both in Technical Reference §5):
   fractions** — γ = 0 components (canonical gases) carry no weight in these
   surface/matrix properties. Gas exclusion agrees with ThermaKin at zero gas
   swelling, but its liquid and mixture swelling rules differ (Technical Reference
-  §5.14). As a cell's
+  §5.15). As a cell's
   matrix volume fraction drops through `1e-3 … 1e-4` the weights blend smoothly
   into the all-phase occupancy, so an emptied cell degrades to the gas-mixture
   conductivity instead of 0. Transport uses a separate, strictly condensed

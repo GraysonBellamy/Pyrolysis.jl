@@ -872,7 +872,7 @@ produces a term proportional to $p_j\nabla\phi$. Copying a numerical `λ`
 value therefore does not generally reproduce the same transport law. Even
 in the uniform-porosity limit, the effective coefficients must match as the
 material changes; the component mixing bases and volume laws require the
-checks in §§5.14 and 10.11.
+checks in §§5.15 and 10.11.
 
 TK describes a Darcy-like rigid-material limit of its own Eq. 14. That
 interpretation does not prescribe the additional mixture Darcy term of

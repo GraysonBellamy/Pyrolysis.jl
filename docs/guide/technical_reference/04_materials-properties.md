@@ -499,7 +499,7 @@ $\partial\boldsymbol f/\partial\boldsymbol u$ of the residual. Because effective
 properties depend on $T$ and $\xi$, and the residual depends on effective
 properties, the per-component derivatives $\mathrm{d}p_j/\mathrm{d}T$ and
 $\partial p_j/\partial \xi_k$ propagate through the chain rule into the Jacobian
-(Chapter 5, §5.15 for the mixing-rule chain). The property types carry no
+(Chapter 5, §5.14 for the mixing-rule chain). The property types carry no
 derivative methods, and no part of the Jacobian is hand-coded: the colored
 Jacobian evaluates the whole residual — the state mapping, where the property
 laws are evaluated, and every kernel — on `ForwardDiff.Dual` numbers, a few
@@ -816,7 +816,7 @@ A material definition distinguishes the density properties assigned to a
 material from its component mass concentration $m_j/V$. FDS calls the latter
 a component density, $\rho_{s,j}$; it is the same quantity as our $\xi_j$.
 Total inventory densities can include different components, as shown below.
-The comparison uses the version scope of §1.6.5; §5.14 covers mixing rules.
+The comparison uses the version scope of §1.6.5; §5.15 covers mixing rules.
 
 | Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
 |:---|:---|:---|:---|:---|
