@@ -58,8 +58,10 @@ area of the faces they name unless noted.
 - `volumetric_absorption`, `radiation_transmitted`: the intensity the cells
   absorbed and the intensity leaving through the last face of the in-depth
   beam, per unit exposed area [W/m²] (zero without in-depth radiation)
-- `surface_emissivity`, `surface_conductivity`: the emissivity and the
-  conductivity [W/(m·K)] of the cell under the `:top` faces
+- `surface_emissivity`, `surface_conductivity`: the emissivity of the cell
+  under the first `:top` face and the conductivity normal to that face
+  [W/(m·K)] with which the face conducts into it
+  ([`boundary_conductivity`](@ref))
 - `back_heat_flux`: the heat flux the `:bottom` condition applies, positive
   into the domain [W/m²]
 - `MLR_gauge`: the mass-loss rate per unit initial area of the `:top` faces
@@ -73,6 +75,10 @@ area of the faces they name unless noted.
   ([`live_inventories`](@ref))
 - `mass_outflow`, `energy_rate`: the live region's mass outflow [kg/s] and
   enthalpy rate [W] ([`ledger_rates`](@ref))
+- `regularized_gradients`, `gradient_support`: the number of live cells whose
+  conduction gradient is a regularized fit, and the smallest normalized
+  determinant of the live cells' fits ([`gradient_support`](@ref); 0 and NaN
+  on a line)
 """
 const SolutionExtras = @NamedTuple{
     gas_generation_rate::Vector{Float64},
@@ -103,6 +109,8 @@ const SolutionExtras = @NamedTuple{
     live_energy::Vector{Float64},
     mass_outflow::Vector{Float64},
     energy_rate::Vector{Float64},
+    regularized_gradients::Vector{Int},
+    gradient_support::Vector{Float64},
 }
 
 """
@@ -206,6 +214,8 @@ _extras(nt::Int) = SolutionExtras((
     zeros(nt),
     zeros(nt),
     zeros(nt),
+    zeros(nt),
+    zeros(Int, nt),
     zeros(nt),
 ))
 
@@ -313,6 +323,7 @@ function PyrolysisSolution(
     gas_output = GasDiagnostics(material, n, n_faces(topo), nt, tags)
     gas = map(is_gas, material.components)
     thermal = find_kernel(ThermalBoundaryKernel, def.kernels)
+    conduction = find_kernel(ConductionKernel, def.kernels)
     beam = find_kernel(BeerLambertKernel, def.kernels)
     ds, c = buffers(ws, def, Float64)
     du = zeros(state_length(layout))
@@ -330,6 +341,8 @@ function PyrolysisSolution(
         _gas_diagnostics!(gas_output, k, def, ds, c)
         x.energy_rate[k], x.mass_outflow[k] = ledger_rates(def, c, ds)
         x.live_energy[k], x.live_mass[k] = live_inventories(def, ext, ds, u)
+        x.regularized_gradients[k], x.gradient_support[k] =
+            conduction === nothing ? (0, NaN) : gradient_support(conduction, ds, topo)
         @views T[:, k] .= ds.T
         @views ξ[:, :, k] .= ds.ξ
         @views m[:, :, k] .= ds.m
@@ -425,7 +438,7 @@ function PyrolysisSolution(
             x.surface_face_fraction[k] = state.face_fraction
             x.surface_face_buoyancy[k] = state.face_buoyancy
             x.surface_emissivity[k] = ds.ε[i]
-            x.surface_conductivity[k] = ds.k[i]
+            x.surface_conductivity[k] = boundary_conductivity(thermal, c, ds, topo, f)
         end
         bottom_faces = has_bottom ? _live_faces(topo, ds.active, :bottom) : Int[]
         if isempty(bottom_faces)

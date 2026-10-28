@@ -38,8 +38,9 @@ using ..Physics: POROSITY_FLOOR, pore_state
 using ..Properties: transport_coefficients
 
 # Smooth floor on the cell conductivity [W/(m·K)], far below any material's:
-# a trial state with no mass left has none, and the face temperatures of the
-# boundary conditions divide by it.
+# a trial state with no mass left has none, and on a line the face
+# temperatures of the boundary conditions divide by it. The tensor paths of
+# more dimensions read the unfloored conductivity.
 const CONDUCTIVITY_FLOOR = 1e-6
 
 # ============================================================================
@@ -110,6 +111,9 @@ automatic differentiation):
   deformation gradient)
 - `geometry`: the mesh metrics at `x`
 - `k`: cell thermal conductivities, smoothly floored at `CONDUCTIVITY_FLOOR`
+  (the line's conduction and boundary conditions)
+- `k_physical`: the same conductivities unfloored, the factor of the complete
+  tensor `k A` on a mesh of more than one dimension
 - `ε`, `a`: cell surface emissivities and absorptivities (the mixing-weighted
   sums, which stay in `[0, 1]`)
 - `I`, `α`: face intensities [W/m²] as stored, and cell absorption
@@ -144,6 +148,7 @@ struct DerivedState{NC,T,G<:MeshGeometry}
     F::Matrix{T}
     geometry::G
     k::Vector{T}
+    k_physical::Vector{T}
     ε::Vector{T}
     a::Vector{T}
     I::Vector{T}
@@ -198,6 +203,7 @@ function DerivedState{T}(
         zeros(T, n),
         zeros(T, dimension(layout)^2, n),
         geometry,
+        zeros(T, n),
         zeros(T, n),
         zeros(T, n),
         zeros(T, n),
@@ -312,6 +318,7 @@ function derive!(
         end
         ξ⁺ = ntuple(j -> ds.ξ⁺[j, i], Val(NC))
         k = effective_conductivity(ξ⁺, Tt, material; skip_absent = Val(true))
+        ds.k_physical[i] = k
         ds.k[i] = smooth_floor(k, CONDUCTIVITY_FLOOR)
         ds.ε[i] = mixture_emissivity(ξ⁺, Tt, material)
         ds.a[i] = mixture_absorptivity(ξ⁺, Tt, material)

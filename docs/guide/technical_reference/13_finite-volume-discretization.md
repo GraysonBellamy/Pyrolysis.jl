@@ -568,23 +568,64 @@ v ≥ 0 side").
 
 On a mesh of quadrilaterals or hexahedra, the conduction kernel computes for every
 live cell the least-squares temperature gradient over its live face neighbours $k$,
-each difference weighted by the inverse squared distance,
+each taken at its transmission image $\mathbf d_k$ through the shared face (§7.1.3)
+and weighted by its inverse squared length,
 
 $$
-\bigl(\mathsf N_i+\epsilon_\mathrm{LS}\,\mathrm{tr}(\mathsf N_i)\,I\bigr)\nabla T_i=\sum_k w_k\,(T_k-T_i)\,\mathbf d_k,
-\qquad \mathsf N_i=\sum_k w_k\,\mathbf d_k\mathbf d_k^{\mathsf T},\quad w_k=|\mathbf d_k|^{-2},
+\bigl(\mathsf N_i+\lambda_i I\bigr)\nabla T_i=\sum_k w_k\,(T_k-T_i)\,\mathbf d_k,
+\qquad \mathsf N_i=\sum_k w_k\,\mathbf d_k\mathbf d_k^{\mathsf T},\quad w_k=|\mathbf d_k|^{-2}.
 $$
 
-with $\mathbf d_k$ the vector between the cell centres and $\epsilon_\mathrm{LS}=10^{-8}$
-(`GRADIENT_REGULARIZATION`) where the neighbours do not span every direction (the
-normal matrix has $\det\mathsf N_i\le10^{-6}(\mathrm{tr}\,\mathsf N_i/D)^D$, `GRADIENT_SPAN`, decided
-on its plain values; zero otherwise): a column one cell wide, or a cell beside dead ones, then has
-a zero gradient component in the unresolved direction instead of an undetermined
-one. The gradients feed the cross-diffusion part of the face flux (§13.7.1) and the
+The image is the vector between the cell centres where the two cells' complete
+tensors are equal, so the gradients of one uniform tensor are the plain
+least-squares ones; across a material interface it moves the neighbour to where
+the field, continuous in temperature and normal flux, is affine as seen from cell
+$i$. A neighbour that conducts at most $10^{-12}$ of the cell's normal conductivity
+(`INSULATING_NEIGHBOUR`) contributes the limit of its image instead, the
+unit-weight row $(\mathbf K_i\hat{\mathbf n}/|\mathbf K_i\hat{\mathbf n}|)\cdot\nabla T_i=0$
+with a zero right-hand side.
+
+The Tikhonov term has the strength
+
+$$
+\lambda_i=\epsilon_\mathrm{LS}\,\mathrm{tr}(\mathsf N_i)\,\sigma(x_i),
+\qquad x_i=\frac{\det\mathsf N_i}{(\mathrm{tr}\,\mathsf N_i/D)^D},
+$$
+
+with $\epsilon_\mathrm{LS}=10^{-8}$ (`GRADIENT_REGULARIZATION`) and $\sigma$ the
+cubic smooth step from 1 at $x\le10^{-6}$ (`GRADIENT_SPAN`) to 0 at
+$x\ge10^{-4}$ (`GRADIENT_SUPPORT`), evaluated on $\mathsf N_i$ with its
+derivatives, so the gradient is continuous in the conductivities and the Jacobian
+carries the switch. The normalized determinant $x_i$ is 1 for neighbours spread
+evenly over every direction and 0 where they miss one: a column one cell wide, a
+cell beside dead ones, or neighbour tensors that turn the images collinear. An
+interior unit square under $\mathbf I$, with its two neighbours along the first axis
+under $[1\ c;\ c\ 1+c^2]$ and its two along the second under $[1+c^2\ c;\ c\ 1]$,
+has collinear images at $c=2$, where an exact transmission field determines no
+gradient component along the common normal of the images; there the fit is the
+regularized one and its unresolved component zero. Mild anisotropy on regular
+grids keeps $x_i$ far above the switch; strongly anisotropic layers can reach it.
+`gradient_support(kernel, ds, topology)` returns the number of live cells with
+$x_i<10^{-4}$, whose gradient is a regularized fit rather than an exact one, and
+the smallest $x_i$; `setup` reports them at the initial state, and the solution
+saves both at every saved time (`regularized_gradients`, `gradient_support`).
+
+The gradients feed the cross-diffusion part of the face flux (§13.7.1) and the
 tangential correction of the thermal boundary kernel.
-`test/multid/test_conduction.jl` asserts exact fluxes for linear fields with rotated
-anisotropic tensors on distorted meshes and second-order convergence of a steady
-manufactured solution with a rotated tensor on a distorted mesh.
+`test/multid/test_conduction.jl` asserts exact fluxes for linear fields with
+rotated anisotropic tensors on distorted meshes; exact fluxes and gradients for
+piecewise-affine fields across planar interfaces (a 100× scalar jump under one
+rotated tensor, a jump between rotated tensors, $\mathbf I$ against
+$\operatorname{diag}(100,1)$, on orthogonal and sheared quadrilaterals and sheared
+hexahedra) and at a ridge and a junction of four materials; continuity of the
+gradient through the regularization's switch and through the insulating limit,
+with the Jacobian equal to central differences in both; and second-order
+convergence of steady manufactured solutions: one with a rotated tensor on a
+distorted mesh, and seven with a planar interface (a 100× scalar jump and a
+rotated-tensor jump on sheared and on distorted quadrilaterals and on sheared
+hexahedra, and $\mathbf I$ against $\operatorname{diag}(1,100)$ aligned with an
+orthogonal grid), whose temperature errors fall at $L^2$ orders between 1.99 and
+2.18 from 8 to 64 cells a side (4 to 32 on hexahedra) in every one of the seven.
 
 ---
 
@@ -609,25 +650,29 @@ to it to a relative $\eta/k_f$, it goes to zero continuously, with a finite
 derivative, as either cell's conductivity vanishes. On a uniform mesh it is the
 harmonic mean $2k_ok_n/(k_o+k_n)$. The cell conductivities $k_i$ are the effective
 conductivities at the positive-part concentrations and the trial temperature (the
-mixing rule of §5), smoothly floored at $10^{-6}$ W m⁻¹ K⁻¹ (`CONDUCTIVITY_FLOOR`);
-the temperatures in the difference are the cell temperatures themselves. With
+mixing rule of §5), smoothly floored at $10^{-6}$ W m⁻¹ K⁻¹ (`CONDUCTIVITY_FLOOR`)
+on a line; the temperatures in the difference are the cell temperatures themselves. With
 constant $k$ on a uniform mesh this is the textbook central difference; with a
 conductivity jump on a face the steady profile is nodally exact (V-HC-04); with
 $k(T)$ it carries a genuine second-order discretization error (V-HC-05).
 
-On a mesh of more than one dimension the face's conductivity tensor is
-$K_f=k_f$ times the distance-weighted mean of the cells' dimensionless tensors, and
-the flux along the normal splits into a two-point part and a cross-diffusion part,
+On a mesh of more than one dimension the flux is the transmission flux (7.2a) of
+the two cells' complete tensors $\mathbf K_i=k_i\mathbf A_i$, with the unfloored
+conductivities:
 
 $$
-q_f=-(\mathbf n\cdot K_f\mathbf n)\,\frac{T_n-T_o}{d_o+d_n}-\mathbf t\cdot\nabla T_f,\qquad
-\mathbf t=K_f\mathbf n-(\mathbf n\cdot K_f\mathbf n)\,\frac{\mathbf d}{d_o+d_n},
+q_f=-a_f\,\frac{T_n-T_o}{d_o+d_n}-\Bigl(\mathbf b_f-a_f\,\frac{\mathbf P\mathbf d}{d_o+d_n}\Bigr)\cdot\frac{d_n\nabla T_o+d_o\nabla T_n}{d_o+d_n},
 $$
 
-with $\nabla T_f$ the distance-weighted mean of the two cells' least-squares
-gradients (§13.6.4), so a linear temperature field's flux is exact on any mesh whose
-neighbours span every direction. On a line $\mathbf d$ is along the normal, the cross
-part vanishes identically and is not evaluated.
+$a_f$ the guarded series mean of the normal conductivities
+$a_i=\mathbf n\cdot\mathbf K_i\mathbf n$, $\mathbf b_f$ the mean of the tangential
+couplings $\mathbf b_i=\mathbf P\mathbf K_i\mathbf n$ over the same denominator,
+$\mathbf P=\mathbf I-\mathbf n\mathbf n^{\mathsf T}$, and $\nabla T_o$, $\nabla T_n$
+the cells' least-squares gradients over their neighbours' transmission images
+(§13.6.4). It is exact for piecewise-affine fields across grid-fitted planar
+interfaces wherever no cell's fit is regularized (§13.6.4), the linear fields of
+one tensor among them. On a line $\mathbf d$ is along the normal, the cross part
+vanishes identically and is not evaluated.
 
 ### 13.7.2 Gas wall and molecular flux
 
@@ -870,7 +915,7 @@ order:
 5. the temperatures: the stored temperature, or the inversion of the enthalpy
    inventory (§13.10.4);
 6. per cell, the trial temperature $\tilde T_i$, the floored heat-capacity sum $C_i$,
-   the sensible enthalpies $h_j(T_i)$, the floored conductivity $k_i$, the surface
+   the sensible enthalpies $h_j(T_i)$, the conductivity $k_i$ with and without its floor, the surface
    emissivity $\varepsilon_i$ and absorptivity $a_i$, the pore-gas properties the gas
    transport needs (the wall coefficients, molecular resistance, porosity,
    partial pressures and mobility), and under in-depth

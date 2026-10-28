@@ -680,9 +680,20 @@ function setup(
     cj = ColoredJacobianCache(def, ws, u0, t0)
     cp=CoreProblem(problem, def, ws, u0, Float64(reltol), tol, cj, T0, m0, cells)
     derive!(ws.derived, u0, layout, state_setup)
+    _report_support(find_kernel(ConductionKernel, kernels), ws.derived, topo)
     check=DomainCheck(cp)
     _porosity_out(check, ws.derived, gas) && throw(ArgumentError(check.monitor.message))
     return cp
+end
+
+# The live cells whose conduction gradient is a regularized fit at the
+# initial state.
+function _report_support(conduction::ConductionKernel, ds, topo)
+    s = gradient_support(conduction, ds, topo)
+    s.cells > 0 &&
+        @info "setup(): the conduction gradients of $(s.cells) cells are regularized fits " *
+              "(smallest normalized determinant $(s.worst))"
+    return nothing
 end
 
 # Every cell's dimensionless conductivity tensor.

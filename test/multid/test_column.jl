@@ -181,6 +181,13 @@ end
                 @test d2[velocity_index(L2, right, 1)] == 0
                 nd > 1 && @test d2[velocity_index(L2, right, 2)] == 0
             end
+            # With no conducting mass left the column's complete tensor is zero
+            # and it conducts nothing; the line's floored conductivity still
+            # conducts.
+            if name === :negative
+                @test all(iszero, d2[energy_index(L2, i)] for i = 1:n_cells(L2))
+                delete!(rows, :energy)
+            end
             for (kind, p) in rows
                 scale = max(maximum(abs(a) for (a, _) in p), kind === :velocity ? θV : 0.0)
                 worst = maximum(abs(a - b) for (a, b) in p)

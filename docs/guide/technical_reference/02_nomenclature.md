@@ -79,7 +79,7 @@ Conventions:
 | `𝒟` | Set of dead cells that merge into the receiver *k* in one deactivation event, outermost first (§14.3.3, §16.7) | – |
 | `d`, `d_L`, `d_R`, `d_o`, `d_n`, `d_{LR}` | Distance from cell center to face (left/right, owner/neighbour) / between adjacent cell centers (overload D1) | m |
 | `d_m`, `d_H`, `d_m^rel`, `d_H^rel` | Mass and energy defects of the conservation audit, and each over the largest term of its balance (§16.3.3, §16.5.4; overload D1) | kg; J; – |
-| `𝐝_k` | Vector from a cell's centre to the centre of its neighbour *k* in the least-squares gradient (more dimensions, §13.6.4; overload D1) | m |
+| `𝐝_k` | Transmission image of neighbour *k* in a cell's least-squares gradient: the vector between the cell centres, moved across a material interface for the jump of the normal slope (more dimensions, §13.6.4; overload D1) | m |
 | `E`, `E_{αβ}`, `E_i` | Activation energy for reaction *i* | J·mol⁻¹ |
 | `E_i` (assembly) | Energy right-hand side of cell *i*, `S_{E,i} − Σ_f s_if A_f F^E_f`: its sources plus its face energy fluxes (§1.4.4, §7.3.3, §13.3.4) | W |
 | `e` | Euler's number / base of natural log (literal) | – |
@@ -237,7 +237,7 @@ Conventions:
 | `ε_band` | Near-threshold band of deactivation, `ε_m ≤ ε_band < 1` (`band`) | – |
 | `ε_AB` | Lennard-Jones well depth (collision integral) | J |
 | `ϵ_ξ`, `ϵ_T`, `ϵ_G` | Slope scales of the van Albada reconstruction for the concentrations, the temperature and the history values: the square of a tolerance over the upwind cell's reference thickness (§11.6.2; overload E1) | (field units)²·m⁻² |
-| `ϵ_LS` | Relative regularization of the least-squares normal matrix, 10⁻⁸ (`GRADIENT_REGULARIZATION`; §13.6.4; overload E1) | – |
+| `ϵ_LS` | Relative regularization of the least-squares normal matrix, 10⁻⁸ (`GRADIENT_REGULARIZATION`), switched on smoothly by the fit's conditioning (§13.6.4; overload E1) | – |
 | `η` | Guard of the distance-weighted harmonic face means, 10⁻²⁰ in the property's units (`FACE_MEAN_GUARD`; §1.4.4, §5.12, §7.1.2); in §17 the relative finite-difference step (overload E2) | property units |
 | `θ`, `θ_i` | Volumetric strain rate (dilation) of cell *i*, `(1/V) dV/dt` (bold `θ` in §17 is the parameter vector; overload A2) | s⁻¹ |
 | `θ_A` | Column-global **radial** volumetric strain rate, `(1/A) dA/dt` (an algebraic unknown under a lateral-shrinkage law) | s⁻¹ |
@@ -393,6 +393,9 @@ Conventions:
 | Viscosity floor (smooth) | — | 10⁻¹² | Pa·s | `MU_FLOOR` |
 | Guard of the harmonic face means | `η` | 10⁻²⁰ | property units | `FACE_MEAN_GUARD` |
 | Regularization of the least-squares gradient | `ϵ_LS` | 10⁻⁸ | – | `GRADIENT_REGULARIZATION` |
+| Conditioning of the gradient fit at and below which the regularization is full | — | 10⁻⁶ | – | `GRADIENT_SPAN` |
+| Conditioning of the gradient fit at and above which the regularization vanishes | — | 10⁻⁴ | – | `GRADIENT_SUPPORT` |
+| Relative normal conductivity of an insulating neighbour in the gradient fit | — | 10⁻¹² | – | `INSULATING_NEIGHBOUR` |
 | Half-width of the clamp band of `χ̄_c` | — | 10⁻³ | – | `LATERAL_CLAMP_WIDTH` |
 | Deactivation threshold | `ε_m` | 10⁻² | – | `solve(...; threshold)` |
 | Near-threshold band under a moving correction | `ε_band` | 0.1 | – | `CORRECTION_BAND` |

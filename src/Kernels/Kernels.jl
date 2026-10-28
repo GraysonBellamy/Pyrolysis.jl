@@ -17,7 +17,8 @@ using ..Materials
 using ..BoundaryConditions
 import ..BoundaryConditions
 using ..BoundaryConditions: BoundaryState, solve_boundary_temperature!
-using ..Properties: guarded_harmonic_mean, transport_coefficients, closed_transport_channel
+using ..Properties:
+    guarded_harmonic_mean, FACE_MEAN_GUARD, transport_coefficients, closed_transport_channel
 using ..Physics:
     interface_flux,
     pore_half_flux,
@@ -40,12 +41,12 @@ include("relative_flux.jl")
 
 export Kernel, Contributions, reset!, contribute!, find_kernel
 export ReactionKernel
-export ConductionKernel, normal_conductivity, cell_gradient
+export ConductionKernel, normal_conductivity, cell_gradient, gradient_support
 export GasTransportKernel, face_peclet
 export BeerLambertKernel, incident_intensity, sweep_intensities!, transmitted_face
 export exposed_face
 export BoundaryPatch, ThermalBoundaryKernel, boundary_energy_flux, boundary_condition
-export conducted_flux
+export conducted_flux, boundary_conductivity
 export RelativeFluxKernel, van_albada
 
 end # module Kernels

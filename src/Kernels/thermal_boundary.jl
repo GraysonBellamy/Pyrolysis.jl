@@ -38,14 +38,17 @@ An LTE thermal film converts its heat to the reservoir control surface using
 `q_r=q_s+H_r-H_s`; adiabatic and prescribed-heat conditions use `H_r` directly.
 The assembled outward energy `H_r-q_r` includes incoming energy exactly once.
 
-On a mesh of more than one dimension the conductivity is a tensor `K = k A`
-(`tensor` holds the cells' dimensionless `A`, shared with the
-[`ConductionKernel`](@ref)), and the flux conducted from the face into its
-cell is `(n·K·n)(T_s − T_cell)/d + t·∇T_cell`, `t = K n − (n·K·n)(x_f − x_cell)/d`
+On a mesh of more than one dimension the conductivity is the complete tensor
+`K = k A`, `k` the cell's unfloored conductivity and `A` its dimensionless
+tensor (`tensor`, shared with the [`ConductionKernel`](@ref)), and the flux
+conducted from the face into its cell is
+`(n·K·n)(T_s − T_cell)/d + t·∇T_cell`, `t = K n − (n·K·n)(x_f − x_cell)/d`
 tangential to the face and `∇T_cell` the conduction kernel's least-squares
 gradient, so a linear field's flux is exact; the surface balance solves for
-`T_s` with the cross part folded into the cell temperature. On a line the
-cross part vanishes and `n·K·n` is the cell's conductivity.
+`T_s` with the cross part folded into the cell temperature. Where `n·K·n`
+vanishes the face is insulated: it conducts nothing, and its temperature is
+the cell's (a prescribed temperature stays prescribed). On a line the cross
+part vanishes and `n·K·n` is the cell's floored conductivity.
 """
 struct ThermalBoundaryKernel{P<:Tuple,R,L,A,X,B} <: Kernel
     patches::P
@@ -196,7 +199,7 @@ end
 
 # The normal conductivity `n·K·n` of boundary face `f`'s cell `i` and the cross
 # part `t·∇T_i` of the flux conducted from the face into the cell: the cell's
-# conductivity and nothing on a line.
+# floored conductivity and nothing on a line.
 @inline _boundary_conduction(::Nothing, c, ds, topo, f, i, d) =
     (ds.k[i], zero(eltype(ds.T)))
 @inline function _boundary_conduction(
@@ -210,10 +213,26 @@ end
 ) where {D}
     g = ds.geometry
     n = _outward(topo, f, i) * g.face_normal[f]
-    K = ds.k[i] * A[i]
+    K = cell_tensor(A, ds, i)
     k_n = normal_conductivity(K, n)
     t = K * n - k_n * (g.face_center[f] - g.cell_center[i]) / d
     return k_n, dot(t, cell_gradient(c, Val(D), i))
+end
+
+# A face whose cell conducts nothing normal to it, decided on the plain value:
+# no flux, and the cell's temperature.
+@inline _insulated(ds, i) = (zero(eltype(ds.T)), ds.T[i])
+
+"""
+	boundary_conductivity(kernel::ThermalBoundaryKernel, c, ds, topology, f) -> Real
+
+The conductivity normal to boundary face `f` [W/(m·K)] that the flux conducted
+into its cell uses: the cell's floored conductivity on a line, `n·K·n` of its
+complete tensor otherwise.
+"""
+function boundary_conductivity(kernel::ThermalBoundaryKernel, c::Contributions, ds, topo, f)
+    i, d = _boundary_cell(kernel, ds, topo, f)
+    return first(_boundary_conduction(kernel.tensor, c, ds, topo, f, i, d))
 end
 
 """
@@ -272,6 +291,7 @@ end
 )
     i, d = _boundary_cell(kernel, ds, topo, f)
     k, χ = _boundary_conduction(kernel.tensor, c, ds, topo, f, i, d)
+    primal(k) <= 0 && return _insulated(ds, i)
     q_in = evaluate_param(bc.flux, t) + zero(eltype(ds.T))
     return -q_in, ds.T[i] + (q_in - χ) * d / k
 end
@@ -304,6 +324,7 @@ end
 ) where {NC}
     i, d = _boundary_cell(kernel, ds, topo, f)
     k, χ = _boundary_conduction(kernel.tensor, c, ds, topo, f, i, d)
+    primal(k) <= 0 && return _insulated(ds, i)
     σ = _outward(topo, f, i)
     J_out = ntuple(j -> σ * c.F_mass[j, f], Val(NC))
     r = solve_boundary_temperature!(

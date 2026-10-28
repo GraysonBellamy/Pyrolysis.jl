@@ -57,8 +57,9 @@ composition- and temperature-dependent mixture conductivity built from the compo
 conductivities $k_j(T)$ by the chosen mixing rule (PARALLEL / SERIES / WEIGHTED / BRUGGEMAN)
 on the **solid** volume-fraction basis; its construction is the subject of §5 (Effective
 Properties & Mixing Rules). The state mapping evaluates it once per cell, at the cell's
-positive-part concentrations and trial temperature, and floors it smoothly at
-$10^{-6}$ W·m⁻¹·K⁻¹ (§5.5, §5.13); only its *face value* enters here.
+positive-part concentrations and trial temperature, and keeps it both as it is and smoothly
+floored at $10^{-6}$ W·m⁻¹·K⁻¹: a line reads the floored value (§5.5, §5.13), the tensor
+conduction of more dimensions the unfloored one (§7.1.3). Only its *face value* enters here.
 
 ### 7.1.2 Discrete face flux: distance-weighted harmonic mean
 
@@ -133,8 +134,10 @@ keeps the steady flux through a sharp interface at the face exact, at no extra c
 
 **Vanishing conductivity.** The guard makes (7.2) go to zero continuously, with a finite
 derivative, as either cell's conductivity vanishes, instead of cutting the face off below a
-threshold; the cell conductivity itself is floored at $10^{-6}$ W·m⁻¹·K⁻¹ in the state
-mapping (§5.13), so the guard only matters on trial states.
+threshold. On a line the cell conductivity itself is floored at $10^{-6}$ W·m⁻¹·K⁻¹ in the
+state mapping (§5.13), so the guard only matters on trial states; the tensor conduction of
+more dimensions reads the unfloored conductivity, and there the guard alone gives the
+insulating limit (§7.1.3).
 
 The kernel evaluates (7.1) at the cell temperatures $T_i$ themselves, not at their trial
 clamp, and with the center-to-face distances of the current geometry, each smoothly floored
@@ -162,25 +165,94 @@ conduction and the boundary conditions are thus separated by face, and the color
 (§15) differentiates both with the rest of the residual.
 
 On a mesh of more than one dimension (residual level only, not a supported path for full
-solves; §13) the conductivity of a cell is a tensor $k_i\mathbf A_i$ with a dimensionless
-symmetric positive-definite $\mathbf A_i$, and the face tensor is
-$\mathbf K_f = k_f\,(d_n\mathbf A_o + d_o\mathbf A_n)/(d_o + d_n)$. The flux along the normal
-$\hat{\mathbf n}$ splits into a two-point normal part and a cross-diffusion part,
+solves; §13) each cell carries the complete conductivity tensor
+$\mathbf K_i=k_i\mathbf A_i$: $\mathbf A_i$ is the cell's dimensionless symmetric
+positive-definite tensor (the `tensor` of `setup`) and $k_i$ its effective conductivity,
+unfloored. Only the product is physical, so the operator reads nothing else: the residual is
+the same for $(k_i,\mathbf A_i)$ and $(s\,k_i,\mathbf A_i/s)$, whatever the size of $k_i$.
+
+**Transmission flux.** Across a planar material interface at the face, in perfect contact and
+without a surface source, the temperature trace and the normal heat flux are common to both
+sides; the normal slope jumps and the tangential flux need not be continuous. Write each
+side's gradient at the face as $\alpha_i\hat{\mathbf n}+\mathbf g_\tau$ with the common
+tangential part $\mathbf g_\tau$, and let $a_i=\hat{\mathbf n}\cdot\mathbf K_i\hat{\mathbf n}$,
+$\mathbf b_i=\mathbf P\mathbf K_i\hat{\mathbf n}$ with $\mathbf P=\mathbf I-\hat{\mathbf n}\hat{\mathbf n}^{\mathsf T}$,
+$\mathbf d$ the vector between the cell centres and $\delta=d_o+d_n$. Flux continuity,
+$q_f=-a_o\alpha_o-\mathbf b_o\cdot\mathbf g_\tau=-a_n\alpha_n-\mathbf b_n\cdot\mathbf g_\tau$,
+and the temperature difference $T_n-T_o=d_o\alpha_o+d_n\alpha_n+\mathbf P\mathbf d\cdot\mathbf g_\tau$
+eliminate the two normal slopes:
 
 $$
-q_f = -(\hat{\mathbf n}\cdot\mathbf K_f\hat{\mathbf n})\,\frac{T_n - T_o}{d_o + d_n}
-- \mathbf t\cdot\overline{\nabla T}_f ,
+q_f=-\frac{(T_n-T_o)+(\mathbf w-\mathbf P\mathbf d)\cdot\mathbf g_\tau}{d_o/a_o+d_n/a_n},
 \qquad
-\mathbf t = \mathbf K_f\hat{\mathbf n} - (\hat{\mathbf n}\cdot\mathbf K_f\hat{\mathbf n})\,\frac{\mathbf d}{d_o + d_n},
+\mathbf w=\frac{d_o\mathbf b_o}{a_o}+\frac{d_n\mathbf b_n}{a_n}.
 $$
 
-with $\mathbf d$ the vector between the cell centers and $\overline{\nabla T}_f$ the
-distance-weighted mean of the two cells' least-squares gradients over their live face
-neighbours, so a linear temperature field's flux is exact wherever the neighbours span every
-direction; where they do not, a Tikhonov term ($10^{-8}$ of the trace of the normal matrix)
-makes the unresolved component of the gradient zero. On a line $\mathbf d$ is along the
-normal and the cross part vanishes identically. Element death on such a mesh exposes the
-faces between live and dead cells, which take the condition of the exposed tag (§14.5).
+In product form, with the guard of (7.2),
+
+$$
+\boxed{\;
+q_f=-a_f\,\frac{T_n-T_o}{\delta}-\Bigl(\mathbf b_f-a_f\,\frac{\mathbf P\mathbf d}{\delta}\Bigr)\cdot\mathbf g_\tau,
+\qquad
+a_f=\frac{\delta\,a_oa_n}{d_oa_n+d_na_o+\eta\,\delta},\quad
+\mathbf b_f=\frac{d_oa_n\mathbf b_o+d_na_o\mathbf b_n}{d_oa_n+d_na_o+\eta\,\delta}
+\;}
+\tag{7.2a}
+$$
+
+with $\mathbf g_\tau=\mathbf P\,(d_n\nabla T_o+d_o\nabla T_n)/\delta$ from the two cells'
+gradients. $a_f$ is the series resistance (7.2) of the normal conductivities: with no
+tangential gradient, two unit squares under $\mathbf I$ and $\operatorname{diag}(100,1)$, their
+shared face normal to the first axis and its half-distances $d_o=d_n=0.5$ m, conduct
+$-198.0198$ W m⁻² at 100 K, where a mean of the two tensors would give $-5050$. Under one tensor on both sides, (7.2a) is the
+two-point part $-(\hat{\mathbf n}\cdot\mathbf K_f\hat{\mathbf n})(T_n-T_o)/\delta$ and the
+cross-diffusion part $-\mathbf t\cdot\nabla T_f$,
+$\mathbf t=\mathbf K_f\hat{\mathbf n}-(\hat{\mathbf n}\cdot\mathbf K_f\hat{\mathbf n})\,\mathbf d/\delta$,
+of the harmonic face tensor $\mathbf K_f=k_f\mathbf A$. As either side's normal conductivity
+vanishes, $a_f$ and $\mathbf b_f$ vanish with it: no floor gives an insulating cell a heat leak.
+
+**Gradients.** The cell gradients are least-squares fits over the live face neighbours
+(§13.6.4), each neighbour $j$ of cell $i$ taken at its *transmission image* through the shared
+face $f$,
+
+$$
+\mathbf d'_{ij}=(\mathbf x_j-\mathbf x_i)
++\bigl(\hat{\mathbf n}\cdot(\mathbf x_j-\mathbf x_f)\bigr)\,
+\frac{(\mathbf K_i-\mathbf K_j)\,\hat{\mathbf n}}{\hat{\mathbf n}\cdot\mathbf K_j\hat{\mathbf n}},
+$$
+
+the displacement at which a field affine on either side of the face, with common trace and
+normal flux, is affine as seen from cell $i$: $T_j-T_i=\nabla T_i\cdot\mathbf d'_{ij}$ exactly.
+At its physical position a neighbour across an interface would blend two normal slopes into
+one fit, and the cross part would carry that error into the faces parallel to the interface,
+on orthogonal grids as well as skewed ones. The image is the plain displacement between equal
+complete tensors. A neighbour that conducts at most $10^{-12}$ of the cell's normal
+conductivity (`INSULATING_NEIGHBOUR`) enters as the limit of its image, the unit-weight row
+$(\mathbf K_i\hat{\mathbf n}/|\mathbf K_i\hat{\mathbf n}|)\cdot\nabla T_i=0$ of an insulated face.
+
+**Properties.** The operator is conservative, exact for constants, and exact for
+piecewise-affine fields across grid-fitted planar interfaces wherever no cell's fit is
+regularized, that is, wherever the neighbours' images of every cell spread over every
+direction with a normalized determinant of at least $10^{-4}$ (§13.6.4): a scalar jump under
+one rotated tensor, a jump between rotated tensors, and two interfaces meeting at a ridge or a
+junction of four materials, on orthogonal and sheared quadrilaterals and sheared hexahedra, as
+well as the linear fields of one tensor on distorted meshes. On layered coefficients the cell
+temperatures converge at second order (§13.6.4). It is not monotone where the tensors have
+cross terms: on unit squares at unit volumetric heat capacity under a uniform rotated tensor
+with $K_{12}>0$, an interior cell's coefficients are $+K_{12}/2$ on its two diagonal neighbours along
+$(1,1)$ and $-K_{12}/2$ on the two along $(1,-1)$ (the signs swap with $K_{12}$), so a cell can
+heat above every neighbour (§7.9). Where the images miss a direction or barely span it, a
+smoothly switched Tikhonov term makes the unresolved component of the gradient small or zero,
+and the fit is no longer exact (§13.6.4).
+
+The boundary kernel conducts $(\hat{\mathbf n}\cdot\mathbf K_i\hat{\mathbf n})(T_s-T_i)/d+\mathbf t\cdot\nabla T_i$,
+$\mathbf t=\mathbf K_i\hat{\mathbf n}-(\hat{\mathbf n}\cdot\mathbf K_i\hat{\mathbf n})(\mathbf x_f-\mathbf x_i)/d$,
+into a boundary cell from its own complete tensor and gradient (§12); where
+$\hat{\mathbf n}\cdot\mathbf K_i\hat{\mathbf n}$ vanishes the face conducts nothing and its
+temperature is the cell's (a prescribed temperature stays prescribed). On a line $\mathbf d$
+is along the normal and the cross part vanishes identically. Element death on a mesh of more
+dimensions exposes the faces between live and dead cells, which take the condition of the
+exposed tag (§14.5).
 
 ---
 
@@ -884,8 +956,16 @@ and discussed where relevant above:
    use (§6.6.3). No pressure–volume work enters the energy row: the pore-gas pressure drives
    the Darcy flux (§9) and does no work on the matrix in the model.
 
+4. **No bound preservation under rotated anisotropy (more dimensions).** The tensor flux
+   (7.2a) with its least-squares gradients is linear and consistent but not monotone where
+   the tensors have cross terms: on unit squares at unit volumetric heat capacity under a
+   uniform rotated tensor, an interior cell's coefficients on the two diagonal neighbours across the
+   cross coupling are $-K_{12}/2$ (along $(1,-1)$ for $K_{12}>0$), so a cell can heat above
+   every neighbour. A cell whose fit has a normalized determinant below $10^{-4}$ has a
+   regularized gradient, not an exact one (§13.6.4).
+
 These do not affect the correctness of the discrete update (7.9)–(7.12): the energy ledger of
 §16 closes the discrete balance of either energy form, whatever the composition — to
 round-off in the inventory form and at the integrator's order in the temperature form. They
-bound the *modeling* fidelity of the energy equation and are exposed, not hidden, through the
+bound the fidelity of the energy equation and are exposed, not hidden, through the
 conservation ledgers and the audit of §16.

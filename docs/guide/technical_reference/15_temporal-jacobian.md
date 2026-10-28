@@ -750,7 +750,8 @@ of each cell, their nodes, and the nodes' cells. It is not traced from the code;
 faces where a kernel reads a neighbour's neighbour (the inventory fluxes relative
 to the mesh, whose face states are reconstructed from two cells upwind; the
 cross-diffusion part of tensor conduction in more dimensions, which reads the
-neighbours' least-squares gradients), one otherwise.
+neighbours' least-squares gradients and, through their transmission images, the
+conductivities of the neighbours' neighbours), one otherwise.
 
 - **A cell row** (a mass, the energy state, the history pair) reaches the
   masses, energy states and history pairs of the cells within the reach and, on

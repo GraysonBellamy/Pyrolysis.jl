@@ -6175,7 +6175,7 @@ quantities divide by the current area of the faces they name unless noted.
 | `volumetric_absorption` | W·m⁻² | Intensity the cells absorbed in depth, per unit exposed area; zero unless `radiation_model = BEER_LAMBERT` |
 | `radiation_transmitted` | W·m⁻² | Intensity leaving through the last face of the in-depth beam, per unit exposed area; zero unless `BEER_LAMBERT` |
 | `surface_emissivity` | – | Emissivity of the cell under the `:top` faces |
-| `surface_conductivity` | W·m⁻¹·K⁻¹ | Conductivity of the cell under the `:top` faces |
+| `surface_conductivity` | W·m⁻¹·K⁻¹ | Conductivity normal to the first `:top` face with which it conducts into its cell (on a mesh of more dimensions `n·K·n` of the cell's complete tensor) |
 | `back_heat_flux` | W·m⁻² | Heat flux the `:bottom` condition applies, positive into the domain |
 | `MLR_gauge` | kg·m⁻²·s⁻¹ | Mass-loss rate per unit initial area of the `:top` faces (cone gauge convention) |
 | `cross_section_area_history` | m² | The cross-section measure, `A(t)` (varies only under a lateral-shrinkage law) |
@@ -6185,6 +6185,8 @@ quantities divide by the current area of the faces they name unless noted.
 | `live_energy` | J | Energy of the live cells (§9.8) |
 | `mass_outflow` | kg·s⁻¹ | Mass outflow of the live region through its boundary faces |
 | `energy_rate` | W | Enthalpy rate of the live region (§9.8) |
+| `regularized_gradients` | – | Number of live cells whose conduction gradient is a regularized fit, not an exact one (meshes of more dimensions; 0 on a line) |
+| `gradient_support` | – | Smallest normalized determinant of the live cells' gradient fits, 1 for neighbours spread evenly over every direction (meshes of more dimensions; NaN on a line) |
 
 For a top condition of incident radiation, re-radiation and convection, the surface
 decomposition closes as `net = absorbed − reradiation − convection`, and the surface

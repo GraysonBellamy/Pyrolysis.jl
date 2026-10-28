@@ -242,11 +242,15 @@ volume fractions `v_j^solid` (5.4) and the per-component conductivities
 The default rule is `WEIGHTED` with `β = 0.5` (`materials.jl`).
 
 The state mapping evaluates `k_i = effective_conductivity(ξ⁺_i, T_trial,i,
-material; skip_absent = Val(true))` and floors it smoothly at
-`CONDUCTIVITY_FLOOR = 1e-6` W·m⁻¹·K⁻¹ (`src/States/derived.jl`), far below any
-material's conductivity: a trial state with no mass left has none, and the
-surface-temperature solve of a boundary face divides by the cell conductivity
-(§12). With `skip_absent = Val(true)` the parallel, series and weighted rules
+material; skip_absent = Val(true))` and keeps it twice: smoothly floored at
+`CONDUCTIVITY_FLOOR = 1e-6` W·m⁻¹·K⁻¹ (`k`, `src/States/derived.jl`), far below
+any material's conductivity, and unfloored (`k_physical`). A line reads the
+floored value: a trial state with no mass left has no conductivity, and the
+surface-temperature solve of its boundary faces divides by the cell
+conductivity (§12). A mesh of more dimensions reads the unfloored value as the
+factor of the complete tensor $k_i\mathbf A_i$: a floor on the factor alone would
+make the fluxes depend on how a conductivity is split between $k_i$ and
+$\mathbf A_i$, and its insulating limit is the operator's own (§7.1.3). With `skip_absent = Val(true)` the parallel, series and weighted rules
 do not evaluate the conductivity law of a component whose volume fraction is
 exactly zero (its partials included, under automatic differentiation); the
 result is the same for every finite conductivity.
