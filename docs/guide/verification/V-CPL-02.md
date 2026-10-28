@@ -15,8 +15,8 @@ ablation ΔH_p. Exact steady traveling wave (exact/landau.jl):
 
   v_ss = q″/(ρ[c(T_p − T₀) + ΔH_p]),  T(ζ) = T₀ + (T_p − T₀)e^(−v_ss ζ/α)
 
-Realization: single reaction solid → gas with γ_gas = 0 (volume loss at
-intrinsic density ⇒ surface regression) under ALE with cell
+Realization: single reaction solid → gas, the gas outside the strain
+(volume loss at the solid density ⇒ surface regression) under ALE with cell
 deactivation. The kinetics-controlled front approximates the fixed-T_p
 ablation limit; (A, E) are chosen on the leading-order Laplace locus
 
@@ -49,7 +49,7 @@ is active as front cells approach deactivation.
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
 | steady energy balance: v vs Landau v_ss(measured T_s) | 0.001952 | 0.001951 | 0.0003337 | 0.0021 | yes | steady first law with stationary virgin solid and c_gas = c_solid |
-| regression consistency: thickness slope vs gas generation | 0.001952 | 0.001952 | 2.133e-05 | 0.0021 | yes | γ_gas = 0 ⇒ dL/dt = −ṁ‴_gas/ρ exactly |
+| regression consistency: thickness slope vs gas generation | 0.001952 | 0.001952 | 2.133e-05 | 0.0021 | yes | gas outside the strain ⇒ dL/dt = −ṁ‴_gas/ρ exactly |
 | mass ledger closure over plateau window | 0.7771 | 0.7807 | 0.00462 | 0.0049 | yes | total-mass drop vs ∫ ṁ″ dt; residual = holdup drift |
 | in-depth profile decay rate (surface-attached frame) | 0.001967 | 0.001952 | 0.007865 | 0.027 | yes | ln(T−T₀) slope over ζ/δ ∈ [0.75, 1.7], 12 cells |
 | design-locus regression rate (loose) | 0.001952 | 0.002 | 0.0242 | 0.1 | yes | leading-order Laplace locus only pins T_p to O(RT_p²/E); informational, tightens as E ↑ (see V-CPL-02b) |
@@ -101,7 +101,7 @@ Observed order 0.6363 (balance).
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
 | steady energy balance: v vs Landau v_ss(measured T_s) | 0.001911 | 0.00191 | 0.0003182 | 0.002 | yes | identity must close at E = 50 kJ/mol as at 100 (locus check) |
-| regression consistency: thickness slope vs gas generation | 0.001911 | 0.00191 | 0.0004004 | 0.0017 | yes | γ_gas = 0 ⇒ dL/dt = −ṁ‴_gas/ρ exactly |
+| regression consistency: thickness slope vs gas generation | 0.001911 | 0.00191 | 0.0004004 | 0.0017 | yes | gas outside the strain ⇒ dL/dt = −ṁ‴_gas/ρ exactly |
 | stationary far-field temperature | 3.481e-07 | 0 | 3.481e-07 | 0.0001 | yes | cold reaction gate and domain length qualify the steady reference |
 
 ![V-CPL-02b mlr_history](assets/V-CPL-02b/V-CPL-02b_mlr_history.png)

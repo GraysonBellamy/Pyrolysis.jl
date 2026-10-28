@@ -72,7 +72,7 @@ The solver is designed for, and validated against, the following experiment and 
 
 - **Cone calorimetry.** A sample is irradiated at a controlled flux (commonly 25–75 kW·m⁻²) while surface temperature, mass-loss rate (MLR), and a heat-release-rate proxy are recorded. The exposed top face takes a radiative-plus-convective boundary condition; the back face is typically adiabatic or a lumped loss, and impermeable. Examples `06_cone_calorimeter.jl` (5.8 mm of PMMA under 25 kW·m⁻² on a moving mesh, with cell deactivation) and `07_douglas_fir_cone.jl` (12 mm of charring Douglas fir under 75 kW·m⁻² on a moving mesh, with gas transport and surface absorption) are the reference configurations.
 - **Idealized thermal-analysis experiments.** Thermogravimetric analysis (TGA), differential scanning calorimetry (DSC), and microscale combustion calorimetry (MCC) can be idealized as a thin, thermally-thin sample with a prescribed heating rate. In the limit of a single well-mixed cell, the species equations reduce to the 0-D Arrhenius mass-loss ODE that TGA inversion assumes; this idealization underpins the single-reaction verification case in §18 (Verification & Validation).
-- **Charring, non-charring, and intumescent solids.** Non-charring polymers (PMMA) leave essentially no residue; charring solids (wood) form an insulating char layer with conductivity and porosity that differ sharply from the virgin material; intumescent coatings swell by orders of magnitude. The component/reaction/property-function machinery (§4) plus the swelling factor $\gamma_j$ and lateral-shrinkage law (§10) span all three.
+- **Charring, non-charring, and intumescent solids.** Non-charring polymers (PMMA) leave essentially no residue; charring solids (wood) form an insulating char layer with conductivity and porosity that differ sharply from the virgin material; intumescent coatings swell by orders of magnitude. The component/reaction/property-function machinery (§4) plus the bulk-density volume law and lateral-shrinkage law (§10) span all three.
 - **Pressure-treated and wet wood / moisture transport.** Hygroscopic materials carry liquid water that evaporates endothermically and migrates as vapor under pressure gradients. gas transport (§9, Gas-Phase Mass Transport & Pressure; declared by the material) and the `StateDependentProperty` heat-of-sorption closure (§4) handle these; examples `08_pressure_treated_wood_cone.jl` and `moisture_hos_comparison.jl` demonstrate these models.
 
 ### 1.2.2 What is **not** modeled
@@ -133,7 +133,7 @@ The cost of an optional layer is therefore paid only when it is used, and the se
 
 Three implementation properties are treated as first-class requirements throughout the code, and they drive many modeling micro-decisions documented in later chapters:
 
-1. **Type stability.** Every hot-path function is written so the Julia compiler can infer concrete types, using heterogeneous tuples for the component/reaction lists and `@generated` or recursive tuple functions to unroll loops over $N_C$ components and $N_R$ reactions (e.g. `_gas_partial_pressure_sum`, `_heat_capacity_sum`, `dry_pyrolysis_gas_indices`). The number of components $N_C$ and reactions $N_R$ are static type parameters of `Material{NC,NR,…}` (§4), and every physics option is a type parameter of the definition the residual reads.
+1. **Type stability.** Every hot-path function is written so the Julia compiler can infer concrete types, using heterogeneous tuples for the component/reaction lists and `@generated` or recursive tuple functions to unroll loops over $N_C$ components and $N_R$ reactions (e.g. `_gas_partial_pressure_sum`, `_heat_capacity_sum`, `_volume_change_rate`). The number of components $N_C$ and reactions $N_R$ are static type parameters of `Material{NC,NR,…}` (§4), and every physics option is a type parameter of the definition the residual reads.
 2. **Allocation-free assembly.** The residual and the colored Jacobian evaluate with zero heap allocation per call. All scratch storage lives in the derived state and the kernel contributions of the `CoreWorkspace`, with twins for each dual-number element type built on first use; the state mapping `derive!` is the only reader of the state vector and the row assembly the only writer of its derivative (§15.2). A dedicated test (`test/jacobian/test_allocations.jl`) asserts zero bytes for one residual and one Jacobian evaluation on every configuration it builds, in both energy forms.
 3. **AD-compatible local derivatives.** Geometry, caloric inversion and property
    evaluations propagate `ForwardDiff.Dual` numbers. The colored Jacobian
@@ -696,8 +696,8 @@ Conventions:
 | $v_g$ | Bulk (Darcy, superficial) gas velocity at a face | m·s⁻¹ |
 | $v_s$ | Solid (skeleton) velocity; at the nodes $v_s = w - c$ | m·s⁻¹ |
 | $v_j$ | Volume fraction of component *j* | – |
-| $v_j^{\text{solid}}$ | Solid volume fraction (excludes non-swelling gases) | – |
-| $v_m$ | Matrix volume fraction, $\sum_j \gamma_j \xi_j/\rho_j$ (§5.1.3) | – |
+| $v_j^{\text{solid}}$ | Condensed volume fraction, over the condensed (solid and liquid) components | – |
+| $v_m$ | Matrix volume fraction, $\sum_j \xi_j/\rho_j$ over the condensed components (§5.1.3) | – |
 | $v_{\text{out}}$ | Outward Darcy velocity a pressure condition drives at a boundary face (§12.5, §13.7.5) | m·s⁻¹ |
 | $v_{\text{rel},f}$ | Velocity of the solid relative to face *f* along its normal, $(v_s - w)\cdot\hat n_f = -c_f \hat n_f$ (§11.6.1) | m·s⁻¹ |
 | $W$ | The integrator's iteration matrix $J - M/(\gamma_{\text{RK}} \Delta t)$ | – |
@@ -725,7 +725,6 @@ Conventions:
 | $\alpha_{\text{th},\infty}$ | Thermal diffusivity of the free stream (pooling film, §12.3.3; overload A5) | m²·s⁻¹ |
 | $\alpha_M$, $\beta_M$ | Monitor coefficients of the equidistribution correction, `monitor = (α_M, β_M)` (defaults 1, 0) | – |
 | $\beta$ | Weighting parameter of the WEIGHTED mixing rule, $k = \beta k_{\parallel} + (1-\beta)k_{\text{series}}$ | – |
-| $\gamma$ ($\gamma_j$) | Swelling factor of component *j* (1 = solids, 0 = non-swelling gas) | – |
 | $\gamma_{\text{RK}}$ | Stage coefficient of the integrator in $W = J - M/(\gamma_{\text{RK}} \Delta t)$ | – |
 | $\Gamma$ | Thermal property ratio $k/c_p$ of a gas (property-ratio and pooling films, §12.3.3; overload G1) | kg·m⁻¹·s⁻¹ |
 | $\Gamma_i$ | Volume rate the node corrections sweep through the faces of cell *i*, $A_{i+1} c_{i+1} - A_i c_i$ on a line (§11.5.2; overload G1) | m³·s⁻¹ |
@@ -824,7 +823,7 @@ Conventions:
 | $\text{floor}$, $\text{reg}$ | Floor / regularizing part of the caloric extension ($C_{\text{floor},i}$, $C_{\text{reg},i}$) |
 | $\text{ext}$ | External source |
 | $\text{min}$, $\text{max}$ | Lower / upper bound |
-| $\text{dry}$ | Dry-pyrolysis-gas (excludes water vapor) |
+| $\text{dry}$ | Dry pyrolysis gas (the gases the solids give off) |
 | $\text{init}$, $0$ | Initial value |
 | $\text{top}$, $\text{bot}$ | Top (z=L) / bottom (z=0) boundary |
 | $\text{rxn}$ | Reaction-source contribution |
@@ -841,7 +840,7 @@ Conventions:
 | $x^{+}$, $x^{-}$ (radiation) | Forward / backward hemispheric intensity (two-flux, FDS comparison) |
 | $x^{+}$ | One-sided positive part, e.g. $\xi^{+}$, $(m)^{+}$ (zero at and below zero, the identity above the scale $\delta_i$); never a state after an event, which carries a hat |
 | $\hat x$ (hat) | The receiver's state after a deactivation merge ($\hat m_{j,k}$, $\hat V_k$, §14.3.3); $\hat n_f$ the unit normal of face *f* |
-| $x^{\text{solid}}$ | Restricted to solid/liquid (non-swelling) components |
+| $x^{\text{solid}}$ | Restricted to the condensed (solid and liquid) components |
 | $x^{\text{diff}}$, $x^{\text{adv}}$ | Diffusive / advective flux component |
 | $x^{E}$ | Energy (the face energy flux $F^E_f$) |
 | $x^{\text{rad}}$ | In-depth radiation ($q^{\text{rad}}_i$, $S^{\text{rad}}_i$) |
@@ -1289,9 +1288,9 @@ inventory (§3.3). Each term and its sign are derived in the sections that follo
 The bulk total density is $\rho_{tot}=\sum_j\xi_j$, the total inventory per
 bulk volume. Each gas has intrinsic pore density $\rho_j^g=\xi_j/\phi$.
 These definitions serve different control volumes. Skeletal occupancy uses
-condensed intrinsic densities without swelling weights; matrix transport
-weights use condensed $\gamma_j\xi_j/\rho_{b,j}$. The volume-change law
-uses its own per-component $\gamma_j/\rho_{b,j}$ (§3.6).
+condensed intrinsic densities; matrix transport weights use the bulk
+occupancy $\xi_j/\rho_{b,j}$ of the transport matrix (§9). The volume-change
+law uses $1/\rho_{b,j}$ of every condensed component (§3.6).
 
 ---
 
@@ -1668,7 +1667,7 @@ For lumped transfer, $J_j^D=-\Lambda M_j\nabla p_j/(RT)$.
 
 ### 3.4.2 Physical and trial pore states
 
-Skeletal occupancy is independent of the swelling factor. All gas-bearing
+All gas-bearing
 initial and accepted states must have resolved positive pore volume, including
 uncertainty from mass, temperature and geometry. Trial evaluation uses a C¹
 porosity divisor guard of $10^{-12}$, an identity above twice that value.
@@ -1694,34 +1693,33 @@ molar flow when wall/molecular transport is present.
 
 ### 3.6.1 The volumetric strain rate
 
-As reactions consume condensed mass and (optionally) swell the matrix, the material
+As reactions consume condensed mass and (optionally) form lighter condensed products, the material
 deforms. The local **volumetric strain rate** (relative rate of cell-volume change) is
 
 $$
 \boxed{\;
 \theta_i = \frac{1}{V_i}\frac{dV_i}{dt}
-= \sum_{j=1}^{N_C} \gamma_j\,\frac{\omega_{j,i}}{\rho_j(T_i)} ,
+= \sum_{j\in S\cup L} \frac{\omega_{j,i}}{\rho_j(T_i)} ,
 \;}
 $$
 
-derived from the mixture continuity relation: when component $j$ (with bulk density
-$\rho_j$) changes its mass concentration by reaction at rate $\omega_j$, it frees or
-claims volume at rate $\omega_j/\rho_j$, weighted by the swelling factor $\gamma_j$ that
-decides whether the component participates in the matrix skeleton. Solids default to
-$\gamma=1$ (depletion shrinks the matrix); gases default to $\gamma=0$ (they escape
-without changing matrix volume); intumescent gases may take $\gamma=1$ (gas creates
-matrix volume); partial values $\gamma\in(0,1)$ are allowed. The implementing kernel
-`volume_change_rate` sums exactly $\sum_j \gamma_j\,\omega_j/\rho_j(T)$, skipping any
-component with $\gamma_j\le 0$, at the trial temperature and with the *reaction* mass
+derived from the mixture continuity relation: when a condensed (solid or liquid)
+component $j$ with bulk density $\rho_j$ changes its mass concentration by reaction at
+rate $\omega_j$, it frees or claims volume at rate $\omega_j/\rho_j$. Gases never enter
+the sum: they leave through the pore space without changing the matrix volume.
+Depletion of a solid shrinks the matrix, and a product of lower bulk density than its
+reactant (a light char or foam) swells it. The implementing kernel
+`volume_change_rate` sums exactly $\sum_{j\in S\cup L} \omega_j/\rho_j(T)$, skipping
+every gas, at the trial temperature and with the *reaction* mass
 sources alone as the driver: the mesh closure forms it from the kernels' reaction
 sources before any external source is added, so a manufactured source of a
 verification run does not move the mesh. The absolute rate is $dV_i/dt = V_i\theta_i$
 on a mesh that moves with the skeleton.
 
-> **Implementation notes.** $\theta = \sum_j \gamma_j\,\omega_j/\rho_j(T)$ is
+> **Implementation notes.** $\theta = \sum_{j\in S\cup L} \omega_j/\rho_j(T)$ is
 > `volume_change_rate` (`_volume_change_rate`) in `src/Physics/volume_change.jl`
-> (with `if γ > 0` guards), called per cell by `closure_rows!`
-> (`src/Closures/balance.jl`). It is the swelling-weighted per-component form, not
+> (gases skipped by the type-level `is_gas`), called per cell by `closure_rows!`
+> (`src/Closures/balance.jl`). It is the per-component condensed form, not
 > $-(\sum_j\omega_j)/\rho$.
 
 ### 3.6.2 The reference models' deformation formulations
@@ -1885,7 +1883,7 @@ This is the contract that makes the residual a *pure function* of the state.
 | Porosity $\varphi$ | intrinsic density | $1-\sum_{S/L}\xi_j/\rho_{i,j}$, smoothly floored at $10^{-12}$ where divided by | §5 |
 | Gas velocity $v_g$ | Darcy | $-(\kappa/\mu)\nabla P$, half-cell mobility $\kappa/\mu$, interface pressure from total species-flux continuity | §9 |
 | Effective $k_{\mathrm{eff}},\lambda_{\mathrm{eff}},\kappa_{\mathrm{eff}},\varepsilon_{\mathrm{eff}},a_{\mathrm{eff}},\alpha_{\mathrm{eff}}$ | mixing rules | parallel/series/weighted/Bruggeman/Carman–Kozeny | §5 |
-| Volume-change rate $\theta$ | swelling continuity | $\sum_j\gamma_j\omega_j/\rho_j(T)$, reaction sources only | §10 |
+| Volume-change rate $\theta$ | condensed-volume continuity | $\sum_{S\cup L}\omega_j/\rho_j(T)$, reaction sources only | §10 |
 | Node velocity $w$ | balance rows | $0=A_{i+1}(w-c)_{i+1}-A_i(w-c)_i-(\theta_i-\theta_A)V_i$, $0 = w_1$ | §11.3.2, (11.9)–(11.10) |
 | Node correction $c$ | equidistribution | installed by `setup`'s rule, or given | §11.7 |
 | Cross-section $A$, $\theta_A$ | algebraic rows | $A=A_0\,\mathrm{law}(\bar\chi_c)$, $\theta_A = \frac{d}{dt}\log\mathrm{law}(\bar\chi_c)$ | §10, §11.3.3 |
@@ -2105,13 +2103,12 @@ compiler folds it to a constant. The runtime `Phase` enum (`SOLID=1`,
 
 `SolidComponent` and `LiquidComponent` store bulk and intrinsic density,
 heat capacity, conductivity, optional superficial matrix transfer,
-permeability, emissivity, incident absorptivity, absorption and swelling.
-Property laws have concrete type parameters. Participating lumped matrices
-require explicit transfer; zero-$\gamma$ condensed phases cannot have nonzero
-transfer or permeability. Liquid defaults to zero swelling participation.
+permeability, emissivity, incident absorptivity and absorption.
+Property laws have concrete type parameters. Every participant in the lumped
+transport matrix requires explicit transfer (§4.1.5).
 
 `GaseousComponent` stores molar mass, reference-density law, heat capacity,
-conductivity, emissivity, absorption and swelling. It has no matrix transfer,
+conductivity, emissivity and absorption. It has no matrix transfer,
 permeability or intrinsic-density field. Its local intrinsic pore density is
 derived from the conserved inventory and pore volume, separately from its
 reference-density law. Concrete property types preserve specialization through
@@ -2135,16 +2132,18 @@ without a runtime field-existence test:
 | `get_permeability(c, T)` | `c.permeability(T)` | `0.0` |
 | `has_permeability(c)` | `true` | `false` |
 | `get_intrinsic_density(c, T)` | `c.intrinsic_density(T)` | `0.0` |
+| `participates_in_transport(c)` | `true` / declares $\lambda$ or a $\kappa$ not identically zero | `false` |
 
-Each is `@inline` and resolves at compile time on the component's concrete type; none branch
-on a stored field. The gas's `get_permeability` and `get_intrinsic_density`
+Each is `@inline` and resolves at compile time on the component's concrete type, except
+that a liquid's `participates_in_transport` tests its stored permeability law for an
+identical zero. The gas's `get_permeability` and `get_intrinsic_density`
 return exactly `0.0`, which is the algebraically correct value for the matrix
 mixing rules (a gas contributes nothing to permeability or to the solid
 skeleton).
 
 > **Implementation note.** Accessors `get_intrinsic_density`, `get_permeability`,
 > `has_permeability`, `get_emissivity`, `get_absorptivity`,
-> `is_solid/is_liquid/is_gas`, `phase`, `molar_mass`, all in
+> `is_solid/is_liquid/is_gas`, `phase`, `molar_mass`, `participates_in_transport`, all in
 > `src/Materials/components.jl`. Kernels read the remaining property fields
 > (`density`, `heat_capacity`, …) directly.
 
@@ -2191,32 +2190,27 @@ never both:
 > `get_intrinsic_density(::GaseousComponent, ::Real) = 0.0`, which is consistent
 > with Eq. (4.2) summing only over solid/liquid.
 
-### 4.1.5 The swelling factor
+### 4.1.5 Condensed volume and matrix participation
 
-The swelling factor $\gamma_j\in[0,1]$ controls whether changes in component $j$'s
-concentration change the *bulk volume* of the cell. Physically it answers: when
-this component is created or destroyed, does the material expand/shrink, or does
-the mass simply enter/leave the existing pore space?
+A condensed component holds the bulk volume $\xi_j/\rho_j$ of its bulk density;
+a gas holds none. This one occupancy enters three places:
 
-- $\gamma_j = 1$ (default for solids): full contribution. Depletion of the solid
-  shrinks the bulk volume; this is the charring/recession behavior.
-- $\gamma_j = 0$ (default for gases): no contribution. Gas fills existing pores
-  and escapes without expanding the bulk.
-- $\gamma_j \in (0,1)$: partial contribution, the intumescent case, where evolved
-  gas creates new bulk volume.
+- the volumetric strain rate $\theta=\sum_{j\in S\cup L}\rho_j^{-1}\,\omega_j$
+  (Chapter 10): depletion of a solid shrinks the bulk volume, and a product of
+  lower bulk density than its reactant swells it, so expansion and intumescence
+  are a light condensed product (char or foam). A complete conversion gives
+  $V_f/V_0=\sum_{j\in S\cup L}y_j\rho_A/\rho_j$; a char that keeps the virgin
+  volume has $\rho_{\text{char}}=y_{\text{char}}\,\rho_{\text{virgin}}$;
+- the thermal and optical mixing weights (Chapter 5): every condensed
+  component, a liquid such as bound moisture included, conducts and emits by its
+  volume share; a gas carries no weight while condensed volume remains;
+- the transport matrix (Chapter 9): every solid, plus each liquid that declares
+  a transfer coefficient $\lambda$ or a permeability that is not identically
+  zero (`participates_in_transport`). The lumped model requires explicit
+  $\lambda$ on every participant.
 
-$\gamma_j$ weights the volumetric strain rate
-$\theta = \sum_j\gamma_j\rho_j^{-1}\mathrm{d}\xi_j/\mathrm{d}t$ (Chapter 10)
-and the thermal matrix volume fractions. Transport weights use the same bulk
-occupancy but exclude gases explicitly. Every condensed component contributes
-to skeletal pore occupancy even when its $\gamma_j$ is zero (§9).
-
-The supported range $0\le\gamma_j\le1$ is a constitutive restriction:
-$\gamma_j$ represents the retained fraction of the declared bulk occupancy.
-Normalized property weights still sum to one for any positive denominator;
-normalization alone does not establish this range. Expansion can be represented
-by a lower product bulk density: a complete conversion with unit swelling
-factors gives $V_f/V_0=\sum_jy_j\rho_A/\rho_j$.
+Every condensed component also occupies skeletal volume $\xi_j/\rho_{i,j}$
+(§4.1.4), whether or not it is part of the transport matrix.
 
 ---
 
@@ -2238,7 +2232,6 @@ consumed downstream:
 | `emissivity` | $\varepsilon_j(T)$ | – | all | $\varepsilon_\mathrm{eff}$ (Ch. 5), radiative BC (Ch. 12) |
 | `surface_absorptivity` | $a_j$ (or `nothing` ⇒ $\varepsilon_j(T)$) | – | S, L | $a_\mathrm{eff}$ (§5.8.2), incident-flux BC (Ch. 12), Beer–Lambert incident intensity (Ch. 8) |
 | `absorption_coeff` | $\alpha_j$ | m²·kg⁻¹ | all | $\alpha_\mathrm{eff}=\sum_j\xi_j\alpha_j$ (Ch. 5, 8) |
-| `swelling_factor` | $\gamma_j$ | – | all | $\rho$, strain rate $\theta$ (Ch. 10) |
 | `molar_mass` | $M_j$ | kg·mol⁻¹ | G | $\rho_g$ (§4.3), $P$ (Ch. 9), Chapman–Enskog estimate (§5.10) |
 
 Note that $\alpha_j$ is a **mass-basis** absorption coefficient [m²·kg⁻¹]; it is
@@ -2251,10 +2244,10 @@ matrix weights. Its value is constitutive data, independent of gas loading.
 ### 4.2.2 Bulk density, matrix occupancy and gas loading
 
 The bulk mixture mass density is $\rho_{tot}=\sum_j\xi_j$. Matrix transport
-uses $q_j=\gamma_j\xi_j/\rho_{b,j}$ only for condensed components and normalizes
-by their sum. Gas loading cannot alter these weights, even if gas has nonzero
-$\gamma$. Thermal mixing and the volume-change law retain their own stated bases.
-Skeletal occupancy is a separate sum using intrinsic densities and no $\gamma$.
+uses $q_j=\xi_j/\rho_{b,j}$ of the transport matrix's components (§4.1.5) and
+normalizes by their sum. Gas loading cannot alter these weights. Thermal mixing
+and the volume-change law use the bulk occupancy of every condensed component.
+Skeletal occupancy is a separate sum using intrinsic densities.
 
 ---
 
@@ -2264,7 +2257,7 @@ $\phi=1-\sum_{S\cup L}\xi_j/\rho_{i,j}(T)$ enters the pore EOS, intrinsic
 densities, dusty-gas geometry and physical admissibility. For condensed
 species, $\partial\phi/\partial\xi_j=-1/\rho_{i,j}$; for gas this derivative
 is zero. Temperature dependence of skeletal density is differentiated too.
-A condensed component with $\gamma=0$ still occupies this skeletal volume.
+A condensed component outside the transport matrix still occupies this skeletal volume.
 Chapter 9 specifies the common trial extension and accepted-state margin.
 
 ---
@@ -2272,13 +2265,13 @@ Chapter 9 specifies the common trial extension and accepted-state margin.
 ## 4.3 Gas reference density and the local pore EOS
 
 The gas component's reference density is
-$\rho_{ref}(T)=P_{ref}M_j/(RT)$, with $P_{ref}=101325$ Pa. It supplies the
-component's thermal-volume and swelling-property law. It is independent of
-the local pressure. The actual pore density is $\rho_j^g=\xi_j/\phi$ and the
+$\rho_{ref}(T)=P_{ref}M_j/(RT)$, with $P_{ref}=101325$ Pa. It enters only the
+all-phase occupancy that property mixing falls back to in a depleted cell
+(§5.1.3). It is independent of the local pressure. The actual pore density is $\rho_j^g=\xi_j/\phi$ and the
 partial pressure is $p_j=\rho_j^gRT/M_j$ (Chapter 9).
 
-Gas reference density and gas swelling never enter condensed matrix transport
-weights. `GaseousComponent(name;M,c,k,ε=0,α=0,γ=0)` declares caloric and thermal
+Gas reference density never enters the volume-change law or the matrix
+transport weights. `GaseousComponent(name;M,c,k,ε=0,α=0)` declares caloric and thermal
 properties; matrix transfer belongs to the gas model and condensed components.
 
 ---
@@ -2716,29 +2709,31 @@ the non-negativity and order checks always run.
 
 For variable-cross-section (lateral shrinkage, Chapter 10) the cumulative gas
 $G_i$ of the conversion-history pair, and with it the pyrolysis progress
-$\chi_i = G_i/m_{\mathrm{dry},i}$, counts only **dry** pyrolysis gas — water vapor is
-excluded because moisture evaporation should not drive radial shrinkage. The set
-of dry-gas component indices is computed by a recursive tuple walk that includes a
-component index iff it is a gas **and** its name is not a water-vapor name. The
-water-vapor test is a substring/equality heuristic on the component name (it
-contains `H2O`, contains `water` in any letter case, or is `h2o` in any letter
-case):
+$\chi_i = G_i/m_{\mathrm{dry},i}$, counts only **dry** pyrolysis gas: the gas
+the solids give off. The set is read from the reaction graph. The *lineage*
+$\mathcal L$ starts with every solid component; until it stops growing, every
+reaction with a reactant in $\mathcal L$ adds its products of positive yield.
+The dry gases are the gases in $\mathcal L$:
 
 ```
-is_gas(c) && !_is_water_vapor_name(c.name)  ⇒ include index
+L = {solids};  repeat: for r with a reactant in L, add r's products (yield > 0) to L
+dry gas j  ⇔  is_gas(c_j) && j ∈ L
 ```
 
-This name-based identification is a documented heuristic (open issue §4.9); a
-gas whose name does not contain a recognized water token is treated as dry
-pyrolyzate regardless of its actual chemistry.
+Water released by decomposition is dry gas, whatever its name; the vapour of an
+evaporating liquid (moisture) is not, because its reactant never enters
+$\mathcal L$; a gas that no reaction produces (a background gas) is not. A gas
+in $\mathcal L$ that a reaction without a reactant in $\mathcal L$ also produces
+has no single origin: the set-up throws an `ArgumentError` naming the gas and
+both groups of reactions, and the gas must be modeled as one species per
+lineage.
 
-> **Implementation note.** `dry_pyrolysis_gas_indices` →
-> `_collect_dry_pyrolysis_gas_indices` and the heuristic `_is_water_vapor_name`,
-> `src/Materials/materials.jl`. The phase test dispatches on the component types;
-> the name test runs when the indices are computed, once, as the problem is set
-> up: `LateralShrinkage` (`src/Closures/lateral.jl`) stores the result as the flag
-> tuple `dry_gas`, and its history sources add the reaction mass sources of the
-> flagged components into $G_i$.
+> **Implementation note.** `dry_gas_flags(material)` (`src/Materials/materials.jl`)
+> returns the flags as an `NTuple{NC,Bool}`. Its only caller is the
+> `LateralShrinkage` constructor (`src/Closures/lateral.jl`), so the rule is
+> applied, once as the problem is set up, only when the material has a lateral
+> law. `LateralShrinkage` stores the flags as `dry_gas`, and its history sources
+> add the reaction mass sources of the flagged components into $G_i$.
 
 ### 4.6.5 Type-stable iteration over heterogeneous tuples
 
@@ -2876,7 +2871,7 @@ excluding pore-gas mass (GP §§2.1, 4.1). It is therefore not generally
 $\sum_{j\in\mathrm{all}}\xi_j$. The
 [mass and volume-fraction reconstruction](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_mass.f90#L495-L632)
 uses that condensed basis. Its reaction parameter $\chi_k$ and solid yield
-$\mathrm{SF}_k$ are distinct from our component swelling weights and
+$\mathrm{SF}_k$ are distinct from our bulk-density volume law and
 lateral conversion variable (§10.11.2).
 
 GP §§2.1–2.5 and V2 user guide §9 define power-law properties, an optional
@@ -2937,11 +2932,11 @@ revisited where the relevant physics is developed.
    internal pores. For genuinely microporous solids this under-predicts porosity
    and over-predicts the matrix volume.
 
-3. **Name-based dry-gas identification.** Water vapor is excluded from the
-   pyrolysis-progress source by a substring match on the component name
-   (`_is_water_vapor_name`). A water species named outside the recognized tokens
-   would be (incorrectly) counted as dry pyrolyzate, and a non-water species named
-   with a water token would be (incorrectly) excluded.
+3. **Dry gas by lineage.** The pyrolysis-progress source counts the gases the
+   solids give off through the reaction graph (§4.6.4). A species that both a
+   solid and a non-solid lineage produce (water from decomposition and from
+   drying, say) must be split into one species per lineage; the set-up refuses
+   it otherwise.
 
 4. **Kinked and AD-dependent property laws.** A `TableProperty` is differentiated
    segment by segment, so its derivative jumps at every knot and the integrator
@@ -3010,32 +3005,33 @@ conservative energy row does not need a normalized mixture heat capacity.
 ### 5.1.2 Thermal volume fractions
 
 `volume_fractions` normalizes all-phase $\xi_j/\rho_{b,j}$.
-`solid_volume_fractions` normalizes all-phase
-$\gamma_j\xi_j/\rho_{b,j}$. Thermal conductivity, emissivity and absorptivity
-use `mixing_volume_fractions`: the swelling-weighted basis above matrix
-occupancy $10^{-3}$, the all-phase basis below $10^{-4}$, and a cubic
-smoothstep blend between them. Gas with nonzero $\gamma$ participates in this
-thermal basis. The trial extension at a vanishing total occupancy is stated
+`condensed_volume_fractions` normalizes $\xi_j/\rho_{b,j}$ over the condensed
+(solid and liquid) components; gases get zero. Thermal conductivity, emissivity
+and absorptivity use `mixing_volume_fractions`: the condensed basis above
+matrix occupancy $10^{-3}$, the all-phase basis below $10^{-4}$, and a cubic
+smoothstep blend between them. A liquid, such as bound moisture, conducts and
+emits by its volume share like a solid. The trial extension at a vanishing total occupancy is stated
 in the property implementation.
 
 ### 5.1.3 Gas matrix weights and skeletal occupancy
 
-Gas transport has a distinct basis: only condensed components enter
-$q_j=\gamma_j\xi_j/\rho_{b,j}$, and their normalized weights determine
-$\Lambda$ and component-mixed $\kappa$. Gas loading never changes these
-weights. At absent matrix support, the specified transport endpoint and
-its skeletal-occupancy domain apply (§9.3).
+Gas transport has a distinct basis: only the transport matrix enters
+$q_j=\xi_j/\rho_{b,j}$, every solid plus each liquid that declares $\lambda$ or a
+permeability that is not identically zero (`participates_in_transport`,
+§4.1.5). Their normalized weights determine $\Lambda$ and component-mixed
+$\kappa$. Gas loading never changes these weights. At absent matrix support,
+the specified transport endpoint and its skeletal-occupancy domain apply (§9.3).
 
-A zero-$\gamma$ condensed component has no matrix weight or direct contribution
-to the strain law. It still has mass, heat capacity and skeletal volume
-$\xi_j/\rho_{i,j}$. Zero weighted matrix occupancy is therefore insufficient
-to identify an unobstructed void.
+A liquid outside the transport matrix has no matrix weight. It still has mass,
+heat capacity, volume in the strain law and skeletal volume
+$\xi_j/\rho_{i,j}$. Zero matrix occupancy is therefore insufficient to identify
+an unobstructed void.
 
 | Quantity | Basis | Consumer |
 |---|---|---|
 | Bulk density | $\sum_j\xi_j$ | inventory |
-| Thermal fractions | all-phase bulk volume, with thermal blend | conductivity and surface optical properties |
-| Gas matrix weights | condensed $\gamma_j\xi_j/\rho_{b,j}$ | $\Lambda$, component-mixed $\kappa$ |
+| Thermal fractions | condensed bulk volume, blended to all-phase bulk volume | conductivity and surface optical properties |
+| Gas matrix weights | transport-matrix $\xi_j/\rho_{b,j}$ | $\Lambda$, component-mixed $\kappa$ |
 | Skeletal occupancy | condensed $\xi_j/\rho_{i,j}$ | physical porosity and endpoint validity |
 | Gas fractions | intrinsic gas inventories | friction, film and reservoir exchange |
 
@@ -3043,9 +3039,8 @@ to identify an unobstructed void.
 
 ## 5.2 Volume-change coefficients
 
-The strain law uses $\gamma_j/\rho_{b,j}(T)$ for each component and its
-reaction source (§3.6, Chapter 10). A nonzero gas swelling factor can change
-bulk geometry without entering gas matrix weights. The pore EOS follows
+The strain law uses $1/\rho_{b,j}(T)$ for each condensed component and its
+reaction source (§3.6, Chapter 10); gases never enter it. The pore EOS follows
 the actual cell volume minus condensed skeletal volume; it does not replace
 that geometric volume by a mixture-specific-volume average.
 
@@ -3054,7 +3049,7 @@ that geometric volume by a mixture-specific-volume average.
 ## 5.3 Porosity
 
 Porosity is the complement of condensed skeletal occupancy,
-$\phi=1-\sum_{S\cup L}\xi_j/\rho_{i,j}(T)$, independent of $\gamma$ and gas loading.
+$\phi=1-\sum_{S\cup L}\xi_j/\rho_{i,j}(T)$, independent of gas loading.
 It is evaluated for every gas-bearing material. The pressure, intrinsic
 species density and gas fractions use this same pore state (§9.1).
 
@@ -3203,12 +3198,12 @@ admitted and adds nothing to $C_g$.
 
 ## 5.5 Thermal conductivity mixing
 
-The effective thermal conductivity is computed from the swelling-weighted
-volume fractions $v_j^{\text{solid}}$ (5.4) and the per-component conductivities
+The effective thermal conductivity is computed from the condensed
+volume fractions $v_j^{\text{solid}}$ (§5.1.2) and the per-component conductivities
 $k_j(T)$ under one of four mixing rules selected by `material.mixing.k.rule`:
 `effective_conductivity(ξ, T, material; skip_absent)` builds
-`v = mixing_volume_fractions(…)` (the (5.4) weights, with the void blend of
-§5.1.3) then dispatches to `_conductivity_from_v` (`effective_properties.jl`).
+`v = mixing_volume_fractions(…)` (those weights, with the void blend of
+§5.1.2) then dispatches to `_conductivity_from_v` (`effective_properties.jl`).
 The default rule is `WEIGHTED` with $\beta = 0.5$ (`materials.jl`).
 
 The state mapping evaluates `k_i = effective_conductivity(ξ⁺_i, T_trial,i,
@@ -3364,10 +3359,10 @@ the implementation:
 ## 5.6 Effective superficial gas transfer
 
 `effective_gas_transfer(ξ,T,material)` returns the lumped superficial
-coefficient $\Lambda$ [m²/s], including a declared endpoint blend. Only
-condensed $\gamma$-weighted bulk occupancies enter its normalized matrix
-weights. Participating condensed components require explicit $\lambda$; gases
-have no transfer-coefficient input. The coefficient multiplies the intrinsic
+coefficient $\Lambda$ [m²/s], including a declared endpoint blend. Only the
+bulk occupancies of the transport matrix (§9.3.1) enter its normalized matrix
+weights. Its components require explicit $\lambda$; gases have no
+transfer-coefficient input. The coefficient multiplies the intrinsic
 partial-pressure gradient, $J_j^D=-\Lambda M_j\nabla p_j/(RT)$.
 
 `PARALLEL`, `SERIES` and `WEIGHTED` use the exact matrix rules of §9.3.
@@ -3383,7 +3378,7 @@ A matrix-free limit requires an explicit endpoint and occupancy domain.
 `effective_permeability(ξ,T,material,φ)` returns $\kappa$ [m²]. Condensed
 component mixing uses the same matrix basis as $\Lambda$. The default
 `WEIGHTED` rule combines parallel and exact series values. Gases and
-zero-$\gamma$ constituents carry no matrix permeability weight.
+liquids outside the transport matrix carry no matrix permeability weight.
 
 ### 5.7.1 Component mixing
 
@@ -3430,9 +3425,9 @@ weights are a convex combination (non-negative, summing to one, in the blend as
 on either side of it), and every component's emissivity law is validated to lie
 in $[0, 1]$ over the property bracket when the component is built
 (`src/Materials/components.jl`), so the sum stays in $[0, 1]$ to round-off and
-its derivative has no kink. The solid basis is used for the same physical reason
-as conductivity (§5.1.3): the radiating surface is the solid/liquid material,
-not trapped non-swelling gas. Component emissivities are property functions
+its derivative has no kink. The condensed basis is used for the same physical reason
+as conductivity (§5.1.2): the radiating surface is the solid/liquid material,
+not the gas in its pores. Component emissivities are property functions
 ($\varepsilon$ accepts the same forms as $k$: number, linear tuple, callable, property
 function) with defaults of `0.9` for `SolidComponent`, `0.95` for
 `LiquidComponent` (condensed liquids are strong emitters — water ≈ 0.96), and
@@ -3892,16 +3887,17 @@ state; equal initial values alone are insufficient.
 | Conductivity | selectable mixing rule | blend of parallel and series limits | condensed volume average in the aligned 1D case | condensed volume average |
 | Permeability | component mixing or Carman–Kozeny | effective gas-transfer coefficient, not our permeability input | component mixing; optional Kozeny–Carman factor | no resolved pore-flow permeability |
 | Absorption input | mass-specific, m²/kg | mass-specific, m²/kg | per length, m⁻¹ | per length, m⁻¹ |
-| Match before comparing | mixing rule, permeability model and absorption units | blend weight and volume fractions for `WEIGHTED`; gas swelling factor | volume basis for `PARALLEL`; permeability caps; effective optical depth | condensed fractions for `PARALLEL`; pore-gas storage; optical depth |
+| Match before comparing | mixing rule, permeability model and absorption units | blend weight and volume fractions for `WEIGHTED`; mixture gas swelling factor | volume basis for `PARALLEL`; permeability caps; effective optical depth | condensed fractions for `PARALLEL`; pore-gas storage; optical depth |
 
 ### 5.15.1 ThermaKin2Ds
 
 TK Eqs. 2 and 17 include gas sensible storage. Eqs. 8–10 blend the
 volume-weighted parallel and series conductivity limits, corresponding to
 our `WEIGHTED` rule when the component laws, blend weight and volume
-fractions match. Its mixture gas swelling factor (Eqs. 3–4) is not generally
-our independent $\gamma_j$. In particular, `L SWELLING: 0` does not
-remove liquid volume from TK Eq. 3.
+fractions match. Its volume fractions include gas through the mixture gas
+swelling factor (Eqs. 3–4); ours weight the condensed components alone, which
+TK reproduces at zero gas swelling. Its liquid volume enters TK Eq. 3 whatever
+`L SWELLING` is, as ours does.
 
 TK Eq. 11 and Pyrolysis.jl use mass-specific component absorption
 $\alpha_j$ [m²/kg], giving
@@ -4020,7 +4016,7 @@ heat-capacity sum, the sensible enthalpies and the face conductivities — §7
 (Heat Conduction, Gas Convection, and Energy Assembly); the gas fluxes that
 consume $\lambda_{\text{eff}}$, $\lambda_j$, $\kappa_{\text{eff}}$, $\mu$, and $\varphi$ — §9 (Gas-Phase Mass Transport and
 Pressure); the radiation models that consume $\alpha_{\text{eff}}$, $\varepsilon_{\text{eff}}$ and $a_{\text{eff}}$ — §8
-(Thermal Radiation); the swelling/volume-change use of $\rho$, $\gamma_j$ — §10 (Volume
+(Thermal Radiation); the volume-change use of $\rho_j$ — §10 (Volume
 Change, Swelling, Intumescence, and Lateral Shrinkage); and the differentiation
 of every mixing rule — §15.
 
@@ -7161,26 +7157,26 @@ face state is developed in §9.6.
 
 During pyrolysis, virgin material can be replaced by char, liquid or void.
 The transport coefficients must follow the condensed matrix that remains.
-For each condensed component, define its weighted bulk occupancy and the
-normalized matrix weights by
+The transport matrix $\mathcal T$ is every solid component plus each liquid
+that declares a transfer coefficient $\lambda$ or a permeability that is not
+identically zero (`participates_in_transport`). For each of its components,
+define the bulk occupancy and the normalized matrix weights by
 
 $$
-q_j=\gamma_j\frac{\xi_j}{\rho_{b,j}(T)},
+q_j=\frac{\xi_j}{\rho_{b,j}(T)},
 \qquad
-q=\sum_{j\in S\cup L}q_j,
+q=\sum_{j\in\mathcal T}q_j,
 \qquad
 w_j=\frac{q_j}{q}\quad(q>0).
 $$
 
-Here $\rho_{b,j}$ is the component's bulk density and $\gamma_j$ its swelling
-factor. These weights describe participation in the transport matrix; they
-serve a different purpose from the skeletal occupancies that determine
-$\phi$ in §9.1. A condensed component with $\gamma_j=0$ has zero matrix
-weight but still occupies physical volume. Its matrix coefficients must be
-zero. Gas components have zero matrix weight for every value of their
-swelling factor and carry neither $\lambda$ nor $\kappa$.
+Here $\rho_{b,j}$ is the component's bulk density. These weights describe
+participation in the transport matrix; they serve a different purpose from
+the skeletal occupancies that determine $\phi$ in §9.1. A liquid outside
+$\mathcal T$ has zero matrix weight but still occupies physical volume. Gas
+components have zero matrix weight and carry neither $\lambda$ nor $\kappa$.
 
-For participating condensed components, the lumped model requires explicit
+For every component of $\mathcal T$, the lumped model requires explicit
 $\lambda$ data; $\kappa$ defaults to zero. For either coefficient $a_j$, the mixture
 rules are
 
@@ -7247,8 +7243,8 @@ and the tortuosity factor in $\eta$ are blended with their endpoint values.
 
 Endpoint data also declare `max_skeletal_occupancy`, the largest remaining
 condensed volume fraction they support. This check matters because $q=0$
-alone does not establish an empty pore path: a zero-$\gamma$ constituent may
-still occupy space. Without an endpoint, the supported domain is
+alone does not establish an empty pore path: a liquid outside the transport
+matrix may still occupy space. Without an endpoint, the supported domain is
 $q\geq hi$; reaching its lower boundary terminates integration with outcome
 `:matrix_exhausted`. The implementation of these mixture and endpoint rules
 is in `src/Properties/gas_transport.jl`.
@@ -7965,39 +7961,39 @@ The mesh-motion machinery (the node positions as differential unknowns, the bala
 
 Consider a material control volume $V$ whose condensed-phase matrix (solids and liquids) forms a skeleton through which gas can percolate. The matrix occupies a volume that is the sum of the partial volumes of each matrix-forming component. If component $j$ has bulk (pure-phase) density $\rho_j$ and mass concentration $\xi_j$ (kg of $j$ per m³ of bulk material, see §2), then the mass of $j$ in the cell is $m_j=\xi_j V$, and the partial (pure-phase) volume it occupies is $m_j/\rho_j=\xi_j V/\rho_j$.
 
-The total matrix volume is the sum of these partial volumes weighted by how much each phase contributes to the *skeleton* that the mesh must track. Introduce the dimensionless **swelling factor** $\gamma_j\in[0,1]$ to encode that weighting:
+The total matrix volume is the sum of the partial volumes of the condensed components, the *skeleton* that the mesh must track; a gas occupies the pores the skeleton leaves and claims none:
 
 $$
-V \;=\; \sum_{j=1}^{N_C} \gamma_j \,\frac{m_j}{\rho_j}
-\;=\; V\sum_{j=1}^{N_C} \gamma_j \,\frac{\xi_j}{\rho_j}.
+V \;=\; \sum_{j\in S\cup L} \frac{m_j}{\rho_j}
+\;=\; V\sum_{j\in S\cup L} \frac{\xi_j}{\rho_j}.
 \tag{10.1}
 $$
 
-Here $\gamma_j=1$ means component $j$ fully claims pure-phase volume in the skeleton (a normal solid: when it depletes, the matrix shrinks), $\gamma_j=0$ means it claims none (a normal gas: it escapes through the pores and does not set the matrix dimensions), and $\gamma_j\in(0,1)$ is a partial claim (an intumescent gas that is partly trapped and inflates the char). Equation (10.1) is the constitutive *definition* of the matrix volume in terms of composition; it is exact for an additive-volume mixture.
+A solid or liquid claims its pure-phase volume in the skeleton (when it depletes, the matrix shrinks); a gas escapes through the pores and does not set the matrix dimensions. Equation (10.1) is the constitutive *definition* of the matrix volume in terms of composition; it is exact for an additive-volume mixture.
 
-Differentiate (10.1) with respect to time at a fixed material point, holding $\rho_j$ as a (slowly varying) property and the $\gamma_j$ as constants:
+Differentiate (10.1) with respect to time at a fixed material point, holding $\rho_j$ as a (slowly varying) property:
 
 $$
-\frac{dV}{dt} \;=\; V\sum_{j=1}^{N_C}\gamma_j\,\frac{1}{\rho_j}\frac{d\xi_j}{dt}
-\;+\; V\sum_{j=1}^{N_C}\gamma_j\,\xi_j\,\frac{d}{dt}\!\left(\frac{1}{\rho_j}\right)
-\;+\; \frac{dV}{dt}\sum_{j=1}^{N_C}\gamma_j\frac{\xi_j}{\rho_j}.
+\frac{dV}{dt} \;=\; V\sum_{j\in S\cup L}\frac{1}{\rho_j}\frac{d\xi_j}{dt}
+\;+\; V\sum_{j\in S\cup L}\xi_j\,\frac{d}{dt}\!\left(\frac{1}{\rho_j}\right)
+\;+\; \frac{dV}{dt}\sum_{j\in S\cup L}\frac{\xi_j}{\rho_j}.
 $$
 
-Using (10.1), $\sum_j\gamma_j\xi_j/\rho_j=1$, so the last term reproduces $dV/dt$. The standard reduction — the one the code adopts — is to *neglect the density-rate term* $\xi_j\,d(1/\rho_j)/dt$ (thermal expansion of the pure phases is small compared with reaction-driven mass exchange) and to read off the **relative volume change rate** — the volumetric strain rate — directly from the mass-source term:
+Using (10.1), $\sum_{j\in S\cup L}\xi_j/\rho_j=1$, so the last term reproduces $dV/dt$. The standard reduction — the one the code adopts — is to *neglect the density-rate term* $\xi_j\,d(1/\rho_j)/dt$ (thermal expansion of the pure phases is small compared with reaction-driven mass exchange) and to read off the **relative volume change rate** — the volumetric strain rate — directly from the mass-source term:
 
 $$
 \boxed{\;\theta \;\equiv\; \frac{1}{V}\frac{dV}{dt}
-\;=\; \sum_{j=1}^{N_C}\gamma_j\,\frac{1}{\rho_j(T)}\,\frac{d\xi_j}{dt}\;}
+\;=\; \sum_{j\in S\cup L}\frac{1}{\rho_j(T)}\,\frac{d\xi_j}{dt}\;}
 \tag{10.2}
 $$
 
-with SI units of $\mathrm{s^{-1}}$. The interpretation is transparent: a unit decrease in the mass concentration of solid $j$ ($d\xi_j/dt<0$) frees a pure-phase volume of $1/\rho_j$ per unit mass, contracting the matrix ($\theta<0$); a gas that does not contribute ($\gamma_g=0$) is invisible to $\theta$ regardless of how fast it is produced.
+with SI units of $\mathrm{s^{-1}}$. The interpretation is transparent: a unit decrease in the mass concentration of solid $j$ ($d\xi_j/dt<0$) frees a pure-phase volume of $1/\rho_j$ per unit mass, contracting the matrix ($\theta<0$); a product of lower bulk density claims more volume than its reactant frees, expanding it; a gas is invisible to $\theta$ regardless of how fast it is produced.
 
 > **Implementation note.** $\theta$ is computed by `volume_change_rate(dξ, T, material)` in `src/Physics/volume_change.jl` (inline methods for $N_C\in\{1,2,3\}$ and a `@generated` method for $N_C>3$, so the loop over the heterogeneous component tuple allocates nothing). The loop is
 > ```julia
-> θ += γⱼ * dξ[j] / ρⱼ        # ρⱼ = comps[j].density(T)
+> θ += dξ[j] / ρⱼ        # ρⱼ = comps[j].density(T)
 > ```
-> evaluated **only when $\gamma_j > 0$**: components with $\gamma_j=0$ are skipped, so no density is evaluated and the term is exactly zero. There is **no minus sign** in the code: the sign of $\theta$ is carried entirely by the sign of $d\xi_j/dt$, which is negative for a depleting reactant (the species source consumes the reactant with coefficient $-1$; see §6.5). The density $\rho_j(T)$ is the *bulk* density property evaluated at the cell's trial temperature $T_{\mathrm{trial}}$ (the cell temperature smoothly clamped into the property bracket $[200, 3000]$ K, the identity on every physical state) — not the intrinsic/skeletal density $\rho_{i,j}$, which is reserved for the porosity (§5.3 and §2, overload A7).
+> evaluated **only for the condensed components**: the test `is_gas` resolves from the component type at compile time, so a gas term is folded away and no gas density is evaluated. There is **no minus sign** in the code: the sign of $\theta$ is carried entirely by the sign of $d\xi_j/dt$, which is negative for a depleting reactant (the species source consumes the reactant with coefficient $-1$; see §6.5). The density $\rho_j(T)$ is the *bulk* density property evaluated at the cell's trial temperature $T_{\mathrm{trial}}$ (the cell temperature smoothly clamped into the property bracket $[200, 3000]$ K, the identity on every physical state) — not the intrinsic/skeletal density $\rho_{i,j}$, which is reserved for the porosity (§5.3 and §2, overload A7).
 
 ### 10.1.2 What $d\xi_j/dt$ is in (10.2)
 
@@ -8018,26 +8014,24 @@ $$
 
 ---
 
-## 10.2 Swelling-factor semantics
+## 10.2 Condensed-volume semantics
 
-The swelling factor $\gamma_j$ is a per-component scalar field on every `AbstractComponent`. Its defaults encode the standard physics:
+Each condensed component holds the volume $\xi_j/\rho_j$ of its bulk density, and only condensed components hold volume:
 
-| Phase | Default $\gamma$ | Meaning | Effect on $\theta$ |
-|---|---|---|---|
-| Solid | $1.0$ | Skeleton-forming; depletion frees pure-phase volume | $\theta<0$ when solid is consumed |
-| Liquid | $0.0$ | Fills pore space; default treats it as volume-neutral | none unless overridden |
-| Gas | $0.0$ | Escapes through pores; does not set matrix dimensions | none |
+| Phase | Volume held | Effect on $\theta$ |
+|---|---|---|
+| Solid | $\xi_j/\rho_j$; depletion frees pure-phase volume | $\theta<0$ when solid is consumed |
+| Liquid | $\xi_j/\rho_j$, like a solid | $\theta<0$ when it evaporates or reacts away |
+| Gas | none; it escapes through the pores and does not set matrix dimensions | none |
 
-> **Implementation note.** Defaults are set in the convenience constructors of `src/Materials/components.jl`: `SolidComponent(...; γ::Real = 1.0, ...)`, `GaseousComponent(...; γ::Real = 0.0, ...)`, and `LiquidComponent(...; γ::Real = 0.0, ...)`. The field is `swelling_factor::Float64` on each struct, validated to $\gamma\in[0,1]$ at construction (an `ArgumentError` names the component otherwise). The factor has one meaning everywhere: the strain rate (10.2), the condensed transport weights and the thermal mixing volume fractions that weight the conductivity and the surface emissivity (§5.1.3) all use the same $\gamma_j\,\xi_j/\rho_j$ weighting.
+> **Implementation note.** The rule is the phase type: `volume_change_rate` skips every `GaseousComponent` and uses the bulk `density` of each `SolidComponent` and `LiquidComponent`. The same bulk occupancy $\xi_j/\rho_j$ of every condensed component weights the conductivity, the surface emissivity and the absorptivity (`condensed_volume_fractions`, §5.1.2); the transport matrix uses it for the solids and the liquids that declare $\lambda$ or $\kappa$ (§9.3.1).
 
 **Modeling guidance.**
 
-- **Non-charring shrinkage (e.g. a polymer converting to gas):** keep the virgin solid at $\gamma=1$ and the gas product at $\gamma=0$. As the solid converts to gas, $\theta<0$ and the column recedes — the classic shrinking-slab picture.
-- **Zero-swelling char:** $\gamma=0$ removes the char's direct strain and its matrix property weight. Its skeletal occupancy, mass and heat storage remain. Such a phase must have zero transport coefficients; a state with no γ-weighted matrix still needs a declared endpoint whose skeletal-occupancy domain includes that state. This choice does not make residual char an unobstructed void.
-
-- **Intumescence (gas-producing expansion):** assign the trapped/blowing gas a swelling factor $\gamma_g\in(0,1]$. A positive $d\xi_g/dt$ (gas being produced) with $\gamma_g>0$ contributes $\theta>0$, i.e. the matrix *inflates*. Combined with a swelling lateral law (§10.5) this reproduces the order-of-magnitude expansion of intumescent coatings. Axial intumescence (through-thickness swell) is captured by $\theta>0$ in (10.2); radial intumescence (lateral swell of the column) is captured by $\mathrm{law}(\bar\chi)>1$ in (10.8). A factor $\gamma>1$ is not representable.
-
-Because $\gamma_j$ is a free per-component parameter, the model spans the full range from pure shrinkage ($\gamma=1$ solid, $\gamma=0$ gas) through volume-neutral ($\gamma=0$ everywhere) to intumescent ($\gamma_g>0$).
+- **Non-charring shrinkage (e.g. a polymer converting to gas):** as the solid converts to gas, $\theta<0$ and the column recedes — the classic shrinking-slab picture.
+- **Charring:** a char of bulk density $\rho_c$ produced with yield $y_c$ from a virgin of bulk density $\rho_v$ leaves $V_f/V_0=y_c\rho_v/\rho_c$ of the volume. A char that keeps the virgin volume has $\rho_c=y_c\rho_v$; a denser char shrinks the column.
+- **Drying:** bound moisture is a liquid at the density of water, so the wood shrinks by the volume of the water it loses, and the water conducts and emits by its volume share while it remains.
+- **Intumescence (expansion):** give the condensed product a bulk density below its yield times the reactant's, $\rho_p<y_p\rho_A$ — a light char or foam. Its formation contributes $\theta>0$, i.e. the matrix *inflates*. Combined with a swelling lateral law (§10.5) this reproduces the order-of-magnitude expansion of intumescent coatings. Axial intumescence (through-thickness swell) is captured by $\theta>0$ in (10.2); radial intumescence (lateral swell of the column) is captured by $\mathrm{law}(\bar\chi)>1$ in (10.8).
 
 ---
 
@@ -8084,11 +8078,13 @@ $$
 
 > **Implementation note.** `setup` (`src/Integration/setup.jl`) evaluates the initial fields at the cell centres (§12.8), forms the initial inventories $m_{j,i}(0)=\xi_{j,i}(0)V_i(0)$, sums them over the components for which `is_solid` is true, and writes the result into the second history row of the initial state; $G_i$ starts at zero. The sum is over **solids only** — liquids (e.g. bound moisture) are *not* counted in the denominator, even though they are matrix-forming. This is deliberate: $\chi$ is a *dry-decomposition* progress variable, and water mass is excluded from both numerator (dry gas only) and denominator (solids only). The row of $m_{\mathrm{dry},i}$ has no source; it changes only through the relative fluxes, when the mesh moves relative to the solid (§10.3.4), and at a deactivation event, which adds the dead cell's pair to the receiver's (Chapter 14). Both conserve the column total $M_{\mathrm{dry}}=\sum_i m_{\mathrm{dry},i}$ over the live cells, which is therefore fixed for the whole solve (until the last live cell goes with no receiver, taking its pair with it).
 
-### 10.3.3 Dry-gas identification and the water-vapor caveat
+### 10.3.3 Dry-gas identification by lineage
 
-The index set $\{j\in\mathrm{dry\ gas}\}$ collects all GAS-phase components *except* water vapor / moisture-derived gases. Phase is a compile-time (type-level) property, but the water-vapor exclusion is done by **name matching**:
+The index set $\{j\in\mathrm{dry\ gas}\}$ collects the gases the solids give off through the reaction graph. Its *lineage* $\mathcal L$ starts with every solid component; until $\mathcal L$ stops growing, each reaction with a reactant in $\mathcal L$ adds its products of positive yield. The dry gases are the gases in $\mathcal L$. Water that the wood releases on decomposition is therefore dry gas whatever its name, while the vapour of evaporating moisture is not (its reactant, a liquid outside $\mathcal L$, never enters), and neither is a background gas no reaction produces. A product reached through an intermediate liquid (solid → melt → monomer) belongs to $\mathcal L$.
 
-> **Implementation note.** `dry_pyrolysis_gas_indices(material)` (`src/Materials/materials.jl`) recurses over the component tuple at compile time (`_collect_dry_pyrolysis_gas_indices`) and includes index $j$ iff `is_gas(comp) && !_is_water_vapor_name(comp.name)`. The name filter `_is_water_vapor_name` is a **substring match**: a name is treated as water vapor if it contains `"H2O"` (case-sensitive), if its lowercase form contains `"water"`, or if its lowercase form is exactly `"h2o"`. `setup` turns the result into the flag tuple `dry_gas::NTuple{NC,Bool}` of the `LateralShrinkage` it builds, once. **Caveat:** because identification is by substring, a dry-gas species accidentally named (say) `:water_gas` would be misclassified as moisture and excluded from $\chi$. Users modeling moisture must name the water-vapor component so it matches (e.g. `:water_vapor` or `:H2O`), and must avoid those substrings in genuine dry-gas names.
+A gas in $\mathcal L$ that a reaction with no reactant in $\mathcal L$ also produces would make $G_i$ ambiguous; the set-up refuses it with an `ArgumentError` that names the gas and both groups of reactions, and the remedy is one species per lineage.
+
+> **Implementation note.** `dry_gas_flags(material)` (`src/Materials/materials.jl`) iterates the lineage over the reactions' `(index, yield)` product pairs to a fixed point and returns the flags as an `NTuple{NC,Bool}`. Its only caller is the `LateralShrinkage` constructor (`src/Closures/lateral.jl`), which `setup` calls once when the material has a lateral law; the flags become its field `dry_gas`. A material without a lateral law never evaluates the rule.
 
 ### 10.3.4 The history pair on a moving mesh and at deactivation
 
@@ -8375,7 +8371,7 @@ $$
 \tag{10.18}
 $$
 
-with the enthalpy inventory $H_i$ in place of $T_i$ under `energy_state = :enthalpy` and a face intensity appended to every node block under `BEER_LAMBERT`. The total length is $N_{\mathrm{state}} = n(N_C+3) + 2\,n_{\mathrm{nodes}} + 2$ (plus $n_{\mathrm{nodes}}$ intensities under `BEER_LAMBERT`). For $N_C=2$ and $n=5$ (so $n_{\mathrm{nodes}}=6$) this is $5\cdot5+6\cdot2+2=39$, which `test/closures/test_variable_cross_section.jl` asserts as `5 * (1 + 2 + 2) + 6 * 2 + 2`; the same problem without a lateral law has $5\cdot3+6\cdot2=27$, asserted as `5 * (1 + 2) + 6 * 2`. The solve of §10.5.2 ($N_C=2$, $n=10$) has 74 unknowns. A fixed mesh carries none of these rows: `setup` refuses a lateral law without `use_ale = true`.
+with the enthalpy inventory $H_i$ in place of $T_i$ under `energy_state = :enthalpy` and a face intensity appended to every node block under `BEER_LAMBERT`. The total length is $N_{\mathrm{state}} = n(N_C+3) + 2\,n_{\mathrm{nodes}} + 2$ (plus $n_{\mathrm{nodes}}$ intensities under `BEER_LAMBERT`). For $N_C=3$ and $n=5$ (so $n_{\mathrm{nodes}}=6$) this is $5\cdot6+6\cdot2+2=44$, which `test/closures/test_variable_cross_section.jl` asserts as `5 * (1 + 3 + 2) + 6 * 2 + 2`; the same problem without a lateral law has $5\cdot4+6\cdot2=32$, asserted as `5 * (1 + 3) + 6 * 2`. The solve of §10.5.2 ($N_C=2$, $n=10$) has 74 unknowns. A fixed mesh carries none of these rows: `setup` refuses a lateral law without `use_ale = true`.
 
 The history rows are differential (ones on the mass matrix), the area and lateral-rate rows algebraic (zeros). Their absolute tolerances are the cell's mass tolerance $r_{\mathrm{tol}}\,\varepsilon_m\,m^s_i(0)$ for both members of the pair, $r_{\mathrm{tol}}A_0$ for the area, and for the lateral rate the smallest node-velocity tolerance divided by the initial thickness (`abstol_vector`, `src/States/tolerances.jl`). The rows are reached through `history_index(layout, i, k)`, `area_index(layout)` and `lateral_rate_index(layout)`, and their presence through `has_history(layout)` and `has_chi(layout)` (`src/States/layout.jl`). The colored Jacobian writes the two dense cross-section rows after its colored pass, through the six column sums (`LateralRows`, §15.9).
 
@@ -8383,7 +8379,7 @@ The history rows are differential (ones on the mass matrix), the area and latera
 
 ## 10.10 Worked sign check
 
-To verify the sign conventions end to end, consider a single charring step $\text{virgin} \to \nu_{\text{char}}\cdot\text{char} + \nu_{\text{gas}}\cdot\text{gas}$ in one cell, with $N_C=3$ ordered (virgin, char, gas), swelling factors $\gamma=(1,1,0)$, and reaction rate $r>0$ (kg·m⁻³·s⁻¹). The reaction species sources are (from §6.5: reactant $-1$, products $+\nu$):
+To verify the sign conventions end to end, consider a single charring step $\text{virgin} \to \nu_{\text{char}}\cdot\text{char} + \nu_{\text{gas}}\cdot\text{gas}$ in one cell, with $N_C=3$ ordered (virgin, char, gas) and reaction rate $r>0$ (kg·m⁻³·s⁻¹). The reaction species sources are (from §6.5: reactant $-1$, products $+\nu$):
 
 $$
 \left.\frac{d\xi_{\mathrm{virgin}}}{dt}\right|_{\mathrm{rxn}}=-r,
@@ -8400,18 +8396,18 @@ $$
 = r\!\left(\frac{\nu_{\mathrm{char}}}{\rho_{\mathrm{char}}} - \frac{1}{\rho_{\mathrm{virgin}}}\right).
 $$
 
-Char is typically far less dense than virgin ($\rho_{\mathrm{char}}\ll\rho_{\mathrm{virgin}}$) but is produced in smaller mass ($\nu_{\mathrm{char}}<1$). The sign of $\theta$ is set by the competition $\nu_{\mathrm{char}}/\rho_{\mathrm{char}}$ vs. $1/\rho_{\mathrm{virgin}}$: for a high-char-yield, very-low-density char the matrix can *swell* ($\theta>0$, the char occupies more pure-phase volume than the virgin it replaced); for a low-char-yield, dense char it *shrinks* ($\theta<0$). The gas, with $\gamma=0$, never contributes — it escapes through the pores. With $\theta<0$ the char mass $m_{\mathrm{char}}$, a state, is unchanged by the contraction while $V$ falls, so the char concentration $\xi_{\mathrm{char}}=m_{\mathrm{char}}/V$ rises at the rate $-\xi_{\mathrm{char}}\theta>0$ of (10.15), conserving char mass. Through the balance rows (10.13), $\theta<0$ in every cell gives a downward solid velocity ($w<0$ at every node above the bottom), so the surface node recedes — material burns away from the top while the substrate stays pinned.
+Char is typically far less dense than virgin ($\rho_{\mathrm{char}}\ll\rho_{\mathrm{virgin}}$) but is produced in smaller mass ($\nu_{\mathrm{char}}<1$). The sign of $\theta$ is set by the competition $\nu_{\mathrm{char}}/\rho_{\mathrm{char}}$ vs. $1/\rho_{\mathrm{virgin}}$: for a high-char-yield, very-low-density char the matrix can *swell* ($\theta>0$, the char occupies more pure-phase volume than the virgin it replaced); for a low-char-yield, dense char it *shrinks* ($\theta<0$). The gas never contributes — it escapes through the pores. With $\theta<0$ the char mass $m_{\mathrm{char}}$, a state, is unchanged by the contraction while $V$ falls, so the char concentration $\xi_{\mathrm{char}}=m_{\mathrm{char}}/V$ rises at the rate $-\xi_{\mathrm{char}}\theta>0$ of (10.15), conserving char mass. Through the balance rows (10.13), $\theta<0$ in every cell gives a downward solid velocity ($w<0$ at every node above the bottom), so the surface node recedes — material burns away from the top while the substrate stays pinned.
 
 **An exact endpoint.** Because the strain rate is linear in the reaction rate, the volume change of a cell under a single reaction $A\to\sum_j y_jB_j$ is linear in the converted mass and path-independent: with $r\,V\,dt=-dm_A$,
 
 $$
-dV = \Big(\frac{\gamma_A}{\rho_A}-\sum_j\frac{y_j\gamma_j}{\rho_j}\Big)\,dm_A ,
+dV = \Big(\frac{1}{\rho_A}-\sum_{j\in S\cup L}\frac{y_j}{\rho_j}\Big)\,dm_A ,
 \qquad
-\frac{V_f}{V_0} = \sum_j y_j\gamma_j\frac{\rho_A}{\rho_j}
-\quad(\gamma_A=1,\ \xi_{A}(0)=\rho_A),
+\frac{V_f}{V_0} = \sum_{j\in S\cup L} y_j\frac{\rho_A}{\rho_j}
+\quad(\xi_{A}(0)=\rho_A),
 $$
 
-whatever the temperature history. The verification case V-CPL-03 asserts this endpoint for seven permutations (a swelling product of half the reactant density, $V_f/V_0=2$; a shrinking one, $1/2$; a neutral one, $1$; char plus gas, $0.3$; mass loss at constant volume, $1$; a partial swelling factor, $1/2$; and the lateral law of §10.5.2, $A_f/A_0=0.75$), each to $3\times10^{-6}$, together with total-mass conservation.
+whatever the temperature history. The verification case V-CPL-03 asserts this endpoint for six permutations (a swelling product of half the reactant density, $V_f/V_0=2$; a shrinking one, $1/2$; a neutral one, $1$; char plus gas, $0.3$; mass loss at constant volume, $1$; and the lateral law of §10.5.2, $A_f/A_0=0.75$), each to $3\times10^{-6}$, together with total-mass conservation.
 
 ---
 
@@ -8424,9 +8420,9 @@ below use §1.6.5's versions; §11.9 separately compares their mesh updates.
 
 | Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
 |:---|:---|:---|:---|:---|
-| Volume law | reaction-volume sum with component weights | mixture density with gas swelling | reaction yield and condensed bulk density | component-density sum with shrink/swell constraints |
+| Volume law | reaction-volume sum over condensed bulk densities | mixture density with gas swelling | reaction yield and condensed bulk density | component-density sum with shrink/swell constraints |
 | Geometry update | coupled node positions; optional scalar area | changing elements with size adjustment | mass/density volume reconstruction | thickness/coordinate update and remeshing |
-| Match before comparing | component weights and lateral law | full density law | yields, densities and deformation mode | density ratios and shrink/swell flags |
+| Match before comparing | condensed bulk densities and lateral law | full density law | yields, densities and deformation mode | density ratios and shrink/swell flags |
 
 ### 10.11.1 ThermaKin2Ds
 
@@ -8442,8 +8438,9 @@ replaced by $-\xi_j\rho^{-1}\partial_t\rho$. The reference plane is
 stationary. TK §3 describes changing element thicknesses and conservative
 splitting/combining, not a permanently fixed mesh. Its density law includes
 solid and liquid volumes and a mixture-dependent gas swelling factor
-(Eqs. 3–4). Our reaction-only $\sum_j\gamma_j\omega_j/\rho_j$ closure
-does not include all density-change effects and is not a general equivalent.
+(Eqs. 3–4). Our reaction-only $\sum_{j\in S\cup L}\omega_j/\rho_j$ closure
+leaves out the gas volume and other density-change effects and is not a
+general equivalent; it matches TK's condensed volumes at zero gas swelling.
 TK restricts deformation to its primary coordinate; our empirical scalar
 lateral-area law is a separate constitutive choice.
 
@@ -8462,12 +8459,12 @@ bulk density (GP Eqs. 3, 56–57; §6.5). The yield is not a per-species
 shrink/non-shrink/swell flag. $\chi_k$ is not the conversion variable
 $\alpha_A$ and neither is our dry-gas progress $\chi$.
 
-For constant densities, fixed area, no additional volume contributions and
-condensed $\gamma_j=1$, our volume change for $A\to y_BB+\text{gas}$
-is proportional to $y_B/\rho_B-1/\rho_A$. Matching $y_B=\mathrm{SF}_k$
-can match this restricted Gpyro V2 volume balance. There is no universal
-$\chi_k\leftrightarrow\gamma_j$ conversion. Our lateral law is not the
-analogue of Gpyro V2's axial shrinkage law.
+For constant densities, fixed area and no additional volume contributions,
+our volume change for $A\to y_BB+\text{gas}$ is proportional to
+$y_B/\rho_B-1/\rho_A$. Matching $y_B=\mathrm{SF}_k$ can match this
+restricted Gpyro V2 volume balance. Its $\chi_k$ has no counterpart in our
+volume law. Our lateral law is not the analogue of Gpyro V2's axial
+shrinkage law.
 
 ### 10.11.3 FDS
 
@@ -8489,7 +8486,7 @@ That expression does **not** describe this source path: in particular, the
 source does not select the most-expanding component as the swelling factor.
 This comparison follows the [implemented regrid calculation](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2388-L2455).
 The V-CPL-03 endpoint examples are restricted checks of matched volume
-balances, not proof that every FDS material maps to our $\gamma_j$.
+balances, not proof that every FDS material maps to our volume law.
 
 ### 10.11.4 Sources and numerical evidence
 
@@ -8523,7 +8520,7 @@ The following limitations are documented in the source and should guide use and 
 
 6. **Interaction with deactivation.** A deactivated cell's history pair goes to the receiver (§10.3.4, §14.3.3), which keeps $\bar\chi$ and $A$ continuous across the event; the conversion is a column quantity, so how the pair of a burned-out surface cell is attributed among the live cells does not matter to the area. The last live cell, lost with no receiver, takes its pair with it.
 
-7. **Substring-based water-vapor exclusion.** The dry-gas index set relies on a name substring match (§10.3.3), which is fragile to naming. A type-level or explicit-flag mechanism for "this gas is moisture-derived" would be more robust than the `"H2O"`/`"water"` heuristic.
+7. **Dry gas by lineage only.** The dry-gas set is the gas the solids give off through the reaction graph (§10.3.3). A species that both a solid lineage and another reactant produce (decomposition water and moisture vapour as one species) is refused and must be split, and a gas produced from a solid that the user means to treat as moisture-derived cannot be excluded except by its reaction graph.
 
 8. **One lateral strain for the whole column.** The axial (node-motion) and lateral (cross-section) channels are rows of one DAE, solved together, but the lateral channel is a single column-global $\theta_A$ subtracted from every cell's $\theta_i$. A cross-section that varies with depth, or lateral motion that differs between layers, would need a multi-dimensional model; the variable cross section is a line's (planar coordinates, one-dimensional mesh).
 
@@ -8848,21 +8845,19 @@ section, and why the masses as states need no dilation term.
 For a fixed-mass control volume of the deforming matrix, the relative volume change
 rate (volumetric strain rate, dilation) is obtained from the mixture continuity
 relation by summing the volume freed or created per unit mass change of each
-matrix-contributing component:
+condensed component:
 $$
 \boxed{\;
 \theta \;\equiv\; \frac{1}{V}\frac{dV}{dt}
-\;=\; \sum_{j=1}^{N_C} \gamma_j\,\frac{1}{\rho_j}\,S_j
+\;=\; \sum_{j\in S\cup L} \frac{1}{\rho_j}\,S_j
 \;}
 \tag{11.7}
 $$
 (`volume_change_rate`, `src/Physics/volume_change.jl`). Here:
 
-- $\gamma_j$ is the **swelling factor** of component $j$ (component field
-  `swelling_factor`): $\gamma=1$ for solids by default (when a solid depletes, the
-  matrix loses that volume), $\gamma=0$ for gases by default (escaping gas does not
-  change the skeleton volume), and $\gamma\in[0,1]$ for partial contributors. Only
-  components with $\gamma_j>0$ enter the sum.
+- the sum runs over the condensed (solid and liquid) components: when one
+  depletes, the matrix loses its volume; a gas never enters (escaping gas does not
+  change the skeleton volume).
 - $\rho_j(T)$ is the **bulk** (pure-phase) density of component $j$, evaluated at the
   cell's trial temperature through the property function `comp.density(T)`.
 - $S_j$ is the **reaction mass source** of component $j$ per unit volume. The
@@ -8870,15 +8865,15 @@ $$
   (\text{reaction mass source})_{j,i}/V_i$, after every kernel has run and before any
   external source is added (`closure_rows!`), so the strain rate is the reactions'
   alone: a manufactured source of a verification run does not move the mesh. It is
-  negative for a consumed solid and positive for a produced char or gas.
+  negative for a consumed solid and positive for a produced char.
 
 **Physical reading and sign.** When a solid of density $\rho_j$ is consumed
-($S_j<0$, $\gamma_j=1$), the term $\gamma_j S_j/\rho_j<0$, so $\theta<0$: the cell
-shrinks. A net char-producing or swelling reaction with the appropriate $\gamma$ can
-yield $\theta>0$ (expansion). Note that (11.7) is the *swelling-factor-weighted*
+($S_j<0$), the term $S_j/\rho_j<0$, so $\theta<0$: the cell shrinks. A reaction
+whose condensed product is lighter than its yield times the reactant's density
+yields $\theta>0$ (expansion). Note that (11.7) is the per-component condensed
 form; the loose statement "$\theta = -(\sum_j S_j)/\rho_{\text{total}}$" is only
-correct in the special case of a single solid with $\gamma=1$ and constant $\rho$.
-The swelling-factor semantics and the endpoints they imply are developed in
+correct in the special case of a single solid with constant $\rho$. The
+condensed-volume semantics and the endpoints they imply are developed in
 Chapter 10.
 
 ### 11.3.2 The discrete volume balance and the balance rows
@@ -9665,7 +9660,7 @@ The principal limitations and open issues are:
 
 ### Cross-references
 
-- The volumetric strain rate $\theta$, the swelling factor $\gamma_j$, the lateral
+- The volumetric strain rate $\theta$, the condensed-volume semantics, the lateral
   shrinkage law and the conversion-history pair are developed in **Chapter 10, Volume
   Change & Lateral Shrinkage**.
 - The energy assembly, $\rho c_p^{\text{eff}}$ (every component), the gas enthalpy flux
@@ -11745,8 +11740,8 @@ mesh:
 
 - **Moving mesh** (`use_ale = true`). The balance rows hold the node velocities
   to every cell's volume balance (§11), so a cell whose solid gasifies into a
-  gas that takes no matrix volume (swelling factor $\gamma=0$, §10) shrinks
-  with its condensed volume: $\Delta z_i\to 0$.
+  gas, which takes no matrix volume (§10), shrinks with its condensed volume:
+  $\Delta z_i\to 0$.
 - **Fixed mesh.** The cell keeps its volume and empties; its concentrations
   fall instead of its thickness.
 
@@ -12302,8 +12297,8 @@ is the surface balance's at the exposed face. The beam transmitted through a
 void column lands on the first condensed cell below it, which can return that
 heat upward only by conduction through the gas, so continued past its first
 void the deck would heat the substrate beneath it far outside the property
-bracket. On a moving mesh the configuration rarely arises: with a
-non-swelling gas an emptying cell collapses, and the correction brings the
+bracket. On a moving mesh the configuration rarely arises: an emptying cell
+collapses, and the correction brings the
 layer to the threshold together. The same outcome ends a moving-mesh solve
 whose crossing cell lies inward of a cell above the band (§14.2.3).
 
@@ -15927,7 +15922,7 @@ Deactivation (§14.3) is a discrete event: cells whose condensed mass falls belo
 threshold $\varepsilon_m$ of their reference mass leave the system, their inventories
 transferred to the live cell beneath. V-BO-04 checks it against an exact solution that
 passes through the event. An adiabatic 10 mm slab at a uniform 600 K carries one
-zero-order reaction solid → gas with no heat of reaction and $\gamma_\text{gas}=0$, on
+zero-order reaction solid → gas with no heat of reaction, on
 40 cells of a moving mesh. The temperature stays at $T_0$ exactly (no source, no
 gradient), so the volumetric rate $r$ is constant and every cell loses the same
 fraction $r/\rho_s$ of its volume per unit time. On a mesh that rides the solid the

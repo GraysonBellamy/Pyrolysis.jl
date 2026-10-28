@@ -48,8 +48,8 @@ mesh:
 
 - **Moving mesh** (`use_ale = true`). The balance rows hold the node velocities
   to every cell's volume balance (§11), so a cell whose solid gasifies into a
-  gas that takes no matrix volume (swelling factor $\gamma=0$, §10) shrinks
-  with its condensed volume: $\Delta z_i\to 0$.
+  gas, which takes no matrix volume (§10), shrinks with its condensed volume:
+  $\Delta z_i\to 0$.
 - **Fixed mesh.** The cell keeps its volume and empties; its concentrations
   fall instead of its thickness.
 
@@ -605,8 +605,8 @@ is the surface balance's at the exposed face. The beam transmitted through a
 void column lands on the first condensed cell below it, which can return that
 heat upward only by conduction through the gas, so continued past its first
 void the deck would heat the substrate beneath it far outside the property
-bracket. On a moving mesh the configuration rarely arises: with a
-non-swelling gas an emptying cell collapses, and the correction brings the
+bracket. On a moving mesh the configuration rarely arises: an emptying cell
+collapses, and the correction brings the
 layer to the threshold together. The same outcome ends a moving-mesh solve
 whose crossing cell lies inward of a cell above the band (§14.2.3).
 

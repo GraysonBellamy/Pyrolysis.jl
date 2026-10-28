@@ -567,7 +567,7 @@ Deactivation (§14.3) is a discrete event: cells whose condensed mass falls belo
 threshold $\varepsilon_m$ of their reference mass leave the system, their inventories
 transferred to the live cell beneath. V-BO-04 checks it against an exact solution that
 passes through the event. An adiabatic 10 mm slab at a uniform 600 K carries one
-zero-order reaction solid → gas with no heat of reaction and $\gamma_\text{gas}=0$, on
+zero-order reaction solid → gas with no heat of reaction, on
 40 cells of a moving mesh. The temperature stays at $T_0$ exactly (no source, no
 gradient), so the volumetric rate $r$ is constant and every cell loses the same
 fraction $r/\rho_s$ of its volume per unit time. On a mesh that rides the solid the

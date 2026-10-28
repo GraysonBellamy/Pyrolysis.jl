@@ -344,8 +344,8 @@ A(t) = A₀ · law(χ̄),          χ̄ = Σ_i G_i / Σ_i M_i
 ```
 
 with `A₀` the mesh's `cross_section`, `G_i` the cumulative dry pyrolysis gas cell `i` has
-produced (every gas the reactions make except water vapour) and `M_i` the cell's initial dry
-solid mass. The law is not a mesh setting: it is the material's `lateral_shrinkage_law`
+produced (the gases the solids give off through the reactions, §7.6.1) and `M_i` the cell's
+initial dry solid mass. The law is not a mesh setting: it is the material's `lateral_shrinkage_law`
 (Chapter 7, §7.6), and `setup` adds the cross-section rows whenever the material carries one.
 The law must be a smooth function (its derivative is taken by automatic differentiation),
 positive and finite on `[−0.001, 1.001]`, and equal to one at zero conversion; a variable

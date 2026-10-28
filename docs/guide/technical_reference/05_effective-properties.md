@@ -40,32 +40,33 @@ conservative energy row does not need a normalized mixture heat capacity.
 ### 5.1.2 Thermal volume fractions
 
 `volume_fractions` normalizes all-phase $\xi_j/\rho_{b,j}$.
-`solid_volume_fractions` normalizes all-phase
-$\gamma_j\xi_j/\rho_{b,j}$. Thermal conductivity, emissivity and absorptivity
-use `mixing_volume_fractions`: the swelling-weighted basis above matrix
-occupancy $10^{-3}$, the all-phase basis below $10^{-4}$, and a cubic
-smoothstep blend between them. Gas with nonzero $\gamma$ participates in this
-thermal basis. The trial extension at a vanishing total occupancy is stated
+`condensed_volume_fractions` normalizes $\xi_j/\rho_{b,j}$ over the condensed
+(solid and liquid) components; gases get zero. Thermal conductivity, emissivity
+and absorptivity use `mixing_volume_fractions`: the condensed basis above
+matrix occupancy $10^{-3}$, the all-phase basis below $10^{-4}$, and a cubic
+smoothstep blend between them. A liquid, such as bound moisture, conducts and
+emits by its volume share like a solid. The trial extension at a vanishing total occupancy is stated
 in the property implementation.
 
 ### 5.1.3 Gas matrix weights and skeletal occupancy
 
-Gas transport has a distinct basis: only condensed components enter
-$q_j=\gamma_j\xi_j/\rho_{b,j}$, and their normalized weights determine
-$\Lambda$ and component-mixed $\kappa$. Gas loading never changes these
-weights. At absent matrix support, the specified transport endpoint and
-its skeletal-occupancy domain apply (§9.3).
+Gas transport has a distinct basis: only the transport matrix enters
+$q_j=\xi_j/\rho_{b,j}$, every solid plus each liquid that declares $\lambda$ or a
+permeability that is not identically zero (`participates_in_transport`,
+§4.1.5). Their normalized weights determine $\Lambda$ and component-mixed
+$\kappa$. Gas loading never changes these weights. At absent matrix support,
+the specified transport endpoint and its skeletal-occupancy domain apply (§9.3).
 
-A zero-$\gamma$ condensed component has no matrix weight or direct contribution
-to the strain law. It still has mass, heat capacity and skeletal volume
-$\xi_j/\rho_{i,j}$. Zero weighted matrix occupancy is therefore insufficient
-to identify an unobstructed void.
+A liquid outside the transport matrix has no matrix weight. It still has mass,
+heat capacity, volume in the strain law and skeletal volume
+$\xi_j/\rho_{i,j}$. Zero matrix occupancy is therefore insufficient to identify
+an unobstructed void.
 
 | Quantity | Basis | Consumer |
 |---|---|---|
 | Bulk density | $\sum_j\xi_j$ | inventory |
-| Thermal fractions | all-phase bulk volume, with thermal blend | conductivity and surface optical properties |
-| Gas matrix weights | condensed $\gamma_j\xi_j/\rho_{b,j}$ | $\Lambda$, component-mixed $\kappa$ |
+| Thermal fractions | condensed bulk volume, blended to all-phase bulk volume | conductivity and surface optical properties |
+| Gas matrix weights | transport-matrix $\xi_j/\rho_{b,j}$ | $\Lambda$, component-mixed $\kappa$ |
 | Skeletal occupancy | condensed $\xi_j/\rho_{i,j}$ | physical porosity and endpoint validity |
 | Gas fractions | intrinsic gas inventories | friction, film and reservoir exchange |
 
@@ -73,9 +74,8 @@ to identify an unobstructed void.
 
 ## 5.2 Volume-change coefficients
 
-The strain law uses $\gamma_j/\rho_{b,j}(T)$ for each component and its
-reaction source (§3.6, Chapter 10). A nonzero gas swelling factor can change
-bulk geometry without entering gas matrix weights. The pore EOS follows
+The strain law uses $1/\rho_{b,j}(T)$ for each condensed component and its
+reaction source (§3.6, Chapter 10); gases never enter it. The pore EOS follows
 the actual cell volume minus condensed skeletal volume; it does not replace
 that geometric volume by a mixture-specific-volume average.
 
@@ -84,7 +84,7 @@ that geometric volume by a mixture-specific-volume average.
 ## 5.3 Porosity
 
 Porosity is the complement of condensed skeletal occupancy,
-$\phi=1-\sum_{S\cup L}\xi_j/\rho_{i,j}(T)$, independent of $\gamma$ and gas loading.
+$\phi=1-\sum_{S\cup L}\xi_j/\rho_{i,j}(T)$, independent of gas loading.
 It is evaluated for every gas-bearing material. The pressure, intrinsic
 species density and gas fractions use this same pore state (§9.1).
 
@@ -233,12 +233,12 @@ admitted and adds nothing to $C_g$.
 
 ## 5.5 Thermal conductivity mixing
 
-The effective thermal conductivity is computed from the swelling-weighted
-volume fractions $v_j^{\text{solid}}$ (5.4) and the per-component conductivities
+The effective thermal conductivity is computed from the condensed
+volume fractions $v_j^{\text{solid}}$ (§5.1.2) and the per-component conductivities
 $k_j(T)$ under one of four mixing rules selected by `material.mixing.k.rule`:
 `effective_conductivity(ξ, T, material; skip_absent)` builds
-`v = mixing_volume_fractions(…)` (the (5.4) weights, with the void blend of
-§5.1.3) then dispatches to `_conductivity_from_v` (`effective_properties.jl`).
+`v = mixing_volume_fractions(…)` (those weights, with the void blend of
+§5.1.2) then dispatches to `_conductivity_from_v` (`effective_properties.jl`).
 The default rule is `WEIGHTED` with $\beta = 0.5$ (`materials.jl`).
 
 The state mapping evaluates `k_i = effective_conductivity(ξ⁺_i, T_trial,i,
@@ -394,10 +394,10 @@ the implementation:
 ## 5.6 Effective superficial gas transfer
 
 `effective_gas_transfer(ξ,T,material)` returns the lumped superficial
-coefficient $\Lambda$ [m²/s], including a declared endpoint blend. Only
-condensed $\gamma$-weighted bulk occupancies enter its normalized matrix
-weights. Participating condensed components require explicit $\lambda$; gases
-have no transfer-coefficient input. The coefficient multiplies the intrinsic
+coefficient $\Lambda$ [m²/s], including a declared endpoint blend. Only the
+bulk occupancies of the transport matrix (§9.3.1) enter its normalized matrix
+weights. Its components require explicit $\lambda$; gases have no
+transfer-coefficient input. The coefficient multiplies the intrinsic
 partial-pressure gradient, $J_j^D=-\Lambda M_j\nabla p_j/(RT)$.
 
 `PARALLEL`, `SERIES` and `WEIGHTED` use the exact matrix rules of §9.3.
@@ -413,7 +413,7 @@ A matrix-free limit requires an explicit endpoint and occupancy domain.
 `effective_permeability(ξ,T,material,φ)` returns $\kappa$ [m²]. Condensed
 component mixing uses the same matrix basis as $\Lambda$. The default
 `WEIGHTED` rule combines parallel and exact series values. Gases and
-zero-$\gamma$ constituents carry no matrix permeability weight.
+liquids outside the transport matrix carry no matrix permeability weight.
 
 ### 5.7.1 Component mixing
 
@@ -460,9 +460,9 @@ weights are a convex combination (non-negative, summing to one, in the blend as
 on either side of it), and every component's emissivity law is validated to lie
 in $[0, 1]$ over the property bracket when the component is built
 (`src/Materials/components.jl`), so the sum stays in $[0, 1]$ to round-off and
-its derivative has no kink. The solid basis is used for the same physical reason
-as conductivity (§5.1.3): the radiating surface is the solid/liquid material,
-not trapped non-swelling gas. Component emissivities are property functions
+its derivative has no kink. The condensed basis is used for the same physical reason
+as conductivity (§5.1.2): the radiating surface is the solid/liquid material,
+not the gas in its pores. Component emissivities are property functions
 ($\varepsilon$ accepts the same forms as $k$: number, linear tuple, callable, property
 function) with defaults of `0.9` for `SolidComponent`, `0.95` for
 `LiquidComponent` (condensed liquids are strong emitters — water ≈ 0.96), and
@@ -922,16 +922,17 @@ state; equal initial values alone are insufficient.
 | Conductivity | selectable mixing rule | blend of parallel and series limits | condensed volume average in the aligned 1D case | condensed volume average |
 | Permeability | component mixing or Carman–Kozeny | effective gas-transfer coefficient, not our permeability input | component mixing; optional Kozeny–Carman factor | no resolved pore-flow permeability |
 | Absorption input | mass-specific, m²/kg | mass-specific, m²/kg | per length, m⁻¹ | per length, m⁻¹ |
-| Match before comparing | mixing rule, permeability model and absorption units | blend weight and volume fractions for `WEIGHTED`; gas swelling factor | volume basis for `PARALLEL`; permeability caps; effective optical depth | condensed fractions for `PARALLEL`; pore-gas storage; optical depth |
+| Match before comparing | mixing rule, permeability model and absorption units | blend weight and volume fractions for `WEIGHTED`; mixture gas swelling factor | volume basis for `PARALLEL`; permeability caps; effective optical depth | condensed fractions for `PARALLEL`; pore-gas storage; optical depth |
 
 ### 5.15.1 ThermaKin2Ds
 
 TK Eqs. 2 and 17 include gas sensible storage. Eqs. 8–10 blend the
 volume-weighted parallel and series conductivity limits, corresponding to
 our `WEIGHTED` rule when the component laws, blend weight and volume
-fractions match. Its mixture gas swelling factor (Eqs. 3–4) is not generally
-our independent $\gamma_j$. In particular, `L SWELLING: 0` does not
-remove liquid volume from TK Eq. 3.
+fractions match. Its volume fractions include gas through the mixture gas
+swelling factor (Eqs. 3–4); ours weight the condensed components alone, which
+TK reproduces at zero gas swelling. Its liquid volume enters TK Eq. 3 whatever
+`L SWELLING` is, as ours does.
 
 TK Eq. 11 and Pyrolysis.jl use mass-specific component absorption
 $\alpha_j$ [m²/kg], giving
@@ -1050,6 +1051,6 @@ heat-capacity sum, the sensible enthalpies and the face conductivities — §7
 (Heat Conduction, Gas Convection, and Energy Assembly); the gas fluxes that
 consume $\lambda_{\text{eff}}$, $\lambda_j$, $\kappa_{\text{eff}}$, $\mu$, and $\varphi$ — §9 (Gas-Phase Mass Transport and
 Pressure); the radiation models that consume $\alpha_{\text{eff}}$, $\varepsilon_{\text{eff}}$ and $a_{\text{eff}}$ — §8
-(Thermal Radiation); the swelling/volume-change use of $\rho$, $\gamma_j$ — §10 (Volume
+(Thermal Radiation); the volume-change use of $\rho_j$ — §10 (Volume
 Change, Swelling, Intumescence, and Lateral Shrinkage); and the differentiation
 of every mixing rule — §15.

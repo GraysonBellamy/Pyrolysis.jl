@@ -244,26 +244,26 @@ face state is developed in §9.6.
 
 During pyrolysis, virgin material can be replaced by char, liquid or void.
 The transport coefficients must follow the condensed matrix that remains.
-For each condensed component, define its weighted bulk occupancy and the
-normalized matrix weights by
+The transport matrix $\mathcal T$ is every solid component plus each liquid
+that declares a transfer coefficient $\lambda$ or a permeability that is not
+identically zero (`participates_in_transport`). For each of its components,
+define the bulk occupancy and the normalized matrix weights by
 
 $$
-q_j=\gamma_j\frac{\xi_j}{\rho_{b,j}(T)},
+q_j=\frac{\xi_j}{\rho_{b,j}(T)},
 \qquad
-q=\sum_{j\in S\cup L}q_j,
+q=\sum_{j\in\mathcal T}q_j,
 \qquad
 w_j=\frac{q_j}{q}\quad(q>0).
 $$
 
-Here $\rho_{b,j}$ is the component's bulk density and $\gamma_j$ its swelling
-factor. These weights describe participation in the transport matrix; they
-serve a different purpose from the skeletal occupancies that determine
-$\phi$ in §9.1. A condensed component with $\gamma_j=0$ has zero matrix
-weight but still occupies physical volume. Its matrix coefficients must be
-zero. Gas components have zero matrix weight for every value of their
-swelling factor and carry neither $\lambda$ nor $\kappa$.
+Here $\rho_{b,j}$ is the component's bulk density. These weights describe
+participation in the transport matrix; they serve a different purpose from
+the skeletal occupancies that determine $\phi$ in §9.1. A liquid outside
+$\mathcal T$ has zero matrix weight but still occupies physical volume. Gas
+components have zero matrix weight and carry neither $\lambda$ nor $\kappa$.
 
-For participating condensed components, the lumped model requires explicit
+For every component of $\mathcal T$, the lumped model requires explicit
 $\lambda$ data; $\kappa$ defaults to zero. For either coefficient $a_j$, the mixture
 rules are
 
@@ -330,8 +330,8 @@ and the tortuosity factor in $\eta$ are blended with their endpoint values.
 
 Endpoint data also declare `max_skeletal_occupancy`, the largest remaining
 condensed volume fraction they support. This check matters because $q=0$
-alone does not establish an empty pore path: a zero-$\gamma$ constituent may
-still occupy space. Without an endpoint, the supported domain is
+alone does not establish an empty pore path: a liquid outside the transport
+matrix may still occupy space. Without an endpoint, the supported domain is
 $q\geq hi$; reaching its lower boundary terminates integration with outcome
 `:matrix_exhausted`. The implementation of these mixture and endpoint rules
 is in `src/Properties/gas_transport.jl`.

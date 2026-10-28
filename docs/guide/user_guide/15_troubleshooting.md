@@ -181,7 +181,7 @@ The constructors reject a deck before a problem exists:
   failing temperature and suggests holding the fit constant outside its measured
   range, `T -> law(clamp(T, T_lo, T_hi))`, or `validate_properties = false`
   (§15.6.3).
-- **Component keywords.** `absorptivity` and `γ` must lie in `[0, 1]`; a gas
+- **Component keywords.** `absorptivity` must lie in `[0, 1]`; a gas
   needs `M > 0`; `ρ_intrinsic` and `φ` exclude each other, and `φ` needs a
   constant `ρ`.
 - **Material.** `gas_viscosity` must be positive and finite at 200, 300, 500,
@@ -494,8 +494,8 @@ any(d -> d <= 0, filter(isfinite, diff(sol.z[:, k])))   # a crossed cell at save
 ```
 
 A cell that gasifies completely thins toward zero width; burnout belongs to
-`deactivation` (§15.4). A swelling factor `γ` or a lateral shrinkage law that
-drives a cell's volume through zero is a modelling error; `setup` already
+`deactivation` (§15.4). A lateral shrinkage law that drives a cell's volume
+through zero is a modelling error; `setup` already
 refuses a lateral law that is not positive on the conversion range (§15.2.3).
 
 ### 15.8.2 The correction and the layer interfaces

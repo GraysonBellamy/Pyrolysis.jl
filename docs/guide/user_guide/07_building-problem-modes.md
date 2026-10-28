@@ -360,8 +360,9 @@ species. Proposed-state control includes changing temperature, condensed masses
 and geometry; it is not a bound on accumulated global error. Tighten it along
 with mesh/time tolerances when qualifying pressure-sensitive predictions.
 
-Matrix transport weights use condensed `γξ/ρ_bulk`; skeletal volume is a
-separate sum without `γ`. Retained cells that lose their matrix need a declared
+Matrix transport weights use the bulk occupancy `ξ/ρ_bulk` of the transport
+matrix (every solid, plus each liquid that declares `λ` or `κ`); skeletal volume
+is a separate sum over every condensed component. Retained cells that lose their matrix need a declared
 endpoint, for example `LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-5,κ=0.,
 max_skeletal_occupancy=1e-3))`. The finite coefficients and supported occupancy
 are physical data. Without an endpoint, the model ends at `:matrix_exhausted`.
@@ -403,9 +404,14 @@ pmma_shrinking = Material(
 ```
 
 The column conversion is `χ̄ = Σ_i G_i / Σ_i M_i`, with `G_i` the cumulative dry pyrolysis
-gas cell `i` has produced and `M_i` its initial solid mass; only "dry" gases contribute, every
-gas component except water vapour (a component whose name contains `H2O` or `water`, in any
-case). The law must be smooth (its derivative is taken by automatic differentiation, so a
+gas cell `i` has produced and `M_i` its initial solid mass; only "dry" gases contribute: the
+gases the solids give off through the reaction graph. Starting from the solids, every reaction
+with a reactant already reached adds its products, and the gases reached are dry. Water that
+the wood releases on decomposition counts, whatever its name; the vapour of evaporating
+moisture (a liquid) does not, and neither does a background gas that no reaction makes
+(`Pyrolysis.Materials.dry_gas_flags(material)` lists them). A gas that both a solid and a
+non-solid lineage produce is refused when the law is set up; model it as two species. The
+law must be smooth (its derivative is taken by automatic differentiation, so a
 piecewise law with a kink gives an ill-defined lateral rate), positive and finite on
 `[−0.001, 1.001]`, and equal to one at `χ̄ = 0`; `setup` checks the last two and refuses a law
 that fails them. Without a law, no cross-section unknowns enter the state.

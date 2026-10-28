@@ -98,8 +98,8 @@ The wood example includes multi-step pyrolysis, absorbed moisture, water
 vapor and inert pore air. Condensed phases provide skeletal densities,
 lumped matrix transfer and permeability. The complete atmospheric reservoir
 has incoming air at the same temperature as the external thermal film.
-The initial air inventory follows the actual pore fraction; zero swelling
-weight on absorbed water does not remove its skeletal occupancy.
+The initial air inventory follows the actual pore fraction, net of the
+absorbed water's skeletal occupancy.
 
 ```bash
 PYROLYSIS_SMOKE=1 julia --project=examples examples/07_douglas_fir_cone.jl
@@ -212,20 +212,20 @@ the cell walls, not a separate phase:
 
 ```julia
 LiquidComponent(:WATER;
-    ρ = 1e5,           # pseudo-density [kg/m³]
+    ρ = 1000.0,        # liquid water [kg/m³]
     c = water_cp,
-    k = 0.145,
+    k = 0.6,           # liquid water [W/(m·K)]
     ε = 0.81,
     α = 1000.0,        # not used with SURFACE_ABSORPTION
     κ = 0.0,           # liquid blocks Darcy flow
 )
 ```
 
-A liquid's default `γ=0` removes its direct strain and matrix transport
-weight. Its mass, heat capacity, evaporation energy and skeletal occupancy
-remain. The imported pseudo-density is a constitutive input to the latter;
-it does not prove an unobstructed void. Set `γ=1` for a matrix-forming melt
-and provide its transport coefficients explicitly.
+The water holds its own volume, so drying shrinks the wood, and it conducts
+and emits by its volume share. It declares neither `λ` nor `κ`, so it is no
+part of the gas-transport matrix; its mass, heat capacity, evaporation energy
+and skeletal occupancy remain. A liquid that should join the matrix, such as
+a melt, declares its transport coefficients explicitly.
 
 ### Reaction heats and rates
 

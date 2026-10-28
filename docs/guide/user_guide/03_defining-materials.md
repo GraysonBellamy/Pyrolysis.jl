@@ -55,7 +55,7 @@ package's top-level docstring and in Chapter 2; this chapter expands every optio
 > `Module.name` syntax resolves any name defined in the module:
 >
 > - From the `Materials` submodule: `Pyrolysis.Materials.n_components`,
->   `Pyrolysis.Materials.n_reactions`, `Pyrolysis.Materials.dry_pyrolysis_gas_indices`,
+>   `Pyrolysis.Materials.n_reactions`, `Pyrolysis.Materials.dry_gas_flags`,
 >   are *exported* from `Materials`; the
 >   stoichiometry helpers `Pyrolysis.Materials.verify_stoichiometry` and
 >   `Pyrolysis.Materials.mass_balance_error` are *internal* (not exported, not part
@@ -70,7 +70,7 @@ package's top-level docstring and in Chapter 2; this chapter expands every optio
 >
 > For convenience you may `using Pyrolysis.Internal`, which re-exports the union of
 > every submodule's *exports* and so brings the exported helpers
-> (`n_components`, `dry_pyrolysis_gas_indices`, …) into scope
+> (`n_components`, `dry_gas_flags`, …) into scope
 > unqualified — but **not** the internal stoichiometry helpers above, which still
 > require the `Pyrolysis.Materials.` prefix. `Internal` is not the stable public
 > surface; prefer qualified access in production code. Material validation happens
@@ -96,36 +96,41 @@ mixture through `ξ_initial` (§5.10). An FDS component density `ρ_{s,j}`
 corresponds to that concentration, while FDS's material density property
 is a separate input (§1.3; Technical Reference §4.8.3).
 
-Participating lumped matrices also require explicit superficial transfer `λ`.
-Zero `λ` closes wall transfer independently of `κ`; zero permeability closes
+Every solid is part of the gas-transport matrix, so under `LumpedTransfer` it
+requires explicit superficial transfer `λ`. Zero `λ` closes wall transfer independently of `κ`; zero permeability closes
 Darcy flow. Neither coefficient is inferred from gas loading.
 
 `ε` accepts a temperature law; `absorptivity` sets a constant incident-radiation
 absorptivity, with `nothing` applying Kirchhoff's relation. `α` is mass-based
 in-depth absorption and is used under `BEER_LAMBERT`.
 
-`γ` sets participation in the volume-change law and property weights. A
-zero-`γ` condensed phase still occupies skeletal volume and must not carry
-nonzero `λ` or `κ`. Specify intrinsic density or pure-phase porosity to
-describe that skeletal volume. Full signatures and units are in §16.2.1.
+Bulk density `ρ` sets the volume a condensed component holds: its bulk
+occupancy `ξ/ρ` drives the volume-change law and weights conductivity,
+emissivity and absorptivity. Specify intrinsic density or pure-phase porosity
+to describe its skeletal volume. Full signatures and units are in §16.2.1.
 
 ---
 
 ### 3.2.2 `LiquidComponent`
 
-Liquids have the condensed component fields. Their defaults are `γ=0`,
-`ε=.95`, `κ=0` and `λ=nothing`.
+Liquids have the condensed component fields. Their defaults are `ε=.95`,
+`κ=0` and `λ=nothing`. A liquid moves with the skeleton like a solid: it holds
+the volume `ξ/ρ` in the volume-change law and conducts and emits by its volume
+share. It is part of the gas-transport matrix only if it declares `λ` or a
+nonzero `κ`, and then needs explicit `λ` under `LumpedTransfer`.
 
 ```julia
 moisture = LiquidComponent(:moisture; ρ=1000., c=4180., k=.60)
 melt = LiquidComponent(:melt; ρ=900., φ=.02, c=2000., k=.2,
-                       γ=1., λ=1e-6, κ=0.)
+                       λ=1e-6, κ=0.)
 ```
 
-Bound moisture with `γ=0` contributes no direct strain or matrix transport
-weight, but it occupies skeletal volume and stores heat. A matrix-forming
-melt with `γ>0` supplies explicit lumped transfer. The initialized sum of
-all condensed skeletal volumes must leave resolved positive gas pore volume.
+Bound moisture declares neither, so it carries no matrix transport weight; it
+shrinks the wood as it dries, conducts and emits by its volume share, occupies
+skeletal volume and stores heat. The melt declares `λ`, so it joins the
+transport matrix and its `λ` enters the gas-transfer mixture. The initialized
+sum of all condensed skeletal volumes must leave resolved positive gas pore
+volume.
 
 ---
 
@@ -137,11 +142,11 @@ product = GaseousComponent(:product; M=0.044, c=1200., k=0.03)
 ```
 
 `M` is a positive molar mass [kg/mol]. Heat capacity `c`, conductivity `k`,
-emissivity `ε`, absorption `α` and swelling `γ` have their usual property-law
+emissivity `ε` and absorption `α` have their usual property-law
 meaning. Gases carry no matrix `λ` or `κ`. `LumpedTransfer` uses coefficients
 on the condensed matrix; `DustyGas` derives gas-specific Knudsen transport
 from molar mass and pore geometry. Gas loading does not enter matrix transport
-weights, regardless of `γ`. Bulk concentration is stored per total cell volume;
+weights or the volume-change law. Bulk concentration is stored per total cell volume;
 the central pore EOS divides by skeletal porosity to obtain intrinsic density.
 
 ---
@@ -162,7 +167,7 @@ For the actual initialized composition, pore volume is
 positive in every gas-bearing cell, even for sealed gas and zero permeability.
 A missing intrinsic density defaults to bulk density; a partially filled cell
 can therefore still be admissible. A name search cannot determine admissibility.
-Zero `γ` excludes a component from matrix transport but not skeletal occupancy.
+A liquid outside the transport matrix still counts in skeletal occupancy.
 For dense melts, an explicit nominal pore volume requires joint porosity,
 mesh and tolerance qualification (§7.5); the numerical divisor floor is not a
 physical porosity choice.
@@ -497,9 +502,11 @@ The available rules are the `MixingRule` enum values (all exported):
 | `BRUGGEMAN` | EMT: `Σ_j v_j (k_j−k)/(k_j+2k) = 0` | **k only** |
 | `CARMAN_KOZENY` | `κ = min(ℓ²φ³ / (180(1−φ)²), ℓ²)` (porosity-based) | **κ only** |
 
-For thermal conductivity, `v_j` is the normalized thermal volume weight.
-For `λ` and component-based `κ`, replace it with normalized condensed matrix
-occupancy `a_j ∝ γ_j ξ_j/ρ_bulk,j`; gases do not contribute. Mixing within
+For thermal conductivity, `v_j` is the normalized condensed volume weight
+`ξ_j/ρ_j` of the solids and liquids. For `λ` and component-based `κ`, replace
+it with the normalized bulk occupancy `a_j ∝ ξ_j/ρ_bulk,j` of the transport
+matrix (every solid, plus each liquid that declares `λ` or `κ`); gases do not
+contribute. Mixing within
 a cell is separate from matching total species flux through adjacent half cells
 (Technical Reference §9).
 
@@ -622,18 +629,19 @@ Two physics notes worth remembering (both in Technical Reference §5):
   temperature and stores sensible heat like every other phase; the enthalpy its
   flux carries enters as the gas enthalpy flux `Σ_j J_j h_j` through each face
   (Technical Reference §7).
-- **Conductivity and emissivity use the swelling-weighted (matrix) volume
-  fractions** — γ = 0 components (canonical gases) carry no weight in these
-  surface/matrix properties. Gas exclusion agrees with ThermaKin at zero gas
-  swelling, but its liquid and mixture swelling rules differ (Technical Reference
-  §5.15). As a cell's
+- **Conductivity and emissivity use the condensed volume fractions** — every
+  solid and liquid by `ξ_j/ρ_j`, so bound moisture conducts and emits by its
+  volume share, and gases carry no weight in these surface/matrix properties.
+  This agrees with ThermaKin at zero gas swelling (Technical Reference §5.15).
+  As a cell's
   matrix volume fraction drops through `1e-3 … 1e-4` the weights blend smoothly
   into the all-phase occupancy, so an emptied cell degrades to the gas-mixture
-  conductivity instead of 0. Transport uses a separate, strictly condensed
-  γ-weighted bulk-volume basis. Both superficial transfer and component-based
+  conductivity instead of 0. Transport uses a separate basis, the bulk
+  occupancy of the transport matrix: every solid, plus each liquid that
+  declares `λ` or `κ`. Both superficial transfer and component-based
   permeability use those matrix weights, with an explicit endpoint and domain
   when that matrix disappears. Skeletal pore occupancy includes every condensed
-  phase regardless of γ. Absorption retains concentration weighting.
+  phase. Absorption retains concentration weighting.
 
 
 ---
@@ -755,7 +763,8 @@ wood = Material(
 Pyrolysis.Materials.n_components(wood)              # 5
 Pyrolysis.Materials.n_reactions(wood)               # 2
 
-Pyrolysis.Materials.dry_pyrolysis_gas_indices(wood) # (4,)  — :H2O (5) excluded
+Pyrolysis.Materials.dry_gas_flags(wood)  # (false, false, false, true, false)
+# :gas (4) descends from the solids; :H2O (5) is the moisture's vapour
 ```
 
 ### 3.6.3 A polymer with specified pore volume
@@ -820,8 +829,7 @@ Errors are collected into one diagnostic when possible.
 | `ε` (emissivity) | `0.9` | `0.95` | `0.0` |
 | `absorptivity` (surface absorptivity) | `nothing` (Kirchhoff) | `nothing` (Kirchhoff) | n/a |
 | `α` (absorption) | `0.0` | `0.0` | `0.0` |
-| `γ` (swelling) | `1.0` | `0.0` | `0.0` |
-| `λ` (superficial matrix transfer) | explicit under lumped transport | explicit for participating liquid | not a gas input |
+| `λ` (superficial matrix transfer) | explicit under lumped transport | `nothing`; declaring it (or `κ`) joins the transport matrix | not a gas input |
 | `κ` (permeability) | `0.0` | `0.0` | n/a (no field) |
 | `ρ_intrinsic` | `= ρ` | `= ρ` | n/a |
 | density | required `ρ` | required `ρ` | ideal gas from `M` |

@@ -17,7 +17,7 @@ REACTION-DRIVEN — no `w_override` — closing the kinetics→θ→w→geometry
 
 ## Manufactured design (see exact/mms.jl, "Induced mesh motion")
 
-Constant intrinsic densities, γ_solid = 1 / γ_gas = 0 (canonical), single
+Constant intrinsic densities, the gas outside the strain, single
 first-order reaction s → g with the depletion limiter numerically inactive
 over the manufactured range (tanh(ξ_s/1.0) ≡ 1.0 in Float64 for
 ξ_s ≳ 20 kg/m³; here ξ_s ≥ 500). T* is spatially UNIFORM (time-varying):

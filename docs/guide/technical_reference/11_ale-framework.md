@@ -315,21 +315,19 @@ section, and why the masses as states need no dilation term.
 For a fixed-mass control volume of the deforming matrix, the relative volume change
 rate (volumetric strain rate, dilation) is obtained from the mixture continuity
 relation by summing the volume freed or created per unit mass change of each
-matrix-contributing component:
+condensed component:
 $$
 \boxed{\;
 \theta \;\equiv\; \frac{1}{V}\frac{dV}{dt}
-\;=\; \sum_{j=1}^{N_C} \gamma_j\,\frac{1}{\rho_j}\,S_j
+\;=\; \sum_{j\in S\cup L} \frac{1}{\rho_j}\,S_j
 \;}
 \tag{11.7}
 $$
 (`volume_change_rate`, `src/Physics/volume_change.jl`). Here:
 
-- $\gamma_j$ is the **swelling factor** of component $j$ (component field
-  `swelling_factor`): $\gamma=1$ for solids by default (when a solid depletes, the
-  matrix loses that volume), $\gamma=0$ for gases by default (escaping gas does not
-  change the skeleton volume), and $\gamma\in[0,1]$ for partial contributors. Only
-  components with $\gamma_j>0$ enter the sum.
+- the sum runs over the condensed (solid and liquid) components: when one
+  depletes, the matrix loses its volume; a gas never enters (escaping gas does not
+  change the skeleton volume).
 - $\rho_j(T)$ is the **bulk** (pure-phase) density of component $j$, evaluated at the
   cell's trial temperature through the property function `comp.density(T)`.
 - $S_j$ is the **reaction mass source** of component $j$ per unit volume. The
@@ -337,15 +335,15 @@ $$
   (\text{reaction mass source})_{j,i}/V_i$, after every kernel has run and before any
   external source is added (`closure_rows!`), so the strain rate is the reactions'
   alone: a manufactured source of a verification run does not move the mesh. It is
-  negative for a consumed solid and positive for a produced char or gas.
+  negative for a consumed solid and positive for a produced char.
 
 **Physical reading and sign.** When a solid of density $\rho_j$ is consumed
-($S_j<0$, $\gamma_j=1$), the term $\gamma_j S_j/\rho_j<0$, so $\theta<0$: the cell
-shrinks. A net char-producing or swelling reaction with the appropriate $\gamma$ can
-yield $\theta>0$ (expansion). Note that (11.7) is the *swelling-factor-weighted*
+($S_j<0$), the term $S_j/\rho_j<0$, so $\theta<0$: the cell shrinks. A reaction
+whose condensed product is lighter than its yield times the reactant's density
+yields $\theta>0$ (expansion). Note that (11.7) is the per-component condensed
 form; the loose statement "$\theta = -(\sum_j S_j)/\rho_{\text{total}}$" is only
-correct in the special case of a single solid with $\gamma=1$ and constant $\rho$.
-The swelling-factor semantics and the endpoints they imply are developed in
+correct in the special case of a single solid with constant $\rho$. The
+condensed-volume semantics and the endpoints they imply are developed in
 Chapter 10.
 
 ### 11.3.2 The discrete volume balance and the balance rows
@@ -1132,7 +1130,7 @@ The principal limitations and open issues are:
 
 ### Cross-references
 
-- The volumetric strain rate $\theta$, the swelling factor $\gamma_j$, the lateral
+- The volumetric strain rate $\theta$, the condensed-volume semantics, the lateral
   shrinkage law and the conversion-history pair are developed in **Chapter 10, Volume
   Change & Lateral Shrinkage**.
 - The energy assembly, $\rho c_p^{\text{eff}}$ (every component), the gas enthalpy flux

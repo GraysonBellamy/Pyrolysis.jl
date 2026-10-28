@@ -11,9 +11,7 @@
 8,"P5: final thickness ratio",1.0,1.0,0.0,3.0e-6,true
 8,"P5: total mass conservation",2.0000000000000004,2.0,2.220446049250313e-16,2.0e-6,true
 8,"P5: final char mass (solid ledger)",0.9999998874647221,1.0,1.1253527787413731e-7,2.0e-6,true
-8,"P6: final thickness ratio",0.5000000562676343,0.5,1.125352686592862e-7,3.0e-6,true
-8,"P6: total mass conservation",1.9999999999999982,2.0,8.881784197001252e-16,2.0e-6,true
-8,"P7: final thickness ratio",1.3333332833932983,1.3333333333333333,3.745502624719066e-8,3.0e-6,true
-8,"P7: total mass conservation",2.000000000000005,2.0,2.4424906541753444e-15,2.0e-6,true
-8,"P7: final char mass (solid ledger)",0.9999998874646915,1.0,1.1253530851629279e-7,2.0e-6,true
-8,"P7: final lateral area ratio A_f/A₀ = law(χ̄ = 1/2)",0.750000028133827,0.75,3.7511769394408624e-8,3.0e-6,true
+8,"P6: final thickness ratio",1.3333332833932983,1.3333333333333333,3.745502624719066e-8,3.0e-6,true
+8,"P6: total mass conservation",2.000000000000005,2.0,2.4424906541753444e-15,2.0e-6,true
+8,"P6: final char mass (solid ledger)",0.9999998874646915,1.0,1.1253530851629279e-7,2.0e-6,true
+8,"P6: final lateral area ratio A_f/A₀ = law(χ̄ = 1/2)",0.750000028133827,0.75,3.7511769394408624e-8,3.0e-6,true

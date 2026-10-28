@@ -144,27 +144,28 @@ stated otherwise.
 
 ```julia
 SolidComponent(name::Symbol; ρ, c, k, ε=.9, absorptivity=nothing,
-    α=0., γ=1., λ=nothing, κ=0., ρ_intrinsic=nothing, φ=nothing,
+    α=0., λ=nothing, κ=0., ρ_intrinsic=nothing, φ=nothing,
     validate_properties=true)
 LiquidComponent(name::Symbol; ρ, c, k, ε=.95, absorptivity=nothing,
-    α=0., γ=0., λ=nothing, κ=0., ρ_intrinsic=nothing, φ=nothing,
+    α=0., λ=nothing, κ=0., ρ_intrinsic=nothing, φ=nothing,
     validate_properties=true)
-GaseousComponent(name::Symbol; M, c, k, ε=0., α=0., γ=0.,
+GaseousComponent(name::Symbol; M, c, k, ε=0., α=0.,
     validate_properties=true)
 ```
 
 Density is in kg/m³, heat capacity in J/(kg K), conductivity in W/(m K),
 molar mass in kg/mol, condensed `λ` in m²/s and permeability in m².
-Participating condensed components require explicit `λ` for `LumpedTransfer`;
-zero is a deliberate closed wall channel. `γ=0` condensed components may
-have neither nonzero `λ` nor nonzero `κ`.
+The transport matrix is every solid plus each liquid that declares `λ` or a
+nonzero `κ` (`Pyrolysis.Materials.participates_in_transport`); its components
+require explicit `λ` for `LumpedTransfer`, and zero is a deliberate closed wall
+channel.
 
 Specify either intrinsic density or a pure-phase porosity, with
 `ρ_intrinsic=ρ/(1-φ)` for constant bulk density. Every condensed component
-occupies skeletal volume regardless of `γ`. Gas-bearing initialized and
-accepted states need resolved positive pore volume. A gas component has no
-matrix transport coefficient. Its `γ` may affect volume change but never
-matrix transport weights.
+holds its bulk volume `ξ/ρ` in the volume-change law and the property weights
+and occupies skeletal volume. Gas-bearing initialized and accepted states need
+resolved positive pore volume. A gas component has no matrix transport
+coefficient and never enters the volume-change law.
 
 Numeric properties become `ConstantProperty`; tuples, callables and explicit
 property objects follow the conversion rules in §16.2.2. The phase predicates
@@ -868,6 +869,9 @@ Choosing for common scenarios:
   installs the equidistribution correction (Chapter 10).
 - Pressure-driven gas flow: give a condensed component `κ > 0` and add pressure
   conditions (§16.4.3).
+- Through-thickness swelling or intumescence: give the condensed product a
+  bulk density below its yield times the reactant's (a light char or foam) and
+  solve with `use_ale = true`.
 - Lateral shrinkage or intumescence: give the material a
   `lateral_shrinkage_law` and solve with `use_ale = true`.
 
@@ -1403,9 +1407,9 @@ Technical Reference chapter.
 
 | Quantity | Default |
 |---|---|
-| `SolidComponent` `ε`, `α`, `γ`, `λ`, `κ` | `0.9`, `0.0`, `1.0`, `nothing`, `0.0` |
-| `LiquidComponent` `ε`, `α`, `γ`, `λ`, `κ` | `0.95`, `0.0`, `0.0`, `nothing`, `0.0` |
-| `GaseousComponent` `ε`, `α`, `γ` | `0.0`, `0.0`, `0.0` |
+| `SolidComponent` `ε`, `α`, `λ`, `κ` | `0.9`, `0.0`, `nothing`, `0.0` |
+| `LiquidComponent` `ε`, `α`, `λ`, `κ` | `0.95`, `0.0`, `nothing`, `0.0` |
+| `GaseousComponent` `ε`, `α` | `0.0`, `0.0` |
 | `absorptivity` (solid, liquid) | `nothing` (Kirchhoff, `a_j = ε_j(T)`) |
 | `ρ_intrinsic` | `= ρ` (no pure-phase pores) |
 | `validate_properties` | `true` |

@@ -192,8 +192,8 @@ Conventions:
 | $v_g$ | Bulk (Darcy, superficial) gas velocity at a face | m·s⁻¹ |
 | $v_s$ | Solid (skeleton) velocity; at the nodes $v_s = w - c$ | m·s⁻¹ |
 | $v_j$ | Volume fraction of component *j* | – |
-| $v_j^{\text{solid}}$ | Solid volume fraction (excludes non-swelling gases) | – |
-| $v_m$ | Matrix volume fraction, $\sum_j \gamma_j \xi_j/\rho_j$ (§5.1.3) | – |
+| $v_j^{\text{solid}}$ | Condensed volume fraction, over the condensed (solid and liquid) components | – |
+| $v_m$ | Matrix volume fraction, $\sum_j \xi_j/\rho_j$ over the condensed components (§5.1.3) | – |
 | $v_{\text{out}}$ | Outward Darcy velocity a pressure condition drives at a boundary face (§12.5, §13.7.5) | m·s⁻¹ |
 | $v_{\text{rel},f}$ | Velocity of the solid relative to face *f* along its normal, $(v_s - w)\cdot\hat n_f = -c_f \hat n_f$ (§11.6.1) | m·s⁻¹ |
 | $W$ | The integrator's iteration matrix $J - M/(\gamma_{\text{RK}} \Delta t)$ | – |
@@ -221,7 +221,6 @@ Conventions:
 | $\alpha_{\text{th},\infty}$ | Thermal diffusivity of the free stream (pooling film, §12.3.3; overload A5) | m²·s⁻¹ |
 | $\alpha_M$, $\beta_M$ | Monitor coefficients of the equidistribution correction, `monitor = (α_M, β_M)` (defaults 1, 0) | – |
 | $\beta$ | Weighting parameter of the WEIGHTED mixing rule, $k = \beta k_{\parallel} + (1-\beta)k_{\text{series}}$ | – |
-| $\gamma$ ($\gamma_j$) | Swelling factor of component *j* (1 = solids, 0 = non-swelling gas) | – |
 | $\gamma_{\text{RK}}$ | Stage coefficient of the integrator in $W = J - M/(\gamma_{\text{RK}} \Delta t)$ | – |
 | $\Gamma$ | Thermal property ratio $k/c_p$ of a gas (property-ratio and pooling films, §12.3.3; overload G1) | kg·m⁻¹·s⁻¹ |
 | $\Gamma_i$ | Volume rate the node corrections sweep through the faces of cell *i*, $A_{i+1} c_{i+1} - A_i c_i$ on a line (§11.5.2; overload G1) | m³·s⁻¹ |
@@ -320,7 +319,7 @@ Conventions:
 | $\text{floor}$, $\text{reg}$ | Floor / regularizing part of the caloric extension ($C_{\text{floor},i}$, $C_{\text{reg},i}$) |
 | $\text{ext}$ | External source |
 | $\text{min}$, $\text{max}$ | Lower / upper bound |
-| $\text{dry}$ | Dry-pyrolysis-gas (excludes water vapor) |
+| $\text{dry}$ | Dry pyrolysis gas (the gases the solids give off) |
 | $\text{init}$, $0$ | Initial value |
 | $\text{top}$, $\text{bot}$ | Top (z=L) / bottom (z=0) boundary |
 | $\text{rxn}$ | Reaction-source contribution |
@@ -337,7 +336,7 @@ Conventions:
 | $x^{+}$, $x^{-}$ (radiation) | Forward / backward hemispheric intensity (two-flux, FDS comparison) |
 | $x^{+}$ | One-sided positive part, e.g. $\xi^{+}$, $(m)^{+}$ (zero at and below zero, the identity above the scale $\delta_i$); never a state after an event, which carries a hat |
 | $\hat x$ (hat) | The receiver's state after a deactivation merge ($\hat m_{j,k}$, $\hat V_k$, §14.3.3); $\hat n_f$ the unit normal of face *f* |
-| $x^{\text{solid}}$ | Restricted to solid/liquid (non-swelling) components |
+| $x^{\text{solid}}$ | Restricted to the condensed (solid and liquid) components |
 | $x^{\text{diff}}$, $x^{\text{adv}}$ | Diffusive / advective flux component |
 | $x^{E}$ | Energy (the face energy flux $F^E_f$) |
 | $x^{\text{rad}}$ | In-depth radiation ($q^{\text{rad}}_i$, $S^{\text{rad}}_i$) |

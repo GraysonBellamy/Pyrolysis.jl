@@ -1,6 +1,6 @@
 "qoi","value","exact","error","tol","within_tol","comment"
 "steady energy balance: v vs Landau v_ss(measured T_s)",0.0019516056175132063,0.0019509545963795232,0.0003336936363825219,0.0021,true,"steady first law with stationary virgin solid and c_gas = c_solid"
-"regression consistency: thickness slope vs gas generation",0.0019516056175132063,0.0019515639926443557,2.1328979734944957e-5,0.0021,true,"γ_gas = 0 ⇒ dL/dt = −ṁ‴_gas/ρ exactly"
+"regression consistency: thickness slope vs gas generation",0.0019516056175132063,0.0019515639926443557,2.1328979734944957e-5,0.0021,true,"gas outside the strain ⇒ dL/dt = −ṁ‴_gas/ρ exactly"
 "mass ledger closure over plateau window",0.777081289622612,0.7806883542108439,0.004620364283361302,0.0049,true,"total-mass drop vs ∫ ṁ″ dt; residual = holdup drift"
 "in-depth profile decay rate (surface-attached frame)",0.0019669545010144287,0.0019516056175132063,0.00786474652639111,0.027,true,"ln(T−T₀) slope over ζ/δ ∈ [0.75, 1.7], 12 cells"
 "design-locus regression rate (loose)",0.0019516056175132063,0.002,0.024197191243396875,0.1,true,"leading-order Laplace locus only pins T_p to O(RT_p²/E); informational, tightens as E ↑ (see V-CPL-02b)"

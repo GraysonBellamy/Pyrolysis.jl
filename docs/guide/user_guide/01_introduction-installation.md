@@ -105,7 +105,7 @@ To set expectations up front, the model does **not** support:
 | Effective (mixture) properties, mixing rules | `MixingSpec`, `MaterialMixing` | TR §5 |
 | Surface / in-depth radiation | `solve(...; radiation_model = …)` + `RadiativeFluxBC` | TR §8 |
 | Pressure-driven gas transport | Set `κ > 0` on a solid/liquid component | TR §9 |
-| Volume change, swelling, intumescence | The swelling factor `γ` on components | TR §10 |
+| Volume change, swelling, intumescence | Bulk density `ρ` of the condensed components (a light product swells) | TR §10 |
 | Lateral shrinkage / variable cross-section | `lateral_shrinkage_law` on the `Material` (with `use_ale = true`) | TR §10 |
 | Mesh moving with the solid (surface recession) | `solve(...; use_ale = true)` | TR §11 |
 | Planar, cylindrical, or spherical geometry | `coordinates` keyword of the mesh constructors | UG 6 |

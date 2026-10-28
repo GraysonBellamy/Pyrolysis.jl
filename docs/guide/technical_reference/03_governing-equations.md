@@ -192,9 +192,9 @@ inventory (§3.3). Each term and its sign are derived in the sections that follo
 The bulk total density is $\rho_{tot}=\sum_j\xi_j$, the total inventory per
 bulk volume. Each gas has intrinsic pore density $\rho_j^g=\xi_j/\phi$.
 These definitions serve different control volumes. Skeletal occupancy uses
-condensed intrinsic densities without swelling weights; matrix transport
-weights use condensed $\gamma_j\xi_j/\rho_{b,j}$. The volume-change law
-uses its own per-component $\gamma_j/\rho_{b,j}$ (§3.6).
+condensed intrinsic densities; matrix transport weights use the bulk
+occupancy $\xi_j/\rho_{b,j}$ of the transport matrix (§9). The volume-change
+law uses $1/\rho_{b,j}$ of every condensed component (§3.6).
 
 ---
 
@@ -571,7 +571,7 @@ For lumped transfer, $J_j^D=-\Lambda M_j\nabla p_j/(RT)$.
 
 ### 3.4.2 Physical and trial pore states
 
-Skeletal occupancy is independent of the swelling factor. All gas-bearing
+All gas-bearing
 initial and accepted states must have resolved positive pore volume, including
 uncertainty from mass, temperature and geometry. Trial evaluation uses a C¹
 porosity divisor guard of $10^{-12}$, an identity above twice that value.
@@ -597,34 +597,33 @@ molar flow when wall/molecular transport is present.
 
 ### 3.6.1 The volumetric strain rate
 
-As reactions consume condensed mass and (optionally) swell the matrix, the material
+As reactions consume condensed mass and (optionally) form lighter condensed products, the material
 deforms. The local **volumetric strain rate** (relative rate of cell-volume change) is
 
 $$
 \boxed{\;
 \theta_i = \frac{1}{V_i}\frac{dV_i}{dt}
-= \sum_{j=1}^{N_C} \gamma_j\,\frac{\omega_{j,i}}{\rho_j(T_i)} ,
+= \sum_{j\in S\cup L} \frac{\omega_{j,i}}{\rho_j(T_i)} ,
 \;}
 $$
 
-derived from the mixture continuity relation: when component $j$ (with bulk density
-$\rho_j$) changes its mass concentration by reaction at rate $\omega_j$, it frees or
-claims volume at rate $\omega_j/\rho_j$, weighted by the swelling factor $\gamma_j$ that
-decides whether the component participates in the matrix skeleton. Solids default to
-$\gamma=1$ (depletion shrinks the matrix); gases default to $\gamma=0$ (they escape
-without changing matrix volume); intumescent gases may take $\gamma=1$ (gas creates
-matrix volume); partial values $\gamma\in(0,1)$ are allowed. The implementing kernel
-`volume_change_rate` sums exactly $\sum_j \gamma_j\,\omega_j/\rho_j(T)$, skipping any
-component with $\gamma_j\le 0$, at the trial temperature and with the *reaction* mass
+derived from the mixture continuity relation: when a condensed (solid or liquid)
+component $j$ with bulk density $\rho_j$ changes its mass concentration by reaction at
+rate $\omega_j$, it frees or claims volume at rate $\omega_j/\rho_j$. Gases never enter
+the sum: they leave through the pore space without changing the matrix volume.
+Depletion of a solid shrinks the matrix, and a product of lower bulk density than its
+reactant (a light char or foam) swells it. The implementing kernel
+`volume_change_rate` sums exactly $\sum_{j\in S\cup L} \omega_j/\rho_j(T)$, skipping
+every gas, at the trial temperature and with the *reaction* mass
 sources alone as the driver: the mesh closure forms it from the kernels' reaction
 sources before any external source is added, so a manufactured source of a
 verification run does not move the mesh. The absolute rate is $dV_i/dt = V_i\theta_i$
 on a mesh that moves with the skeleton.
 
-> **Implementation notes.** $\theta = \sum_j \gamma_j\,\omega_j/\rho_j(T)$ is
+> **Implementation notes.** $\theta = \sum_{j\in S\cup L} \omega_j/\rho_j(T)$ is
 > `volume_change_rate` (`_volume_change_rate`) in `src/Physics/volume_change.jl`
-> (with `if γ > 0` guards), called per cell by `closure_rows!`
-> (`src/Closures/balance.jl`). It is the swelling-weighted per-component form, not
+> (gases skipped by the type-level `is_gas`), called per cell by `closure_rows!`
+> (`src/Closures/balance.jl`). It is the per-component condensed form, not
 > $-(\sum_j\omega_j)/\rho$.
 
 ### 3.6.2 The reference models' deformation formulations
@@ -788,7 +787,7 @@ This is the contract that makes the residual a *pure function* of the state.
 | Porosity $\varphi$ | intrinsic density | $1-\sum_{S/L}\xi_j/\rho_{i,j}$, smoothly floored at $10^{-12}$ where divided by | §5 |
 | Gas velocity $v_g$ | Darcy | $-(\kappa/\mu)\nabla P$, half-cell mobility $\kappa/\mu$, interface pressure from total species-flux continuity | §9 |
 | Effective $k_{\mathrm{eff}},\lambda_{\mathrm{eff}},\kappa_{\mathrm{eff}},\varepsilon_{\mathrm{eff}},a_{\mathrm{eff}},\alpha_{\mathrm{eff}}$ | mixing rules | parallel/series/weighted/Bruggeman/Carman–Kozeny | §5 |
-| Volume-change rate $\theta$ | swelling continuity | $\sum_j\gamma_j\omega_j/\rho_j(T)$, reaction sources only | §10 |
+| Volume-change rate $\theta$ | condensed-volume continuity | $\sum_{S\cup L}\omega_j/\rho_j(T)$, reaction sources only | §10 |
 | Node velocity $w$ | balance rows | $0=A_{i+1}(w-c)_{i+1}-A_i(w-c)_i-(\theta_i-\theta_A)V_i$, $0 = w_1$ | §11.3.2, (11.9)–(11.10) |
 | Node correction $c$ | equidistribution | installed by `setup`'s rule, or given | §11.7 |
 | Cross-section $A$, $\theta_A$ | algebraic rows | $A=A_0\,\mathrm{law}(\bar\chi_c)$, $\theta_A = \frac{d}{dt}\log\mathrm{law}(\bar\chi_c)$ | §10, §11.3.3 |
