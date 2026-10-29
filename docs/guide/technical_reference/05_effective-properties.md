@@ -512,6 +512,16 @@ cell, the absorptivity of that cell (`incident_intensity`,
 `src/Kernels/radiation.jl`; §8.3). Surface emission always uses
 $\varepsilon_{\text{eff}}$.
 
+Kirchhoff's law equates $a_j$ and $\varepsilon_j$ only for a gray surface or
+for a source at the surface's own temperature; a cone heater at $850$–$1150$ K
+is neither for wood or clear polymers. Measured absorptivities to the heater
+spectrum (Försth and Roos 2011): plywood $0.84$ under a $25$ kW·m⁻² heater,
+$0.79$ under $75$ kW·m⁻², $0.68$ once charred; clear PMMA $0.92$ and $0.89$;
+black and brown PMMA $0.94$–$0.96$, falling to $0.87$–$0.93$ after
+degradation. The gray default therefore errs by $0.02$–$0.05$ for wood and up
+to $0.09$ for degraded PMMA, $2$–$9\,\%$ of the incident flux; supply the
+measured value through the component `absorptivity` when that matters.
+
 ### 5.8.3 Effective absorption coefficient
 
 The volumetric (extinction) absorption coefficient of the in-depth radiation

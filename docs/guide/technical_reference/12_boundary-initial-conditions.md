@@ -94,6 +94,12 @@ normal of the remaining live cell. Assembly applies that orientation explicitly.
 Heat $q_s$ is positive into the material and species fluxes are positive
 outward. Conduction uses $k(T_s-T_{cell})/d$ with current face distance.
 For a wall thermal film, its heat correlation equals this conductive flux.
+The sensible enthalpy the outgoing gas carries, $\sum_g J_g h_g(T_s)$, cancels
+between the gas and solid sides of the surface, both evaluating it at $T_s$
+with the same caloric laws; it belongs to the cell's enthalpy-flux divergence
+and never to the $T_s$ balance, where it would double-count
+$\dot m''c_{p,g}(T_s-T_{\text{ref}})$, about $5$ kW·m⁻² at
+$10$ g·m⁻²·s⁻¹.
 Boundary assembly converts to the direct-reservoir energy control surface:
 $q_r=q_s+H_r-H_s$ and $E_{out}=H_r-q_r$. Inflow carries the specified incoming
 enthalpy even under adiabatic or prescribed thermal conditions (§9.5).
@@ -231,6 +237,26 @@ capacities give a frozen-property approximation for temperature-dependent
 properties. The stable Taylor/exponential branches of `blowing_factor`
 avoid cancellation at zero and overflow under strong blowing.
 
+**Validity.** The bare coefficient is the inert-surface value. On an
+outgassing face with $B=\dot m''c_{p,g}/h$ it overstates the exchange by the
+factor $1/\beta(B)$: cone and gasification tests run at $B\approx1$–$4$
+($\dot m''=10$–$30$ g·m⁻²·s⁻¹, $h=7$–$15$ W·m⁻²·K⁻¹), where
+$\beta=0.05$–$0.6$ and the difference is $1$–$5$ kW·m⁻², $10$–$35\,\%$ of
+the net surface flux and $10$–$30$ K in $T_s$; a coefficient fitted to one
+phase of a test is wrong in the other, since $B\approx0$ before pyrolysis and
+$B>1$ during it. The Couette film is itself validated only for light gases
+over flat plates: within $8\,\%$ of the similarity solutions for laminar free
+convection on a horizontal plate up to $B\approx1.2$ (Brouwers 1993), and
+overstating the residual exchange by $1.2$–$1.7\times$ at $B=0.7$–$2$ in
+forced laminar flow (Kays, Crawford and Weigand 2005, Table 19-1); beyond
+$B\approx1$ the term is below $2\,\%$ of the incident flux and only its
+suppression matters. No film law is validated for heavy volatiles pooling over
+a horizontal face in a quiescent chamber, the regime the pooling model
+approximates with constants fitted to a chamber CFD. `NoBlowing` is the
+default because no blowing law is validated for these faces; its error is the
+bounded quantity above, to be read with the uncertainty of $h$ itself
+(§12.12).
+
 `PropertyRatioFilm(free_stream; n_Γ)` modifies the free-stream Couette
 parameter using $(\Gamma_\infty/\Gamma_g)^{n_\Gamma}$, where $\Gamma=k/c_p$.
 The outgoing mixture uses mass-weighted heat capacity and Wilke conductivity.
@@ -341,7 +367,12 @@ decomposition `compute_boundary_heat_fluxes` follows the *same* dispatch: its `n
 is the flux the balance actually applies — $a_s q_{\text{inc}}$ is inside `net`
 under `NO_RADIATION`/`SURFACE_ABSORPTION` and absent under `BEER_LAMBERT`, where the
 in-depth deposit is reported separately as `extras.volumetric_absorption`
-(§12.9.1).
+(§12.9.1). The number called absorptivity means two things: under
+`NO_RADIATION` and `SURFACE_ABSORPTION` it is the absorptivity of an opaque
+face to the heater's spectrum (§5.8.2); under `BEER_LAMBERT` it is the
+fraction of the incident flux that enters the medium, $1-\rho_s$ with
+$\rho_s$ the surface reflectance ($0.04$–$0.08$ for PMMA, $n\approx1.49$),
+the absorption coefficient of §5.8.3 doing the absorbing.
 
 > **Implementation note.** `BeerLambertKernel(topology, geometry, bc_set)`
 > (`src/Kernels/radiation.jl`) takes its source from
@@ -813,3 +844,21 @@ Failures report `TransportFailure`. Vacuum and closed channels use explicit
 continuations, and empirical blowing laws reject mixtures outside their
 stated composition domain. Refine the boundary half-cell when a reaction
 zone or in-depth absorption makes its temperature variation significant.
+
+The surface energy balance (§12.2) describes an opaque, gray, diffuse face in
+an inert or flaming atmosphere, its gas-side exchange reduced to a
+coefficient. Outside that: there is no flame feedback (§1.8.1); the incident
+flux is not attenuated by the pyrolysate plume, which absorbs $6$–$14\,\%$ of
+it before ignition and $20$–$27\,\%$ at steady outgassing in a cone-type
+geometry without extraction (Zhou et al. 2009, 2010), up to $35\,\%$ under a
+coil heater (Kashiwagi 1979), so a fitted $h$ or $a_s$ carries the apparatus
+it was fitted in; there is no surface reaction, so a char face in air after
+flame-out, where oxidation doubles to triples the mass flux and raises $T_s$
+by $150$–$200$ K (Kashiwagi et al. 1987; Lautenberger and Fernandez-Pello
+2009), is outside the model; and $h$ is the least certain input — reported
+cone values span $7$–$34$ W·m⁻²·K⁻¹, $14$–$31$ rising with surface
+temperature on a steel plate (Staggs 2009), $6$–$10$ in CAPA II (Swann et al.
+2017) — and at ignition, before the face outgasses, the convective loss is
+$15$–$65\,\%$ of the radiative net, so the ignition time, which scales as
+$q_{\text{net}}^{-2}$, is the quantity most exposed to it. The blowing
+treatment has its own limits (§12.3.3).

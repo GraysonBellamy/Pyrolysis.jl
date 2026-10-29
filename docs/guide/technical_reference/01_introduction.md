@@ -451,7 +451,7 @@ The physics below is absent from the model. It is ordered by its expected effect
 
 **Likely to bias the validation cases**
 
-1. **Flame heat-flux feedback.** There is no ignition-triggered flame heat-flux boundary condition. After ignition a cone-calorimeter flame returns roughly 20–30 kW·m⁻² (PMMA) or 10–15 kW·m⁻² (wood) to the surface, 40–60 % on top of a 50 kW·m⁻² exposure, so parameters calibrated without it absorb that net-flux bias. The natural form is a flame-flux BC switched on by a critical-MLR or critical-$T_s$ callback. Flame feedback and the blowing reduction of the convective coefficient (the `blowing` model of `ConvectiveBC`, §12.3.3) act in opposite directions and partially cancel: enabling a blowing model alone on a cone example calibrated without either raises $T_s$ and MLR. Both belong in place before the cone examples are recalibrated.
+1. **Flame heat-flux feedback.** There is no ignition-triggered flame heat-flux boundary condition. After ignition a cone-calorimeter flame returns roughly 20–30 kW·m⁻² (PMMA) or 10–15 kW·m⁻² (wood) to the surface, 40–60 % on top of a 50 kW·m⁻² exposure, so parameters calibrated without it absorb that net-flux bias. The natural form is a flame-flux BC switched on by a critical-MLR or critical-$T_s$ callback. Flame feedback and the blowing reduction of the convective coefficient (the `blowing` model of `ConvectiveBC`, §12.3.3) both raise the net surface flux when the film temperature is the ambient one the examples use, since blowing cuts a loss; they offset each other only when the film temperature is the flame's, so that blowing suppresses the flame's convective heating. Enabling a blowing model alone on a cone example calibrated without either therefore raises $T_s$ and MLR. Both belong in place before the cone examples are recalibrated.
 2. **Multi-reactant kinetics** (item 3 above). A reaction with more than one reactant is rejected by problem validation; source evaluation also checks the restriction (`_apply_reaction_source!`, `src/Physics/kinetics.jl`). This blocks char oxidation, recondensation, and autocatalysis (Prout–Tompkins fits cannot be represented). The extension point is a 3-ary reactant tuple `(idx, order, mass_stoich)`; it touches the reaction type, the kinetics, the volumetric strain rate, and the reaction kernel (the colored Jacobian differentiates whatever the kernel computes).
 
 **Relevant to near-term applications**
@@ -461,6 +461,14 @@ The physics below is absent from the model. It is ordered by its expected effect
 5. **Backing layer and contact resistance at the back face.** There is no contact-resistance or substrate model. An adiabatic back face over-predicts late-time back-half temperatures (the missing loss is about 0.7–3 kW·m⁻² for 25 mm of wood over 10–20 min); a lumped Robin condition on the bottom face (radiative + convective, as in example `06_cone_calorimeter.jl`) is the available approximation. A contact conductance plus a semi-infinite-substrate $h(t)$ would close the gap.
 6. **Kinetics expressiveness.** Normalized-conversion ($\alpha$) tracking, a $T^n$ pre-factor, and DAEM-style stacking are absent. Any real order $n \ge 0$ per reactant ($\xi^n$) is supported and equals $\xi_0^n(1-\alpha)^n$ up to a rescaling of $A_i$, so the gap is $\alpha$-normalization, not the conversion order.
 7. **Transport-closure accuracy** (item 5 above). The gas viscosity is a material curve without composition-dependent mixing. Binary diffusivity and pore geometry must be supplied for the dusty-gas model. Both closures exclude thermal diffusion and gravity; donor advection is first order. A matrix endpoint supplies finite porous resistance, not a free-flow momentum model (§9).
+
+8. **Attenuation of the incident flux by the pyrolysate plume.** The flux the
+   surface receives is the set flux; the volatiles above the face absorb
+   $6$–$14\,\%$ of it before ignition and $20$–$27\,\%$ at steady outgassing in
+   a cone-type geometry (Zhou et al. 2009, 2010), $35\,\%$ under a coil heater
+   (Kashiwagi 1979), while a cone flame lets more than $95\,\%$ through (Rhodes
+   and Quintiere 1996). The effect depends on the apparatus and its extraction
+   flow, so it is left to the calibration of $h$ and $a_s$ (§12.12).
 
 **Niche or future**
 

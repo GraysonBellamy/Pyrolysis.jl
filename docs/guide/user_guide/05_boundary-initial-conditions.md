@@ -205,9 +205,18 @@ convective member of a combined BC applies its own model. The solution
 records the applied ratio `R_b` and, for the pooling model, `ψ`, the face fraction
 and the face buoyancy in `extras.surface_blowing_ratio`,
 `surface_pooling_factor`, `surface_face_fraction` and
-`surface_face_buoyancy`. The shipped examples were calibrated with the bare
-coefficient (and without flame feedback — the two partially cancel; see Technical
-Reference §1.8.1 before recalibrating).
+`surface_face_buoyancy`.
+
+**Validity.** The bare coefficient is the inert-surface value; on an outgassing
+face it overstates the convective exchange by 10–35 % of the net surface flux
+(10–30 K in `T_s`) at cone and gasification mass fluxes, and a coefficient
+fitted before ignition is wrong during burning, when the face outgasses. The
+Couette film is validated for light gases over flat plates up to `B ≈ 1`; no
+film law is validated for heavy volatiles pooling over a horizontal face,
+which is what the pooling model approximates with constants fitted to a
+chamber CFD. The shipped examples were calibrated with the bare coefficient
+and without flame feedback; see Technical Reference §12.3.3 and §1.8.1 before
+recalibrating.
 
 ### 5.2.4 `RadiativeBC` — surface re-radiation
 
@@ -293,7 +302,11 @@ Fields:
 Under `BEER_LAMBERT` the incident radiation enters through the `:top` face only:
 a `RadiativeFluxBC` on any other tag is refused with an `ArgumentError`. With
 `absorptivity = nothing` the absorbed fraction is the effective absorptivity of
-the first live cell.
+the first live cell. Under `BEER_LAMBERT` that number is the fraction of the
+flux that enters the material (one minus the surface reflectance, 0.92–0.96
+for PMMA), not the opaque absorptivity; under surface absorption it is the
+absorptivity to the heater's spectrum, which for wood and clear polymers lies
+0.02–0.09 below the emission emissivity (Technical Reference §5.8.2).
 
 The boundary flux from this BC has `dq_BC/dT_s = 0` (it is the *incoming* source
 and does not depend on the surface temperature).
