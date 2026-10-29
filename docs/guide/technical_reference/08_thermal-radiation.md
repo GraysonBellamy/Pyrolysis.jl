@@ -168,9 +168,10 @@ band, is short against the thermal-gradient scale; the in-depth transport it car
 radiative conductivity $16n^2\sigma T^3/3\kappa_R$ that the surface treatment omits. For wood
 and char the mean free path is below 0.1 mm. For black PMMA the spectral windows at 2–3 µm
 and 4–5 µm give $\kappa_R\approx4\times10^{3}$ m⁻¹ at 650 K, a mean free path of 0.25 mm and
-a radiative conductivity of 0.045 W·m⁻¹·K⁻¹, about a sixth of the measured conductivity; in
-the 25 kW·m⁻² cone case it changes the surface temperature by 6 K, the back-face temperature
-by 15 K and the mass loss rate by 5 %, within the scatter of those measurements.
+a radiative conductivity of 0.045 W·m⁻¹·K⁻¹, a fifth of the room-temperature conductivity and
+half of the value a cone-calibrated law assigns at 650 K (§5.5); in
+the 25 kW·m⁻² cone case it changes the surface temperature by 6 K and the mass loss rate by
+5 %, within the scatter of those measurements, and the back-face temperature by 15 K, above it.
 
 ---
 

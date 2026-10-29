@@ -1603,6 +1603,19 @@ occupancy `ξ/ρ` drives the volume-change law and weights conductivity,
 emissivity and absorptivity. Specify intrinsic density or pure-phase porosity
 to describe its skeletal volume. Full signatures and units are in §16.2.1.
 
+Conductivities are *apparent*: `k` is the conductivity of the component as a
+porous bulk at its own porosity, pore gas included, and a gas component's `k` is
+never mixed in while any condensed matrix remains (Technical Reference §5.5).
+Give a char the conductivity measured on char, not on carbon; give a wood its dry
+conductivity when moisture is a separate component, since the moisture conducts
+by its own volume share; and where radiation crosses the pores or passes through
+a semi-transparent solid, put it into `k` as a `T^3` term,
+`k = k₀(T) + 16 n² σ T³ / (3 β)`, rather than into a constant chosen at one
+temperature. Heat capacities `c` are sensible: reaction and latent heats go into
+the reactions, and a `c` law must stay physical over the temperatures a solve
+reaches, so continue a fit beyond its measured window at its low-temperature
+slope or hold it constant (Technical Reference §5.4).
+
 ---
 
 ### 3.2.2 `LiquidComponent`

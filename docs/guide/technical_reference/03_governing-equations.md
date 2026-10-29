@@ -432,7 +432,13 @@ the temperature equation of §3.3.1. Three things follow:
    or drying, happens in place and raises the porosity, and the geometry does not recede.
    That is the constant-volume model of degradation; it suits inert layers and charring
    solids whose char keeps its volume, and a material that recedes or swells needs
-   `use_ale = true` (§11). Where an equidistribution
+   `use_ale = true` (§11). Keeping the volume means that the products' bulk densities
+   conserve it, $\rho_{b,\text{product}} = Y\rho_{b,\text{reactant}}$ with $Y$ the solid
+   yield, so that $\sum_j \xi_j/\rho_{b,j}$ stays near 1: the conductivity and emissivity
+   weights are normalized over the condensed components (§5.1.2), so a cell whose condensed
+   bulk volume has fallen below the cell volume keeps its matrix's own apparent
+   conductivity, while its porosity and gas transport see the full void (§5.16).
+   Where an equidistribution
    correction moves the mesh relative to the skeleton, the inventories, and the
    enthalpy they carry, cross the faces at the relative velocity (§11.2.2, §11.6).
 

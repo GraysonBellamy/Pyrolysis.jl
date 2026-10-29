@@ -472,7 +472,7 @@ The physics below is absent from the model. It is ordered by its expected effect
 
 **Niche or future**
 
-- Spectral (two-band) radiation and in-depth emission from glowing char or from a semi-transparent polymer (for black PMMA the radiative conductivity it would add is about 0.045 W·m⁻¹·K⁻¹ at 650 K, a sixth of the measured conductivity, §8.2.2); a model of that kind would add further algebraic intensity rows to the state, as the Beer–Lambert face intensities do (§8).
+- Spectral (two-band) radiation and in-depth emission from glowing char or from a semi-transparent polymer (for black PMMA the radiative conductivity it would add is about 0.045 W·m⁻¹·K⁻¹ at 650 K, a fifth of the room-temperature conductivity and half of the value a cone-calibrated law assigns at that temperature, §5.5, §8.2.2); a model of that kind would add further algebraic intensity rows to the state, as the Beer–Lambert face intensities do (§8).
 - Substrate reflection; scattering ($\sigma_s$ is not modeled); view-factor edge fall-off.
 - Species-pair-dependent molecular diffusivities and thermal-transpiration effects beyond the declared common-diffusivity dusty-gas closure.
 - Liquid free-water capillarity (relevant only above the fiber-saturation point, about 30 % moisture content) and bound-water diffusion ($\sqrt{Dt} \approx 0.25$ mm over a cone test, negligible at fire heating rates).

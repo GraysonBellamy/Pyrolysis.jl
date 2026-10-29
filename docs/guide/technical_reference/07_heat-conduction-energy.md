@@ -42,7 +42,8 @@ and $-1$ otherwise.
 
 ### 7.1.1 Continuous law
 
-Conductive transport of sensible heat in the condensed phase obeys Fourier's law,
+Conductive transport of sensible heat through the porous bulk, the condensed
+components and the gas in their pores together, obeys Fourier's law,
 
 $$
 \mathbf{q}_{\text{cond}} = -k(T,\xi)\,\nabla T ,

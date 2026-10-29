@@ -503,7 +503,7 @@ The physics below is absent from the model. It is ordered by its expected effect
 
 **Niche or future**
 
-- Spectral (two-band) radiation and in-depth emission from glowing char or from a semi-transparent polymer (for black PMMA the radiative conductivity it would add is about 0.045 W·m⁻¹·K⁻¹ at 650 K, a sixth of the measured conductivity, §8.2.2); a model of that kind would add further algebraic intensity rows to the state, as the Beer–Lambert face intensities do (§8).
+- Spectral (two-band) radiation and in-depth emission from glowing char or from a semi-transparent polymer (for black PMMA the radiative conductivity it would add is about 0.045 W·m⁻¹·K⁻¹ at 650 K, a fifth of the room-temperature conductivity and half of the value a cone-calibrated law assigns at that temperature, §5.5, §8.2.2); a model of that kind would add further algebraic intensity rows to the state, as the Beer–Lambert face intensities do (§8).
 - Substrate reflection; scattering ($\sigma_s$ is not modeled); view-factor edge fall-off.
 - Species-pair-dependent molecular diffusivities and thermal-transpiration effects beyond the declared common-diffusivity dusty-gas closure.
 - Liquid free-water capillarity (relevant only above the fiber-saturation point, about 30 % moisture content) and bound-water diffusion ($\sqrt{Dt} \approx 0.25$ mm over a cone test, negligible at fire heating rates).
@@ -1537,7 +1537,13 @@ the temperature equation of §3.3.1. Three things follow:
    or drying, happens in place and raises the porosity, and the geometry does not recede.
    That is the constant-volume model of degradation; it suits inert layers and charring
    solids whose char keeps its volume, and a material that recedes or swells needs
-   `use_ale = true` (§11). Where an equidistribution
+   `use_ale = true` (§11). Keeping the volume means that the products' bulk densities
+   conserve it, $\rho_{b,\text{product}} = Y\rho_{b,\text{reactant}}$ with $Y$ the solid
+   yield, so that $\sum_j \xi_j/\rho_{b,j}$ stays near 1: the conductivity and emissivity
+   weights are normalized over the condensed components (§5.1.2), so a cell whose condensed
+   bulk volume has fallen below the cell volume keeps its matrix's own apparent
+   conductivity, while its porosity and gas transport see the full void (§5.16).
+   Where an equidistribution
    correction moves the mesh relative to the skeleton, the inventories, and the
    enthalpy they carry, cross the faces at the relative velocity (§11.2.2, §11.6).
 
@@ -3132,6 +3138,21 @@ summed over every component with no phase branch, so **gas sensible storage is
 part of the left-hand side of the energy equation**. The units check:
 $[\text{kg}\,\text{m}^{-3}]\cdot[\text{J}\,\text{kg}^{-1}\,\text{K}^{-1}] = [\text{J}\,\text{m}^{-3}\,\text{K}^{-1}]$.
 
+Each $c_{p,j}$ is the *sensible* heat capacity of its component. The reaction and
+latent heats are carried by the source terms (§3.3.3, §6), so a law that includes
+them, such as the apparent heat capacity a DSC or STA records while the sample
+decomposes, counts that heat twice. Two checks bound a law over the temperatures
+a solve reaches. The Dulong–Petit limit, $3R$ per mole of atoms, is about
+3.2 kJ·kg⁻¹·K⁻¹ for wood (C₆H₁₀O₅ units) and 3.7 for PMMA, and organic solids and
+melts stay below it (molten PMMA reaches 2.7 at 650 K). And a fit must not be
+continued beyond its measured window at a slope steeper than the one measured
+below it: the window of a wood heat-capacity measurement ends where decomposition
+begins, while a solve carries the virgin and intermediate components well past
+it. A law continued at its low-temperature slope, or held constant, stays
+physical. In a calibrated deck the reaction heats absorb whichever continuation
+was chosen, so the heat capacity and the heats of reaction are a pair and are
+refitted together.
+
 Because the cell masses are the states, the energy row does not divide by a
 volume (§7.3) and reads the extensive form of (5.9), the **heat-capacity sum**
 of the cell,
@@ -3253,6 +3274,26 @@ $k_j$ is the conductivity of that component as a porous bulk, pore gas included,
 conductivity of a `GaseousComponent` is not added to it: it enters $k_{\mathrm{eff}}$ only through
 the all-phase blend below a matrix occupancy of $10^{-3}$ (§5.1.2), where the matrix has gone.
 
+Three consequences for a material definition follow from that convention. A char's
+$k_j$ is the apparent conductivity of the char at its own porosity, not that of the
+carbon skeleton: measured crack-free wood char rises from 0.06–0.1 W·m⁻¹·K⁻¹ near
+ambient to about 0.4 at 1073 K. A wood's $k_j$ is its dry value when the moisture
+is a separate component, since the moisture conducts by its own volume share and
+a handbook value at a stated moisture content would count the water twice. And
+where the heated layer is optically thick, $\beta\,\delta_T \gtrsim 3$ with $\beta$
+the extinction coefficient and $\delta_T$ the thermal thickness, the radiation that
+crosses the pores or passes through a semi-transparent component is a diffusive
+transport with the Rosseland conductivity $16n^{2}\sigma T^{3}/(3\beta)$, $n$ the
+refractive index of the component ($n = 1$ in pores). That term belongs inside
+$k_j(T)$, as $k_j = k_{0,j}(T) + 16n^{2}\sigma T^{3}/(3\beta_j)$. Measured wood char
+follows that form with $\beta \approx 800$–1000 m⁻¹. For PMMA, with
+$\beta_R \approx 3900$ m⁻¹ and $n^{2} \approx 2.1$ from its own emission spectrum,
+the term is 0.045 W·m⁻¹·K⁻¹ at 650 K, half of the value a cone-calibrated law
+assigns there, and a law that falls with temperature above the glass transition
+is a calibration constant standing in for it (§8.2.2). Below the optically thick
+limit, in the first millimetre of a polymer before ignition, the radiative
+transport is not local and no conductivity represents it (§8).
+
 The state mapping evaluates `k_i = effective_conductivity(ξ⁺_i, T_trial,i,
 material; skip_absent = Val(true))` and keeps it twice: smoothly floored at
 `CONDUCTIVITY_FLOOR = 1e-6` W·m⁻¹·K⁻¹ ($k$, `src/States/derived.jl`), far below
@@ -3290,8 +3331,9 @@ $k = k_{\text{series}}$. Physically:
   the gradient so heat passes through each in turn; thermal *resistances* add,
   giving a harmonic mean. Appropriate for stratified layering.
 
-The true effective conductivity of any two-phase mixture lies between these
-Hashin–Shtrikman-bracketed bounds.
+Any mixture, whatever its microstructure, lies between these two (the Wiener
+bounds); a macroscopically isotropic one lies inside the narrower Hashin–Shtrikman
+bounds.
 
 > **Implementation note.** Both sums are produced in one pass by the generated
 > `_conductivity_sums(v, T, comps, Val(NC), Val(skip_absent))`
@@ -3317,13 +3359,19 @@ default $\beta = 0.5$ (`MixingSpec` default, `materials.jl`) is the arithmetic m
 of the two bounds. The blend is the package's default conductivity model
 (`materials.jl`) because, lacking microstructural information, the mean of the
 rigorous bounds is the least-biased single estimate. The $\beta$ value is validated to
-lie in $[0,1]$ at `MixingSpec` construction (`materials.jl`).
+lie in $[0,1]$ at `MixingSpec` construction (`materials.jl`). It is a fit parameter of
+the material, not a measured microstructure, and the cone comparisons cannot fix it:
+in a charring deck the cells in which virgin wood and char coexist form a thin band
+between pure layers, and the whole span from $\beta = 0$ to $\beta = 1$ moves the
+surface temperature of a cone case by under 20 K, the back face by about 10 K and
+the peak mass loss rate by 2 %, less than the scatter of the experiments. The
+default stays unless a property measurement fixes $\beta$.
 
 ### 5.5.3 Bruggeman effective-medium theory
 
-For random heterogeneous microstructures — and especially for the self-similar
-pore structure of forming char — the **BRUGGEMAN** symmetric effective-medium
-closure is more faithful than a fixed blend. It treats each phase as a spherical
+For a random, macroscopically isotropic mixture of grains the **BRUGGEMAN**
+symmetric effective-medium closure replaces the fixed blend by a self-consistent
+estimate. It treats each phase as a spherical
 inclusion embedded in the *effective* medium and demands self-consistency: the
 volume-averaged polarization vanishes,
 
@@ -3333,10 +3381,12 @@ $$
 \tag{5.15}
 $$
 
-Unlike the parallel/series/weighted forms, (5.15) is *implicit* in $k_{\text{eff}}$ and
-can capture percolation-like behaviour (the effective conductivity dropping
-sharply when a continuous phase fractures) and genuinely non-linear composition
-dependence. The factor $+2 k_{\text{eff}}$ is the spherical-inclusion depolarization
+Unlike the parallel/series/weighted forms, (5.15) is *implicit* in $k_{\text{eff}}$. Its
+percolation threshold, $k_{\text{eff}} \to 0$ when a conducting phase dispersed in an
+insulator falls below a third of the volume, cannot be reached here: the weights
+are the condensed components, whose conductivities are validated positive, and
+the pore gas carries no weight, so the closure is a smooth interpolant inside the
+Hashin–Shtrikman bounds, close to the weighted rule at $\beta \approx 0.6$. The factor $+2 k_{\text{eff}}$ is the spherical-inclusion depolarization
 factor for an isotropic 3-D medium; the symmetric form (no distinguished host
 phase) reflects an isotropic, statistically self-similar microstructure.
 
@@ -4067,6 +4117,15 @@ verification and validation discussion of §18.
    Kozeny constant 180 is empirical for a packed bed of spheres. Real porous char
    may have a fractal or anisotropic pore structure for which a different closure
    (or a measured $\kappa(\varphi)$ curve) would be more accurate.
+
+7. **Void on a fixed mesh.** The conductivity weights are normalized over the
+   condensed components (§5.1.2). On a fixed mesh a deck whose products do not
+   conserve bulk volume opens a void that the porosity sees and the conductivity
+   does not: the cell keeps its matrix's apparent $k$ where the void dilutes it by
+   the matrix fraction and adds the radiation across the void, $4\sigma\ell T^{3}$
+   for a width $\ell$, about 0.2 W·m⁻¹·K⁻¹ per millimetre at 1000 K. A burned-out
+   cell, whose blend gives the gas-mixture conductivity alone, is the same case.
+   A moving mesh removes both (§3.3.2).
 
 The matching subsystem discussions are: the energy assembly that consumes the
 heat-capacity sum, the sensible enthalpies and the face conductivities — §7
@@ -5221,7 +5280,8 @@ and $-1$ otherwise.
 
 ### 7.1.1 Continuous law
 
-Conductive transport of sensible heat in the condensed phase obeys Fourier's law,
+Conductive transport of sensible heat through the porous bulk, the condensed
+components and the gas in their pores together, obeys Fourier's law,
 
 $$
 \mathbf{q}_{\text{cond}} = -k(T,\xi)\,\nabla T ,
@@ -6319,9 +6379,10 @@ band, is short against the thermal-gradient scale; the in-depth transport it car
 radiative conductivity $16n^2\sigma T^3/3\kappa_R$ that the surface treatment omits. For wood
 and char the mean free path is below 0.1 mm. For black PMMA the spectral windows at 2–3 µm
 and 4–5 µm give $\kappa_R\approx4\times10^{3}$ m⁻¹ at 650 K, a mean free path of 0.25 mm and
-a radiative conductivity of 0.045 W·m⁻¹·K⁻¹, about a sixth of the measured conductivity; in
-the 25 kW·m⁻² cone case it changes the surface temperature by 6 K, the back-face temperature
-by 15 K and the mass loss rate by 5 %, within the scatter of those measurements.
+a radiative conductivity of 0.045 W·m⁻¹·K⁻¹, a fifth of the room-temperature conductivity and
+half of the value a cone-calibrated law assigns at 650 K (§5.5); in
+the 25 kW·m⁻² cone case it changes the surface temperature by 6 K and the mass loss rate by
+5 %, within the scatter of those measurements, and the back-face temperature by 15 K, above it.
 
 ---
 
