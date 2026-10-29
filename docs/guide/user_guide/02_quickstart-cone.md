@@ -244,9 +244,10 @@ What each piece does:
   Where this flux is deposited depends on the `radiation_model` you choose at
   solve time (see §2.6).
 - **`RadiativeBC(ε, T_inf, F)`** is the surface's own **re-radiation loss**,
-  `q = F·ε·σ·(T_∞⁴ − T_s⁴)`. With `ε = nothing` it uses the effective
-  emissivity; the view factor `F` defaults to `1.0`. Because `T_s` exceeds
-  `T_∞` once heated, this term is a loss.
+  `q = ε·σ·(F·T_∞⁴ − T_s⁴)`. With `ε = nothing` it uses the effective
+  emissivity; the view factor `F` to the surroundings defaults to `1.0` and
+  scales only the irradiation they send, never the emission. Because `T_s`
+  exceeds `T_∞` once heated, this term is a loss.
 
 > **Don't confuse the two radiative BCs.** `RadiativeBC` applies the
 > *re-radiation loss* (the `T_s⁴` term) using the surface's **own emissivity**
@@ -273,7 +274,7 @@ Other thermal BCs available (full reference in UG 5 / Technical Reference §12):
 | `AdiabaticBC()` | `0` | perfect insulation |
 | `HeatFluxBC(q)` | prescribed `q` or `q(t)` | `+` into domain; not subject to absorptivity |
 | `ConvectiveBC(h, T_inf)` | `h(T_∞ − T_s)` | `h`, `T_inf` may be functions of `t` |
-| `RadiativeBC(ε, T_inf, F)` | `F·ε·σ·(T_∞⁴ − T_s⁴)` | re-radiation; `ε = nothing` ⇒ `ε_eff` |
+| `RadiativeBC(ε, T_inf, F)` | `ε·σ·(F·T_∞⁴ − T_s⁴)` | re-radiation; `F` scales the surroundings' irradiation only; `ε = nothing` ⇒ `ε_eff` |
 | `RadiativeFluxBC(flux, absorptivity)` | `a·flux`, `a` the absorptivity (model-dependent) | incident external radiation |
 | `DirichletThermalBC(T)` | enforces `T_s = T` | fixed-temperature face |
 | `bc1 + bc2 + …` | sum | `CombinedThermalBC` |

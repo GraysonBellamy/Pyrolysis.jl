@@ -858,9 +858,10 @@ What each piece does:
   Where this flux is deposited depends on the `radiation_model` you choose at
   solve time (see §2.6).
 - **`RadiativeBC(ε, T_inf, F)`** is the surface's own **re-radiation loss**,
-  `q = F·ε·σ·(T_∞⁴ − T_s⁴)`. With `ε = nothing` it uses the effective
-  emissivity; the view factor `F` defaults to `1.0`. Because `T_s` exceeds
-  `T_∞` once heated, this term is a loss.
+  `q = ε·σ·(F·T_∞⁴ − T_s⁴)`. With `ε = nothing` it uses the effective
+  emissivity; the view factor `F` to the surroundings defaults to `1.0` and
+  scales only the irradiation they send, never the emission. Because `T_s`
+  exceeds `T_∞` once heated, this term is a loss.
 
 > **Don't confuse the two radiative BCs.** `RadiativeBC` applies the
 > *re-radiation loss* (the `T_s⁴` term) using the surface's **own emissivity**
@@ -887,7 +888,7 @@ Other thermal BCs available (full reference in UG 5 / Technical Reference §12):
 | `AdiabaticBC()` | `0` | perfect insulation |
 | `HeatFluxBC(q)` | prescribed `q` or `q(t)` | `+` into domain; not subject to absorptivity |
 | `ConvectiveBC(h, T_inf)` | `h(T_∞ − T_s)` | `h`, `T_inf` may be functions of `t` |
-| `RadiativeBC(ε, T_inf, F)` | `F·ε·σ·(T_∞⁴ − T_s⁴)` | re-radiation; `ε = nothing` ⇒ `ε_eff` |
+| `RadiativeBC(ε, T_inf, F)` | `ε·σ·(F·T_∞⁴ − T_s⁴)` | re-radiation; `F` scales the surroundings' irradiation only; `ε = nothing` ⇒ `ε_eff` |
 | `RadiativeFluxBC(flux, absorptivity)` | `a·flux`, `a` the absorptivity (model-dependent) | incident external radiation |
 | `DirichletThermalBC(T)` | enforces `T_s = T` | fixed-temperature face |
 | `bc1 + bc2 + …` | sum | `CombinedThermalBC` |
@@ -3105,7 +3106,7 @@ the surface temperature `T_s` (§5.4). Every flux is reported with the **positiv
 | `AdiabaticBC` | `0` | — |
 | `HeatFluxBC` | `q(t)` (prescribed) | `flux` |
 | `ConvectiveBC` | `h·(T_∞ − T_s)` | `h`, `T_inf` |
-| `RadiativeBC` | `F·ε_eff·σ·(T_∞⁴ − T_s⁴)` | `ε` (`nothing`), `T_inf`, `F` (`1.0`) |
+| `RadiativeBC` | `ε_eff·σ·(F·T_∞⁴ − T_s⁴)` | `ε` (`nothing`), `T_inf`, `F` (`1.0`) |
 | `RadiativeFluxBC` | `a·q_inc` (model-dependent) | `flux`, `absorptivity` (`nothing` ⇒ `a_eff`) |
 | `DirichletThermalBC` | enforces `T_s = T` | `T` |
 | `CombinedThermalBC` | `Σ_i q_BC,i` | built via `+` |
@@ -3225,12 +3226,12 @@ Reference §1.8.1 before recalibrating).
 ```julia
 bc = RadiativeBC(T_inf = 300.0)                  # uses material's effective emissivity
 bc = RadiativeBC(ε = 0.9, T_inf = 300.0)         # fixed emissivity
-bc = RadiativeBC(T_inf = 300.0, F = 0.7)         # partially enclosed surface
+bc = RadiativeBC(T_inf = 300.0, F = 0.4)         # surroundings over 40 % of the hemisphere; the rest is a RadiativeFluxBC source
 bc = RadiativeBC(ε = T -> 0.85 + 0.1*(T-300)/700, T_inf = 300.0)  # T-dependent ε
 ```
 
 Gray-body radiative exchange with the surroundings,
-`q_BC = F·ε_eff·σ·(T_∞⁴ − T_s⁴)`, where `σ = 5.670374419×10⁻⁸` W·m⁻²·K⁻⁴.
+`q_BC = ε_eff·σ·(F·T_∞⁴ − T_s⁴)`, where `σ = 5.670374419×10⁻⁸` W·m⁻²·K⁻⁴.
 Fields:
 
 - `ε` — surface emissivity. Default `nothing`, which means **use the effective
@@ -3241,10 +3242,14 @@ Fields:
   temperature dependence you gave the component `ε`. You can also pass a
   constant in `[0, 1]` or a function `ε(T)`.
 - `T_inf` — surroundings temperature `T_∞` in K (constant or `T_∞(t)`).
-- `F` — view factor in `[0, 1]`, default `1.0` (surface fully sees the
-  surroundings). Use `F < 1` for partially enclosed geometries.
+- `F` — view factor from the surface to the surroundings at `T_∞`, in
+  `[0, 1]`, default `1.0`. It scales the irradiation received from them only;
+  the surface always emits `ε·σ·T_s⁴` into its whole hemisphere. Use `F < 1`
+  when the rest of the hemisphere is a source you supply separately through a
+  `RadiativeFluxBC`; a cone flux set with a water-cooled gauge already carries
+  the heater's geometry, so a cone calorimeter uses `F = 1`.
 
-Its temperature derivative is `dq_BC/dT_s = −4·F·ε_eff·σ·T_s³`. When `ε` is a
+Its temperature derivative is `dq_BC/dT_s = −4·ε_eff·σ·T_s³`. When `ε` is a
 function of temperature, the solver **neglects** the `dε/dT` term in this
 derivative; this slightly slows Newton convergence but does not change the
 converged root (see Technical Reference §12.2).
@@ -11384,7 +11389,7 @@ and `BoundaryConditionSet` are top-level exports.
 | `AdiabaticBC` | `AdiabaticBC()` | `0` |
 | `HeatFluxBC` | `HeatFluxBC(flux)`, a number or `t -> q` | `flux` |
 | `ConvectiveBC` | `ConvectiveBC(; h, T_inf, blowing = NoBlowing(), validate = true)`, or `ConvectiveBC(h, T_inf)` | `R_b h (T_∞ − T_s)`, `R_b` the blowing model's ratio (one without outflow) |
-| `RadiativeBC` | `RadiativeBC(; ε = nothing, T_inf, F = 1.0, validate = true)` | `F ε σ (T_∞⁴ − T_s⁴)`; `ε = nothing` is the exposed cell's effective emissivity |
+| `RadiativeBC` | `RadiativeBC(; ε = nothing, T_inf, F = 1.0, validate = true)` | `ε σ (F T_∞⁴ − T_s⁴)`, `F` the view factor to the surroundings (irradiation only); `ε = nothing` is the exposed cell's effective emissivity |
 | `RadiativeFluxBC` | `RadiativeFluxBC(flux; absorptivity = nothing, validate = true)`, or `RadiativeFluxBC(; flux, absorptivity = nothing, validate = true)` | `a q(t)`, incident external radiation; `absorptivity = nothing` is the exposed cell's effective absorptivity |
 | `DirichletThermalBC` | `DirichletThermalBC(T)`, a number or `t -> T` | holds `T_s = T` |
 | `CombinedThermalBC` | `bc1 + bc2 + …` | the sum of its members |

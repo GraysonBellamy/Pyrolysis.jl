@@ -137,11 +137,13 @@ end
 """
 	RadiativeBC{Fε,FT,FF} <: AbstractThermalBC
 
-Radiative heat transfer boundary condition: q" = F × ε × σ × (T∞⁴ - T_surface⁴)
+Radiative exchange with gray surroundings: q" = ε σ (F T∞⁴ − T_surface⁴).
 
-Models thermal radiation exchange between a surface and its surroundings.
-The heat flux is positive when T∞ > T_surface (heating) and negative when
-T_surface > T∞ (cooling/re-radiation loss).
+The surface emits ε σ T_surface⁴ into its whole hemisphere whatever it faces,
+and receives ε σ T∞⁴ from the fraction F of that hemisphere occupied by the
+surroundings at T∞. The flux is positive into the material when the
+irradiation exceeds the emission and negative (a re-radiation loss) once the
+surface is hot.
 
 # Fields
 - `ε::Fε`: Surface emissivity [-], range 0-1. Can be:
@@ -155,12 +157,14 @@ T_surface > T∞ (cooling/re-radiation loss).
   - Polished metals: 0.02 - 0.10
   - Oxidized metals: 0.40 - 0.80
 - `T_inf::FT`: Ambient/surroundings temperature [K]. Can be constant or time-dependent.
-- `F::FF`: View factor [-], range 0-1. Fraction of radiation leaving the surface
-  that reaches the surroundings at T_inf. Default is 1.0 (surface fully sees surroundings).
-  Use values < 1 for:
-  - Partially enclosed surfaces
-  - Surfaces facing walls at different temperatures
-  - Complex geometries with self-viewing
+- `F::FF`: View factor [-] from the surface to the surroundings at `T_inf`,
+  range 0-1, default 1.0. It scales the irradiation received from them only,
+  never the surface's own emission. Use `F < 1` when the rest of the
+  hemisphere is taken up by a source whose irradiation is supplied
+  separately (a heater through `RadiativeFluxBC`, with its own view factor
+  folded into that flux). A cone flux set with a water-cooled gauge already
+  carries the heater's geometry, so a cone calorimeter is modelled with
+  `F = 1`.
 
 # Example
 ```julia
@@ -170,8 +174,9 @@ bc = RadiativeBC(T_inf=300.0)
 # Override with fixed emissivity
 bc = RadiativeBC(ε=0.9, T_inf=300.0)
 
-# With view factor for partially enclosed surface
-bc = RadiativeBC(T_inf=300.0, F=0.7)
+# Surroundings over 40 % of the hemisphere; the heater filling the other
+# 60 % is supplied through a RadiativeFluxBC
+bc = RadiativeBC(T_inf=300.0, F=0.4)
 
 # Temperature-dependent emissivity (e.g., char formation)
 bc = RadiativeBC(ε=T -> 0.85 + 0.1*(T-300)/700, T_inf=300.0)
@@ -185,7 +190,7 @@ change in surface properties as material decomposes (e.g., polymer → char).
 struct RadiativeBC{Fε,FT,FF} <: AbstractThermalBC
     ε::Fε           # nothing = use effective, or ε(T), or constant
     T_inf::FT       # T∞(t) or constant
-    F::FF           # View factor (0-1), default 1.0
+    F::FF           # View factor to the surroundings (0-1), default 1.0
 end
 
 # Constructors with optional emissivity and view factor

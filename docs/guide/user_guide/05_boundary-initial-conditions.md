@@ -94,7 +94,7 @@ the surface temperature `T_s` (§5.4). Every flux is reported with the **positiv
 | `AdiabaticBC` | `0` | — |
 | `HeatFluxBC` | `q(t)` (prescribed) | `flux` |
 | `ConvectiveBC` | `h·(T_∞ − T_s)` | `h`, `T_inf` |
-| `RadiativeBC` | `F·ε_eff·σ·(T_∞⁴ − T_s⁴)` | `ε` (`nothing`), `T_inf`, `F` (`1.0`) |
+| `RadiativeBC` | `ε_eff·σ·(F·T_∞⁴ − T_s⁴)` | `ε` (`nothing`), `T_inf`, `F` (`1.0`) |
 | `RadiativeFluxBC` | `a·q_inc` (model-dependent) | `flux`, `absorptivity` (`nothing` ⇒ `a_eff`) |
 | `DirichletThermalBC` | enforces `T_s = T` | `T` |
 | `CombinedThermalBC` | `Σ_i q_BC,i` | built via `+` |
@@ -214,12 +214,12 @@ Reference §1.8.1 before recalibrating).
 ```julia
 bc = RadiativeBC(T_inf = 300.0)                  # uses material's effective emissivity
 bc = RadiativeBC(ε = 0.9, T_inf = 300.0)         # fixed emissivity
-bc = RadiativeBC(T_inf = 300.0, F = 0.7)         # partially enclosed surface
+bc = RadiativeBC(T_inf = 300.0, F = 0.4)         # surroundings over 40 % of the hemisphere; the rest is a RadiativeFluxBC source
 bc = RadiativeBC(ε = T -> 0.85 + 0.1*(T-300)/700, T_inf = 300.0)  # T-dependent ε
 ```
 
 Gray-body radiative exchange with the surroundings,
-`q_BC = F·ε_eff·σ·(T_∞⁴ − T_s⁴)`, where `σ = 5.670374419×10⁻⁸` W·m⁻²·K⁻⁴.
+`q_BC = ε_eff·σ·(F·T_∞⁴ − T_s⁴)`, where `σ = 5.670374419×10⁻⁸` W·m⁻²·K⁻⁴.
 Fields:
 
 - `ε` — surface emissivity. Default `nothing`, which means **use the effective
@@ -230,10 +230,14 @@ Fields:
   temperature dependence you gave the component `ε`. You can also pass a
   constant in `[0, 1]` or a function `ε(T)`.
 - `T_inf` — surroundings temperature `T_∞` in K (constant or `T_∞(t)`).
-- `F` — view factor in `[0, 1]`, default `1.0` (surface fully sees the
-  surroundings). Use `F < 1` for partially enclosed geometries.
+- `F` — view factor from the surface to the surroundings at `T_∞`, in
+  `[0, 1]`, default `1.0`. It scales the irradiation received from them only;
+  the surface always emits `ε·σ·T_s⁴` into its whole hemisphere. Use `F < 1`
+  when the rest of the hemisphere is a source you supply separately through a
+  `RadiativeFluxBC`; a cone flux set with a water-cooled gauge already carries
+  the heater's geometry, so a cone calorimeter uses `F = 1`.
 
-Its temperature derivative is `dq_BC/dT_s = −4·F·ε_eff·σ·T_s³`. When `ε` is a
+Its temperature derivative is `dq_BC/dT_s = −4·ε_eff·σ·T_s³`. When `ε` is a
 function of temperature, the solver **neglects** the `dε/dT` term in this
 derivative; this slightly slows Newton convergence but does not change the
 converged root (see Technical Reference §12.2).

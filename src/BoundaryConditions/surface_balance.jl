@@ -403,8 +403,10 @@ end
 end
 
 # ----------------------------------------------------------------------------
-# RadiativeBC: q = F × ε × σ × (T_inf⁴ - T_s⁴)
-# Emission always uses ε_eff; `a_eff` is accepted for signature uniformity.
+# RadiativeBC: q = ε × σ × (F × T_inf⁴ - T_s⁴). The view factor scales the
+# irradiation from the surroundings only; the emission leaves into the whole
+# hemisphere. Emission always uses ε_eff; `a_eff` is accepted for signature
+# uniformity.
 # ----------------------------------------------------------------------------
 @inline function evaluate_bc_flux_and_derivative(
     bc::RadiativeBC,
@@ -422,11 +424,11 @@ end
     T_inf = evaluate_param(bc.T_inf, t)
     F = evaluate_param(bc.F, t)
 
-    q = F * ε * STEFAN_BOLTZMANN * (T_inf^4 - T_s^4)
-    dq_dT = -4 * F * ε * STEFAN_BOLTZMANN * T_s^3
+    q = ε * STEFAN_BOLTZMANN * (F * T_inf^4 - T_s^4)
+    dq_dT = -4 * ε * STEFAN_BOLTZMANN * T_s^3
 
     # This returned slope freezes ε. Surface solves differentiate q directly,
-    # including F*dε_dT*σ*(T_inf^4-T_s^4) when ε depends on temperature.
+    # including dε_dT*σ*(F*T_inf^4-T_s^4) when ε depends on temperature.
 
     return q, dq_dT
 end

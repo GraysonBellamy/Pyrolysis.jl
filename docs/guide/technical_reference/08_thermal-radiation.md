@@ -143,7 +143,7 @@ applied: the weights are convex and every component value lies in $[0,1]$
 in $[0,1]$. An explicit `absorptivity` on the condition (a constant or a function
 of $t$) overrides $a_{\text{eff}}$. The absorbed incident flux does not depend on
 $T_s$. Surface re-radiation is supplied separately by a `RadiativeBC` term,
-$q=F\varepsilon_{\text{eff}}\sigma(T_\infty^4-T_s^4)$, whose $T_s$-dependence
+$q=\varepsilon_{\text{eff}}\sigma(F\,T_\infty^4-T_s^4)$, whose $T_s$-dependence
 enters the Newton derivative (§12.3.4).
 
 The textbook alternative — depositing the absorbed flux as a volumetric source
@@ -519,7 +519,7 @@ face) for `BEER_LAMBERT`.
 |---|---|---|
 | `RadiativeFluxBC` at `:top` | $a\,q_{\text{inc}}$ in the surface balance | zero in the surface balance; the first member feeds the beam |
 | `RadiativeFluxBC` at another tag | $a\,q_{\text{inc}}$ in that face's balance | refused by `setup` |
-| `RadiativeBC` | $F\varepsilon\sigma(T_\infty^4-T_s^4)$ in the surface balance | the same |
+| `RadiativeBC` | $\varepsilon\sigma(F\,T_\infty^4-T_s^4)$ in the surface balance | the same |
 | `ConvectiveBC`, `HeatFluxBC`, … | unchanged | unchanged |
 
 The same dispatch threads through `CombinedThermalBC`, so a cone-calorimeter

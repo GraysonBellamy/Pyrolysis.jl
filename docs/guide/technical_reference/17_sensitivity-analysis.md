@@ -392,7 +392,7 @@ Common $\boldsymbol{\theta}$ entries and how they enter the model:
   (§14), so density is a particularly broad-reaching handle.
 - **Boundary-condition parameters** — incident flux level, convective
   coefficient $h_{\text{conv}}$, ambient $T_\infty$, view factor $F$,
-  emissivity in $q_{\text{rad}}=F\varepsilon\sigma(T_\infty^4-T_s^4)$. These
+  emissivity in $q_{\text{rad}}=\varepsilon\sigma(F\,T_\infty^4-T_s^4)$. These
   enter the surface energy balance solved for $T_s$ (§12.2).
 
 ### 17.4.3 Worked structure of a local-sensitivity evaluation

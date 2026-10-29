@@ -261,15 +261,21 @@ is in `src/BoundaryConditions/blowing.jl`.
 ### 12.3.4 `RadiativeBC` (gray surface exchange with surroundings)
 
 $$
-q_{\text{BC}} = F\,\varepsilon\,\sigma\,\bigl(T_\infty^4 - T_s^4\bigr),
+q_{\text{BC}} = \varepsilon\,\sigma\,\bigl(F\,T_\infty^4 - T_s^4\bigr),
 \qquad
-\frac{dq_{\text{BC}}}{dT_s} = -4\,F\,\varepsilon\,\sigma\,T_s^3,
+\frac{dq_{\text{BC}}}{dT_s} = -4\,\varepsilon\,\sigma\,T_s^3,
 $$
 
 with the Stefan–Boltzmann constant $\sigma=5.670374419\times10^{-8}$ W·m⁻²·K⁻⁴
 (`src/Materials/constants.jl`, exported as `STEFAN_BOLTZMANN`). The fields are: the
-**view factor** $F\in[0,1]$ (fraction of the surface's hemisphere that exchanges
-with surroundings at $T_\infty$; default $1$), the **emissivity** $\varepsilon$
+**view factor** $F\in[0,1]$ from the surface to the surroundings at $T_\infty$
+(default $1$), which scales the irradiation received from them and never the
+emission — the surface emits $\varepsilon\sigma T_s^4$ into its whole hemisphere
+whatever it faces, and a source filling the rest of the hemisphere (a heater)
+is supplied through a `RadiativeFluxBC` with its own view factor folded into
+the flux; a cone flux set with a water-cooled gauge at ambient already reads
+$G-\sigma T_\infty^4$ over the full hemisphere, so the cone calorimeter is
+modelled with $F=1$ — the **emissivity** $\varepsilon$
 (either a supplied constant or function of the surface temperature, evaluated at the
 trial clamp of the iterate, or, when `nothing`, the composition-weighted
 $\varepsilon_{\text{eff}}$ of §5.8.2), and the surroundings temperature
@@ -281,7 +287,7 @@ surface under every radiation model. (`surface_balance.jl`.)
 
 The displayed slope holds emissivity fixed. If emissivity depends on surface
 temperature, the full derivative additionally contains
-$F\sigma\varepsilon'(T_s)(T_\infty^4-T_s^4)$. The surface-root Jacobian and
+$\sigma\varepsilon'(T_s)(F\,T_\infty^4-T_s^4)$. The surface-root Jacobian and
 its implicit derivative include that term by differentiating the flux residual.
 The low-level flux helper also returns a frozen-coefficient slope; this slope
 is not used to differentiate the qualified surface root.

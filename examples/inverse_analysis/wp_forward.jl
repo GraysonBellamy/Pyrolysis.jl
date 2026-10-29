@@ -493,9 +493,9 @@ function build_bcs(
     # water-cooled chamber walls make the (1−F_cone) surroundings a clean
     # blackbody sink, validating the bare −ε·σ·T_s⁴ emission form (no enclosure
     # radiosity factor). See wp_properties.jl EMISSION block + derive_shrinkage
-    # discussion. The cone-direction RadiativeBC uses T_inf=0 to inject only
-    # the sample's F_cone share of self-emission (cone re-emission already in
-    # q_ext); validate=false because the validator rejects T_inf≤0.
+    # discussion. The RadiativeBC emits ε·σ·T_s⁴ into the whole hemisphere and
+    # receives the surroundings' irradiation over its view factor 1 − F_cone;
+    # the cone's share of the hemisphere is already in q_ext.
     F_cone = scenario.F_cone
     # With the split on, pin the cone-spectrum absorptivity (char value);
     # otherwise fall back to ε_eff (baseline: absorptivity = emission = ε_eff).
@@ -505,7 +505,6 @@ function build_bcs(
         RadiativeFluxBC(flux = scenario.q_ext)
     top_thermal =
         rad_flux +
-        RadiativeBC(F = F_cone, T_inf = 0.0, validate = false) +
         RadiativeBC(F = 1.0 - F_cone, T_inf = scenario.T_top_surr) +
         ConvectiveBC(h = scenario.h_top, T_inf = scenario.T_top_gas, blowing = blowing)
     top_mass = AmbientGasBC(

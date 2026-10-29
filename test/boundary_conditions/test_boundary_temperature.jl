@@ -172,6 +172,32 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
             @test T_inf < state.T_surface < T_cell
         end
 
+        @testset "Radiative BC: the view factor scales the irradiation only" begin
+            # q = εσ(F T_inf⁴ − T_s⁴): emission leaves into the whole hemisphere
+            # whatever F; F = 0 is a surface facing a black sink at 0 K.
+            T_cell = 800.0
+            k_eff = 0.2
+            Δz_half = 50e-6
+            ε = 0.9
+            T_inf = 300.0
+            σ = STEFAN_BOLTZMANN
+            for F in (1.0, 0.4, 0.0)
+                bc = RadiativeBC(ε = ε, T_inf = T_inf, F = F)
+                state = _solve_bt(T_cell, k_eff, Δz_half, bc, 0.0, ε)
+                @test state.converged
+                T_s = state.T_surface
+                @test state.q_applied ≈ ε * σ * (F * T_inf^4 - T_s^4) rtol=1e-8
+                q, dq = evaluate_bc_flux_and_derivative(bc, T_s, 0.0, ε)
+                @test q ≈ ε * σ * (F * T_inf^4 - T_s^4) rtol=1e-12
+                @test dq ≈ -4 * ε * σ * T_s^3 rtol=1e-12
+            end
+            # A smaller view factor removes irradiation, so the surface is colder.
+            T_full = _solve_bt(T_cell, k_eff, Δz_half, RadiativeBC(ε = ε, T_inf = T_inf), 0.0, ε).T_surface
+            T_part = _solve_bt(T_cell, k_eff, Δz_half, RadiativeBC(ε = ε, T_inf = T_inf, F = 0.4), 0.0, ε).T_surface
+            @test T_part < T_full
+            @test T_full - T_part ≈ 0.6 * ε * σ * T_inf^4 / (k_eff / Δz_half + 4 * ε * σ * T_full^3) rtol=5e-2
+        end
+
         @testset "Combined BC (flux + radiative + convective)" begin
             # Typical cone calorimeter setup
             T_cell = 850.0
