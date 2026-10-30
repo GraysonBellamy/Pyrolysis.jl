@@ -964,11 +964,8 @@ for t in profile_times
         if length(T_profile) <= 1
             continue
         end
-        # Use current thickness at this time
-        t_idx = isempty(thickness_times) ? 1 : argmin(abs.(thickness_times .- times[idx]))
-        current_thickness =
-            isempty(thickness_values) ? sample_thickness : thickness_values[t_idx]
-        z_coords = range(0, current_thickness*1000, length = length(T_profile))
+        # Cell centres of the moving mesh at this time
+        z_coords = get_cell_positions(solution; at = idx) .* 1000
         plot!(
             z_coords,
             T_profile,
@@ -994,6 +991,14 @@ println("Results saved to: cone_calorimeter_douglas_fir_results.png")
 
 println("\nGenerating component evolution plot...")
 
+# Thickness average of component k at saved time i. The cells of the moving
+# mesh have unequal widths, so each concentration is weighted by its cell's.
+function thickness_average(solution, k, i)
+    widths = diff(get_profile(solution, :z, i))
+    live = findall(isfinite, solution.T[:, i])
+    return sum(solution.ξ[k, j, i] * widths[j] for j in live) / sum(widths[live])
+end
+
 # Extract component concentrations over time (averaged across thickness)
 n_times = size(solution.ξ, 3)
 avg_DF = zeros(n_times)
@@ -1008,13 +1013,13 @@ for i = 1:n_times
     ξ_profile = solution.ξ[:, :, i]
     n_cells_i = size(ξ_profile, 2)
     if n_cells_i > 0
-        avg_DF[i] = sum(ξ_profile[1, :]) / n_cells_i
-        avg_int1[i] = sum(ξ_profile[2, :]) / n_cells_i
-        avg_int2[i] = sum(ξ_profile[3, :]) / n_cells_i
-        avg_int3[i] = sum(ξ_profile[4, :]) / n_cells_i
-        avg_int4[i] = sum(ξ_profile[5, :]) / n_cells_i
-        avg_char[i] = sum(ξ_profile[6, :]) / n_cells_i
-        avg_moisture[i] = sum(ξ_profile[7, :]) / n_cells_i
+        avg_DF[i] = thickness_average(solution, 1, i)
+        avg_int1[i] = thickness_average(solution, 2, i)
+        avg_int2[i] = thickness_average(solution, 3, i)
+        avg_int3[i] = thickness_average(solution, 4, i)
+        avg_int4[i] = thickness_average(solution, 5, i)
+        avg_char[i] = thickness_average(solution, 6, i)
+        avg_moisture[i] = thickness_average(solution, 7, i)
     end
 end
 
@@ -1126,12 +1131,13 @@ for i = 1:n_times
         liquids = avg_moisture[i]
 
         # Average gas concentrations
-        gas1_conc_avg[i] = sum(ξ_profile[8, :]) / n_cells_i
-        gas2_conc_avg[i] = sum(ξ_profile[9, :]) / n_cells_i
-        gas3_conc_avg[i] = sum(ξ_profile[10, :]) / n_cells_i
-        gas4_conc_avg[i] = sum(ξ_profile[11, :]) / n_cells_i
-        gas5_conc_avg[i] = sum(ξ_profile[12, :]) / n_cells_i
-        water_vapor_conc_avg[i] = sum(ξ_profile[13, :]) / n_cells_i
+        gas1_conc_avg[i] = thickness_average(solution, 8, i)
+        gas2_conc_avg[i] = thickness_average(solution, 9, i)
+        gas3_conc_avg[i] = thickness_average(solution, 10, i)
+        gas4_conc_avg[i] = thickness_average(solution, 11, i)
+        gas5_conc_avg[i] = thickness_average(solution, 12, i)
+        water_vapor_conc_avg[i] = thickness_average(solution, 13, i)
+        air_conc_avg = thickness_average(solution, 14, i)
 
         gases =
             gas1_conc_avg[i] +
@@ -1139,7 +1145,8 @@ for i = 1:n_times
             gas3_conc_avg[i] +
             gas4_conc_avg[i] +
             gas5_conc_avg[i] +
-            water_vapor_conc_avg[i]
+            water_vapor_conc_avg[i] +
+            air_conc_avg
 
         total_solid_conc[i] = solids
         total_liquid_conc[i] = liquids
@@ -1178,13 +1185,13 @@ for i = 1:n_times
         alpha_thermal[i] = k_eff_front[i] / rho_cp_front[i]
 
         # === Temperature at Specific Depths ===
-        # Depth measured from surface (z=L), so:
-        # 25% depth = cell at index ~0.75*n_cells from bottom
-        # 50% depth = midplane
-        # 75% depth = cell at index ~0.25*n_cells from bottom
-        idx_25pct = max(1, round(Int, 0.75 * n_cells_i))
-        idx_50pct = max(1, round(Int, 0.50 * n_cells_i))
-        idx_75pct = max(1, round(Int, 0.25 * n_cells_i))
+        # Depth measured from surface (z=L): the cell whose centre is nearest
+        # to z = 0.75 L (25% depth), 0.50 L (midplane) and 0.25 L (75% depth)
+        centres = get_cell_positions(solution; at = i)
+        nearest(z) = argmin(abs.(replace(centres, NaN => Inf) .- z))
+        idx_25pct = nearest(0.75 * thickness_values[i])
+        idx_50pct = nearest(0.50 * thickness_values[i])
+        idx_75pct = nearest(0.25 * thickness_values[i])
         T_25pct[i] = T_profile[idx_25pct]
         T_50pct[i] = T_profile[idx_50pct]
         T_75pct[i] = T_profile[idx_75pct]
@@ -1192,7 +1199,7 @@ for i = 1:n_times
         # === Energy Balance ===
         # Total thermal energy: E = ∫ ρ cp T dV (per unit area)
         # E = Σ (ρ_i × cp_i × T_i × Δz_i)
-        dz_cell = thickness_values[i] / n_cells_i
+        widths = diff(get_profile(solution, :z, i))   # cell widths of the moving mesh
         energy_stored[i] = 0.0
         total_rxn_heat_domain[i] = 0.0
         for cell_idx = 1:n_cells_i
@@ -1208,7 +1215,7 @@ for i = 1:n_times
             end
 
             # Contribution to thermal energy (relative to 298 K reference)
-            energy_stored[i] += ρ_cell * cp_cell * (T_cell - 298.15) * dz_cell
+            energy_stored[i] += ρ_cell * cp_cell * (T_cell - 298.15) * widths[cell_idx]
 
             # Reaction heat at this cell: Q = -Σ(hᵢ × rᵢ) [W/m³]
             # heats[i] is in J/kg, rates[i] is in kg/(m³·s)
@@ -1227,7 +1234,7 @@ for i = 1:n_times
             # Sum of (-h × r) × dz gives W/m² for each cell contribution
             for rxn_idx = 1:6
                 total_rxn_heat_domain[i] +=
-                    -local_heats[rxn_idx] * local_rates[rxn_idx] * dz_cell
+                    -local_heats[rxn_idx] * local_rates[rxn_idx] * widths[cell_idx]
             end
         end
 

@@ -817,11 +817,8 @@ for t in profile_times
         if length(T_profile) <= 1
             continue
         end
-        # Use current thickness at this time
-        t_idx = isempty(thickness_times) ? 1 : argmin(abs.(thickness_times .- times[idx]))
-        current_thickness =
-            isempty(thickness_values) ? sample_thickness : thickness_values[t_idx]
-        z_coords = range(0, current_thickness*1000, length = length(T_profile))
+        # Cell centres of the moving mesh at this time
+        z_coords = get_cell_positions(solution; at = idx) .* 1000
         plot!(
             z_coords,
             T_profile,
@@ -845,6 +842,14 @@ println("Results saved to: cone_calorimeter_ptw_results.png")
 
 println("\nGenerating component evolution plot...")
 
+# Thickness average of component k at saved time i. The cells of the moving
+# mesh have unequal widths, so each concentration is weighted by its cell's.
+function thickness_average(solution, k, i)
+    widths = diff(get_profile(solution, :z, i))
+    live = findall(isfinite, solution.T[:, i])
+    return sum(solution.ξ[k, j, i] * widths[j] for j in live) / sum(widths[live])
+end
+
 # Extract component concentrations over time (averaged across thickness)
 n_times = size(solution.ξ, 3)
 avg_water = zeros(n_times)
@@ -858,12 +863,12 @@ for i = 1:n_times
     ξ_profile = solution.ξ[:, :, i]
     n_cells_i = size(ξ_profile, 2)
     if n_cells_i > 0
-        avg_water[i] = sum(ξ_profile[1, :]) / n_cells_i
-        avg_PTW[i] = sum(ξ_profile[3, :]) / n_cells_i
-        avg_PTW1[i] = sum(ξ_profile[4, :]) / n_cells_i
-        avg_PTW2[i] = sum(ξ_profile[5, :]) / n_cells_i
-        avg_PTW3[i] = sum(ξ_profile[6, :]) / n_cells_i
-        avg_char[i] = sum(ξ_profile[7, :]) / n_cells_i
+        avg_water[i] = thickness_average(solution, 1, i)
+        avg_PTW[i] = thickness_average(solution, 3, i)
+        avg_PTW1[i] = thickness_average(solution, 4, i)
+        avg_PTW2[i] = thickness_average(solution, 5, i)
+        avg_PTW3[i] = thickness_average(solution, 6, i)
+        avg_char[i] = thickness_average(solution, 7, i)
     end
 end
 

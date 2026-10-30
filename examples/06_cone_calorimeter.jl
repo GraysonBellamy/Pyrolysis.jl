@@ -332,7 +332,7 @@ for i in eachindex(times)
     live = findall(isfinite, solution.T[:, i])
     m_solid = sum(masses[j, c] for j in (1, 2), c in live)
     m_gas = sum(masses[j, c] for j in (3, 4), c in live)
-    n_cells = length(live)
+    n_live = length(live)
 
     # Expected thickness from solid mass
     L_expected = m_solid / ρ_solid
@@ -342,7 +342,7 @@ for i in eachindex(times)
     should_print = (i <= 10) || (i >= length(times)-2) || (mod(i, 10) == 0)  # Print every 10th point
     if should_print
         println(
-            "  t=$(round(t_i, digits=1))s: L=$(round(L_i*1000, digits=3))mm, m_solid=$(round(m_solid, digits=4))kg/m², m_gas=$(round(m_gas, digits=4))kg/m², L_exp=$(round(L_expected*1000, digits=3))mm, ratio=$(round(ratio, digits=3)), n=$n_cells",
+            "  t=$(round(t_i, digits=1))s: L=$(round(L_i*1000, digits=3))mm, m_solid=$(round(m_solid, digits=4))kg/m², m_gas=$(round(m_gas, digits=4))kg/m², L_exp=$(round(L_expected*1000, digits=3))mm, ratio=$(round(ratio, digits=3)), n=$n_live",
         )
     end
 end
@@ -534,11 +534,8 @@ for t in profile_times
         if length(T_profile) <= 1
             continue
         end
-        # Use current thickness at this time (approximate from nearest ALE data point)
-        t_idx = isempty(thickness_times) ? 1 : argmin(abs.(thickness_times .- times[idx]))
-        current_thickness =
-            isempty(thickness_values) ? sample_thickness : thickness_values[t_idx]
-        z_coords = range(0, current_thickness*1000, length = length(T_profile))
+        # Cell centres of the moving mesh at this time
+        z_coords = get_cell_positions(solution; at = idx) .* 1000
         plot!(
             z_coords,
             T_profile,
@@ -618,7 +615,9 @@ for target_t in [200.0, 400.0, 600.0, 800.0]
         continue
     end
     T_prof = solution.T[:, idx]
-    n_cells = length(T_prof)
+    # Deactivated cells are NaN; the exposed-face cell is the last live one.
+    surface_cell = findlast(isfinite, T_prof)
+    n_live = count(isfinite, T_prof)
 
     # Energy balance components at top surface
     # External radiation
@@ -651,7 +650,7 @@ for target_t in [200.0, 400.0, 600.0, 800.0]
     println("  Back T: $(round(T_back_val, digits=1)) K")
     println("  MLR: $(round(gen_rate_val*1000, digits=3)) g/(m²·s)")
     println("  Thickness: $(round(thick*1000, digits=3)) mm")
-    println("  Cells: $n_cells")
+    println("  Cells: $n_live")
 
     println("\nEnergy flux at top surface [kW/m²]:")
     println("  External radiation (absorbed): +$(round(q_absorbed/1000, digits=2))")
@@ -665,10 +664,10 @@ for target_t in [200.0, 400.0, 600.0, 800.0]
     # Surface cell concentrations
     if idx <= size(solution.ξ, 3)
         ξ_prof = solution.ξ[:, :, idx]
-        if size(ξ_prof, 2) >= n_cells
-            ξ_virgin = ξ_prof[1, n_cells]  # Surface cell
-            ξ_char = ξ_prof[2, n_cells]
-            ξ_gas = ξ_prof[3, n_cells]
+        if surface_cell !== nothing
+            ξ_virgin = ξ_prof[1, surface_cell]
+            ξ_char = ξ_prof[2, surface_cell]
+            ξ_gas = ξ_prof[3, surface_cell]
 
             println("\nSurface cell composition [kg/m³]:")
             println("  Virgin: $(round(ξ_virgin, digits=2))")

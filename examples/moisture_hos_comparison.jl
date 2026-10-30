@@ -475,7 +475,9 @@ function extract_results(sol)
         ξ_profile = sol.ξ[:, :, i]
         n_cells_i = size(ξ_profile, 2)
         if n_cells_i > 0
-            avg_moisture[i] = sum(ξ_profile[MOISTURE_IDX, :]) / n_cells_i
+            # Weighted by the unequal cell widths of the moving mesh
+            widths = diff(get_profile(sol, :z, i))
+            avg_moisture[i] = sum(ξ_profile[MOISTURE_IDX, :] .* widths) / sum(widths)
         end
     end
 
