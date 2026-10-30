@@ -374,13 +374,16 @@ h_conv = 10.0                # W/(m²·K)
 # 1 liquid (WATER) + 1 gas vapor (WATER_VAPOR) + 5 solids (PTW, PTW1-3, Char) + 5 gases (PTW_gas1-4, AIR)
 
 # Initial concentrations:
-# - PTW at full density (498.46 kg/m³)
+# - Bound water swells the wood by its own volume, so the dry wood (oven-dry
+#   density 498.46 kg/m³) and the water share the cell:
+#   ξ_PTW/498.46 + ξ_w/1000 = 1 with ξ_w = MC ξ_PTW
 # - Water moisture content (adjustable)
 # - Background pore air at ~1 atm partial pressure
 # - All others initially zero
 moisture_content_db = 0.10  # 10% moisture content on dry basis
-ρ_PTW_initial = 498.46      # Initial PTW density (dry)
-# For dry basis, moisture density = MC_db * ρ_dry
+ρ_PTW_oven_dry = 498.46     # Oven-dry density: oven-dry mass over oven-dry volume
+ρ_water = 1000.0            # Density of the bound water (WATER component)
+ρ_PTW_initial = ρ_PTW_oven_dry / (1 + moisture_content_db * ρ_PTW_oven_dry / ρ_water)
 ρ_water_initial = moisture_content_db * ρ_PTW_initial
 
 # Pore air concentration giving P = 101325 Pa in the initial pore space
@@ -400,7 +403,7 @@ println("Mesh created:")
 println("  - Thickness: $(sample_thickness*1000) mm")
 println("  - Number of cells: $n_cells")
 println("  - Cell size: $(sample_thickness/n_cells*1000) mm")
-println("  - Initial PTW density: $ρ_PTW_initial kg/m³")
+println("  - Initial dry PTW: $(round(ρ_PTW_initial, digits=1)) kg/m³ (oven-dry density $ρ_PTW_oven_dry kg/m³)")
 println(
     "  - Initial water: $(round(ρ_water_initial, digits=1)) kg/m³ ($(round(moisture_content_db*100, digits=1))% dry basis)",
 )

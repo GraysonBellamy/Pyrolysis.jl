@@ -145,6 +145,20 @@ transport matrix and its `λ` enters the gas-transfer mixture. The initialized
 sum of all condensed skeletal volumes must leave resolved positive gas pore
 volume.
 
+Bound water swells wood by about its own volume, so the dry wood and its water
+share the cell: their bulk occupancies sum to one. With `ρ` the wood's oven-dry
+density (oven-dry mass over oven-dry volume), `ρ_w` the water's and `MC` the
+dry-basis moisture content, initialize
+
+```julia
+ξ_wood  = ρ / (1 + MC * ρ / ρ_w)
+ξ_water = MC * ξ_wood
+```
+
+Setting `ξ_wood = ρ` and adding the water on top overfills the cell: the slab
+holds more mass than its thickness admits, and it dries to a wood denser than
+`ρ`.
+
 ---
 
 ### 3.2.3 `GaseousComponent`

@@ -347,12 +347,13 @@ kinetics evaluator automatically passes `ξ` when the heat is state-dependent.
 
 ```julia
 const MOISTURE_IDX = 7        # index of moisture in the components tuple
-const ρ_DRY_BASIS  = 530.0    # dry-wood density for the moisture-content ratio [kg/m³]
+const SOLID_IDX    = 1:6      # indices of the dry solids, the basis of the moisture content
 
 # HoS(MC) = 2450.4 + 875.6 * exp(-0.1122 * MC) [kJ/kg], MC = moisture content (% dry basis)
 heat_of_sorption = StateDependentProperty(
     (T, ξ) -> begin
-        MC = 100.0 * ξ[MOISTURE_IDX] / ρ_DRY_BASIS          # moisture content, % dry basis
+        MC = 100.0 * ξ[MOISTURE_IDX] /
+             max(sum(ξ[j] for j in SOLID_IDX), 1e-12)        # water over dry solid mass, %
         return (2450.420909987441 + 875.6441221735336 *
                 exp(-0.1121684273316275 * MC)) * 1e3          # J/kg (endothermic, h > 0)
     end,
@@ -362,8 +363,10 @@ Reaction(:moisture_evaporation, :moisture => :water_vapor;
          A = 2.997e5, E = 5.0e4, h = heat_of_sorption, n = 1.0)
 ```
 
-The closure indexes `ξ` by component position, so `MOISTURE_IDX` must match the
-moisture component's slot in the `components` tuple. Evaporation is endothermic,
+The closure indexes `ξ` by component position, so `MOISTURE_IDX` and `SOLID_IDX`
+must match the slots in the `components` tuple. The moisture content is the
+water's mass over the dry solids' mass, which holds as the cell shrinks; a
+fixed density in the denominator does not. Evaporation is endothermic,
 so the returned value is positive. See Technical Reference §6.6 and Chapter 3 for
 the property-function types.
 

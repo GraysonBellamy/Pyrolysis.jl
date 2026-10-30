@@ -125,7 +125,7 @@ const κ_CHAR = 1.0e-12
 
 # Component index for moisture (used in StateDependentProperty closure)
 const MOISTURE_IDX = 7
-const ρ_DRY_BASIS = 530.0
+const SOLID_IDX = 1:6  # dry solids (DF ... Char), the basis of MC
 
 # ============================================================================
 # Build-and-Solve Function
@@ -186,7 +186,7 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
     if hos_model == :exponential
         h_evap = StateDependentProperty(
             (T, ξ) -> begin
-                MC = 100.0 * ξ[MOISTURE_IDX] / ρ_DRY_BASIS
+                MC = 100.0 * ξ[MOISTURE_IDX] / max(sum(ξ[j] for j in SOLID_IDX), 1e-12)
                 return (HOS_A + HOS_B * exp(-HOS_C * MC)) * 1e3
             end,
         )
@@ -350,7 +350,9 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
     sample_thickness = 12.0e-3
     n_cells = 240
     T_ambient = 300.0
-    ρ_DF_initial = 530.0
+    # Bound water holds its own volume: ξ_DF/ρ_DF + ξ_w/1000 = 1 with ξ_w = MC ξ_DF
+    ρ_DF_oven_dry = 530.0  # oven-dry mass over oven-dry volume
+    ρ_DF_initial = ρ_DF_oven_dry / (1 + mc_db * ρ_DF_oven_dry / 1000.0)
     ρ_moisture_initial = mc_db * ρ_DF_initial
 
     mesh = create_uniform_mesh(sample_thickness, n_cells)

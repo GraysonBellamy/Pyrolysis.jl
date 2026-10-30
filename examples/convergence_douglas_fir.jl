@@ -107,13 +107,13 @@ const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
 
     # Heat of sorption (state-dependent) — nominal CR2 fit from sensitivity analysis
     moisture_idx = 7
-    ρ_dry_basis = 530.0
+    solid_idx = 1:6  # dry solids (DF ... Char), the basis of MC
     hos_a = 2450.420909987441    # kJ/kg - asymptotic baseline
     hos_b = 875.6441221735336    # kJ/kg - exponential amplitude
     hos_c = 0.1121684273316275   # 1/% - exponential decay rate
     hos = StateDependentProperty(
         (T, ξ) -> begin
-            MC = 100.0 * ξ[moisture_idx] / ρ_dry_basis
+            MC = 100.0 * ξ[moisture_idx] / max(sum(ξ[j] for j in solid_idx), 1e-12)
             return (hos_a + hos_b * exp(-hos_c * MC)) * 1e3
         end,
     )
@@ -284,7 +284,9 @@ const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
     q_external = 50e3
     h_conv = 10.0
     moisture_content_db = 0.06
-    ρ_DF_initial = 530.0
+    # Bound water holds its own volume: ξ_DF/ρ_DF + ξ_w/1000 = 1 with ξ_w = MC ξ_DF
+    ρ_DF_oven_dry = 530.0  # oven-dry mass over oven-dry volume
+    ρ_DF_initial = ρ_DF_oven_dry / (1 + moisture_content_db * ρ_DF_oven_dry / 1000.0)
     ρ_moisture_initial = moisture_content_db * ρ_DF_initial
 
     mesh = create_uniform_mesh(sample_thickness, n_cells)

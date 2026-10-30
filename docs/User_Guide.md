@@ -1639,6 +1639,20 @@ transport matrix and its `λ` enters the gas-transfer mixture. The initialized
 sum of all condensed skeletal volumes must leave resolved positive gas pore
 volume.
 
+Bound water swells wood by about its own volume, so the dry wood and its water
+share the cell: their bulk occupancies sum to one. With `ρ` the wood's oven-dry
+density (oven-dry mass over oven-dry volume), `ρ_w` the water's and `MC` the
+dry-basis moisture content, initialize
+
+```julia
+ξ_wood  = ρ / (1 + MC * ρ / ρ_w)
+ξ_water = MC * ξ_wood
+```
+
+Setting `ξ_wood = ρ` and adding the water on top overfills the cell: the slab
+holds more mass than its thickness admits, and it dries to a wood denser than
+`ρ`.
+
 ---
 
 ### 3.2.3 `GaseousComponent`
@@ -2716,12 +2730,13 @@ kinetics evaluator automatically passes `ξ` when the heat is state-dependent.
 
 ```julia
 const MOISTURE_IDX = 7        # index of moisture in the components tuple
-const ρ_DRY_BASIS  = 530.0    # dry-wood density for the moisture-content ratio [kg/m³]
+const SOLID_IDX    = 1:6      # indices of the dry solids, the basis of the moisture content
 
 # HoS(MC) = 2450.4 + 875.6 * exp(-0.1122 * MC) [kJ/kg], MC = moisture content (% dry basis)
 heat_of_sorption = StateDependentProperty(
     (T, ξ) -> begin
-        MC = 100.0 * ξ[MOISTURE_IDX] / ρ_DRY_BASIS          # moisture content, % dry basis
+        MC = 100.0 * ξ[MOISTURE_IDX] /
+             max(sum(ξ[j] for j in SOLID_IDX), 1e-12)        # water over dry solid mass, %
         return (2450.420909987441 + 875.6441221735336 *
                 exp(-0.1121684273316275 * MC)) * 1e3          # J/kg (endothermic, h > 0)
     end,
@@ -2731,8 +2746,10 @@ Reaction(:moisture_evaporation, :moisture => :water_vapor;
          A = 2.997e5, E = 5.0e4, h = heat_of_sorption, n = 1.0)
 ```
 
-The closure indexes `ξ` by component position, so `MOISTURE_IDX` must match the
-moisture component's slot in the `components` tuple. Evaporation is endothermic,
+The closure indexes `ξ` by component position, so `MOISTURE_IDX` and `SOLID_IDX`
+must match the slots in the `components` tuple. The moisture content is the
+water's mass over the dry solids' mass, which holds as the cell shrinks; a
+fixed density in the denominator does not. Evaporation is endothermic,
 so the returned value is positive. See Technical Reference §6.6 and Chapter 3 for
 the property-function types.
 
@@ -9640,8 +9657,9 @@ do not share mutable state:
 @everywhere function build_and_solve(n_cells::Int)
     # ... build material (13 components, 6 reactions) and BCs ...
     mesh = create_uniform_mesh(12.0e-3, n_cells)
-    ξ_initial_funcs = [z -> 530.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0,
-                       z -> 31.8,                                 # 6 % moisture, dry basis
+    ξ_DF = 530.0 / (1 + 0.06 * 530.0 / 1000.0)   # wood and 6 % bound water fill the cell (§3.2.2)
+    ξ_initial_funcs = [z -> ξ_DF, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0,
+                       z -> 0.06 * ξ_DF,                          # 6 % moisture, dry basis
                        z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0]
     problem = PyrolysisProblem(mesh = mesh, material = material, bc_set = bc_set,
         T_initial = z -> 300.0, ξ_initial = ξ_initial_funcs,
@@ -9808,7 +9826,7 @@ auto-converted to a `ConstantProperty`:
 ```julia
 if hos_model == :exponential
     h_evap = StateDependentProperty((T, ξ) -> begin
-        MC = 100.0 * ξ[MOISTURE_IDX] / ρ_DRY_BASIS
+        MC = 100.0 * ξ[MOISTURE_IDX] / max(sum(ξ[j] for j in SOLID_IDX), 1e-12)
         return (HOS_A + HOS_B * exp(-HOS_C * MC)) * 1e3   # J/kg
     end)
 elseif hos_model == :constant

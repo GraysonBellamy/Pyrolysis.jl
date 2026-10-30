@@ -62,7 +62,7 @@ println("Running with $(nworkers()) worker(s)")
         (1 - 0.95 * 0.80 * 0.37 * 0.79) / (1 - LC_FINAL_CHAR_YIELD),
     ]
     const LC_MOISTURE_IDX = 7
-    const LC_ρ_DRY_BASIS = 530.0
+    const LC_SOLID_IDX = 1:6  # dry solids (DF ... Char), the basis of MC
     const LC_NOMINAL_HRXN = [
         -19200.66288032251,
         -5263.201466602739,
@@ -94,7 +94,7 @@ println("Running with $(nworkers()) worker(s)")
     baseline_char_cp(T) = 312.4273785167445 + 1.8372509265710314 * T
 
     function baseline_hos(T, ξ)
-        MC = 100.0 * ξ[LC_MOISTURE_IDX] / LC_ρ_DRY_BASIS
+        MC = 100.0 * ξ[LC_MOISTURE_IDX] / max(sum(ξ[j] for j in LC_SOLID_IDX), 1e-12)
         return (2450.420909987441 + 875.6441221735336 * exp(-0.1121684273316275 * MC)) * 1e3
     end
 
@@ -364,7 +364,9 @@ println("Running with $(nworkers()) worker(s)")
 
         # Problem setup
         T_ambient = 300.0
-        ρ_DF_initial = 530.0
+        # Bound water holds its own volume: ξ_DF/ρ_DF + ξ_w/1000 = 1 with ξ_w = MC ξ_DF
+        ρ_DF_oven_dry = 530.0  # oven-dry mass over oven-dry volume
+        ρ_DF_initial = ρ_DF_oven_dry / (1 + 0.06 * ρ_DF_oven_dry / 1000.0)
         ρ_moisture_initial = 0.06 * ρ_DF_initial
 
         mesh = create_uniform_mesh(12.0e-3, 240)

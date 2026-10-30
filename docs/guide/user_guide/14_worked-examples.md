@@ -135,8 +135,9 @@ do not share mutable state:
 @everywhere function build_and_solve(n_cells::Int)
     # ... build material (13 components, 6 reactions) and BCs ...
     mesh = create_uniform_mesh(12.0e-3, n_cells)
-    ξ_initial_funcs = [z -> 530.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0,
-                       z -> 31.8,                                 # 6 % moisture, dry basis
+    ξ_DF = 530.0 / (1 + 0.06 * 530.0 / 1000.0)   # wood and 6 % bound water fill the cell (§3.2.2)
+    ξ_initial_funcs = [z -> ξ_DF, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0,
+                       z -> 0.06 * ξ_DF,                          # 6 % moisture, dry basis
                        z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0]
     problem = PyrolysisProblem(mesh = mesh, material = material, bc_set = bc_set,
         T_initial = z -> 300.0, ξ_initial = ξ_initial_funcs,
@@ -303,7 +304,7 @@ auto-converted to a `ConstantProperty`:
 ```julia
 if hos_model == :exponential
     h_evap = StateDependentProperty((T, ξ) -> begin
-        MC = 100.0 * ξ[MOISTURE_IDX] / ρ_DRY_BASIS
+        MC = 100.0 * ξ[MOISTURE_IDX] / max(sum(ξ[j] for j in SOLID_IDX), 1e-12)
         return (HOS_A + HOS_B * exp(-HOS_C * MC)) * 1e3   # J/kg
     end)
 elseif hos_model == :constant

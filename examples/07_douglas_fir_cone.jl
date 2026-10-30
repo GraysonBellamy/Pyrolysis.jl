@@ -151,15 +151,16 @@ water_vapor_cp = CallableProperty(T -> 1716.7 + 0.4154 * T + 1.530e-4 * T^2)
 
 # Moisture-dependent heat of sorption
 # HoS(MC) = 2450.4 + 875.6 * exp(-0.1122 * MC) [kJ/kg]
-# where MC is moisture content (%) on dry basis: MC = 100 * ξ_moisture / ρ_dry
+# where MC is moisture content (%) on dry basis: the water mass over the dry
+# solid mass, MC = 100 * ξ_moisture / Σ ξ_solid
 # As moisture decreases, more energy is required to release the remaining bound water
 const MOISTURE_IDX = 7           # Component index for moisture
-const ρ_DRY_BASIS = 530.0        # Dry wood density for MC calculation [kg/m³]
+const SOLID_IDX = 1:6            # Component indices of the dry solids (DF ... Char)
 
 heat_of_sorption = StateDependentProperty(
     (T, ξ) -> begin
         # Moisture content on dry basis (%)
-        MC = 100.0 * ξ[MOISTURE_IDX] / ρ_DRY_BASIS
+        MC = 100.0 * ξ[MOISTURE_IDX] / max(sum(ξ[j] for j in SOLID_IDX), 1e-12)
         # # Heat of sorption [J/kg] - increases as moisture decreases
         return (2450.420909987441 + 875.6441221735336 * exp(-0.1121684273316275 * MC)) * 1e3
     end,
@@ -470,13 +471,15 @@ h_conv = 10.0                # W/(m²·K)
 # 6 solids (DF, DF_int1-4, Char) + 1 liquid (MOISTURE) + 7 gases (DF_gas1-5, WATER_VAPOR, AIR)
 
 # Initial concentrations:
-# - DF at full density (530 kg/m³)
-# - Moisture content 6% on dry basis: 530 * 0.06 = 31.8 kg/m³
+# - Bound water swells the wood by its own volume, so the dry wood (oven-dry
+#   density 530 kg/m³) and the water share the cell: ξ_DF/530 + ξ_w/1000 = 1
+#   with ξ_w = MC ξ_DF, giving ξ_DF = 513.7 and ξ_w = 30.8 kg/m³ at 6% MC
 # - Background pore air at ~1 atm partial pressure
 # - All others initially zero
 moisture_content_db = 0.06  # 6% moisture content on dry basis
-ρ_DF_initial = 530.0        # Initial wood density (dry)
-# For dry basis, moisture density = MC_db * ρ_dry
+ρ_DF_oven_dry = 530.0       # Oven-dry density: oven-dry mass over oven-dry volume
+ρ_water = 1000.0            # Density of the bound water (MOISTURE component)
+ρ_DF_initial = ρ_DF_oven_dry / (1 + moisture_content_db * ρ_DF_oven_dry / ρ_water)
 ρ_moisture_initial = moisture_content_db * ρ_DF_initial
 
 # Pore air concentration giving P = 101325 Pa in the initial pore space
@@ -511,7 +514,7 @@ println("Mesh created:")
 println("  - Thickness: $(sample_thickness*1000) mm")
 println("  - Number of cells: $n_cells")
 println("  - Cell size: $(sample_thickness/n_cells*1000) mm")
-println("  - Initial wood density: $ρ_DF_initial kg/m³")
+println("  - Initial dry wood: $(round(ρ_DF_initial, digits=1)) kg/m³ (oven-dry density $ρ_DF_oven_dry kg/m³)")
 println(
     "  - Initial moisture: $(round(ρ_moisture_initial, digits=1)) kg/m³ ($(round(moisture_content_db*100, digits=1))% dry basis)",
 )
