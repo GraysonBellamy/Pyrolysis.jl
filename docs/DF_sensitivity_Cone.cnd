@@ -4,7 +4,7 @@
 // Nominal heat flux : 50 kW/m2
 // Initial temperature : 300 K
 // Duration time : 600 s
-// Moisture content : 6% dry basis
+// Moisture content : 6% dry basis, liquid water holding its own volume
 
 OBJECT TYPE:  1D
 

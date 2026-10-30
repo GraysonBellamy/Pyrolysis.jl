@@ -12,16 +12,19 @@
 //   - Heat of sorption integrated from 6% to 0% MC (dry basis):
 //     HoS(MC) = (2450.42 + 875.64*exp(-0.1122*MC)) kJ/kg
 //     avg = (1/6)*integral_0^6 HoS dMC = 3088 kJ/kg.
+//   - Moisture is liquid water (rho 1000, k 0.6) holding its own volume, as in
+//     07_douglas_fir_cone.jl; its transport equals virgin DF's (Julia leaves it
+//     out of the transport matrix).
 //   - Gas transport = lambda_gas * sqrt(M_ref/M_i), lambda_gas=3e-5, M_ref=0.029.
 //   - TK sign convention: HEAT > 0 exothermic, HEAT < 0 endothermic
 //     (opposite of Julia/standard thermodynamic convention).
 
 COMPONENT:	MOISTURE
 STATE:		L
-DENSITY:	1e6  0  0  0
+DENSITY:	1000  0  0  0
 HEAT CAPACITY:	5.2e3  -6.7  1.1e-2  2
-CONDUCTIVITY:	0.145  0  0  0
-TRANSPORT:	2e-5  0  0  0
+CONDUCTIVITY:	0.6  0  0  0
+TRANSPORT:	5e-7  0  0  0
 EMISSIVITY & ABSORPTION:  0.81  1000
 
 COMPONENT:	WATER_VAPOR
