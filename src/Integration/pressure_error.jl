@@ -24,6 +24,8 @@ struct PressureErrorNorm{C,G}
     state::Vector{PressureErrorDual}
     positions::Vector{PressureErrorDual}
     geometry::G
+    gas::Vector{Int}
+    masses::Vector{Float64}
     callback::Base.RefValue{_PressureNormWrapper}
     evaluations::Base.RefValue{Int}
 end
@@ -33,7 +35,41 @@ function PressureErrorNorm(cp)
     u=PressureErrorDual.(cp.u0)
     x=PressureErrorDual.(ref.positions)
     g=MeshGeometry{PressureErrorDual}(d.setup.topology)
-    return PressureErrorNorm(cp, u, x, g, Ref(_PressureNormWrapper(_rms_error)), Ref(0))
+    # The components differ in type, so the per-cell loop reads these plain
+    # vectors: indexing the tuple at run time would dispatch at every cell.
+    comps=d.setup.material.components
+    gas=collect(Int, gas_component_indices(comps))
+    masses=Float64[molar_mass(comps[j]) for j in gas]
+    return PressureErrorNorm(
+        cp,
+        u,
+        x,
+        g,
+        gas,
+        masses,
+        Ref(_PressureNormWrapper(_rms_error)),
+        Ref(0),
+    )
+end
+
+# The norm reads only the cell volumes. On a line each is one expression of its
+# two nodes, so it skips the faces and quadrature of the full geometry; in more
+# dimensions the volumes rest on the face sweeps.
+@inline _proposed_geometry!(g::MeshGeometry{1}, x, A, topo) = g
+@inline _proposed_geometry!(g, x, A, topo) = geometry!(g, x, A, topo)
+@inline function _proposed_volume(::MeshGeometry{1}, x, A, topo, i)
+    n0, n1=topo.cells[i].nodes
+    return shell_volume(topo.coordinates, x[n0], x[n1], A)
+end
+@inline _proposed_volume(g, x, A, topo, i) = g.cell_volume[i]
+
+# The volume the condensed components hold, by recursion over the tuple, whose
+# entries differ in type.
+@inline _condensed_volume(::Tuple{}, m, T, j, V) = V
+@inline function _condensed_volume(cs::Tuple, m, T, j, V)
+    comp=first(cs)
+    S=is_gas(comp) ? V : V+m[j]/get_intrinsic_density(comp, T)
+    return _condensed_volume(Base.tail(cs), m, T, j+1, S)
 end
 
 function bind_pressure_norm!(norm::PressureErrorNorm, integrator)
@@ -82,7 +118,7 @@ function pressure_error(norm::PressureErrorNorm, u, uprev, scaled_error, abstol,
     mat=setup.material
     ref=setup.reference
     NC=n_components(mat)
-    ng=count(is_gas, mat.components)
+    ng=length(norm.gas)
     ng==0 && return 0.0
     ud=norm.state
     @inbounds for j in eachindex(u)
@@ -96,7 +132,7 @@ function pressure_error(norm::PressureErrorNorm, u, uprev, scaled_error, abstol,
                           PressureErrorDual(ref.positions[j])
     end
     A=has_chi(layout) ? ud[area_index(layout)] : PressureErrorDual(ref.cross_section)
-    geometry!(norm.geometry, norm.positions, A, setup.topology)
+    _proposed_geometry!(norm.geometry, norm.positions, A, setup.topology)
     worst=0.0
     @inbounds for i = 1:n_cells(layout)
         layout.mask[energy_index(layout, i)] || continue
@@ -115,21 +151,13 @@ function pressure_error(norm::PressureErrorNorm, u, uprev, scaled_error, abstol,
                 ),
             )
         end
-        V=norm.geometry.cell_volume[i]
-        W=V-sum(
-            ntuple(
-                j->is_gas(mat.components[j]) ? zero(T) :
-                   m[j]/get_intrinsic_density(mat.components[j], T),
-                Val(NC),
-            ),
-        )
+        V=_proposed_volume(norm.geometry, norm.positions, A, setup.topology, i)
+        W=V-_condensed_volume(mat.components, m, T, 1, zero(T))
         ForwardDiff.value(W)>0 && ForwardDiff.value(T)>0 || return Inf
         sumerror=0.0
         P=0.0
-        for j = 1:NC
-            comp=mat.components[j]
-            is_gas(comp) || continue
-            p=m[j]*R_GAS*T/(molar_mass(comp)*W)
+        for k = 1:ng
+            p=m[norm.gas[k]]*R_GAS*T/(norm.masses[k]*W)
             ep=abs(ForwardDiff.partials(p)[1])
             pj=max(ForwardDiff.value(p), 0.0)
             isfinite(ep) || return Inf

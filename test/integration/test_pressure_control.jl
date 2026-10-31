@@ -32,6 +32,8 @@ function pressure_fixture(; cells = 3)
         tspan = (0.0, 0.2),
     )
 end
+_norm_bytes(norm, u, e, abstol, reltol) =
+    @allocated pressure_error(norm, u, u, e, abstol, reltol)
 @testset "proposed-state pressure error" begin
     for energy in (:temperature, :enthalpy)
         cp=setup(
@@ -60,6 +62,9 @@ end
         e.=0
         e[energy_index(layout, 1)]=1e7
         @test pressure_error(norm, cp.u0, cp.u0, e, cp.abstol, cp.reltol)>0
+        # A solve calls the norm several times a step, on components of different types.
+        _norm_bytes(norm, cp.u0, e, cp.abstol, cp.reltol)
+        @test _norm_bytes(norm, cp.u0, e, cp.abstol, cp.reltol)==0
     end
 end
 @testset "pressure control in supported steppers" begin
