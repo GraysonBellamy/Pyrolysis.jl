@@ -5328,7 +5328,16 @@ How the methods differ in use:
 - **`FBDF`** reuses its Jacobian across steps and iterates Newton on each. It
   restarts at order one after an event, hence its forced small restart step;
   with the flag raised it would restart at order one on every step, hence the
-  flag is cleared.
+  flag is cleared. It refreshes the Jacobian only after a Newton failure, so the
+  policy stops Newton at `κ = 1e-4`, tighter than the method's own default
+  (Technical Reference §15.5.2). At matched accuracy it took about half
+  `Rodas5P`'s time on the burnout and PMMA cone decks at tight tolerance and about
+  three quarters at loose tolerance, about 0.7 on the white pine deck, and level
+  on the Douglas fir deck. Its largest errors sit just past a jump in a property
+  law, in a cell that has just crossed it: at the deck's tolerance they match
+  `Rodas5P`'s, at looser tolerances they reach about twenty times `Rodas5P`'s, so
+  keep the tolerance where a property law jumps. `Rodas5P` remains the default:
+  the verification suite is qualified on it.
 - **`KenCarp4`** iterates Newton on each stage, so the Newton-failure step cap
   of §8.3 applies to it, as it does to `FBDF`.
 

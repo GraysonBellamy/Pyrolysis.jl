@@ -13191,6 +13191,18 @@ linearized exactly in every stage. On a dead row $W$ is a scaled identity row
 (§14.3.1). Every row of the Jacobian's pattern stores its diagonal, so $W$'s
 stored entries are a subset of the pattern's whatever $\Delta t$.
 
+`FBDF` refreshes its Jacobian only after a Newton failure, and a chord iteration
+that contracts converges and never fails. A gas row's stiffness goes as $h^{-2}$,
+so where a cell thins the iteration slows as the Jacobian ages: on a stiff row the
+contraction rate is $\theta=|J_{\rm true}/J_{\rm held}-1|$. After $n$ iterations
+$\theta^n$ of the predictor's error remains in the row, and the order-$k$
+predictor amplifies an alternating error by $2^{k+1}-1$. At
+$(2^{k+1}-1)\,\theta^n\approx1$ a period-two mode in one row sustains itself, the
+error estimate stays near one whatever $\Delta t$ while $\lambda\Delta t\gg1$, and
+the step stops growing. Newton's stopping test does not see the mode, since its
+root mean square over $N$ rows dilutes one row by $\sqrt N$. `fbdf_policy`
+therefore stops Newton at $\kappa=10^{-4}$ against the method's $10^{-2}$.
+
 ### 15.5.3 Output times, callbacks and observers
 
 States are saved at `saveat` (default `problem.output_times`); the state a solve

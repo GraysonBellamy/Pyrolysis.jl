@@ -80,12 +80,19 @@ rodas5p_policy(linsolve; restart::Symbol = :heuristic) = IntegratorPolicy(
 	fbdf_policy(linear_solver)
 
 `FBDF`, the variable-order backward-differentiation method, with the observer
-flag cleared (with it raised the method restarts at order one on every step)
-and a forced small restart step after an event, where it restarts at order
-one.
+flag cleared (with it raised the method restarts at order one on every step),
+a forced small restart step after an event, where it restarts at order one, and
+Newton's stopping constant at 1e-4. The method refreshes its Jacobian only after
+a Newton failure, and a chord iteration slowed by a thinning cell converges
+without failing; at the default constant what it leaves in one gas row feeds
+back through the predictor and holds the step near 1e-5 s.
 """
 fbdf_policy(linsolve) = IntegratorPolicy(
-    FBDF(autodiff = AutoFiniteDiff(), linsolve = linsolve),
+    FBDF(
+        autodiff = AutoFiniteDiff(),
+        linsolve = linsolve,
+        nlsolve = NLNewton(κ = 1 // 10000),
+    ),
     :forced_dt,
     :clear,
     DT_AFTER_EVENT,

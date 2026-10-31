@@ -58,3 +58,22 @@ problem =
         @test maximum(abs.(get_pressure(sol) .- get_pressure(tight)))<20ptol
     end
 end
+
+# FBDF reuses its Jacobian and iterates Newton on each step, so this start, with
+# its gas below the pressure budget, is where its stopping test has to hold.
+@testset "vacuum trace production under FBDF ($energy)" for energy in
+                                                            (:temperature, :enthalpy)
+    sol=solve(
+        problem;
+        energy_state = energy,
+        integrator_policy = fbdf_policy(StructuredKLU()),
+        pressure_tolerance = 1.0,
+        reltol = 1e-8,
+        abstol = 1e-10,
+        maxiters = 10000,
+        saveat = 20.0,
+    )
+    @test completed(sol)
+    @test sol.statistics.accepted<1000
+    @test sol.statistics.nonlinear_failures<50
+end
