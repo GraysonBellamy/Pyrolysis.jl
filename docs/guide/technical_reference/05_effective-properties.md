@@ -873,8 +873,9 @@ Each guard is C¹ and is exactly the identity on the physical states the
 tolerances can distinguish, so a trial state outside the physical domain still
 has finite properties with finite derivatives, while the domain test reads the
 unguarded quantities (§15.5.4). The kernels read the signed concentrations
-$\xi_{j,i} = m_{j,i}/\tilde V_i$ in the reaction rates (§6) and relative solid-motion
-fluxes (§11); pore-gas transport and the property laws read $\xi^{+}$.
+$\xi_{j,i} = m_{j,i}/\tilde V_i$ in the reaction rates (§6), relative solid-motion
+fluxes (§11) and the lumped law across an interior face (§9.10.2); the property laws
+and the other pore-gas transport read $\xi^{+}$.
 
 ### 5.13.2 Cell properties
 

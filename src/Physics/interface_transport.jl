@@ -12,13 +12,23 @@ end
 @inline function _lumped_forward(pl, pr, Tl, Tr, Ts, dl, dr, λl, λr, ml, mr)
     Pl, Pr=sum(pl), sum(pr)
     Δ=_pressure_difference(pl, pr)
+    # Below vacuum, on a trial state, the wall term stays linear and a negative
+    # pressure moves no gas viscously: the upstream half when its own total is
+    # negative, the downstream half when the left flux at P*=0 cannot fill the
+    # interface against the right wall flux, so that P*<0.
+    if primal(Pl)<0
+        ml=zero(ml)
+    end
     A=(λl/Tl+ml*Pl/Tl)/dl
+    if primal(Pr)<0 && primal(A*Pl+λr/(Tr*dr)*Pr)<0
+        mr=zero(mr)
+    end
     B=(λr/Tr+mr*Pr/Ts)/dr
     C=mr/(Ts*dr)
     # δ=P*-Pr is the nonnegative root Cδ²+(A+B)δ-AΔ=0.
     # Scaling and the conjugate root avoid overflow and cancellation.
     scale=max(primal(A), primal(B), primal(C*Δ))
-    if scale==0
+    if primal(A)==0 && primal(B)<=0
         return (
             n = zero(pl+pr),
             p = pl+(dl/(dl+dr))*(pr-pl),

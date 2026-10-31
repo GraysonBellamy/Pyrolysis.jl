@@ -198,3 +198,78 @@ end
     end
     @test all(abs.(BigFloat.(J) .- reference) .< 2e-8 .* abs.(reference))
 end
+
+# A face of the lumped law reads signed pressures, so a trial state reaches it
+# below vacuum.
+@testset "the lumped law at and below vacuum" begin
+    T, d=300.0, 1e-4
+    one(K, mob) = (K = SVector(K), t = 0.0, mob = mob)
+    two(K, mob) = (K = SVector(K, K), t = 0.0, mob = mob)
+    flux(pl, pr, cl, cr = cl) = interface_flux(pl, pr, T, T, d, d, cl, cr)
+    wall(K, Δ) = K*Δ/(R_GAS*T*2d)
+
+    @testset "no viscous flow below vacuum" begin
+        # Negative conductances would turn a tiny state into a flux of thousands.
+        closed=flux(SVector(-1e3), SVector(-1e4), one(0.0, 1e-3))
+        @test closed.n == SVector(0.0)
+        @test flux(SVector(-1.0), SVector(-2.0), one(1e-6, 1e-8)).n[1] ≈ wall(1e-6, 1.0)
+        # Flow runs down the gradient however strong the mobility.
+        @test flux(SVector(-1.0), SVector(-2.0), one(1e-8, 5e-6)).n[1] ≈ wall(1e-8, 1.0)
+        @test flux(SVector(-2.0), SVector(-1.0), one(1e-8, 5e-6)).n[1] ≈ -wall(1e-8, 1.0)
+    end
+
+    @testset "a total of exactly zero" begin
+        for (pl, pr) in (
+            (SVector(1.0, -1.0), SVector(-1.0, 0.5)),
+            (SVector(1.0, -1.0), SVector(2.0, -2.0)),
+        )
+            r=flux(pl, pr, two(0.0, 1e-8))
+            @test all(isfinite, r.n)
+            @test all(isfinite, r.p)
+        end
+    end
+
+    @testset "a closed half beside vacuum carries nothing" begin
+        @test flux(SVector(1.0), SVector(0.0), one(0.0, 0.0), one(0.0, 1e-8)).n ==
+              SVector(0.0)
+    end
+
+    @testset "the flux is continuous across each vacuum branch" begin
+        λ, m=1e-6, 1e-7
+        c=one(λ, m)
+        continuous(Pl, Pr) = isapprox(
+            flux(SVector(Pl*(1-1e-9)), SVector(Pr), c).n[1],
+            flux(SVector(Pl*(1+1e-9)), SVector(Pr), c).n[1];
+            rtol = 1e-7,
+        )
+        @test flux(SVector(-1e-9), SVector(-2.0), c).n[1] ≈
+              flux(SVector(1e-9), SVector(-2.0), c).n[1] rtol=1e-6
+        # The interface reaches vacuum where the left flux at P*=0, (λ+mPl)Pl
+        # over Td, equals the right wall flux, 2λ over Td.
+        threshold=(-λ+sqrt(λ^2+8m*λ))/(2m)
+        @test continuous(threshold, -2.0)
+        # The pure-Darcy interface closes to vacuum with the upstream total.
+        @test abs(flux(SVector(1e-9), SVector(-2.0), one(0.0, m)).n[1]) <
+              1e-8*flux(SVector(1.0), SVector(-2.0), one(0.0, m)).n[1]
+    end
+
+    @testset "derivatives stay finite on every branch" begin
+        for x0 in ([-1.0, -2.0], [1.0, -2.0], [-1.0, 2.0], [2.0, 1.0])
+            g=ForwardDiff.gradient(
+                x->interface_flux(
+                    SVector(x[1]),
+                    SVector(x[2]),
+                    T,
+                    T,
+                    d,
+                    d,
+                    one(1e-6, 1e-8),
+                    one(1e-6, 1e-8),
+                ).n[1],
+                x0,
+            )
+            @test all(isfinite, g)
+            @test g[1]>0 && g[2]<0
+        end
+    end
+end

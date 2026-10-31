@@ -3,7 +3,7 @@ using ForwardDiff
 using SparseArrays
 using StaticArrays
 using Pyrolysis
-using Pyrolysis.Materials: DepletionLimiter, R_GAS
+using Pyrolysis.Materials: DepletionLimiter, R_GAS, gas_component_indices
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.States: StateLayout, state_length
@@ -87,7 +87,14 @@ function _states(cp)
     perturbed = u0 .* (1 .+ 0.2 .* sin.(1:length(u0)))
     zero_state = zeros(length(u0))
     negative = -abs.(u0)
-    return (; u0, hot, perturbed, zero_state, negative)
+    # The solids as they are and the gas at trace levels of either sign: the
+    # state `negative` zeroes the coefficients a signed pressure acts through.
+    trace_gas = copy(u0)
+    for i = 1:n_cells(layout), g in gas_component_indices(cp.def.setup.material.components)
+        j = mass_index(layout, i, g)
+        trace_gas[j] = (isodd(i) ? -1 : 1) * 0.1 * cp.abstol[j]
+    end
+    return (; u0, hot, perturbed, zero_state, negative, trace_gas)
 end
 
 
@@ -164,6 +171,57 @@ const _exchange=(
     residual!(du, cp.u0, def, 0.0, ws)
     @test (@allocated residual!(du, cp.u0, def, 0.0, ws))==0
 end
+# A two-cell column holding trace gas in one cell: the mass is a tenth of the
+# guard's width, so the guarded pressure is three percent of the true one.
+function _trace_column(model)
+    solid = SolidComponent(:solid, ρ = 1000.0, φ = 0.5, c = 1500.0, k = 0.3, λ = 1e-5)
+    gas = GaseousComponent(:gas, M = 0.044, c = 1000.0, k = 0.025)
+    material = Material(
+        name = :trace,
+        components = (solid, gas),
+        reactions = (),
+        gas_transport = model,
+    )
+    problem = PyrolysisProblem(
+        mesh = create_uniform_mesh(0.002, 2),
+        material = material,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
+            mass = (top = ImpermeableBC(), bottom = ImpermeableBC()),
+        ),
+        T_initial = z -> 300.0,
+        ξ_initial = [z -> 1000.0, z -> 0.0],
+        tspan = (0.0, 1.0),
+    )
+    cp = setup(problem; pressure_tolerance = 1.0)
+    u = copy(cp.u0)
+    u[mass_index(cp.def.layout, 1, 2)] = 0.1 * cp.abstol[mass_index(cp.def.layout, 1, 2)]
+    du = zeros(length(u))
+    residual!(du, u, cp.def, 0.0, cp.ws)
+    ds, c = cp.ws.derived, cp.ws.contributions
+    f = only(
+        f for f = 1:n_faces(cp.def.setup.topology) if
+        cp.def.setup.topology.faces[f].cells[2] != 0
+    )
+    return (; ds, F = c.F_mass[2, f], V = ds.V[1], m = u[mass_index(cp.def.layout, 1, 2)])
+end
+
+@testset "an interior face reads trace gas" begin
+    M, T, Δz = 0.044, 300.0, 0.001
+    lumped = _trace_column(LumpedTransfer())
+    ds = lumped.ds
+    exact = lumped.m * R_GAS * T / (M * ds.φ[1] * lumped.V)
+    # The lumped law sees the true pressure; the property evaluation keeps
+    # the guarded one, which is what the boundary solves read.
+    @test abs(lumped.F) ≈ M * ds.K[2, 1] * exact / (R_GAS * T * Δz) rtol = 1e-9
+    @test ds.p[2, 1] < 0.05 * exact
+    # A single gas under the dusty model takes the same face law, on the
+    # guarded pressure: its interface solves are posed on nonnegative ones.
+    dusty = _trace_column(_models.dusty)
+    @test abs(dusty.F) ≈ M * dusty.ds.K[2, 1] * dusty.ds.p[2, 1] / (R_GAS * T * Δz) rtol =
+        1e-9
+end
+
 # A sealed, isothermal coupled column with a pressure peak in the middle:
 # the gas flows out of the peak both ways and stays in the column.
 function _sealed_column()

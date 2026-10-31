@@ -3888,8 +3888,9 @@ Each guard is C¹ and is exactly the identity on the physical states the
 tolerances can distinguish, so a trial state outside the physical domain still
 has finite properties with finite derivatives, while the domain test reads the
 unguarded quantities (§15.5.4). The kernels read the signed concentrations
-$\xi_{j,i} = m_{j,i}/\tilde V_i$ in the reaction rates (§6) and relative solid-motion
-fluxes (§11); pore-gas transport and the property laws read $\xi^{+}$.
+$\xi_{j,i} = m_{j,i}/\tilde V_i$ in the reaction rates (§6), relative solid-motion
+fluxes (§11) and the lumped law across an interior face (§9.10.2); the property laws
+and the other pore-gas transport read $\xi^{+}$.
 
 ### 5.13.2 Cell properties
 
@@ -7793,6 +7794,18 @@ commensurate during trace-gas production. Exactly absent gas still contributes
 zero pressure. Prescribed reservoir pressure is used exactly; an unknown
 hydraulic surface pressure uses the corresponding total-pressure trial
 extension. Residual evaluation does not mutate solver tolerances.
+
+The lumped law across an interior face does not pass through this transition.
+A smooth function that is nonnegative and zero at vacuum has zero slope there,
+and below $\delta_j$ the guarded pressure varies as $m_j^3$, where Newton's
+method on an implicit step does not converge. The law is linear in the partial
+pressures, so the face reads them from the signed inventories,
+$p_j=m_jRT/(M_j\phi V)$: exact at every nonnegative mass, with slope at vacuum.
+A negative inventory on a trial state draws gas back across the face, and a
+negative total pressure moves no gas viscously. The dusty-gas interface solve
+is posed on nonnegative pressures and the boundary solves on nonnegative
+compositions, so these read the guarded pressures, as do the reported
+pressures, within the bound above.
 
 This controls a local error estimate, not accumulated global solution error.
 Mesh refinement and comparisons with tighter tolerances remain necessary as

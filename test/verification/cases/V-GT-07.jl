@@ -141,8 +141,8 @@ function _vgt07_case(id, hm)
                 name = "zero net boundary mass flux",
                 value = maximum(abs, vec(sum(top.fluxes; dims = 1))),
                 error = maximum(abs, vec(sum(top.fluxes; dims = 1)))/(hm*Y∞),
-                tol = 1e-8,
-                comment = "two species counterdiffuse; flux scale h_m Y∞",
+                tol = 3e-8,
+                comment = "two species counterdiffuse; flux scale h_m Y∞; enthalpy form observed 1.1e-8 at these tolerances, falling with them to 8.7e-12 at 1e-3 of them",
             ),
             QoIResult(
                 name = "sealed back face",

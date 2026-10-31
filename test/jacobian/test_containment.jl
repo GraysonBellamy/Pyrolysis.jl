@@ -149,6 +149,13 @@ function _states(cp, wood::Bool)
         perturbed = u0 .* (1 .+ 0.2 .* sin.(1:length(u0))),
         zero_state = zeros(length(u0)),
         negative = -abs.(u0),
+        # Physical solids with the gas at trace levels of either sign: the
+        # state `negative` zeroes the coefficients a signed pressure acts through.
+        trace_gas = _cell_state(
+            cp,
+            i -> 450.0 + 200.0 * i / n,
+            i -> (solid * (0.65 + 0.3 * i / n), (isodd(i) ? -1 : 1) * 1e-9),
+        ),
     )
     return wood ? (; states..., overfilled = uniform(800.0, (1650.0, 1.0))) : states
 end

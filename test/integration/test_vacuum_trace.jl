@@ -1,5 +1,6 @@
-# A thin ramp-heated gasifying sample starts at exact vacuum. Trace production
-# must cross the smooth positive-part region without a step-count explosion.
+# A thin ramp-heated gasifying sample starts at exact vacuum, so its gas begins
+# below the pressure budget. Trace production must pass through that range
+# without a step-count explosion.
 using Test, Pyrolysis
 
 virgin = SolidComponent(:virgin; ρ = 1190.0, φ = 0.3, c = 1500.0, k = 0.20, λ = 1e-6)
@@ -27,19 +28,11 @@ problem =
 
 
 
-@testset "vacuum trace production resolves the gas guard ($energy)" for energy in (
-    :temperature,
-    :enthalpy,
-)
-    # At the reference enthalpy tolerance, use a nonlinear implicit method:
-    # the caloric extension and an initially flat gas guard make the
-    # linearly implicit method take very small startup steps. The ordinary
-    # trajectory below still qualifies the default policy in both forms.
-    reference_policy=energy===:enthalpy ? kencarp4_policy(StructuredKLU()) : nothing
+@testset "vacuum trace production stays resolved ($energy)" for energy in
+                                                                (:temperature, :enthalpy)
     tight=solve(
         problem;
         energy_state = energy,
-        integrator_policy = reference_policy,
         pressure_tolerance = 1e-5,
         reltol = 1e-10,
         abstol = 1e-12,

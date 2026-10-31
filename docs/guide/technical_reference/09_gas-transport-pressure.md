@@ -741,6 +741,18 @@ zero pressure. Prescribed reservoir pressure is used exactly; an unknown
 hydraulic surface pressure uses the corresponding total-pressure trial
 extension. Residual evaluation does not mutate solver tolerances.
 
+The lumped law across an interior face does not pass through this transition.
+A smooth function that is nonnegative and zero at vacuum has zero slope there,
+and below $\delta_j$ the guarded pressure varies as $m_j^3$, where Newton's
+method on an implicit step does not converge. The law is linear in the partial
+pressures, so the face reads them from the signed inventories,
+$p_j=m_jRT/(M_j\phi V)$: exact at every nonnegative mass, with slope at vacuum.
+A negative inventory on a trial state draws gas back across the face, and a
+negative total pressure moves no gas viscously. The dusty-gas interface solve
+is posed on nonnegative pressures and the boundary solves on nonnegative
+compositions, so these read the guarded pressures, as do the reported
+pressures, within the bound above.
+
 This controls a local error estimate, not accumulated global solution error.
 Mesh refinement and comparisons with tighter tolerances remain necessary as
 pores evolve. In particular, nominal porosity in a dense melt is material

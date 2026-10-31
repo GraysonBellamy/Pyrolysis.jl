@@ -63,14 +63,38 @@ end
     return p, (K = K, t = ds.molecular_resistance[i], mob = ds.mob[i])
 end
 
+# The partial pressures an interior face reads. The lumped law is linear in
+# them, so it takes the signed inventories: exact at every nonnegative mass,
+# with slope at vacuum, where the guarded pressures have none and Newton's
+# method fails; a negative inventory draws gas back across the face. The
+# dusty-gas interface solve is posed on nonnegative pressures, so it keeps the
+# guarded ones, as do the boundary solves.
+@inline function _face_pressures(
+    ::LumpedTransfer,
+    kernel::GasTransportKernel{M,NC,NG},
+    ds,
+    i,
+    guarded,
+) where {M,NC,NG}
+    return SVector{NG}(
+        ntuple(
+            k->ds.ξ[kernel.indices[k], i]/ds.φ[i]*R_GAS*ds.T_trial[i]/kernel.masses[k],
+            Val(NG),
+        ),
+    )
+end
+@inline _face_pressures(::GasTransport, kernel, ds, i, guarded) = guarded
+
 # The kernel's species mass fluxes through the interior face `f` between the
 # live cells `o` and `nb` [kg/(m² s)], with the two floored center-to-face
 # distances.
 @inline function _face_mass_flux(kernel::GasTransportKernel, ds, topo, f, o, nb)
     d_o=smooth_floor(center_to_face_distance(ds.geometry, topo, f, o), kernel.d_floor[f])
     d_n=smooth_floor(center_to_face_distance(ds.geometry, topo, f, nb), kernel.d_floor[f])
-    pl, cl=_cell_pore(ds, o, kernel.indices)
-    pr, cr=_cell_pore(ds, nb, kernel.indices)
+    guarded_l, cl=_cell_pore(ds, o, kernel.indices)
+    guarded_r, cr=_cell_pore(ds, nb, kernel.indices)
+    pl=_face_pressures(kernel.model, kernel, ds, o, guarded_l)
+    pr=_face_pressures(kernel.model, kernel, ds, nb, guarded_r)
     flux=interface_flux(pl, pr, ds.T_trial[o], ds.T_trial[nb], d_o, d_n, cl, cr)
     return flux.n .* kernel.masses, d_o, d_n
 end
