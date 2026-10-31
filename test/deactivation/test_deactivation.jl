@@ -1449,3 +1449,82 @@ end
     @test [e.cell for e in umfpack.events] == [e.cell for e in klu.events]
     @test [e.t for e in umfpack.events] ≈ [e.t for e in klu.events] rtol = 1e-6
 end
+
+@testset "a void found after a merge leaves consistent rows: $(moving ? "moving" : "fixed") mesh, $(energy) form" for moving in
+                                                                                                                      (
+        true,
+        false,
+    ),
+    energy in (:temperature, :enthalpy)
+
+    # The outermost cell merges, then a void lies inward of the live cells.
+    solid = SolidComponent(:a; φ = 0.3, ρ = 500.0, c = 1000.0, k = 0.2, λ = 1e-6, α = 3.0)
+    gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02)
+    problem = PyrolysisProblem(
+        mesh = create_uniform_mesh(0.01, 4),
+        material = Material(
+            name = :void,
+            components = (solid, gas),
+            reactions = (Reaction(:burn, 1 => 2; A = 0.02, E = 0.0, h = 0.0),),
+            gas_transport = LumpedTransfer(
+                endpoint = LumpedEndpoint(λ = 1e-6, κ = 0.0, max_skeletal_occupancy = 1e-3),
+            ),
+        ),
+        bc_set = BoundaryConditionSet(
+            thermal = (top = RadiativeFluxBC(flux = 1e4), bottom = AdiabaticBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 600.0)),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> 600.0,
+        ξ_initial = [z -> 500.0, z -> 0.0],
+        tspan = (0.0, 0.001),
+        output_times = [0.0, 0.001],
+    )
+    cp = setup(
+        problem;
+        use_ale = moving,
+        deactivation = true,
+        correction = NoCorrection(),
+        radiation_model = BEER_LAMBERT,
+        energy_state = energy,
+    )
+    layout, d = cp.def.layout, cp.deactivation
+    u = copy(cp.u0)
+    for (i, f) in enumerate((0.002, 0.5, 0.0101, 0.0099))
+        m = (f * d.reference[i], 0.0)
+        u[mass_index(layout, i, 1)] = m[1]
+        u[mass_index(layout, i, 2)] = m[2]
+        u[energy_index(layout, i)] = Pyrolysis.States.energy_state_value(
+            energy_state(layout),
+            cp.def.setup,
+            600.0,
+            m,
+            i,
+        )
+    end
+    consistent_state!(u, cp.def, cp.ws, 0.0)
+    sol = @test_logs (:warn, r"cell 1 is below its threshold") match_mode = :any integrate(
+        cp;
+        u0 = u,
+        dt = 1e-6,
+        dtmax = 1e-6,
+        saveat = [0.0, 0.001],
+    )
+    @test sol.outcome === :interior
+    @test [(e.cell, e.receiver) for e in sol.events] == [(4, 3)]
+    v = copy(sol.raw_solution.u[end])
+    du = similar(v)
+    residual!(du, v, cp.def, sol.t[end], cp.ws)
+    rows = [
+        k for k in (intensity_index(layout, f) for f in eachindex(cp.ws.derived.I)) if
+        layout.mask[k]
+    ]
+    @test maximum(abs, du[rows]) < 1e-9
+    if moving
+        velocities =
+            [k for k in (velocity_index(layout, nd) for nd = 1:5) if layout.mask[k]]
+        @test maximum(abs, du[velocities]) < 1e-12
+    end
+end

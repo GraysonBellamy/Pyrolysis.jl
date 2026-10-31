@@ -551,11 +551,15 @@ function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy, loc
     # Deactivates in place with the threshold widened by `slack` and returns
     # `:transferred`, `:burned_out`, `:interior`, `:inconsistent` when the
     # sweep leaves a velocity row above round-off, or `:inadmissible` when the
-    # result is not admissible.
+    # result is not admissible. A void found after a merge ends on the sweep of
+    # what was merged.
     deactivate = FunctionWrapper{Symbol,Tuple{_StateVector,Float64,Float64}}(
         (u, t, slack) -> begin
+            made = length(cells.events)
             status = deactivate!(u, cells, def, t; slack)
-            status === :transferred || return status
+            status === :transferred ||
+                (status === :interior && length(cells.events) > made) ||
+                return status
             _consistent_intensities!(u, def, ws, t)
             _consistent_motion!(u, def, ws, t) === nothing || return :inconsistent
             inadmissible(u, layout, def.setup, check.abstol) && return :inadmissible
