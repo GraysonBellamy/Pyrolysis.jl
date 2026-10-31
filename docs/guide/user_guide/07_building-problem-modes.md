@@ -130,8 +130,8 @@ problem = PyrolysisProblem(
 
 Under a lateral shrinkage law (§7.6) the initial state also holds each cell's conversion
 history, `G_i = 0` and `M_i` the cell's initial solid mass, the denominator of the column
-conversion `χ̄`. A lumped gas transport material's pore gas is initialized through `ξ_initial` as well
-(§7.5.1). See Technical Reference §12 for the initial and boundary conditions.
+conversion `χ̄`. A lumped gas
+transport material's pore gas is initialized through `ξ_initial` as well (§7.5.1). See Technical Reference §12 for the initial and boundary conditions.
 
 ### 7.1.3 Time span and output times
 
@@ -236,13 +236,14 @@ less condensed mass than `threshold` of what it started with (`Pyrolysis.Closure
 gives the fraction each component leaves). The correction moves the mesh relative to the
 solid, thinning a vanishing layer's cells together so that the layer leaves in one event;
 the near-threshold band then defaults to `0.1`. Otherwise (a fixed mesh, deactivation off,
-or a charring layer whose residue stays above the threshold) the solve has no correction and
-a moving mesh moves with the solid.
+or a charring layer whose residue stays above the threshold) the solve has no correction
+and a moving mesh moves with the solid. A reaction of order other than one refuses
+deactivation and the correction (§4.14).
 
 | Keyword | Effect |
 |---|---|
 | `correction = NoCorrection()` | Keeps the mesh with the solid whatever `setup` would install. |
-| `correction = EquidistributionCorrection(; ...)` | Configures the correction (Chapter 10); needs `use_ale = true`. |
+| `correction = EquidistributionCorrection(; ...)` | Configures the correction (Chapter 10); needs `use_ale = true`; refused at a reaction order other than one. |
 | `lagrangian = [nodes...]` | Nodes that always move with the solid. Under the equidistribution correction every interior node between cells that start with different condensed components must be among them, and by default they are exactly those nodes. |
 | `band` | The near-threshold band of a moving mesh, in `[threshold, 1)`. |
 

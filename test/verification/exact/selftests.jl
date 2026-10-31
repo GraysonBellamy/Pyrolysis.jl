@@ -166,9 +166,10 @@
     end
 
     @testset "isothermal kinetics closed forms" begin
-        # 1. nth-order: dξ/dt = −kξⁿ verified by central finite difference.
+        # 1. nth-order: dξ/dt = −k ξ₀ (ξ/ξ₀)ⁿ verified by central finite
+        #    difference, before the burnout of the orders below one.
         for n in (0.0, 2.0, 2 / 3)
-            ξ0, k, t = 100.0, 0.5, 5.0
+            ξ0, k, t = 100.0, 0.5, 1.0
             δ = 1e-6
             dξdt =
                 (
@@ -176,15 +177,15 @@
                     nth_order_xi(t - δ; ξ0 = ξ0, k = k, n = n)
                 ) / (2δ)
             ξt = nth_order_xi(t; ξ0 = ξ0, k = k, n = n)
-            @test dξdt ≈ -k * ξt^n rtol = 1e-6
+            @test dξdt ≈ -k * ξ0 * (ξt / ξ0)^n rtol = 1e-6
         end
 
         # 2. Burnout: exact zero at t_b for n < 1, and m^(1/3) linear in t for
         #    the contracting-sphere order n = 2/3 (FDS NaHCO₃ marker).
-        tb = nth_order_burnout_time(ξ0 = 100.0, k = 5.0, n = 0.0)
+        tb = nth_order_burnout_time(k = 0.05, n = 0.0)
         @test tb == 20.0
-        @test nth_order_xi(tb; ξ0 = 100.0, k = 5.0, n = 0.0) == 0.0
-        tb3 = nth_order_burnout_time(ξ0 = 1.0, k = 0.3, n = 2 / 3)
+        @test nth_order_xi(tb; ξ0 = 100.0, k = 0.05, n = 0.0) == 0.0
+        tb3 = nth_order_burnout_time(k = 0.3, n = 2 / 3)
         m13(t) = nth_order_xi(t; ξ0 = 1.0, k = 0.3, n = 2 / 3)^(1 / 3)
         @test m13(0.3 * tb3) ≈ 1 - 0.3 rtol = 1e-12
         @test m13(0.7 * tb3) ≈ 1 - 0.7 rtol = 1e-12
@@ -204,6 +205,21 @@
         ξB_at(t) = series_chain_xi(t; ξ0 = ξ0, k1 = k1, k2 = k2)[2]
         @test ξB_at(tpeak) > ξB_at(tpeak - 0.01)
         @test ξB_at(tpeak) > ξB_at(tpeak + 0.01)
+
+        # 4. Series scheme on conversions: the Bateman form at second-step order
+        #    one, and the balance at another order by central finite difference.
+        k1, k2 = 0.05, 0.1
+        for t in (5.0, 20.0, 80.0)
+            ξA, ξB, _ = series_chain_xi(t; ξ0 = 1.0, k1 = k1, k2 = k2)
+            eA, eB = series_chain_conversion(t; k1 = k1, k2 = k2, n2 = 1.0)
+            @test eA ≈ ξA rtol = 1e-13
+            @test eB ≈ ξB rtol = 1e-13
+            δ = 1e-3
+            b₊ = series_chain_conversion(t + δ; k1 = k1, k2 = k2, n2 = 1.8)[2]
+            b₋ = series_chain_conversion(t - δ; k1 = k1, k2 = k2, n2 = 1.8)[2]
+            a, b = series_chain_conversion(t; k1 = k1, k2 = k2, n2 = 1.8)
+            @test (b₊ - b₋) / 2δ ≈ k1 * a - k2 * b^1.8 rtol = 1e-6
+        end
     end
 
     @testset "radiative cooling implicit solution" begin

@@ -67,8 +67,7 @@ cell's block follows the blocks of its nodes not yet placed, cell by cell
 With $N_{\rm node}=2\delta_{\rm mov}+\delta_{\rm BL}$ the width of a node block and
 $N_{\rm cell}=N_C+1+2\delta_\chi$ that of a cell block on a line ($\delta_{\rm mov}$,
 $\delta_{\rm BL}$, $\delta_\chi$ equal to one on a moving mesh, under in-depth
-radiation and under a variable cross section, zero otherwise, as in §3.1.2), and
-$N_{\rm blk}=N_{\rm node}+N_{\rm cell}$ the stride, the indices are
+radiation and under a variable cross section, zero otherwise, as in §3.1.2), and $N_{\rm blk}=N_{\rm node}+N_{\rm cell}$ the stride, the indices are
 
 $$
 \begin{aligned}

@@ -341,7 +341,7 @@ function Material(;
     # argument type makes the `Material{…,LSL}` apply_type monomorphic in each
     # branch, instead of a `Union{Function,Nothing}` split JET flags as a possible
     # no-matching-method on the inner constructor.
-    return _construct_material(
+    material = _construct_material(
         name,
         components,
         resolved,
@@ -351,6 +351,8 @@ function Material(;
         to_property(gas_viscosity),
         gas_transport,
     )
+    needs_lineage(material) && lineage_graph(material)
+    return material
 end
 
 function _construct_material(
@@ -512,4 +514,211 @@ function dry_gas_flags(material::Material{NC}) where {NC}
         )
     end
     return ntuple(j -> is_gas(comps[j]) && j in lineage, Val(NC))
+end
+
+# ============================================================================
+# Reaction lineages
+# ============================================================================
+
+"""
+	needs_lineage(material) -> Bool
+
+Whether some reaction of `material` has an order other than one, which is
+evaluated on the conversion of its reactant against the reactant's lineage
+inventory. Every first-order reaction is evaluated on its concentration, and a
+material with no other order carries no reference.
+"""
+needs_lineage(material::Material) =
+    any(r -> any(p -> p[2] != 1.0, r.reactants), material.reactions)
+
+"""
+	LineageGraph
+
+What the reaction network alone fixes of the reference of each reaction, per
+reaction in the material's order: `reactant`, the reactant's component index;
+`order`, its order; `basis`, the reaction's `basis` (`NaN` for the lineage
+rules); `ancestors`, per component whether the reactant can be formed from it,
+the reactant itself included (empty for a first-order reaction); `reach`, per
+component the mass of the reactant one unit of its inventory can become (empty
+for a first-order reaction and under a `basis`). `condensed` flags the
+condensed components.
+"""
+struct LineageGraph
+    names::Vector{Symbol}
+    components::Vector{Symbol}
+    condensed::Vector{Bool}
+    reactant::Vector{Int}
+    order::Vector{Float64}
+    basis::Vector{Float64}
+    ancestors::Vector{Vector{Bool}}
+    reach::Vector{Vector{Float64}}
+end
+
+# The channels of every condensed component: per reaction it consumes, the
+# condensed products other than itself at positive yield with their weights,
+# the yields renormalised by what the reaction consumes. A reaction that
+# returns its whole reactant consumes nothing and is no channel.
+function _lineage_channels(material::Material{NC}, condensed) where {NC}
+    channels = [Vector{Pair{Int,Float64}}[] for _ = 1:NC]
+    for r in material.reactions
+        a = first(r.reactants[1])
+        condensed[a] || continue
+        consumed = 1.0 - sum(y for (p, y) in r.products if p == a; init = 0.0)
+        consumed > 0 || continue
+        push!(
+            channels[a],
+            [p => y / consumed for (p, y) in r.products if p != a && y > 0 && condensed[p]],
+        )
+    end
+    return channels
+end
+
+# The nodes reachable from `seeds` along `next`, the seeds included.
+function _reachable(next::Vector{Vector{Int}}, seeds)
+    seen = falses(length(next))
+    front = Int[seeds...]
+    seen[front] .= true
+    while !isempty(front)
+        v = pop!(front)
+        for p in next[v]
+            seen[p] && continue
+            seen[p] = true
+            push!(front, p)
+        end
+    end
+    return Vector{Bool}(seen)
+end
+
+# The nodes of `member` children first, and the cycle among them along
+# `children`, `nothing` when there is none.
+function _children_first(children::Vector{Vector{Int}}, member::Vector{Bool})
+    state = zeros(Int8, length(children))
+    order, path = Int[], Int[]
+    function visit(v)
+        state[v] = 1
+        push!(path, v)
+        for p in children[v]
+            member[p] || continue
+            state[p] == 1 && return path[findfirst(==(p), path):end]
+            if state[p] == 0
+                cycle = visit(p)
+                cycle === nothing || return cycle
+            end
+        end
+        pop!(path)
+        state[v] = 2
+        push!(order, v)
+        return nothing
+    end
+    for v in eachindex(member)
+        (member[v] && state[v] == 0) || continue
+        cycle = visit(v)
+        cycle === nothing || return order, cycle
+    end
+    return order, nothing
+end
+
+# The reach of the reactant `a` over its ancestors, visited children first:
+# one unit of a node's inventory becomes the common value of its channels
+# that reach `a`, a channel producing nothing toward `a` being ignored.
+function _reach(channels, ancestors, order, a::Int, rxn::Symbol, names)
+    Φ = zeros(length(ancestors))
+    Φ[a] = 1.0
+    for v in order
+        v == a && continue
+        value = NaN
+        for channel in channels[v]
+            any(e -> ancestors[first(e)], channel) || continue
+            φ = sum(y * Φ[p] for (p, y) in channel; init = 0.0)
+            if isnan(value)
+                value = φ
+            elseif abs(φ - value) > 1e-12 * max(abs(φ), abs(value))
+                throw(
+                    ArgumentError(
+                        "reaction :$rxn: competing channels of :$(names[v]) reach " *
+                        ":$(names[a]) with different yields ($value and $φ), so the " *
+                        "reference depends on the rates: give `basis`",
+                    ),
+                )
+            end
+        end
+        Φ[v] = value
+    end
+    return Φ
+end
+
+"""
+	lineage_graph(material) -> LineageGraph
+
+The graph rules of the reference of every reaction of order other than one, in
+order: its reactant is condensed and not fed from outside the condensed
+inventory (a condensed product of a gas-consuming reaction is fed, and so is
+every node reachable from it along positive-yield edges), whatever its
+`basis`; without a `basis`, the reactant's ancestors hold no cycle, and the
+channels of each ancestor that reach it agree on the reach, the mass of the
+reactant one unit of the ancestor's inventory can become. A reaction that
+returns its whole reactant is no edge, and the yields of one that returns part
+of it are renormalised by what it consumes. Throws an `ArgumentError` naming
+the reaction otherwise, with `basis` as the remedy where there is one.
+"""
+function lineage_graph(material::Material{NC}) where {NC}
+    for r in material.reactions
+        length(r.reactants) == 1 || throw(
+            ArgumentError(
+                "reaction :$(r.name) needs exactly one reactant for an order other than one",
+            ),
+        )
+        all(p -> 1 <= first(p) <= NC, (r.reactants..., r.products...)) ||
+            throw(ArgumentError("reaction :$(r.name) references a component outside 1:$NC"))
+    end
+    names = [c.name for c in material.components]
+    condensed = [!is_gas(c) for c in material.components]
+    channels = _lineage_channels(material, condensed)
+    children = [unique(first(e) for channel in channels[v] for e in channel) for v = 1:NC]
+    parents = [[v for v = 1:NC if p in children[v]] for p = 1:NC]
+    gas_products = Int[
+        p for r in material.reactions if !condensed[first(r.reactants[1])] for
+        (p, y) in r.products if y > 0 && condensed[p]
+    ]
+    fed = _reachable(children, gas_products)
+
+    reactions = collect(material.reactions)
+    ancestors = [Bool[] for _ in reactions]
+    reach = [Float64[] for _ in reactions]
+    for (k, r) in enumerate(reactions)
+        a, n = r.reactants[1]
+        n == 1 && continue
+        condensed[a] || throw(
+            ArgumentError(
+                "reaction :$(r.name) has the gas reactant :$(names[a]) at order $n: " *
+                "an order other than one needs a condensed reactant",
+            ),
+        )
+        fed[a] && throw(
+            ArgumentError(
+                "reaction :$(r.name): :$(names[a]) is fed by a gas-consuming reaction, " *
+                "so its lineage has no initial inventory; no `basis` repairs this",
+            ),
+        )
+        ancestors[k] = _reachable(parents, a)
+        isnan(r.basis) || continue
+        order, cycle = _children_first(children, ancestors[k])
+        cycle === nothing || throw(
+            ArgumentError(
+                "reaction :$(r.name): the ancestors of :$(names[a]) hold the cycle " *
+                "$(join((names[v] for v in (cycle..., first(cycle))), " → ")): give `basis`",
+            ),
+        )
+        reach[k] = _reach(channels, ancestors[k], order, a, r.name, names)
+    end
+    return LineageGraph(
+        [r.name for r in reactions],
+        names,
+        condensed,
+        [first(r.reactants[1]) for r in reactions],
+        [last(r.reactants[1]) for r in reactions],
+        [r.basis for r in reactions],
+        ancestors,
+        reach,
+    )
 end

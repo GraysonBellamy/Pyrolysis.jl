@@ -378,7 +378,7 @@ Reaction(name, :reactant => :product;
 # (c) integer index, two products
 Reaction(name, reactant::Int => (p1::Int, p2::Int);
          A, E, h, yields, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
-         validate_mass = true)
+         validate_mass = true, basis = NaN)
 
 # (d) symbol, two products (resolved by Material)
 Reaction(name, :reactant => (:p1, :p2);

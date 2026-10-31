@@ -184,7 +184,7 @@ driver), which carries its own self-tests.
 
 **Case catalogue.** Each case family has one file in `test/verification/cases/`;
 lettered members (V-HC-02a–d, V-HC-04a–d, V-RX-02a–d, V-RX-04a/b, V-RX-05a–c,
-V-GT-03b–d, V-GT-07a/b, V-GT-08a/b, V-CPL-01b, V-CPL-02b) share the family's
+V-RX-06a–c, V-GT-03b–d, V-GT-07a/b, V-GT-08a/b, V-CPL-01b, V-CPL-02b) share the family's
 file and its report chapter. Most families compare
 against an exact or manufactured solution; the burnout cases V-BO-01, 02, 03 and
 05 to 08 check mass budgets, ledgers and a pinned reference run instead.
@@ -192,7 +192,7 @@ against an exact or manufactured solution; the burnout cases V-BO-01, 02, 03 and
 | Family | Cases | Reference solution | What it verifies |
 |---|---|---|---|
 | Heat conduction | V-HC-01 – V-HC-05 | Carslaw–Jaeger erfc and eigenfunction series, resistance network, Kirchhoff transform | the convective surface Newton (V-HC-01; Biot sweep V-HC-02a–d), the constant-flux slab to its back-face plateau (V-HC-03), the harmonic-mean face conductivity at a layer jump on and off a face, including the same interface on a fitted mesh (V-HC-04a–d), $k(T)$ (V-HC-05) |
-| Kinetics and surface radiation | V-RX-01 – V-RX-05 | Bateman chain, Khawam–Flanagan isothermal integrals, parallel-reaction splits, implicit radiative-cooling law, insulated-reaction logarithmic temperature history | multi-step coupling, reaction order and the depletion limiter (V-RX-02d keeps it on as a guard), two-product yields and heat superposition, `RadiativeBC` through the surface Newton, reaction heat and sensible-enthalpy formation with unequal species heat capacities |
+| Kinetics and surface radiation | V-RX-01 – V-RX-08 | Bateman chain, Khawam–Flanagan isothermal integrals, parallel-reaction splits, implicit radiative-cooling law, insulated-reaction logarithmic temperature history, conversion-basis burnout on fixed and moving meshes (V-RX-06), a series scheme on conversions with an order other than one on the intermediate (V-RX-07), a graded conversion in the closed form cell by cell (V-RX-08) | multi-step coupling, reaction order and the depletion limiter (V-RX-02d keeps it on as a guard), two-product yields and heat superposition, `RadiativeBC` through the surface Newton, reaction heat and sensible-enthalpy formation with unequal species heat capacities |
 | In-depth radiation | V-RAD-01 | Lautenberger eigenfunction series | Beer–Lambert absorption with conduction and a convective face, including the sub-surface temperature peak |
 | Gas transport | V-GT-01 – V-GT-08 | Gaussian plane source, integrated wall/Darcy resistance, binary dusty-gas exchange, coupled thermal-film solution, Robin diffusion, prescribed-inflow Darcy $P^2$ profile | wall transport and conservation, pressure closure and upwinding, interfaces and flow reversal, binary exchange, nonisothermal transport, transient mass-film uptake, imposed gas inflow and pressure outflow |
 | Coupled physics | V-CPL-01 – V-CPL-05 | Neumann two-phase Stefan solution, Landau ablation wave, exact shrink/swell endpoints, Frank-Kamenetskii slab, 0D TGA curve | a latent-heat front (apparent heat capacity, V-CPL-01; gated reaction, V-CPL-01b), surface regression on a moving mesh (V-CPL-02, 02b), volume change and the lateral-shrinkage law, the reaction–conduction bifurcation, the boundary and volume coupling of the kinetics |
@@ -475,7 +475,8 @@ Two implementation details must be accounted for when the check is made
   the limiter with `DepletionLimiter(enabled = false)`; the exact-kinetics cases do
   the latter (V-RX-01, V-RX-02a–c, V-RX-03, V-CPL-01b, V-CPL-03, V-CPL-05, V-GT-02),
   and V-RX-02d keeps the limiter
-  on to require $0\le\xi\le\xi_\mathrm{th}$ at twice the zero-order burnout time.
+  on to require a nonnegative residue below its conversion threshold at twice the
+  zero-order burnout time.
 
 ### 18.2.3 Beer–Lambert transmitted fraction
 
@@ -567,12 +568,12 @@ Deactivation (§14.3) is a discrete event: cells whose condensed mass falls belo
 threshold $\varepsilon_m$ of their reference mass leave the system, their inventories
 transferred to the live cell beneath. V-BO-04 checks it against an exact solution that
 passes through the event. An adiabatic 10 mm slab at a uniform 600 K carries one
-zero-order reaction solid → gas with no heat of reaction, on
+first-order reaction solid → gas with no heat of reaction, on
 40 cells of a moving mesh. The temperature stays at $T_0$ exactly (no source, no
-gradient), so the volumetric rate $r$ is constant and every cell loses the same
-fraction $r/\rho_s$ of its volume per unit time. On a mesh that rides the solid the
-solid concentration stays at $\rho_s$ (the shrinkage removes volume, not
-concentration) and the thickness is
+gradient), and at the concentration $\rho_s$ the volumetric rate $r = k\,\rho_s$ is
+constant, so every cell loses the same fraction $r/\rho_s$ of its volume per unit
+time. On a mesh that rides the solid the solid concentration stays at $\rho_s$ (the
+shrinkage removes volume, not concentration) and the thickness is
 
 $$
 L(t)=L_0\exp\!\Big(-\frac{r\,t}{\rho_s}\Big).
@@ -584,13 +585,13 @@ the event: every cell is in the near-threshold band when the first crosses, so t
 whole column merges into the innermost cell in one invocation of 39 events, and that
 survivor holds the column's mass (about $40\,\varepsilon_m$ of its own initial mass) at
 $\rho_s$ and burns on at the exact rate. The QoIs require the thickness to follow the
-exact law through the event within $10^{-6}$ relative (observed $1.5\times10^{-9}$ in
-the temperature form, $1.2\times10^{-9}$ in the enthalpy form), the solid
+exact law through the event within $10^{-6}$ relative (observed $8.9\times10^{-10}$ in
+the temperature form, $8.0\times10^{-10}$ in the enthalpy form), the solid
 concentration to stay at $\rho_s$ within $10^{-8}$, the temperature at $T_0$ within
 $10^{-6}$ K, one invocation leaving one live cell, and the located event within
-$10^{-6}$ of the exact crossing time (observed $3.1\times10^{-10}$ and
-$1.8\times10^{-10}$). The case checks the event location (§14.3.5), the conservative
-transfer (§14.3.3) and the restart after the event together.
+$10^{-6}$ of the exact crossing time (observed $1.9\times10^{-10}$). The case checks the event location
+(§14.3.5), the conservative transfer (§14.3.3) and the restart after the event
+together.
 
 ---
 
@@ -929,7 +930,7 @@ to small steps; the smooth temperature gates and the one-sided depletion limiter
 (§6.2–§6.3) keep the residual and its Jacobian differentiable through them, so the error
 estimator behaves. A deactivation event is located inside its step at the first root of
 the threshold margin and the integration restarts from the state the event leaves
-(§14.3.5); V-BO-04 locates it within $3.1\times10^{-10}$ of the exact crossing
+(§14.3.5); V-BO-04 locates it within $1.9\times10^{-10}$ of the exact crossing
 (§18.2.5), and the module tests require a located event's time to converge with the
 tolerance on fixed and moving meshes.
 

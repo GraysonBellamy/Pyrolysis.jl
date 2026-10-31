@@ -15,18 +15,40 @@ const DEFAULT_DEPLETION_LIMITER = DepletionLimiter()
 # Scalar-type-generic so AD passes carry Duals through.
 @inline _fast_pow(x::Real, n::Real) = n == 1 ? x : (n == 0 ? one(x) : x^n)
 
-# The concentration factor of one reactant, multiplied onto `conc`: the power
-# of the finite base times the onset, which is zero at and below zero.
-@inline function _reactant_factor(conc, limiter::DepletionLimiter, ξ::Real, order::Real)
+# The factor of a first-order reactant, multiplied onto `conc`: the finite base
+# times the onset, which is zero at and below zero.
+@inline function _reactant_factor(conc, limiter::DepletionLimiter, ξ::Real)
     if limiter.enabled
         # The onset and its slope vanish at and below zero, so the rate and
         # every derivative of it are exactly zero there.
         ξ <= 0 && return zero(conc) * zero(ξ)
-        conc *= _fast_pow(_finite_base(ξ, limiter.base_scale), order)
+        conc *= _finite_base(ξ, limiter.base_scale)
         conc *= one_sided_factor(ξ / limiter.threshold, limiter.join)
         return conc
     end
-    return conc * _finite_power(ξ, limiter.base_scale, order)
+    return conc * _finite_power(ξ, limiter.base_scale, 1.0)
+end
+
+# The factor of a reactant of order other than one, multiplied onto `conc`: the
+# reference concentration times the power of the finite base of the conversion
+# `x = ξ/ξ_ref`, times the onset on `x`, which is zero at and below zero mass. A
+# base-applied limiter could not gate order zero (`x⁰ ≡ 1`) and would keep a
+# singular derivative at depletion for orders below one half.
+@inline function _conversion_factor(
+    conc,
+    limiter::DepletionLimiter,
+    ξ::Real,
+    ξ_ref::Real,
+    order::Real,
+)
+    if limiter.enabled
+        ξ <= 0 && return zero(conc) * zero(ξ)
+        x = ξ / ξ_ref
+        conc *= ξ_ref * _fast_pow(_finite_base(x, limiter.conversion_base), order)
+        conc *= one_sided_factor(x / limiter.conversion_threshold, limiter.join)
+        return conc
+    end
+    return conc * ξ_ref * _finite_power(ξ / ξ_ref, limiter.conversion_base, order)
 end
 
 # δ·softplus(ξ/δ) for ξ > 0: equal to ξ to within δ·log 2, and exactly ξ once
@@ -64,12 +86,15 @@ end
 	reaction_rate(rxn::Reaction, ξ::NTuple{NC,Float64}, T::Float64;
 				  limiter=DEFAULT_DEPLETION_LIMITER) -> Float64
 
-Compute the reaction rate [kg/(m³·s)] for a single reaction.
+Compute the reaction rate [kg/(m³·s)] of a first-order reaction.
 
-r = A * exp(-E/RT) * ∏ᵢ ξᵢ^nᵢ * ∏ᵢ g(ξᵢ/ξ_th) * H(T - T_min) * H(T_max - T)
+r = A * exp(-E/RT) * ξ * g(ξ/ξ_th) * H(T - T_min) * H(T_max - T)
+
+Any other order needs a reference: `reaction_rate(rxn, ξ, T, ξ_ref)`; this method
+throws an `ArgumentError` for it.
 
 # Depletion Protection
-Each reactant contributes a rate factor set by the [`DepletionLimiter`](@ref)
+The reactant contributes a rate factor set by the [`DepletionLimiter`](@ref)
 (`ξ_th = limiter.threshold`, default 1.0 kg/m³): the power of a finite base
 times a C¹ onset `g` ([`one_sided_factor`](@ref)) that is exactly zero at and
 below ξ = 0 and equals `tanh(ξ/ξ_th)` above `join · ξ_th`, so the rate recovers
@@ -93,31 +118,78 @@ function reaction_rate(
     # Arrhenius rate constant
     k = rxn.A * exp(-rxn.E / (R_GAS * T))
 
-    # Concentration product over reactants: ∏_i ξ_{r_i}^{n_i}, each with a
-    # smooth tanh depletion factor on the *rate*, not the power-law base — a
-    # base-applied limiter cannot gate order-0 reactants (ξ_eff^0 ≡ 1) and has
-    # singular ∂r/∂ξ at depletion for orders n < 0.5. Tuple iteration is fully
-    # unrolled by the compiler when NRin is a static type parameter.
+    # The reactant's concentration with a smooth tanh depletion factor on the
+    # *rate*, not the base. Tuple iteration is fully unrolled by the compiler
+    # when NRin is a static type parameter.
     conc_factor = one(promote_type(eltype(ξ), typeof(T)))
     @inbounds for (idx, order) in rxn.reactants
-        conc_factor = _reactant_factor(conc_factor, limiter, ξ[idx], order)
+        order == 1 || _refuse_order(rxn.name, order)
+        conc_factor = _reactant_factor(conc_factor, limiter, ξ[idx])
     end
 
-    r = k * conc_factor
+    return _temperature_gates(k * conc_factor, rxn, T)
+end
 
-    # Smooth replacement for H(T - T_min) * H(T_max - T): a hard step would
-    # break Newton/AD smoothness, so a tanh ramp of width rxn.gate_width [K]
-    # keeps the bounds effective (≈1 inside, ≈0 outside) while remaining
-    # differentiable.
+# Smooth replacement for H(T - T_min) * H(T_max - T): a hard step would
+# break Newton/AD smoothness, so a tanh ramp of width rxn.gate_width [K]
+# keeps the bounds effective (≈1 inside, ≈0 outside) while remaining
+# differentiable.
+@inline function _temperature_gates(r, rxn::Reaction, T::Real)
     if isfinite(rxn.T_min) && rxn.T_min > 0.0
         r *= 0.5 * (1 + tanh((T - rxn.T_min) / rxn.gate_width))
     end
     if isfinite(rxn.T_max)
         r *= 0.5 * (1 + tanh((rxn.T_max - T) / rxn.gate_width))
     end
-
     return r
 end
+
+"""
+	reaction_rate(rxn::Reaction{1}, ξ, T, ξ_ref; limiter=DEFAULT_DEPLETION_LIMITER) -> Real
+
+The rate [kg/(m³·s)] of a single-reactant reaction whose reactant has the
+reference concentration `ξ_ref` [kg/m³]:
+
+r = A exp(-E/RT) ξ_ref x^n g(x/x_th) H(T - T_min) H(T_max - T),   x = ξ/ξ_ref
+
+with `A` in s⁻¹ for every order, the finite base of `x^n` and the onset `g` set
+by `limiter.conversion_base` and `limiter.conversion_threshold`
+([`DepletionLimiter`](@ref)). The rate is exactly zero at and below zero mass
+under an enabled limiter. At order one `ξ_ref` is not read: the rate is the
+one of [`reaction_rate`](@ref) without a reference, to the bit. At any other
+order `ξ_ref` must be finite and positive.
+"""
+function reaction_rate(
+    rxn::Reaction{1},
+    ξ::NTuple{NC,<:Real},
+    T::Real,
+    ξ_ref::Real;
+    limiter::AbstractDepletionLimiter = DEFAULT_DEPLETION_LIMITER,
+) where {NC}
+    idx, order = rxn.reactants[1]
+    order == 1 && return reaction_rate(rxn, ξ, T; limiter)
+    (isfinite(ξ_ref) && ξ_ref > 0) || _refuse_reference(rxn.name, ξ_ref)
+    k = rxn.A * exp(-rxn.E / (R_GAS * T))
+    conc = one(promote_type(eltype(ξ), typeof(T), typeof(ξ_ref)))
+    return _temperature_gates(
+        k * _conversion_factor(conc, limiter, ξ[idx], ξ_ref, order),
+        rxn,
+        T,
+    )
+end
+
+@noinline _refuse_order(name::Symbol, order) = throw(
+    ArgumentError(
+        "reaction :$name has order $order, which needs a reference: " *
+        "reaction_rate(rxn, ξ, T, ξ_ref)",
+    ),
+)
+
+@noinline _refuse_reference(name::Symbol, ξ_ref) = throw(
+    ArgumentError(
+        "reaction :$name needs a finite positive reference concentration, got $ξ_ref",
+    ),
+)
 
 """
 	evaluate_reactions!(rates::Vector{Float64}, heats::Vector{Float64},
@@ -134,6 +206,7 @@ Evaluate all reaction rates and heats of reaction.
 - `material`: Material definition
 
 This function is designed to be allocation-free using @generated for compile-time unrolling.
+Every reaction must be first order; the reference method takes the others.
 
 # Depletion Limiter
 Rates are evaluated with `limiter`, by default the material's own
@@ -177,6 +250,69 @@ end
                 heats[$i] = rxn.heat(T, ξ)  # Pass ξ for state-dependent heats
             end
         end)
+    end
+    push!(exprs, :(return nothing))
+    return Expr(:block, exprs...)
+end
+
+"""
+	evaluate_reactions!(rates, heats, ξ, T, material, limiter, ξ_ref)
+
+Evaluate all reaction rates and heats against the reference concentrations
+`ξ_ref`, one per reaction, not read at order one. A reaction of another order
+with a zero reference has no lineage in the cell: its rate and heat are zero
+whatever `ξ` and the limiter hold, and it never reaches
+[`reaction_rate`](@ref), whose reference it does not have.
+"""
+function evaluate_reactions!(
+    rates::AbstractVector,
+    heats::AbstractVector,
+    ξ::NTuple{NC,<:Real},
+    T::Real,
+    material::Material{NC,NR},
+    limiter::AbstractDepletionLimiter,
+    ξ_ref::NTuple{NR,<:Real},
+) where {NC,NR}
+    _evaluate_reactions_gen!(
+        rates,
+        heats,
+        ξ,
+        T,
+        material.reactions,
+        limiter,
+        ξ_ref,
+        Val(NR),
+    )
+    return nothing
+end
+
+@generated function _evaluate_reactions_gen!(
+    rates::AbstractVector,
+    heats::AbstractVector,
+    ξ::NTuple{NC,<:Real},
+    T::Real,
+    reactions::Tuple{Vararg{Any,NR}},
+    limiter::AbstractDepletionLimiter,
+    ξ_ref::NTuple{NR,<:Real},
+    ::Val{NR},
+) where {NC,NR}
+    exprs = Expr[]
+    for i = 1:NR
+        push!(
+            exprs,
+            quote
+                @inbounds begin
+                    rxn = reactions[$i]
+                    if iszero(ξ_ref[$i]) && last(first(rxn.reactants)) != 1
+                        rates[$i] = zero(eltype(rates))
+                        heats[$i] = zero(eltype(heats))
+                    else
+                        rates[$i] = reaction_rate(rxn, ξ, T, ξ_ref[$i]; limiter = limiter)
+                        heats[$i] = rxn.heat(T, ξ)
+                    end
+                end
+            end,
+        )
     end
     push!(exprs, :(return nothing))
     return Expr(:block, exprs...)

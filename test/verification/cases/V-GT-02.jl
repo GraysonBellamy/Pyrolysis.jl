@@ -53,7 +53,7 @@ function _verification_case_vgt02()
             ρ_intrinsic = 1e5,
         )
         gas = GaseousComponent(:gas, M = M_gas, c = 1000.0, k = 0.03)
-        rxn = Reaction(:generate, 1 => 2; A = ġ, E = 0.0, h = 0.0, n = 0.0)
+        rxn = Reaction(:generate, 1 => 2; A = ġ / 1000.0, E = 0.0, h = 0.0, n = 0.0)
         mat = Material(
             name = :VGT02,
             components = (solid, gas),

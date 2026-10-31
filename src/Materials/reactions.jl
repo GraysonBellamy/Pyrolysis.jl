@@ -18,12 +18,19 @@ one, a [`DepletionLimiter`](@ref) by default.
 abstract type AbstractDepletionLimiter end
 
 """
-	DepletionLimiter(; threshold = 1.0, join = 1.0, base_scale = 1e-8, enabled = true)
+	DepletionLimiter(; threshold = 1.0, join = 1.0, base_scale = 1e-8, enabled = true,
+	                 conversion_threshold = 1e-3, conversion_base = 1e-8)
 
 The depletion limiter: each reactant's rate factor is exactly zero at and below
 zero concentration and C¹ through it, for every reaction order, so an absent
 or negative trial concentration is never consumed and every rate has a finite
 derivative at any real state.
+
+A first-order reactant carries the factor on its concentration; a reactant of
+any other order carries it on its conversion `x = ξ/ξ_ref`, with
+`conversion_threshold` and `conversion_base` in place of `threshold` and
+`base_scale`, both dimensionless and `join` shared. The conversion onset is
+exactly one for `x ≥ 20 conversion_threshold` at `join ≤ 20`.
 
 Per reactant the rate is multiplied by `g(ξ/threshold)`: the cubic onset
 `(s − 2y) t³ + (3y − s) t²`, `t = x/join`, `y = tanh(join)`,
@@ -48,6 +55,8 @@ higher ones damp the stiffness of a vanishing reactant.
 - `join::Float64`: where the onset joins `tanh`, in units of `threshold`
 - `base_scale::Float64`: scale of the finite power base [kg/m³]
 - `enabled::Bool`: apply the factor
+- `conversion_threshold::Float64`: conversion scale of the roll-off, orders other than one
+- `conversion_base::Float64`: conversion scale of the finite power base, orders other than one
 
 # Usage
 ```julia
@@ -60,13 +69,33 @@ struct DepletionLimiter <: AbstractDepletionLimiter
     join::Float64
     base_scale::Float64
     enabled::Bool
-    function DepletionLimiter(threshold::Real, join::Real, base_scale::Real, enabled::Bool)
+    conversion_threshold::Float64
+    conversion_base::Float64
+    function DepletionLimiter(
+        threshold::Real,
+        join::Real,
+        base_scale::Real,
+        enabled::Bool,
+        conversion_threshold::Real,
+        conversion_base::Real,
+    )
         threshold > 0 ||
             throw(ArgumentError("DepletionLimiter: threshold must be positive"))
         join > 0 || throw(ArgumentError("DepletionLimiter: join must be positive"))
         base_scale > 0 ||
             throw(ArgumentError("DepletionLimiter: base_scale must be positive"))
-        return new(Float64(threshold), Float64(join), Float64(base_scale), enabled)
+        conversion_threshold > 0 ||
+            throw(ArgumentError("DepletionLimiter: conversion_threshold must be positive"))
+        conversion_base > 0 ||
+            throw(ArgumentError("DepletionLimiter: conversion_base must be positive"))
+        return new(
+            Float64(threshold),
+            Float64(join),
+            Float64(base_scale),
+            enabled,
+            Float64(conversion_threshold),
+            Float64(conversion_base),
+        )
     end
 end
 
@@ -75,7 +104,16 @@ DepletionLimiter(;
     join::Real = 1.0,
     base_scale::Real = 1e-8,
     enabled::Bool = true,
-) = DepletionLimiter(threshold, join, base_scale, enabled)
+    conversion_threshold::Real = 1e-3,
+    conversion_base::Real = 1e-8,
+) = DepletionLimiter(
+    threshold,
+    join,
+    base_scale,
+    enabled,
+    conversion_threshold,
+    conversion_base,
+)
 
 # ============================================================================
 # Reaction Type
@@ -89,11 +127,14 @@ reactants and products.
 
 The reaction rate is computed as:
 ```
-r = A * exp(-E/RT) * ∏_i ξ_{r_i}^{n_i} * H(T - T_min) * H(T_max - T)
+r = A * exp(-E/RT) * ξ_ref * x^n * H(T - T_min) * H(T_max - T),   x = ξ/ξ_ref
 ```
-where the product runs over `reactants`. Per unit reaction extent, the first
-reactant is consumed with mass stoichiometry **1.0**; products are produced
-with their per-product `stoich` from the `products` tuple.
+with `ξ` the reactant's concentration and `ξ_ref` the concentration of its
+lineage inventory, the condensed mass its lineage started with at the material
+point (first order: `ξ_ref` cancels and `r = k ξ`). `A` is in s⁻¹ for every
+order. Per unit reaction extent, the first reactant is consumed with mass
+stoichiometry **1.0**; products are produced with their per-product `stoich`
+from the `products` tuple.
 
 Reaction orders must be `n ≥ 0` (enforced at construction; a negative order
 makes the rate singular at reactant depletion). At runtime each reactant also
@@ -112,12 +153,15 @@ widths approach the hard step at the cost of Jacobian stiffness near the gate.
 - `name::Symbol`: Reaction identifier
 - `reactants::NTuple{NRin, Tuple{Int, Float64}}`: `(component_idx, reaction_order)` per reactant.
 - `products::NTuple{NRout, Tuple{Int, Float64}}`: `(component_idx, mass_stoich)` per product.
-- `A::Float64`: Pre-exponential factor [s⁻¹] or [m³/(kg·s)]
+- `A::Float64`: Pre-exponential factor [s⁻¹]
 - `E::Float64`: Activation energy [J/mol]
 - `heat::Ph`: Heat of reaction [J/kg of reactant₁]
 - `T_min::Float64`: Minimum temperature for reaction [K]
 - `T_max::Float64`: Maximum temperature for reaction [K]
 - `gate_width::Float64`: Width of the smooth tanh temperature gates [K] (> 0, default 1.0)
+- `basis::Float64`: The reference as a fraction of the material point's initial
+  condensed mass, on the cells the reactant's lineage can reach, in place of
+  the lineage rules; `NaN` for the lineage rules. Only for orders other than one.
 
 # Mass-balance convention
 
@@ -143,6 +187,7 @@ struct Reaction{NRin,NRout,Ph<:AbstractPropertyFunction} <: AbstractReaction
     T_min::Float64
     T_max::Float64
     gate_width::Float64                           # tanh temperature-gate width [K]
+    basis::Float64                                # reference fraction; NaN = lineage
 
     function Reaction(
         name::Symbol,
@@ -155,6 +200,7 @@ struct Reaction{NRin,NRout,Ph<:AbstractPropertyFunction} <: AbstractReaction
         T_max::Real;
         gate_width::Real = 1.0,
         validate_mass::Bool = true,
+        basis::Real = NaN,
     ) where {NRin,NRout,Ph<:AbstractPropertyFunction}
         for (_, order) in reactants
             _validate_reaction_order(order, name)
@@ -166,7 +212,19 @@ struct Reaction{NRin,NRout,Ph<:AbstractPropertyFunction} <: AbstractReaction
             _validate_stoichiometry(products, name)
         end
         _validate_gate_width(gate_width, name)
-        new{NRin,NRout,Ph}(name, reactants, products, A, E, heat, T_min, T_max, gate_width)
+        _validate_basis(basis, all(r -> r[2] == 1, reactants), name)
+        new{NRin,NRout,Ph}(
+            name,
+            reactants,
+            products,
+            A,
+            E,
+            heat,
+            T_min,
+            T_max,
+            gate_width,
+            basis,
+        )
     end
 end
 
@@ -178,10 +236,9 @@ end
 """
 	_validate_reaction_order(n::Real, name::Symbol)
 
-Reject negative reaction orders at construction. In the ξ-power-law rate
-`r = k(T)·ξ^n` a negative order makes the rate singular as the reactant
-depletes (`ξ^n → ∞` as `ξ → 0`) — no depletion limiter can repair that.
-Orders `n ≥ 0` (including 0 and fractional TGA fits) are supported; their
+Reject negative reaction orders at construction. In the rate a negative order
+is singular as the reactant depletes (`x^n → ∞` as `x → 0`) — no depletion
+limiter can repair that. Orders `n ≥ 0` (including 0 and fractional TGA fits) are supported; their
 near-depletion behavior is regularized by the depletion limiter
 ([`DepletionLimiter`](@ref)).
 """
@@ -189,8 +246,8 @@ function _validate_reaction_order(n::Real, name::Symbol)
     n >= 0 || throw(
         ArgumentError(
             "Reaction :$name has reaction order n = $n; negative orders are " *
-            "unphysical in the ξ-power-law rate (ξ^n → ∞ as the reactant " *
-            "depletes). Supported orders are n ≥ 0.",
+            "unphysical (the rate is singular as the reactant depletes). " *
+            "Supported orders are n ≥ 0.",
         ),
     )
     return nothing
@@ -209,6 +266,28 @@ function _validate_gate_width(w::Real, name::Symbol)
         ArgumentError(
             "Reaction :$name has gate_width = $w; the tanh temperature-gate " *
             "width must be a finite positive number of kelvin.",
+        ),
+    )
+    return nothing
+end
+
+"""
+	_validate_basis(basis::Real, first_order::Bool, name::Symbol)
+
+Reject a `basis` outside `(0, 1]` or on a first-order reaction, whose reference
+cancels. `NaN` asks for the lineage rules and passes.
+"""
+function _validate_basis(basis::Real, first_order::Bool, name::Symbol)
+    isnan(basis) && return nothing
+    (isfinite(basis) && 0 < basis <= 1) || throw(
+        ArgumentError(
+            "Reaction :$name has basis = $basis; a basis is a fraction of the " *
+            "initial condensed mass in (0, 1].",
+        ),
+    )
+    first_order && throw(
+        ArgumentError(
+            "Reaction :$name is first order, whose reference cancels: give no basis.",
         ),
     )
     return nothing
@@ -277,7 +356,7 @@ end
 # ============================================================================
 
 """
-	Reaction(name, reactant => product; A, E, h, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true)
+	Reaction(name, reactant => product; A, E, h, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true, basis=NaN)
 
 Create a simple single-reactant, single-product reaction.
 
@@ -292,6 +371,7 @@ Create a simple single-reactant, single-product reaction.
 - `T_max=Inf`: Maximum temperature [K]
 - `gate_width=1.0`: Width of the smooth tanh temperature gates [K] (> 0)
 - `validate_mass=true`: If true, enforce mass balance in stoichiometry
+- `basis=NaN`: The reference as a fraction of the initial condensed mass (`n ≠ 1`)
 
 # Example
 ```julia
@@ -309,6 +389,7 @@ function Reaction(
     T_max::Real = Inf,
     gate_width::Real = 1.0,
     validate_mass::Bool = true,
+    basis::Real = NaN,
 )
     reactant, product = pair
     reactants = ((reactant, Float64(n)),)
@@ -325,11 +406,12 @@ function Reaction(
         Float64(T_max);
         gate_width = Float64(gate_width),
         validate_mass = validate_mass,
+        basis = Float64(basis),
     )
 end
 
 """
-	Reaction(name, reactant => (product1, product2); A, E, h, yields, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true)
+	Reaction(name, reactant => (product1, product2); A, E, h, yields, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true, basis=NaN)
 
 Create a reaction with two products.
 
@@ -345,6 +427,7 @@ Create a reaction with two products.
 - `T_max=Inf`: Maximum temperature [K]
 - `gate_width=1.0`: Width of the smooth tanh temperature gates [K] (> 0)
 - `validate_mass=true`: If true, enforce mass balance in stoichiometry
+- `basis=NaN`: The reference as a fraction of the initial condensed mass (`n ≠ 1`)
 
 # Example
 ```julia
@@ -364,6 +447,7 @@ function Reaction(
     T_max::Real = Inf,
     gate_width::Real = 1.0,
     validate_mass::Bool = true,
+    basis::Real = NaN,
 )
     reactant = pair.first
     product1, product2 = pair.second
@@ -382,6 +466,7 @@ function Reaction(
         Float64(T_max);
         gate_width = Float64(gate_width),
         validate_mass = validate_mass,
+        basis = Float64(basis),
     )
 end
 
@@ -423,10 +508,11 @@ struct PendingReaction{R,P,Ph<:AbstractPropertyFunction} <: AbstractReaction
     T_max::Float64
     gate_width::Float64
     validate_mass::Bool
+    basis::Float64
 end
 
 """
-	Reaction(name::Symbol, reactant::Symbol => product::Symbol; A, E, h, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true)
+	Reaction(name::Symbol, reactant::Symbol => product::Symbol; A, E, h, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true, basis=NaN)
 
 Symbolic single-reactant, single-product reaction constructor. Returns a
 `PendingReaction` that is resolved to a numeric `Reaction` inside the
@@ -447,9 +533,11 @@ function Reaction(
     T_max::Real = Inf,
     gate_width::Real = 1.0,
     validate_mass::Bool = true,
+    basis::Real = NaN,
 )
     _validate_reaction_order(n, name)
     _validate_gate_width(gate_width, name)
+    _validate_basis(basis, n == 1, name)
     PendingReaction(
         name,
         pair.first,
@@ -463,12 +551,13 @@ function Reaction(
         Float64(T_max),
         Float64(gate_width),
         validate_mass,
+        Float64(basis),
     )
 end
 
 """
 	Reaction(name::Symbol, reactant::Symbol => (product1::Symbol, product2::Symbol);
-			 A, E, h, yields, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true)
+			 A, E, h, yields, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true, basis=NaN)
 
 Symbolic two-product reaction constructor. Returns a `PendingReaction` resolved
 inside `Material(...)`.
@@ -490,9 +579,11 @@ function Reaction(
     T_max::Real = Inf,
     gate_width::Real = 1.0,
     validate_mass::Bool = true,
+    basis::Real = NaN,
 )
     _validate_reaction_order(n, name)
     _validate_gate_width(gate_width, name)
+    _validate_basis(basis, n == 1, name)
     yields_f64 = (Float64(yields[1]), Float64(yields[2]))
     PendingReaction(
         name,
@@ -507,6 +598,7 @@ function Reaction(
         Float64(T_max),
         Float64(gate_width),
         validate_mass,
+        Float64(basis),
     )
 end
 
@@ -539,6 +631,7 @@ function resolve_reaction(
         T_max = rxn.T_max,
         gate_width = rxn.gate_width,
         validate_mass = rxn.validate_mass,
+        basis = rxn.basis,
     )
 end
 
@@ -565,6 +658,7 @@ function resolve_reaction(
         T_max = rxn.T_max,
         gate_width = rxn.gate_width,
         validate_mass = rxn.validate_mass,
+        basis = rxn.basis,
     )
 end
 

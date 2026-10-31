@@ -67,6 +67,7 @@ function _require_supported(
             "deactivation" => deactivation,
             "the equidistribution correction" =>
                 !(correction isa Union{NoCorrection,PrescribedCorrection}),
+            "a reaction order other than one" => needs_lineage(material),
         )
         for (what, needed) in line
             needed && throw(ArgumentError("$what is a line's: the mesh has $D dimensions"))
@@ -103,6 +104,22 @@ function _require_supported(
             ArgumentError(
                 "a correction moves the mesh relative to the solid, which needs " *
                 "use_ale = true",
+            ),
+        )
+    end
+    if needs_lineage(material)
+        name = first(r for r in material.reactions if last(r.reactants[1]) != 1).name
+        deactivation && throw(
+            ArgumentError(
+                "reaction :$name has an order other than one, read on one conversion per " *
+                "cell, which a merge of cells at different conversions cannot hold: " *
+                "solve without deactivation",
+            ),
+        )
+        correction isa NoCorrection || throw(
+            ArgumentError(
+                "reaction :$name has an order other than one, whose cells must keep " *
+                "their material, which a correction moves between them: give no correction",
             ),
         )
     end
@@ -147,11 +164,111 @@ function _composition_interfaces(
     return [nd for nd = 2:size(amounts, 2) if present(nd - 1) != present(nd)]
 end
 
+# Whether the solve's sources add mass to the cells.
+_external_mass(::NoSources) = false
+_external_mass(s::VolumetricSources) = s.mass !== nothing
+
+"""
+	lineage_references(graph, m0, condensed0, sources) -> references
+
+The reference of every reaction of order other than one, from the rules of the
+[`LineageGraph`](@ref) `graph` and the initial fields: `references[r]` holds the
+per-cell reference [kg] `c_{r,i} M_{0,i}` of reaction `r` (empty for a first-order
+reaction), zero where the cell holds none of the lineage. `m0` holds the initial
+masses (`NC × n`) and `condensed0` the initial condensed mass `M_{0,i}` of each
+cell.
+
+With `Y_{v,i} = m_{v,i}/M_{0,i}`, exactly zero in a cell that starts empty, the
+coefficient is `c_{r,i} = Σ_v Y_{v,i} Φ(v)` over the reactant's ancestors, `Φ` the
+graph's reach, or under a `basis` `b` the value `b` on the cells holding some
+ancestor. Throws an `ArgumentError` when the sources add mass (every condensed
+node is then externally fed), when a cell holds a reactant that is also formed
+there and the reaction has no `basis`, and when a positive coefficient is below
+`1e-12` or a `basis` below `1e-6`, so that every positive reference is a normal
+float and exact zero means absence.
+"""
+function lineage_references(
+    graph::LineageGraph,
+    m0::AbstractMatrix{Float64},
+    condensed0::AbstractVector{Float64},
+    sources,
+)
+    NC, n = size(m0)
+    converted = findall(!=(1.0), graph.order)
+    (_external_mass(sources) && !isempty(converted)) && throw(
+        ArgumentError(
+            "reaction :$(graph.names[first(converted)]) has an order other than one " *
+            "in a solve whose sources add mass: its lineage has no initial inventory",
+        ),
+    )
+    Y = zeros(NC, n)
+    for i = 1:n
+        condensed0[i] > 0 || continue
+        for j = 1:NC
+            graph.condensed[j] && (Y[j, i] = m0[j, i] / condensed0[i])
+        end
+    end
+    references = [Float64[] for _ in graph.order]
+    for r in converted
+        a, b = graph.reactant[r], graph.basis[r]
+        name = graph.names[r]
+        !isnan(b) &&
+            b < 1e-6 &&
+            throw(
+                ArgumentError(
+                    "reaction :$name has basis = $b: a basis below 1e-6 is refused",
+                ),
+            )
+        c = zeros(n)
+        for i = 1:n
+            if isnan(b)
+                Φ = graph.reach[r]
+                formed = sum(Y[v, i] * Φ[v] for v = 1:NC if v != a; init = 0.0)
+                (Y[a, i] > 0 && formed > 0) && throw(
+                    ArgumentError(
+                        "reaction :$name: cell $i holds :$(graph.components[a]) and the " *
+                        "ancestors it is formed from, so its reference is ambiguous: " *
+                        "give `basis`",
+                    ),
+                )
+                c[i] = Y[a, i] + formed
+            else
+                c[i] = any(v -> graph.ancestors[r][v] && Y[v, i] > 0, 1:NC) ? b : 0.0
+            end
+            0 < c[i] < 1e-12 && throw(
+                ArgumentError(
+                    "reaction :$name: the lineage fraction $(c[i]) of cell $i is below " *
+                    "1e-12, too small to be a normalisation",
+                ),
+            )
+        end
+        references[r] = c .* condensed0
+    end
+    return references
+end
+
+# The reference of every reaction in every cell [kg], reactions × cells: zero
+# for a first-order reaction and throughout an all-first-order material.
+function _reaction_references(
+    material::Material{NC,NR},
+    m0,
+    condensed0,
+    sources,
+) where {NC,NR}
+    table = zeros(NR, size(m0, 2))
+    needs_lineage(material) || return table
+    references = lineage_references(lineage_graph(material), m0, condensed0, sources)
+    for (r, reference) in enumerate(references)
+        isempty(reference) || (table[r, :] = reference)
+    end
+    return table
+end
+
 # The correction of a solve that names none: the equidistribution correction
 # where the mesh moves, cells are deactivated and deactivation at `threshold`
 # can remove some cell ([`vanishes`](@ref)), so that a layer's cells thin
-# together and leave in one event; no correction otherwise. `ξ0` holds the
-# cells' initial concentrations (`NC × n`).
+# together and leave in one event; no correction otherwise. `ξ0` holds the cells'
+# initial concentrations (`NC × n`).
 function _installed_correction(
     material::Material{NC},
     ξ0::AbstractMatrix{Float64},
@@ -229,9 +346,10 @@ function _kernels(
     relative::Tuple,
     tensors,
     pressure_tolerance,
+    references::Matrix{Float64},
 )
     material = problem.material
-    reactions = n_reactions(material) > 0 ? (ReactionKernel(material),) : ()
+    reactions = n_reactions(material) > 0 ? (ReactionKernel(material, references),) : ()
     transport =
         !gas_can_move(problem) ? () :
         (GasTransportKernel(gas, topo, g0, problem.bc_set, material, laws),)
@@ -442,6 +560,12 @@ at rest (verification; the material must not react, and no other correction
 is given), the inventories crossing the faces at `−w`. `time_scale` [s]
 scales the velocity tolerances (the first step).
 
+A reaction of order other than one is evaluated on the conversion of its
+reactant against its lineage inventory, a constant of each cell
+([`lineage_references`](@ref)): the cells keep their material. Such a reaction
+is refused on a mesh of more than one dimension, with `deactivation` and with a
+correction, which would mix material at different conversions.
+
 `deactivation` deactivates, during the solve, every cell whose condensed mass
 falls below the fraction `threshold` (`ε_m`) of its initial condensed mass
 ([`CellDeactivation`](@ref), [`ConservativeTransfer`](@ref)), from the
@@ -543,6 +667,10 @@ function setup(
     geometry!(g0, x, topo.cross_section, topo)
     m0 = [ξ0[j, i] * g0.cell_volume[i] for j = 1:NC, i = 1:n]
     _require_layers(correction, m0, material, topo.lagrangian)
+    condensed0 = [
+        sum(m0[j, i] for j = 1:NC if !is_gas(material.components[j]); init = 0.0) for
+        i = 1:n
+    ]
 
     reference = CellReference(
         Mesh(topo, mesh.positions),
@@ -558,6 +686,7 @@ function setup(
         energy isa EnthalpyState ?
         CaloricExtension(laws, reference.mass_scale, reference.capacity_floor) : nothing
     gas = _gas_transport(problem)
+    references = _reaction_references(material, m0, condensed0, sources)
     state_setup = StateSetup(topo, material, laws, reference, caloric, gas)
     chi = material.lateral_shrinkage_law !== nothing
     history = history || chi
@@ -576,10 +705,6 @@ function setup(
 
     M0 = [
         sum(m0[j, i] for j = 1:NC if is_solid(material.components[j]); init = 0.0) for
-        i = 1:n
-    ]
-    condensed0 = [
-        sum(m0[j, i] for j = 1:NC if !is_gas(material.components[j]); init = 0.0) for
         i = 1:n
     ]
     lateral = chi ? LateralShrinkage(material, topo.cross_section, sum(M0)) : nothing
@@ -640,6 +765,7 @@ function setup(
         relative,
         tensors,
         pressure_tolerance,
+        references,
     )
     def = CoreDefinition(layout, state_setup, kernels, cl, sources)
     ws = CoreWorkspace(def, T0)

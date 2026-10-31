@@ -27,39 +27,50 @@ H1).
 
 ### 6.1.1 Continuous form
 
-A single condensed-phase decomposition reaction $i$ proceeds at a volumetric rate
-$r_i$ (kg·m⁻³·s⁻¹) given by an Arrhenius rate constant multiplied by a power-law
-dependence on the mass concentrations of its reactants and gated to a temperature
-window:
+A single condensed-phase decomposition reaction $i$ of reactant $a$ proceeds at a
+volumetric rate $r_i$ (kg·m⁻³·s⁻¹) given by an Arrhenius rate constant
+multiplied by a dependence on how much of the reactant is left and gated to a
+temperature window:
 
 $$
 r_i(T,\boldsymbol{\xi}) \;=\; A_i \,
 \exp\!\left(-\frac{E_i}{R_g\,T}\right)
-\;\prod_{j\,\in\,\mathrm{reactants}(i)} b(\xi_j)^{\,n_{i,j}}
-\,g\!\bigl(\xi_j/\xi_{\mathrm{th}}\bigr)
+\Gamma_i(\xi_a)
 \;\cdot\; H(T - T_{\min,i})\,H(T_{\max,i} - T),
-\qquad \xi_j > 0,
+\qquad \xi_a > 0,
 \tag{6.1}
 $$
 
-and $r_i = 0$ when any reactant has $\xi_j \le 0$. Here
+$$
+\Gamma_i(\xi_a) =
+\begin{cases}
+b(\xi_a)\,g\!\bigl(\xi_a/\xi_{\mathrm{th}}\bigr), & n_i = 1,\\[2pt]
+\xi_{\mathrm{ref},i}\;b_x(x_i)^{\,n_i}\,g\!\bigl(x_i/x_{\mathrm{th}}\bigr),
+\quad x_i = \xi_a/\xi_{\mathrm{ref},i}, & n_i \ne 1,
+\end{cases}
+$$
 
-- $A_i$ is the pre-exponential factor (s⁻¹ for a first-order reaction; more
-  generally with units that make $r_i$ come out in kg·m⁻³·s⁻¹ — see §6.4),
+and $r_i = 0$ when the reactant has $\xi_a \le 0$. Here
+
+- $A_i$ is the pre-exponential factor, in s⁻¹ for every order (§6.4),
 - $E_i$ is the activation energy (J·mol⁻¹),
 - $R_g = 8.31446261815324$ J·mol⁻¹·K⁻¹ is the universal gas constant
   (`R_GAS`, src/Materials/constants.jl),
-- $n_{i,j}$ is the reaction order of reaction $i$ with respect to reactant $j$
-  ($n_{i,j} \ge 0$, enforced at construction),
-- $b(\xi_j)$ is the **finite base** of the power, equal to $\xi_j$ to within
-  $10^{-8}$ kg·m⁻³ (§6.3.2, §6.4),
-- $g(\xi_j/\xi_{\mathrm{th}})$ is the one-sided **depletion onset** (§6.3), and
+- $n_i$ is the reaction order ($n_i \ge 0$, enforced at construction),
+- $\xi_{\mathrm{ref},i}$ is the **reference concentration** of the reactant, the
+  condensed mass its lineage started with at the material point over the cell
+  volume (§6.4, §6.5.5), and $x_i$ its **conversion**,
+- $b(\xi_a)$ and $b_x(x_i)$ are the **finite bases**, equal to $\xi_a$ to within
+  $10^{-8}$ kg·m⁻³ and to $x_i$ to within $10^{-8}$ (§6.3.2),
+- $g$ is the one-sided **depletion onset** (§6.3), and
 - $H(\cdot)$ is the Heaviside step, implemented as a **smooth tanh ramp** (§6.2).
 
+At first order the reference cancels: $\xi_{\mathrm{ref}}\,x = \xi_a$, and that
+case is evaluated on the concentration directly.
+
 The factorisation of $r_i$ into a temperature-only Arrhenius constant
-$k_i(T) \equiv A_i \exp(-E_i/R_g T)$ and a composition-only product
-$\prod_j b(\xi_j)^{n_{i,j}} g(\xi_j/\xi_{\mathrm{th}})$ is exact and is exploited
-directly by the code:
+$k_i(T) \equiv A_i \exp(-E_i/R_g T)$ and a composition factor $\Gamma_i$ is exact
+and is exploited directly by the code:
 
 ```julia
 k = rxn.A * exp(-rxn.E / (R_GAS * T))
@@ -81,8 +92,7 @@ is ill-defined — the condensed phase is a continuum of macromolecules, not a
 well-mixed ideal gas of identifiable molecules. Working in $\xi_j$ sidesteps the
 need for a molar mass of the solid, makes $r_i$ directly the mass conversion rate,
 and lets the stoichiometric coefficients $\nu_{i,j}$ be pure **mass** yields that
-sum to unity (§6.5). The price is that $A_i$ inherits whatever units make the
-product dimensionally consistent (§6.4). ThermaKin and FDS also use mass-based
+sum to unity (§6.5). ThermaKin and FDS also use mass-based
 rates, but their factors and stoichiometric bases differ; Gpyro V2's conversion
 rate includes a cumulative-mass normalization (§6.9).
 
@@ -91,7 +101,8 @@ rate includes a cumulative-mass normalization (§6.9).
 The finite-volume discretisation (§13, Finite-Volume Discretization) collocates
 all state at cell centres. The reaction kernel (`ReactionKernel`,
 src/Kernels/reactions.jl) evaluates the reaction model once per cell, from the
-cell's concentrations and trial temperature in the derived state (§5.13):
+cell's concentrations and trial temperature in the derived state (§5.13). A
+material whose reactions are all first order runs:
 
 ```julia
 ξ = ntuple(j -> ds.ξ[j, i], Val(NC))
@@ -106,6 +117,19 @@ end
 c.S_energy[i] += reaction_heat_source(c.rates, c.heats) * V
 ```
 
+`ReactionKernel{Conv}` is specialised on whether some order differs from one. With
+such a reaction the same body also forms the reference concentrations and hands
+them to the reference method of `evaluate_reactions!`:
+
+```julia
+ξ_ref = ntuple(r -> kernel.reference[r, i] / V, Val(NR))
+evaluate_reactions!(c.rates, c.heats, ξ, T, material, kernel.limiter, ξ_ref)
+```
+
+A first-order reaction does not read its entry, and a reaction of another order
+with a zero reference (§6.5.5) writes zero rate and zero heat without reaching
+`reaction_rate`, whatever the limiter or the trial state.
+
 The rates read the signed concentrations $\xi_{j} = m_{j}/V_{\text{eval}}$ of the
 cell (not the positive parts the property laws see: the limiter itself makes a
 rate vanish at and below zero, §6.3) and the trial temperature
@@ -119,8 +143,8 @@ at or below zero contributes exact zeros and, with the limiter enabled, is not
 evaluated at all (`_all_quenched`).
 
 The continuous law (6.1) thus becomes simply $r_i^{\,\mathrm{cell}} =
-r_i(T_{\mathrm{trial,cell}}, \boldsymbol{\xi}_{\mathrm{cell}})$ — there is **no
-spatial operator inside the reaction term**. Reactions are local (point-wise in
+r_i(T_{\mathrm{trial,cell}}, \boldsymbol{\xi}_{\mathrm{cell}})$ with the cell's own
+reference — there is **no spatial operator inside the reaction term**. Reactions are local (point-wise in
 space); all spatial coupling enters through transport (conduction §7, gas
 diffusion/Darcy §9) and through the mesh motion (§11). This is the
 cell-as-batch-reactor view: each control volume behaves, kinetically, like an
@@ -268,6 +292,12 @@ a zero-order fit ($n_{i,j}=0$, common in TGA analysis) the bare rate does not
 vanish at all — left unguarded it keeps consuming reactant at $k_i(T)$ straight
 through $\xi_j = 0$ and integrates the concentration negative without bound.
 
+For an order other than one the same singularity sits at $x \to 0$: on a moving
+mesh the concentration stays at its bulk density while the mass is consumed, so
+a scale on $\xi$ never engages, and the derivative of $x^{n}$ at burnout is what
+has to be removed. The limiter of such a reaction therefore acts on the
+conversion.
+
 ### 6.3.2 The one-sided rate factor
 
 Pyrolysis.jl rolls the rate off smoothly as a reactant depletes and stops it
@@ -286,8 +316,10 @@ b(\xi)^{\,n}\; g\!\bigl(\xi/\xi_{\mathrm{th}}\bigr), & \xi > 0 .
 \tag{6.3}
 $$
 
-The **finite base** is a softplus at the scale $\delta_b$ (`base_scale`,
-default $10^{-8}$ kg·m⁻³),
+written here for the first-order concentration form; a reaction of another
+order carries the same factor on its conversion, (6.3b) below. The **finite
+base** is a softplus at the scale $\delta_b$ (`base_scale`, default
+$10^{-8}$ kg·m⁻³),
 
 $$
 b(\xi) \;=\; \xi + \delta_b \ln\!\bigl(1 + e^{-\xi/\delta_b}\bigr),
@@ -348,6 +380,46 @@ $$
 
 so $\partial r_i/\partial\xi_j \to 0$ for every $n \ge 0$.
 
+**On the conversion.** A reaction of order $n \ne 1$ carries the factor on
+$x = \xi/\xi_{\mathrm{ref}}$, with its own dimensionless scales and the same
+join and the same $g$:
+
+$$
+r_i \;=\; k_i(T)\,\xi_{\mathrm{ref}}\;b_x(x)^{\,n}\;g\!\bigl(x/x_{\mathrm{th}}\bigr),
+\qquad
+b_x(x) = x + \delta_x\ln\!\bigl(1+e^{-x/\delta_x}\bigr),
+\tag{6.3b}
+$$
+
+exactly zero at and below zero mass under an enabled limiter
+(`_conversion_factor`, src/Physics/kinetics.jl):
+
+```julia
+if limiter.enabled
+    ξ <= 0 && return zero(conc) * zero(ξ)
+    x = ξ / ξ_ref
+    conc *= ξ_ref * _fast_pow(_finite_base(x, limiter.conversion_base), order)
+    conc *= one_sided_factor(x / limiter.conversion_threshold, limiter.join)
+    return conc
+end
+return conc * ξ_ref * _finite_power(ξ / ξ_ref, limiter.conversion_base, order)
+```
+
+With $C = (3\tanh x_J - x_J\,\mathrm{sech}^2 x_J)/x_J^2$, 1.8648 at the default
+join, the rate vanishes in two ranges,
+
+$$
+r_i \approx C\,k_i\,\xi_{\mathrm{ref}}\,\frac{x^{\,n+2}}{x_{\mathrm{th}}^2}
+\quad (\delta_x \ll x \ll x_{\mathrm{th}}),
+\qquad
+r_i \approx C\,k_i\,\xi_{\mathrm{ref}}\,(\delta_x\ln 2)^{n}\,\frac{x^{2}}{x_{\mathrm{th}}^2}
+\quad (x \ll \delta_x),
+$$
+
+and $\partial r_i/\partial x \to 0$ in both. The factor is exactly one for
+$x \ge 20\,x_{\mathrm{th}}$ when $x_J \le 20$; $g(10) = 1 - 4.1\times10^{-9}$;
+the base correction rounds away above $x \approx 3.6\times10^{-7}$.
+
 ### 6.3.3 Behaviour and default values
 
 The limiter is configured by the `DepletionLimiter` struct
@@ -360,13 +432,16 @@ whose defaults are
 | `join` ($x_J$) | $1.0$ | where the cubic onset joins `tanh`, in units of `threshold` |
 | `base_scale` ($\delta_b$) | $10^{-8}$ kg·m⁻³ | scale of the finite power base |
 | `enabled` | `true` | apply the onset; `false` keeps only the finite base |
+| `conversion_threshold` ($x_{\mathrm{th}}$) | $10^{-3}$ | conversion scale of the roll-off, orders other than one |
+| `conversion_base` ($\delta_x$) | $10^{-8}$ | conversion scale of the finite power base, orders other than one |
 
-`threshold`, `join` and `base_scale` must be positive; the constructor refuses
-anything else with an `ArgumentError`. Each `Material` carries its own limiter
+`threshold`, `join`, `base_scale`, `conversion_threshold` and `conversion_base`
+must be positive; the constructor refuses anything else with an `ArgumentError`.
+The join is shared, and the statement that the conversion onset is exactly one
+above $20\,x_{\mathrm{th}}$ holds at $x_J \le 20$. Each `Material` carries its own limiter
 in `material.depletion_limiter`, set with the `Material` constructor's
 `depletion_limiter` keyword (default `DepletionLimiter()`); the reaction kernel
-is built from it (`ReactionKernel(material)`) and passes it to every rate
-evaluation. `DEFAULT_DEPLETION_LIMITER = DepletionLimiter()`
+is built from it and passes it to every rate evaluation. `DEFAULT_DEPLETION_LIMITER = DepletionLimiter()`
 (src/Physics/kinetics.jl) backs only the standalone `reaction_rate` entry point
 when no `limiter` keyword is passed.
 
@@ -394,6 +469,12 @@ $\mathrm d\xi/\mathrm dt = -1.865\,k\,\xi^3/\xi_{\mathrm{th}}^2$ gives
 $\xi \approx \xi_{\mathrm{th}}/\sqrt{3.73\,k\,t}$ at late times. Choose
 $\xi_{\mathrm{th}}$ well below the concentrations that matter for the quantities
 of interest.
+
+The conversion limiter's bias has the same shape in $x$: choose
+$x_{\mathrm{th}}$ well below the conversions that matter. A reactant whose fit
+holds down to the end of its conversion needs $x_{\mathrm{th}}$ below the residue
+of interest; the default leaves the rate within $4.1\times10^{-9}$ of the bare law
+down to $x = 10^{-2}$.
 
 Reaction orders are validated at construction: $n < 0$ is rejected
 (`_validate_reaction_order`, src/Materials/reactions.jl), since a negative-order
@@ -444,67 +525,70 @@ in `test/physics/test_kinetics.jl`).
 > **Implementation note.** Limiter struct: `DepletionLimiter`,
 > src/Materials/reactions.jl (carried per material in
 > `material.depletion_limiter`; re-exported from Pyrolysis.Physics).
-> Per-reactant application inside the concentration product loop
+> Per-reactant application inside the rate
 > (`_reactant_factor`, `_finite_base`, `_finite_power`, `one_sided_factor`):
 > src/Physics/kinetics.jl.
 
 ---
 
-## 6.4 Reaction Order and the Concentration Product
+## 6.4 Reaction Order and the Conversion Basis
 
-The composition factor is the product over all reactants of the per-reactant
-factor of §6.3, the finite base raised to its order times the onset:
+**The order acts on the conversion.** A first-order reaction is evaluated on its
+reactant's concentration. Every other order acts on the reactant's conversion
 
 $$
-\Phi_i(\boldsymbol{\xi}) = \prod_{j\,\in\,\mathrm{reactants}(i)} f(\xi_j;\,n_{i,j})
-= \prod_{j\,\in\,\mathrm{reactants}(i)} b(\xi_j)^{\,n_{i,j}}\,g\!\bigl(\xi_j/\xi_{\mathrm{th}}\bigr)
-\quad (\text{all } \xi_j > 0).
+x_i = \frac{m_{a}}{M_{\mathrm{ref},i}} = \frac{\xi_a}{\xi_{\mathrm{ref},i}},
+\qquad
+r_i V = k_i(T)\,M_{\mathrm{ref},i}\;x_i^{\,n_i}\,g\!\bigl(x_i/x_{\mathrm{th}}\bigr),
 \tag{6.4}
 $$
 
-Each reactant is stored as an `(component_index, reaction_order)` pair in the
-`reactants::NTuple{NRin, Tuple{Int,Float64}}` field
-(src/Materials/reactions.jl), so the order $n_{i,j}$ is a **`Float64`** and may
-be non-integer (e.g. $n=0.5$, $n=1.5$, common in TGA fits and in nucleation/
-diffusion reaction models). Orders must satisfy $n_{i,j} \ge 0$ — negative
-orders are rejected at construction (§6.3.3). The tuple is iterated with the
-loop fully unrolled by the compiler because `NRin` is a static type parameter.
+with $M_{\mathrm{ref},i}$ the reactant's **lineage inventory**, the condensed mass
+its lineage started with at the material point (§6.5.5). The reason is the mesh.
+A fit to thermogravimetric data defines the order on $m/m_0$. On a mesh that
+moves with the solid the cell volume follows the condensed volume (§10), so a
+pure reactant's concentration stays at its bulk density while its mass is
+consumed: an order on the concentration would be a constant factor, and every
+order would behave as first order. On the conversion the law is the same on any
+mesh,
 
-The exponentiation routes through a fast-path helper that special-cases the two
-most common orders:
+$$
+\frac{m}{m_0} = \frac{L}{L_0} = \bigl[1-(1-n)\,k\,t\bigr]^{1/(1-n)}
+\quad\text{(uniform slab, one reaction, no residue)},
+$$
+
+which case V-RX-06 asserts on fixed and moving meshes at $n = 0$, $0.5$ and $2$;
+at $n = 0$ a burning slab thins linearly, $L = L_0(1-kt)$.
+
+**Units of the pre-exponential.** $A_i$ is in s⁻¹ for every order: a conversion is
+dimensionless and the rate carries one reference concentration, so
+$k_i\,\xi_{\mathrm{ref}}$ is in kg·m⁻³·s⁻¹ at any $n$. A rate constant fitted to
+$\mathrm dx/\mathrm dt = -k\,x^n$ is the deck's $A$ as it stands.
+
+**Evaluation.** The order is a `Float64` and may be non-integer. The exponentiation
+routes through a fast-path helper that special-cases the two most common orders:
 
 ```julia
 @inline _fast_pow(x::Real, n::Real) = n == 1 ? x : (n == 0 ? one(x) : x^n)
 ```
 
-(src/Physics/kinetics.jl). For $n=1$ it returns $x$ directly (no `pow` call);
-for $n=0$ it returns `one(x)` — a zero-order reactant contributes no
-concentration dependence to the power law, but its onset
-$g(\xi/\xi_{\mathrm{th}})$ still gates the rate to zero as it runs out
-(§6.3.2); otherwise it falls back to the general `x^n`. Because the finite base
-$b(\xi)$ is positive, $x^n$ is always real-valued even for fractional $n$. The
-accumulator is initialised at the promoted scalar type so dual numbers carry
-through:
+(src/Physics/kinetics.jl). For $n=0$ it returns `one(x)`: a zero-order reaction
+runs at $k_i\,\xi_{\mathrm{ref}}$, and its onset still gates the rate to zero as
+the reactant runs out (§6.3.2). Because the finite base is positive, $x^n$ is
+always real-valued even for fractional $n$. The first-order path never forms a
+conversion (`reaction_rate(rxn, ξ, T)`, which refuses any other order); the
+reference method `reaction_rate(rxn, ξ, T, ξ_ref)` dispatches on the order before
+it reads the reference, and requires a finite positive `ξ_ref` otherwise.
 
-```julia
-conc_factor = one(promote_type(eltype(ξ), typeof(T)))
-```
+**The reference.** $M_{\mathrm{ref},r,i}$ is computed at `setup` for every reaction of
+order other than one (§6.5.5) and stays a constant of the cell: at such an order the
+cells keep their material, since `setup` refuses deactivation and any correction
+(§6.10). The reference concentration is $\xi_{\mathrm{ref},r,i} = M_{\mathrm{ref},r,i}/V_i$.
+The reference adds no row to the state and no entry to the Jacobian's pattern.
 
-(src/Physics/kinetics.jl).
-
-**Units of the pre-exponential.** Dimensional consistency of (6.1) forces
-
-$$
-[A_i] = \text{kg}\,\text{m}^{-3}\,\text{s}^{-1}
-\Big/ \Big(\text{kg}\,\text{m}^{-3}\Big)^{\sum_j n_{i,j}}
-= \bigl(\text{kg}\,\text{m}^{-3}\bigr)^{1-\sum_j n_{i,j}}\,\text{s}^{-1}.
-$$
-
-For a first-order single reactant ($\sum_j n_{i,j}=1$) this reduces to s⁻¹; for a
-second-order/bimolecular case it becomes m³·kg⁻¹·s⁻¹. The struct docstring records
-this convention ("[s⁻¹] or [m³/(kg·s)]", src/Materials/reactions.jl) but the
-code does **not** check it — the user is responsible for supplying $A_i$ in units
-consistent with the chosen orders.
+> **Implementation note.** Detection: `needs_lineage`, src/Materials/materials.jl.
+> The table of references: `ReactionKernel.reference`, src/Kernels/reactions.jl, from
+> `lineage_references`, src/Integration/setup.jl.
 
 ---
 
@@ -553,7 +637,7 @@ mass stoichiometry (not just a rate order) could be attached to each reactant
 (src/Materials/reactions.jl). Note the asymmetry baked into the model: a
 reactant carries a rate **order** $n_{i,j}$ (how its concentration scales the
 rate) but its **mass** stoichiometry is fixed at $1$; a product carries a mass
-**yield** but no rate order (products never appear in $\Phi_i$).
+**yield** but no rate order (products never appear in the rate's composition factor).
 
 For a single-reactant reaction, then, the coefficients are
 
@@ -645,6 +729,82 @@ Heat Conduction, Gas Convection, and Energy Assembly.
 > per-reaction application `_apply_reaction_source!` (same file); the cell
 > sources `S_mass = S_j V`: `ReactionKernel`, src/Kernels/reactions.jl.
 > Build-time balance: `_validate_stoichiometry`, src/Materials/reactions.jl.
+
+### 6.5.5 Lineages: the reference of a reactant
+
+The reference of a reaction of order other than one is its reactant's **lineage
+inventory**, the condensed mass that can become the reactant at that material
+point. A reactant present at the start is its own lineage; an intermediate's
+inventory is what its parents can yield. Water is a lineage like any other.
+
+**The graph.** The nodes are the condensed components. A reaction with condensed
+reactant $a$, products $p$ of yield $y_p > 0$ and self-return $y_{aa}$ consumes
+nothing when $y_{aa} \ge 1$ and contributes no edge; otherwise it is a **channel**
+of $a$ with edge weights $w_{a\to p} = y_p/(1-y_{aa})$ to each condensed $p \ne a$.
+A product listed with yield zero is not an edge.
+
+**The rules**, run only on a material with an order other than one, in this order:
+
+1. *External feed, overridden or not.* A condensed product of a reaction whose
+   reactant is a gas is externally fed, and so is every node reachable from it;
+   a solve whose sources add mass makes every condensed node externally fed. A
+   reactant of order other than one that is externally fed is refused, and
+   `basis` is no remedy: its lineage has no initial inventory. A gas reactant of
+   order other than one is refused for the same reason.
+2. *Ancestors.* Without `basis`, the reactant's ancestors (the nodes from which it
+   is reachable along positive-yield edges) must hold no cycle; otherwise the
+   reaction is refused, naming the cycle, with `basis` as the remedy.
+3. *Reach.* The mass of $a$ that one unit of $v$'s inventory can become, in reverse
+   topological order: $\Phi_a(a) = 1$, and for $v$, over the channels of $v$ that
+   reach $a$, each channel's value is $\sum_p w_{v\to p}\,\Phi_a(p)$. Two reaching
+   channels that differ by more than $10^{-12}$ relative are refused, since the
+   branching would depend on the rates, with `basis` as the remedy. A channel that
+   produces nothing toward $a$ is ignored: a competitive branch is normalised to
+   the whole of its origin's inventory, so $A\to B$ beside $A\to C$ gives
+   $\Phi_B(A) = y_B$. This is a derivation from the balance convention of the
+   Kinetics Neo documentation, in which each initial reactant starts at formal
+   concentration one and may react in several ways and an intermediate's balance
+   sums its producing and consuming steps; it is not a quoted rule for arbitrary
+   graphs.
+4. *Per cell.* With $Y_{v,i} = m_{v,i}(0)/M_{0,i}$ and $M_{0,i}$ the cell's initial
+   condensed mass (exactly zero in a cell that starts empty), the coefficient is
+   $c_{a,i} = \sum_v Y_{v,i}\,\Phi_a(v)$ and the reference $c_{a,i}M_{0,i}$. A cell
+   that holds the reactant and also an ancestor it can be formed from is refused
+   unless `basis` is given: no fitting convention covers a node both present and
+   formed.
+5. *`basis`.* A reaction with `basis` $= b$ has $c_{r,i} = b$ on the cells holding an
+   ancestor of its reactant and zero elsewhere, with no cycle or channel check.
+   `basis` is a fraction of the material point's initial condensed mass.
+6. *Representability.* A positive coefficient below $10^{-12}$ and a `basis` below
+   $10^{-6}$ are refused, so every positive reference and every scale derived from
+   it is a normal float, and exact zero means structural absence, never underflow.
+7. *Inactive reactions.* A reaction whose reference is zero in every cell has no
+   lineage: its reactant cannot acquire mass, it gets no row, and the kernel masks
+   it (§6.1.2).
+
+The graph rules (1 to 3) run in `Material(...)` (`lineage_graph`,
+src/Materials/materials.jl). The rest need the initial fields or the solve's
+sources and run in `setup` (`lineage_references`, src/Integration/setup.jl). A
+material with every order equal to one is never validated, so its cyclic and
+competitive networks are unaffected.
+
+**A worked lineage.** The Douglas fir chain with 94.3 mg of wood and 5.7 mg of
+water in a 100 mg cell, yields 0.95, 0.80, 0.37, 0.79 and 0.74, has the references
+94.3, 89.585, 71.668, 26.517, 20.949 and 15.502 mg along the chain, and 5.7 mg for
+the water. A step of order 2 holding 35 mg of the second intermediate runs at
+$k\,(35)^2/71.668 = 17.09\,k$ mg/s, against $35\,k$ mg/s at first order.
+
+**Importing fitted parameters.** A Kinetics Neo fit is on these lineage
+normalisations: $A$ carries over unchanged. A fit normalised to the total initial
+mass (the Aria/Sierra members of a parallel or series scheme) takes `basis = 1.0`,
+which reproduces the bare and the limited law; the alternative
+$A \leftarrow A\,c_a^{\,n-1}$ reproduces the bare law only. A fit on wet mass of a
+dry-lineage reactant takes `basis = 1.0`. A Gpyro single step carries $A$ over; a
+Gpyro series scheme with $n \ne 1$ on an intermediate differs by convention (§6.9.2).
+
+> **Implementation note.** Graph rules: `lineage_graph`, `LineageGraph`,
+> src/Materials/materials.jl. Per-cell rules: `lineage_references`,
+> src/Integration/setup.jl.
 
 ---
 
@@ -838,7 +998,10 @@ limiter = material.depletion_limiter)` forwards to `_evaluate_reactions_gen!`
 (src/Physics/kinetics.jl), which the compiler expands into a flat block — one
 explicit `rates[i] = reaction_rate(rxn, ξ, T; limiter)` and
 `heats[i] = rxn.heat(T, ξ)` statement per reaction — with no run-time loop over
-the heterogeneous `reactions` tuple. Heterogeneity (each `Reaction` may have a
+the heterogeneous `reactions` tuple. The reference method
+`evaluate_reactions!(rates, heats, ξ, T, material, limiter, ξ_ref, inactive)` is
+the same block with `reaction_rate(rxn, ξ, T, ξ_ref[i]; limiter)`, and writes zero
+rate and heat for a reaction flagged `inactive`. Heterogeneity (each `Reaction` may have a
 different `NRin`, `NRout`, and heat property type) is therefore handled by static
 dispatch with no `Union` boxing and no allocation.
 
@@ -911,7 +1074,7 @@ state the restricted cases in which a mapping exists.
 
 | Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
 |:---|:---|:---|:---|:---|
-| Bare reactant factor | one $\xi_j^n$ | one or two concentrations | conversion model times cumulative available mass/volume | $\rho_{s,\alpha}^{n_s}=\xi_\alpha^{n_s}$ |
+| Bare reactant factor | $\xi$ at first order; $\xi_{\mathrm{ref}}x^n$ on the lineage inventory otherwise | one or two concentrations | conversion model times cumulative available mass/volume | $\rho_{s,\alpha}^{n_s}=\xi_\alpha^{n_s}$ |
 | Extra rate factors | smooth gates and depletion limiter | hard temperature limits | oxygen dependence and critical temperature | oxygen and temperature powers, rate limits |
 | Positive heat | endothermic | exothermic | endothermic | endothermic |
 | Match before comparing | unit reactant consumption | normalized stoichiometry and flipped heat sign | conversion normalization and heat basis | units, rate options and enthalpy datum |
@@ -923,10 +1086,13 @@ TK Eqs. 5–6 define $\theta_1 C_1+\theta_2 C_2\to\theta_3 C_3+
 
 $$r_{\mathrm{TK}}=A_{\mathrm{TK}}e^{-E/(RT)}\xi_{C_1}\xi_{C_2},$$
 
-where the second concentration factor is set to one for a single reactant.
-Pyrolysis.jl allows an arbitrary nonnegative concentration order for its
-single mass-bearing reactant; it does not support the general bimolecular
-source. A sequence of single-reactant steps is not in general equivalent to
+where the second concentration factor is set to one for a single reactant, so
+the single-reactant TK rate is first order on the concentration and maps onto
+ours directly. A TK second-order step in one species,
+$A_{\mathrm{TK}}\xi^2$, is the conversion form with $A = A_{\mathrm{TK}}\xi_{\mathrm{ref}}$
+at a fixed reference; the two laws then agree on a fixed mesh and differ on a
+moving one, where our reference concentration follows the mesh volume and the
+TK law has none. Pyrolysis.jl does not support the general bimolecular source. A sequence of single-reactant steps is not in general equivalent to
 a bimolecular rate law.
 
 TK applies hard lower/upper temperature limits. Pyrolysis.jl uses smooth
@@ -965,9 +1131,13 @@ The manual states a cutoff below `TCRIT`; the
 also ramps the rate over the next kelvin. For $n_k=1$, oxygen-independent
 kinetics and a fully open gate, the bare rate reduces to
 $\xi_A Z_k e^{-E_k/(RT)}$. It matches our unregularized first-order law,
-subject to our own limiter and gate settings. For $n_k\ne1$ there is an
-additional factor $(m_\Sigma/V)^{1-n_k}$: copying $Z_k$ to $A$ does not
-generally reproduce the rate. Other conversion models and the
+subject to our own limiter and gate settings. For $n_k\ne1$ on a reactant
+present from the start, $m_\Sigma$ is our reference and $1-\alpha_A$ our
+conversion, so $Z_k$ is our $A$. On an intermediate the two differ by
+convention: $m_\Sigma$ accumulates what has been formed so far, our reference is
+what the lineage can yield, known from the start (§6.5.5). That cumulative form
+is not implemented, and a Gpyro series scheme with $n_k\ne1$ on an intermediate
+does not transfer. Other conversion models and the
 `CONVENTIONAL_RXN_ORDER` option change this accounting
 ([`REACTION_RATE_Y`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_mass.f90#L129-L259)).
 Local oxygen dependence and gas-consuming yields cannot generally be
@@ -999,8 +1169,10 @@ e^{-E_{\alpha\beta}/(RT_s)}X_{O_2}(x)^{n_{O_2}}T_s^{n_t}.
 $$
 
 Here $\rho_{s,\alpha}=\xi_\alpha=m_\alpha/V$ is the reactant's mass
-concentration (§4.8.3). Thus the concentration-order and Arrhenius factors
-have the same basis as our bare single-reactant law. Pyrolysis.jl omits
+concentration (§4.8.3). At $n_s=1$ this is our bare single-reactant law. At
+$n_s\ne1$ the FDS order acts on the concentration and ours on the conversion,
+so on a fixed mesh $A = A_{\alpha\beta}\,\xi_{\mathrm{ref}}^{\,n_s-1}$, with $A$ in
+s⁻¹. Pyrolysis.jl omits
 the explicit oxygen and temperature powers. FDS's oxygen profile is a
 prescribed exponential penetration model
 with surface oxygen determined by a mass-transfer balance, not a pore-gas
@@ -1079,14 +1251,43 @@ intumescent solids, moisture). Its boundaries, with the source-of-truth guards:
    $(A_i, E_i)$, but there is no built-in quadrature over an activation-energy
    distribution or fitting helper for it.
 
-5. **Depletion-limiter bias.** The limiter (6.3) under-predicts the rate near
+5. **Depletion-limiter bias.** At first order the limiter (6.3) under-predicts the rate near
    and below $\xi_{\mathrm{th}} = 1$ kg·m⁻³ (24 % at the threshold, 98 % at
    $0.1\,\xi_{\mathrm{th}}$) and converts exponential burnout tails into
    algebraic ones, $\xi \approx \xi_{\mathrm{th}}/\sqrt{3.73\,k\,t}$ for
    first-order kinetics (§6.3.3). For materials whose physically meaningful residue
    concentrations are comparable to the default threshold, the threshold should
    be lowered (at some cost in stiffness) or the limiter disabled for
-   validation.
+   validation. The conversion limiter (6.3b) carries the same shape of bias below
+   $x_{\mathrm{th}}$.
+
+6. **One conversion per cell.** The rate at an order other than one reads one
+   conversion per cell, so a cell must hold one material: one conversion cannot
+   reproduce the sum of the rates of material at different conversions, and a heated
+   column holds a range of them. At such an order `setup` therefore refuses
+   deactivation, which merges cells, and any correction, which moves material between
+   them. Measured on `examples/06` at 72 cells against the same deck with neither,
+   allowing both moves the mass-loss rate by a factor of up to 5.8 at $n = 0.5$, and the
+   correction alone, before any merge, by 2.2 % of the peak at $n = 0.5$, 8.8 % at
+   $n = 0.25$ and 32 % at $n = 0$. These compare two discretisations, and the $n = 0$
+   curve itself moves by 12 % of the peak from 72 to 144 cells, so that last figure is
+   an indication only. No test at a merge can bound what follows it: below order one a
+   relative difference $d$ grows as $\mathrm{d}\ln(|d|/x)/\mathrm{d}t = k(1-n)x^{n-1}$.
+   With the cells on their material a heated deck runs to the end of the span wherever
+   a residue keeps the cells from emptying, and above order one without a residue,
+   since the conversion falls without reaching zero. Below order one with no residue a
+   cell empties in finite time and the solve stalls at the first one; a small residue
+   avoids this (0.2 % on the decks measured).
+
+7. **Networks with no fixed lineage.** A lineage fed through the gas phase, a
+   solve with external mass sources, gas reactants at orders other than one and
+   multi-dimensional meshes are refused for any order other than one
+   (§6.5.5, §15.1).
+
+8. **Prefer first-order steps.** A multi-step scheme of first-order reactions needs no
+   reference, no extra state, and no refusal, and transfers between codes without a
+   normalisation convention. Where a fit allows it, more first-order steps are the
+   better choice over a smaller number of steps of other orders.
 
 These limitations are consistent across the kinetics and materials chapters; where a richer model is required (bimolecular oxidation, oxygen-sensitive
 char burnout, DAEM), the present architecture's chief virtue is that the

@@ -1,13 +1,14 @@
 # =============================================================================
-# V-BO-04 — uniform zero-order burnout (exact L(t) through the deactivation event)
+# V-BO-04 — uniform burnout (exact L(t) through the deactivation event)
 # =============================================================================
 #
-# An adiabatic slab at uniform T₀ with one zero-order reaction solid → gas
+# An adiabatic slab at uniform T₀ with one first-order reaction solid → gas
 # and no heat of reaction. The temperature stays at T₀ exactly (no
-# heat source, no gradient), so the volumetric rate r = A·exp(−E/RT₀) is a
-# constant and every cell loses the same fraction r/ρ_s of its current
-# volume per unit time. Under ALE the solid concentration stays at ρ_s
-# (dilation removes volume, not concentration) and the exact thickness is
+# heat source, no gradient), so k = A·exp(−E/RT₀) is a constant and at the
+# concentration ρ_s the volumetric rate r = k ρ_s is one too: every cell loses
+# the same fraction r/ρ_s of its current volume per unit time. Under ALE the
+# solid concentration stays at ρ_s (dilation removes volume, not concentration)
+# and the exact thickness is
 #
 #   L(t) = L₀ · exp(−r t / ρ_s).
 #
@@ -28,10 +29,10 @@ function _vbo04_setup(n_cells::Int; t_end = 480.0)
     r = 10.0                                     # kg m⁻³ s⁻¹ volumetric rate at T0
     E = 5.0e4
     R = 8.314462618
-    A = r * exp(E / (R * T0))
+    A = r / ρ_s * exp(E / (R * T0))
     solid = SolidComponent(:solid, ρ = ρ_s, φ = 0.3, c = c, k = k, λ = 1e-6)  # non-degenerate gas transport
     gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02)
-    rxn = Reaction(:burn, 1 => 2; A = A, E = E, h = 0.0, n = 0.0)
+    rxn = Reaction(:burn, 1 => 2; A = A, E = E, h = 0.0)
     mat = Material(name = :VBO04, components = (solid, gas), reactions = (rxn,))
     mesh = create_uniform_mesh(L0, n_cells)
     bcs = BoundaryConditionSet(
@@ -134,7 +135,7 @@ function _verification_case_vbo04()
     end
     return VerificationCase(
         id = "V-BO-04",
-        title = "Uniform zero-order burnout: exact thickness through the deactivation event",
+        title = "Uniform burnout: exact thickness through the deactivation event",
         tags = [:ale, :burnout, :depletion, :kinetics, :exact],
         references = ["closed form L(t) = L₀ exp(−r t/ρ_s)"],
         build = build,

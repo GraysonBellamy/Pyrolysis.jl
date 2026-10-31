@@ -10,10 +10,10 @@
 #
 # Realization: the volumetric heat source is a SELF-REGENERATING reaction
 # A → A (order n = 0, h < 0) — product index = reactant index nets ξ̇ ≡ 0
-# exactly (verified: drift 0.0) while depositing |h|·A·e^(−E/RT) per unit
+# exactly (verified: drift 0.0) while depositing |h|·A·ρ·e^(−E/RT) per unit
 # volume, i.e. a pure zero-order Arrhenius source with no reactant-depletion
-# clock. The depletion limiter's tanh(ξ/1) factor is exactly 1.0 at
-# ξ = 1000 kg/m³, and the default gates (T_min = 0) are exactly open, so the
+# clock. The conversion stays at one, where the depletion limiter's onset is
+# exactly 1.0, and the default gates (T_min = 0) are exactly open, so the
 # kinetics are pure Arrhenius. A T_max gate at T₀ + 100 K caps the
 # SUPERCRITICAL branch so the runaway saturates instead of chasing e^θ to
 # integrator death; the subcritical branch (rise ≤ 15 K) never feels it.
@@ -43,8 +43,15 @@ function _vcpl04_problem(δ; n_cells, t_end, n_outputs = 11)
     A_r = S0 / abs(h_rxn) * exp(E / (R * T0))
 
     comp = SolidComponent(:A, ρ = ρξ, c = c, k = k)
-    rxn =
-        Reaction(:fk_source, 1 => 1; A = A_r, E = E, h = h_rxn, n = 0.0, T_max = T0 + 100.0)
+    rxn = Reaction(
+        :fk_source,
+        1 => 1;
+        A = A_r / ρξ,
+        E = E,
+        h = h_rxn,
+        n = 0.0,
+        T_max = T0 + 100.0,
+    )
     mat = Material(name = :VCPL04, components = (comp,), reactions = (rxn,))
     mesh = create_uniform_mesh(2 * L_half, n_cells)
     bc_set = BoundaryConditionSet(

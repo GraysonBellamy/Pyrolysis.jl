@@ -224,17 +224,18 @@ Reaction(name, reactant::Symbol => product::Symbol; A, E, h, n = 1.0, …)
 # two products
 Reaction(name, reactant::Int => (p1::Int, p2::Int);
          A, E, h, yields, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
-         validate_mass = true)
+         validate_mass = true, basis = NaN)
 Reaction(name, reactant::Symbol => (p1::Symbol, p2::Symbol); A, E, h, yields, n = 1.0, …)
 ```
 
 | Keyword | Meaning (symbol) | Units | Default |
 |---|---|---|---|
-| `A` | pre-exponential factor `A_i` | s⁻¹ (first order) | required |
+| `A` | pre-exponential factor `A_i` | s⁻¹ | required |
 | `E` | activation energy `E_i` | J·mol⁻¹ | required |
 | `h` | heat of reaction, **`h > 0` endothermic**; number, `(a, b)` tuple (`a + b·T`) or property object | J per kg of reactant | required |
 | `yields` | mass yields `(y1, y2)` of the two products | – | required (two products) |
-| `n` | reaction order, `n ≥ 0` | – | `1.0` |
+| `n` | reaction order, `n ≥ 0`, on the conversion when not 1 | – | `1.0` |
+| `basis` | the reference as a fraction of the initial condensed mass, in `(0, 1]`, refused at `n = 1`; `NaN` for the lineage rules | – | `NaN` |
 | `T_min`, `T_max` | smooth lower and upper temperature gates | K | `0.0`, `Inf` |
 | `gate_width` | width of the tanh gates, positive | K | `1.0` |
 | `validate_mass` | require the yields to sum to one | – | `true` |
@@ -346,17 +347,20 @@ pmma = Material(
 ```
 
 ```julia
-DepletionLimiter(; threshold = 1.0, join = 1.0, base_scale = 1e-8, enabled = true)
+DepletionLimiter(; threshold = 1.0, join = 1.0, base_scale = 1e-8, enabled = true,
+                 conversion_threshold = 1e-3, conversion_base = 1e-8)
 ```
 
 The depletion limiter multiplies each reactant's rate by a factor that is
-exactly zero at and below zero concentration and rises to one above
-`threshold` [kg·m⁻³]: a cubic onset from zero up to `join · threshold`, joined
-with value and slope to `tanh(ξ/threshold)` above. The rate is `C¹` through zero
-for every reaction order, so an absent or negative trial concentration is never
-consumed. The order's power is taken of `base_scale · softplus(ξ/base_scale)`,
-which equals `ξ` to within `base_scale` [kg·m⁻³]. `threshold`, `join` and
-`base_scale` must be positive. With `enabled = false` the factor is one and
+exactly zero at and below zero mass and rises to one above its threshold,
+`threshold` [kg·m⁻³] on the concentration at first order and the dimensionless
+`conversion_threshold` on the conversion at any other order: a cubic onset from
+zero up to `join` times the threshold, joined with value and slope to `tanh`
+above. The rate is `C¹` through zero for every reaction order, so an absent or
+negative trial mass is never consumed. The order's power is taken of a softplus
+that equals its argument to within `base_scale` [kg·m⁻³] or `conversion_base`.
+`threshold`, `join`, `base_scale`, `conversion_threshold` and `conversion_base` must
+be positive. With `enabled = false` the factor is one and
 only the finite power base remains, so a zero-order reaction then runs at its
 full rate at any concentration (Chapter 4, §4.10; Technical Reference §6).
 

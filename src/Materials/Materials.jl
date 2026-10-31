@@ -100,6 +100,7 @@ export Material, MixingRule, PARALLEL, SERIES, WEIGHTED, BRUGGEMAN, CARMAN_KOZEN
 export MixingSpec, MaterialMixing
 export n_components, n_reactions
 export dry_gas_flags
+export needs_lineage, lineage_graph, LineageGraph
 
 # Gas transport (component-based permeability)
 export gas_component_indices

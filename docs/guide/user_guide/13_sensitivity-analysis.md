@@ -15,7 +15,7 @@ Reference §17.
 > **Coordinate and symbol conventions.** `z = 0` is the back face (tag
 > `:bottom`); `z = L` is the exposed surface (tag `:top`); heat enters from the
 > top. The Arrhenius parameters are the
-> pre-exponential `A_i` [s⁻¹] (or [m³·kg⁻¹·s⁻¹] for higher-order reactions), the
+> pre-exponential `A_i` [s⁻¹], the
 > activation energy `E_i` [J·mol⁻¹], and the heat of reaction `h` [J·kg⁻¹] with
 > the **`h > 0` endothermic** storage convention (Technical Reference §2 and §6).
 > Component cell masses are the integrated species states; mass concentrations

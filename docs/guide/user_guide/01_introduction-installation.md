@@ -158,7 +158,7 @@ Key state and input units:
 | Material density property (bulk) | `ρ_j` | kg·m⁻³ |
 | Heat capacity | `c_p` | J·kg⁻¹·K⁻¹ |
 | Thermal conductivity | `k` | W·m⁻¹·K⁻¹ |
-| Pre-exponential factor | `A_i` | s⁻¹ (first order) |
+| Pre-exponential factor | `A_i` | s⁻¹ |
 | Activation energy | `E_i` | J·mol⁻¹ |
 | Heat of reaction | `h` | J·kg⁻¹ of reactant |
 | Permeability | `κ` | m² |

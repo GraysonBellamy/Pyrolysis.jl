@@ -162,6 +162,8 @@ a combination it does not implement:
 | `a lateral shrinkage law needs planar coordinates`; `in-depth radiation needs planar coordinates` | a `Cylindrical()` or `Spherical()` mesh with a lateral law or `BEER_LAMBERT` | a planar mesh, or `SURFACE_ABSORPTION` |
 | `the lateral shrinkage law must be positive and finite on [-0.001, 1.001]`; `… must equal one at zero conversion` | a law that vanishes or is not one at `χ̄ = 0` | a law such as `χ̄ -> 1 - 0.3χ̄` |
 | `a correction moves the mesh relative to the solid, which needs use_ale = true` | a `correction` other than `NoCorrection()` on a fixed mesh | `use_ale = true` |
+| `reaction :r has an order other than one, read on one conversion per cell, … solve without deactivation` | `deactivation = true` with a reaction of order other than one | leave deactivation off (§4.14) |
+| `reaction :r has an order other than one, whose cells must keep their material, … give no correction` | a `correction` with a reaction of order other than one | give no correction (§4.14) |
 | `a prescribed mesh velocity needs use_ale = true`, and its siblings | `w_override` on a fixed mesh, on a reacting material, with `deactivation`, or with a `correction` | `w_override` is a verification hook (§16.7) |
 | `the cells beside node(s) … start with different condensed components: give the layer interfaces as lagrangian nodes …` | an explicit `lagrangian` list that omits a layer interface under the equidistribution correction | leave `lagrangian` at its default, which lists the interfaces, or add them |
 | `the mass conditions name the tag :x, which the mesh does not have` | a mass condition keyed by a tag the mesh lacks | key the conditions by the mesh's tags |
@@ -456,11 +458,13 @@ test rejects anything below that. Small negative values of that order in
 `sol.m` or `sol.ξ` are expected, not an error.
 
 - **The depletion limiter.** Each reactant's rate factor is exactly zero at and
-  below zero concentration and C¹ through it, for every reaction order:
-  `DepletionLimiter(; threshold = 1.0, join = 1.0, base_scale = 1e-8, enabled = true)`,
-  the `threshold` [kg·m⁻³] the concentration scale of the roll-off. With
+  below zero mass and C¹ through it, for every reaction order:
+  `DepletionLimiter(; threshold = 1.0, join = 1.0, base_scale = 1e-8, enabled = true,
+  conversion_threshold = 1e-3, conversion_base = 1e-8)`, the `threshold` [kg·m⁻³]
+  the concentration scale of the roll-off at first order and the
+  `conversion_threshold` its conversion scale at any other order. With
   `enabled = false` the factor is one, an absent reactant reacts at the rate of
-  a `base_scale` concentration, and the admissibility check is the only guard
+  a base-scale concentration, and the admissibility check is the only guard
   (§4.10; Technical Reference §6.3).
 - **Upwind advection.** The lumped gas transport advective gas flux is first-order upwind
   of the intrinsic gas density `ξ/φ`, stable and diffusive (Technical Reference

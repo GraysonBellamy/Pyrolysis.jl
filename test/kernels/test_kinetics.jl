@@ -12,13 +12,19 @@ using Pyrolysis.Integration
 using Pyrolysis.Integration: setup
 
 _rxn(order) = Reaction(:r, 1 => 2; A = 1.0, E = 1000 * R_GAS, h = 0.0, n = order)
-_rate(x, order, T; limiter = DepletionLimiter()) =
-    reaction_rate(_rxn(order), (x, zero(x)), trial_temperature(T); limiter = limiter)
+# Against a reference of 1 kg/m³, so a concentration is a conversion.
+_rate(x, order, T; limiter = DepletionLimiter()) = reaction_rate(
+    _rxn(order),
+    (x, zero(x)),
+    trial_temperature(T),
+    one(x);
+    limiter = limiter,
+)
 
 # Trial concentrations off the physical domain, including the window
 # ξ/base_scale ∈ (−745, −726) where the finite base underflows to zero before
 # its slope does.
-const _trial_concentrations = (-1e6, -1.0, -7.3e-6, -1e-9, 0.0, 1e-12, 1e-9, 1.0)
+const _trial_concentrations = (-1e6, -1.0, -7.3e-6, -1e-9, 0.0, 1e-12, 1e-9, 1.0, 1e3)
 
 @testset "depletion limiter: finite rates and derivatives at absent reactants" begin
     for order in (0.0, 0.3, 0.5, 1.0, 2.0), x in _trial_concentrations
@@ -79,7 +85,7 @@ end
         components = (virgin, char, gas),
         reactions = (
             Reaction(:pyro, 1 => (2, 3); A = 5e9, E = 1.4e5, h = 8e5, yields = (0.3, 0.7)),
-            Reaction(:ox, 2 => 3; A = 1e3, E = 8e4, h = -2e6, n = 0.5),
+            Reaction(:ox, 2 => 3; A = 1e3, E = 8e4, h = -2e6, n = 0.5, basis = 0.3),
         ),
         depletion_limiter = DepletionLimiter(threshold = 2.0),
     )
@@ -104,7 +110,12 @@ end
     rates, heats = zeros(2), zeros(2)
     for i = 1:6
         ξ = ntuple(j -> ds.ξ[j, i], 3)
-        evaluate_reactions!(rates, heats, ξ, ds.T[i], mat)
+        ξ_ref = (0.0, kernel.reference[2, i] / ds.V_eval[i])
+        # The reference is the basis of the condensed mass the cell started with.
+        @test ξ_ref[2] ≈
+              0.3 * sum(cp.m0[j, i] for j = 1:2) / cp.def.setup.reference.volume[i] rtol =
+            1e-14
+        evaluate_reactions!(rates, heats, ξ, ds.T[i], mat, mat.depletion_limiter, ξ_ref)
         ω = (-rates[1], 0.3rates[1] - rates[2], 0.7rates[1] + rates[2])
         for j = 1:3
             @test c.S_mass[j, i] ≈ ω[j] * ds.V_eval[i] rtol = 1e-14
@@ -120,7 +131,7 @@ end
     gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03)
     reactions = (
         Reaction(:pyro, 1 => (2, 3); A = 5e9, E = 1.4e5, h = 8e5, yields = (0.3, 0.7)),
-        Reaction(:ox, 2 => 3; A = 1e3, E = 8e4, h = -2e6, n = 0.5),
+        Reaction(:ox, 2 => 3; A = 1e3, E = 8e4, h = -2e6, n = 0.5, basis = 0.3),
     )
     mat = Material(
         name = :slab,
@@ -157,7 +168,8 @@ end
     rates, heats = zeros(2), zeros(2)
     for i = 1:6
         ξ = ntuple(j -> ds.ξ[j, i], 3)
-        evaluate_reactions!(rates, heats, ξ, ds.T_trial[i], mat, kernel.limiter)
+        ξ_ref = (0.0, kernel.reference[2, i] / ds.V_eval[i])
+        evaluate_reactions!(rates, heats, ξ, ds.T_trial[i], mat, kernel.limiter, ξ_ref)
         ω = (-rates[1], 0.3rates[1] - rates[2], 0.7rates[1] + rates[2])
         if quenched(ξ, reactions)
             @test all(iszero, rates)
@@ -241,6 +253,62 @@ end
     @test sol.ξ[3, 1, end] < 0.1 * 500.0
     @test sol.ξ[4, 1, end] > 0.9 * 500.0
     @test sum(sol.ξ[:, 1, end]) ≈ 1000.0 rtol = 1e-12
+end
+
+# A reaction without a lineage is masked: neither a disabled limiter nor a
+# positive trial mass of its reactant reaches the rate law.
+@testset "a reaction without a lineage: the other at order $second, limiter $(enabled ? "on" : "off")" for second in
+                                                                                                           (
+        1.0,
+        2.0,
+    ),
+    enabled in (true, false)
+
+    comps = (
+        SolidComponent(:carrier, ρ = 1000.0, c = 1000.0, k = 0.5),
+        SolidComponent(:A, ρ = 1000.0, c = 1000.0, k = 0.5),
+        SolidComponent(:C, ρ = 1000.0, c = 1000.0, k = 0.5),
+        SolidComponent(:P, ρ = 1000.0, c = 1000.0, k = 0.5),
+    )
+    rxns = (
+        Reaction(:a, 2 => 4; A = 2.0, E = 0.0, h = 1e5, n = 0.5),
+        Reaction(:c, 3 => 4; A = 2.0, E = 0.0, h = 0.0, n = second),
+    )
+    mat = Material(
+        name = :absent,
+        components = comps,
+        reactions = rxns,
+        depletion_limiter = DepletionLimiter(enabled = enabled),
+    )
+    problem = PyrolysisProblem(
+        mesh = create_uniform_mesh(1e-3, 1),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = DirichletThermalBC(700.0), bottom = DirichletThermalBC(700.0)),
+        ),
+        T_initial = z -> 700.0,
+        ξ_initial = [z -> 500.0, z -> 0.0, z -> 500.0, z -> 0.0],
+        tspan = (0.0, 2.0),
+    )
+    cp = setup(problem)
+    layout = cp.def.layout
+    kernel = only(k for k in cp.def.kernels if k isa ReactionKernel)
+    @test kernel isa ReactionKernel{true}
+    @test kernel.reference[1, 1] == 0
+    @test (kernel.reference[2, 1] > 0) == (second != 1)
+    ds = cp.ws.derived
+    u = copy(cp.u0)
+    for trial in (0.0, 1e-3)
+        u[Pyrolysis.States.mass_index(layout, 1, 2)] = trial
+        Pyrolysis.States.derive!(ds, u, layout, cp.def.setup)
+        c = Contributions{Float64}(4, 2, 1, 2, 2)
+        reset!(c)
+        contribute!(c, kernel, ds, cp.def.setup.topology, mat, 0.0)
+        # Everything from the live reaction, nothing from the masked one.
+        @test c.S_mass[2, 1] === 0.0
+        @test c.S_energy[1] === 0.0
+        @test c.S_mass[3, 1] < 0
+    end
 end
 
 # Decay from a small initial concentration: the one-sided limiter brings the

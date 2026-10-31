@@ -60,7 +60,7 @@ Conventions:
 | $A$ | Cross-sectional area of the 1D column (the mesh's cross-section measure; an algebraic unknown under a lateral-shrinkage law) | m² |
 | $A_0$ | Initial / calibration-reference cross-sectional area (fixed at setup) | m² |
 | $A_f$, $A_n$ | Area of face $f$ ($A$ in planar coordinates; $2\pi r A$, $A r^{2}$ on cylindrical and spherical meshes). On a line face $n$ sits at node $n$, so the balance rows' $A_i$, $A_{i+1}$ are the areas of the two faces of cell *i* (overload A3) | m² |
-| $A_{\alpha\beta}$, $A_i$ | Arrhenius pre-exponential factor for reaction *i* (or *αβ*) | s⁻¹ (1st-order); m³·kg⁻¹·s⁻¹ (bimolecular) |
+| $A_{\alpha\beta}$, $A_i$ | Arrhenius pre-exponential factor for reaction *i* (or *αβ*) | s⁻¹ |
 | $a_j$ | Surface absorptivity of component *j* for incident radiation (`surface_absorptivity`; $\varepsilon_j(T)$ when unset, Kirchhoff) | – |
 | $a_{\text{eff}}$ | Effective (composition-weighted) surface absorptivity, $\sum_j v_j a_j$ | – |
 | $a$, $a_s$ | Absorptivity applied to the incident flux of a `RadiativeFluxBC`: the condition's own `absorptivity` when it has one, otherwise $a_{\text{eff}}$ of the outermost live cell (§8.3.2, §12.3.5) | – |
@@ -70,6 +70,7 @@ Conventions:
 | $C_i$ | Heat-capacity sum of cell *i*, $\sum_j m_{j,i} c_{p,j}(\tilde T_i)$ at the trial temperature, smoothly floored at $C_{\text{floor},i}$ | J·K⁻¹ |
 | $C_{\text{floor},i}$ | Capacity floor of cell *i*, $\rho c_{p,\text{floor}} V_i(0)$ (§5.4.3, §13.10.4) | J·K⁻¹ |
 | $C_{\text{reg},i}$ | Regularizing capacity of the extended caloric relation: zero while the cell's guaranteed heat capacity is at least $2C_{\text{floor},i}$, rising to $C_{\text{floor},i}$ as that capacity vanishes (§5.4.3, §13.10.4, §16.4) | J·K⁻¹ |
+| $c_{r,i}$ | Lineage coefficient of reaction *r* in cell *i*: its reference as a fraction of the cell's initial condensed mass (§6.5.5) | – |
 | $c_p$, $c_{p,j}$ | Specific heat capacity (of component *j*) | J·kg⁻¹·K⁻¹ |
 | $c_{p,j,\text{min}}$ | Half the sampled minimum of the heat-capacity law of component *j*, the guaranteed capacity of the caloric extension (§13.10.4) | J·kg⁻¹·K⁻¹ |
 | $c_{p,\text{ref}}$ | Mass-weighted heat capacity of a cell at its initial temperature, the scale of its enthalpy-row tolerance (§13.10.5, §15.5.6) | J·kg⁻¹·K⁻¹ |
@@ -134,6 +135,7 @@ Conventions:
 | $m_{\text{live}}$ | Mass inventory of the live cells, $\sum_{i\ \text{live}} \sum_j m_{j,i}$ (§16.3.1) | kg |
 | $m^{\text{lost}}_{j,e}$, $m^{\text{lost}}_e$ | Mass of component *j* (summed over the components) that deactivation event *e* removes from the live region without passing it to the receiver: the vented gas on a fixed mesh, the last cell's inventory (§16.3.3, §16.7); $m^{\text{vent}}_{j,d}$ the gas mass vented from dead cell *d* (§14.3.3) | kg |
 | $m^s_i(0)$ | Reference condensed mass of cell *i*: its initial solid and liquid mass (the deactivation reference and the scale of its mass tolerances); $m^s_i$ its current condensed mass | kg |
+| $M_{\text{ref},r}$ | Reference of reaction *r*: the lineage inventory of its reactant at the material point (§6.4, §6.5.5) | kg |
 | $m_{\text{dry},i}$ | Initial dry-solid mass of cell *i*: second member of the conversion-history pair (code `M`), the χ denominator | kg |
 | $\hat m_{j,k}$, $\hat V_k$ | Mass of component *j* in, and volume of, the receiver *k* after a deactivation merge (§14.3.3) | kg; m³ |
 | $\dot m_g$, $\dot m''$, $\dot m''_k$ | Outward gas mass flux at the surface ($\dot m''$ in the blowing models, $\dot m''_k$ of species *k*; §12.3.3) | kg·m⁻²·s⁻¹ |
@@ -150,7 +152,7 @@ Conventions:
 | $n_c$ | Number of colors of the colored Jacobian (§15.7) | – |
 | $n_{\text{layer}}$ | Number of cells across a layer of the equidistribution correction; its gain is $n_{\text{layer}}^{2}/\tau_{\text{eq}}$ (§11.7.2; overload N1) | – |
 | $n_{\text{nodes}}$, $n_{\text{faces}}$ | Number of mesh nodes / faces (= n+1 in 1D) | – |
-| $n_{i,j}$, $n_s$ | Reaction order of reaction *i* w.r.t. reactant *j* | – |
+| $n_{i,j}$, $n_s$ | Reaction order of reaction *i* w.r.t. reactant *j*, an order on the conversion for $n \ne 1$ | – |
 | $n_{\Gamma}$, $n_D$ | Exponents of the property-ratio film ($n_{\Gamma}$ on $\Gamma_{\infty}/\Gamma_g$, default 0.6) and of the pooling film's face fractions ($n_D$, default 1/2) (§12.3.3) | – |
 | $P$ | Gas pressure in the porous medium | Pa |
 | $P_{\text{ref}}$ | Reference pressure (= 101325) | Pa |
@@ -162,6 +164,7 @@ Conventions:
 | $q'''$, $q_{\text{rad}}'''$, $q^{\text{rad}}_i$ | Volumetric radiation source (Beer–Lambert; $q^{\text{rad}}_i$ its average over cell *i*, §8.3.2) | W·m⁻³ |
 | $R_b$ | Blowing ratio $h_{\text{eff}}/h$ of a convective condition's blowing model, 1 at zero species fluxes (§12.3.3; the code's $\chi$, overload B1) | – |
 | $R_g$ ($R$, $R_{\text{gas}}$) | Universal gas constant (= 8.31446261815324) | J·mol⁻¹·K⁻¹ |
+| $R_{s,i}$ | Reference field *s* of cell *i*, a differential unknown where some order differs from one (§6.4) | kg |
 | $r$, $r_i$ | Reaction rate (per unit volume) of reaction *i* | kg·m⁻³·s⁻¹ |
 | $r_{\text{hi}}$, $r_{\text{lo}}$ | Activation bounds of the equidistribution correction, fractions of a cell's initial thickness (defaults 0.3, 0.1) | – |
 | $S$ | Sutherland constant (= 110.4 K, air) in the viscosity law | K |
@@ -201,7 +204,9 @@ Conventions:
 | $w_k$ | Weight $\lvert\mathbf{d}_k\rvert^{-2}$ of neighbour *k* in the least-squares gradient (§13.6.4); a quadrature weight in §16.5.3 (overload W1) | m⁻²; – |
 | $X_{\alpha}$ | Volume fraction (FDS/Gpyro V2 comparison notation; internally $v_j$) | – |
 | $x$, $y$ | Transverse/lateral coordinates (multi-dimensional meshes and comparison text) | m |
-| $x_J$ | Join of the depletion limiter's onset, in units of $\xi_{\text{th}}$ (`join`, default 1; §6.3.2) | – |
+| $x_a$ | Conversion of reactant $a$ against its reference, $\xi_a/\xi_{\text{ref}}$ (§6.4) | – |
+| $x_J$ | Join of the depletion limiter's onset, in units of its threshold (`join`, default 1; §6.3.2) | – |
+| $x_{\text{th}}$, $\delta_x$ | Conversion scales of the depletion limiter's onset and finite base (`conversion_threshold`, `conversion_base`; §6.3.2) | – |
 | $Y_j$ | Mass fraction of component *j*, $\xi_j/\rho$ ($Y_k$ of species *k* at the face in the pooling film, §12.3.3) | – |
 | $Z$ | Pre-exponential factor (Gpyro V2 notation; FDS uses $A_{\alpha\beta}$; internally $A$) | varies |
 | $z$ | Axial / through-thickness coordinate (primary spatial variable) | m |
@@ -255,6 +260,7 @@ Conventions:
 | $\nu_{i,j}$ | Stoichiometric coefficient (yield) of component *j* in reaction *i* (negative reactant, positive product) | – |
 | $\xi_j$, $\xi_{j,i}$ | Mass concentration of component *j* (in cell *i*), $m_{j,i}/\tilde V_i$ — **constitutive species variable** | kg·m⁻³ |
 | $\xi^{+}_{j,i}$ | Positive-part concentration $(m_{j,i})^{+}/\tilde V_i$ at which the property laws are evaluated | kg·m⁻³ |
+| $\xi_{\text{ref},i}$ | Reference concentration of reaction *i*, its reference over the cell volume (§6.1, §6.4) | kg·m⁻³ |
 | $\xi_{\text{th}}$ | Concentration scale of the depletion limiter (`DepletionLimiter` `threshold`, default 1 kg·m⁻³) | kg·m⁻³ |
 | $\xi_{\text{tol},i}$ | Mass tolerance of cell *i* over its initial volume, the positivity scale of the relative-flux face states (§11.6.2, §11.6.3) | kg·m⁻³ |
 | $\rho$ | Bulk density ($\sum \xi_j$ for the total inventory density) | kg·m⁻³ |
@@ -276,7 +282,7 @@ Conventions:
 | $\bar{\chi}_c$ | Column conversion smoothly clamped into $[-10^{-3}, 1 + 10^{-3}]$ (`LATERAL_CLAMP_WIDTH`), the argument of the lateral-shrinkage law (§10.4) | – |
 | $\psi$, $\psi_0$ | Pooling factor of the pooling film, the share of the no-outflow exchange the face keeps, and its floor (`PoolingFilm` keyword `ψ0`, default 0.59; §12.3.3; overload B1) | – |
 | $\psi_{\text{VA}}(a, b; \epsilon)$ | Smooth van Albada slope of the relative-flux reconstruction (§11.6.2) | (field units)·m⁻¹ |
-| $\Phi$ | Generic cell field in the two-point gradient, where the face index $f$ shares the formula (§13.6.1); $\Phi_i(\xi)$ the reactant concentration product of reaction *i* (§6.4); in §17 the terminal part of a loss | varies |
+| $\Phi$ | Generic cell field in the two-point gradient, where the face index $f$ shares the formula (§13.6.1); $\Phi_a(v)$ the reach of reactant *a* from node *v* of a reaction network, the mass of *a* one unit of *v*'s inventory can become (§6.5.5); in §17 the terminal part of a loss | varies |
 | $\Omega(t)$, $\Omega_i(t)$ | Live region of the column (§16.2); region of cell *i* (§7.2, §11.2.1) | – |
 | $\Omega_D$ | Diffusion collision integral (Neufeld) | – |
 | $\omega_{j,i}$ | Net volumetric production rate of component *j* by reaction in cell *i*, $\sum_r \nu_{r,j} r_r$ (= $S_{j,i}$; the code's $\omega$); the cell's reaction source is $\omega_{j,i} \tilde V_i$ | kg·m⁻³·s⁻¹ |

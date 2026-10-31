@@ -140,17 +140,16 @@ function _two_layer(n_top, n_bottom; t_end = 100.0)
     )
 end
 
-# A uniform zero-order burn at a uniform temperature (V-BO-04's
-# configuration).
-function _zero_order(n; t_end = 480.0)
+# A uniform burn at a uniform temperature (V-BO-04's configuration).
+function _uniform_burn(n; t_end = 480.0)
     T0, ρ_s, r, E = 600.0, 1000.0, 10.0, 5.0e4
-    A = r * exp(E / (8.314462618 * T0))
+    A = r / ρ_s * exp(E / (8.314462618 * T0))
     solid = SolidComponent(:solid, φ = 0.3, ρ = ρ_s, c = 1000.0, k = 0.2, λ = 1e-6)
     gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02)
     mat = Material(
-        name = :zero_order,
+        name = :uniform_burn,
         components = (solid, gas),
-        reactions = (Reaction(:burn, 1 => 2; A = A, E = E, h = 0.0, n = 0.0),),
+        reactions = (Reaction(:burn, 1 => 2; A = A, E = E, h = 0.0),),
     )
     return PyrolysisProblem(
         mesh = create_stretched_mesh(10e-3, n, 1.05),
@@ -670,7 +669,7 @@ const _active = EquidistributionCorrection(
 )
 const _correction_configurations = (
     two_layer = (problem = n -> _two_layer(n - 3, 3), lagrangian = [4]),
-    zero_order = (problem = _zero_order, lagrangian = Int[]),
+    uniform_burn = (problem = _uniform_burn, lagrangian = Int[]),
     mixed = (problem = _mixed, lagrangian = Int[]),
 )
 

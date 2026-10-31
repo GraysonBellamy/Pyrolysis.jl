@@ -187,7 +187,7 @@ Key state and input units:
 | Material density property (bulk) | `ρ_j` | kg·m⁻³ |
 | Heat capacity | `c_p` | J·kg⁻¹·K⁻¹ |
 | Thermal conductivity | `k` | W·m⁻¹·K⁻¹ |
-| Pre-exponential factor | `A_i` | s⁻¹ (first order) |
+| Pre-exponential factor | `A_i` | s⁻¹ |
 | Activation energy | `E_i` | J·mol⁻¹ |
 | Heat of reaction | `h` | J·kg⁻¹ of reactant |
 | Permeability | `κ` | m² |
@@ -1872,7 +1872,7 @@ Reaction(name, :reactant => :product;
 # (c) integer index, two products
 Reaction(name, reactant::Int => (p1::Int, p2::Int);
          A, E, h, yields, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
-         validate_mass = true)
+         validate_mass = true, basis = NaN)
 
 # (d) symbol, two products (resolved by Material)
 Reaction(name, :reactant => (:p1, :p2);
@@ -2401,27 +2401,32 @@ the kinetics convention in the nomenclature.
 
 ## 4.1 The reaction rate law
 
-Every reaction in Pyrolysis.jl evaluates the same volumetric rate (kg·m⁻³·s⁻¹):
+Every reaction in Pyrolysis.jl evaluates the same volumetric rate (kg·m⁻³·s⁻¹).
+At first order it reads the reactant's concentration, and at any other order
+its conversion:
 
 ```
-r_i = A_i · exp(−E_i / (R_g · T)) · Π_j b(ξ_j)^{n_{i,j}} · g(ξ_j/ξ_th) · gate(T)
+n = 1:  r_i = A_i · exp(−E_i / (R_g · T)) · b(ξ) · g(ξ/ξ_th) · gate(T)
+n ≠ 1:  r_i = A_i · exp(−E_i / (R_g · T)) · ξ_ref · b_x(x)^{n} · g(x/x_th) · gate(T),   x = ξ/ξ_ref
 ```
 
 where
 
-- `A_i` is the Arrhenius pre-exponential factor (units depend on order; see §4.4),
+- `A_i` is the Arrhenius pre-exponential factor, in s⁻¹ for every order (§4.4),
 - `E_i` is the activation energy (J·mol⁻¹),
 - `R_g = 8.31446261815324` J·mol⁻¹·K⁻¹ is the universal gas constant,
 - `T` is the cell's trial temperature (K): the cell temperature smoothly
   clamped into the property bracket `[200, 3000]` K with 1 K transitions, which
   is the cell temperature on every physical state,
-- `ξ_j` is the mass concentration of reactant `j` (kg·m⁻³) — note
+- `ξ` is the mass concentration of the reactant (kg·m⁻³) — note
   **mass concentration**, not mole fraction or mass fraction,
-- `n_{i,j}` is the reaction order with respect to reactant `j` (must be ≥ 0;
-  negative orders are rejected at construction),
-- `b(ξ_j)` is the finite power base of the depletion limiter (equal to `ξ_j`
-  to within `10⁻⁸` kg·m⁻³) and `g(ξ_j/ξ_th)` its one-sided onset, exactly zero
-  at and below zero concentration (§4.10), and
+- `n` is the reaction order (must be ≥ 0; negative orders are rejected at
+  construction),
+- `ξ_ref` is the reactant's reference concentration, the condensed mass its
+  lineage started with at the material point over the cell volume (§4.5), and
+  `x` its conversion,
+- `b` and `b_x` are the finite power bases of the depletion limiter and `g` its
+  one-sided onset, exactly zero at and below zero mass (§4.10), and
 - `gate(T)` is a smooth temperature window built from `T_min` / `T_max` (§4.6).
 
 The rate is on a **mass-concentration** basis, which is what makes the species
@@ -2490,11 +2495,12 @@ Reaction(:charring, :virgin => (:char, :gas); A = 1e15, E = 200e3, h = 500e3,
 
 | Keyword | Meaning | Units | Default |
 |---|---|---|---|
-| `A` | Arrhenius pre-exponential factor (required) | s⁻¹ (first order) | — |
+| `A` | Arrhenius pre-exponential factor (required) | s⁻¹ | — |
 | `E` | Activation energy (required) | J·mol⁻¹ | — |
 | `h` | Heat of reaction (required; number, `(a,b)` tuple, or property function) | J·kg⁻¹ | — |
 | `yields` | Mass split for the two-product form (required there) | – | — |
-| `n` | Reaction order w.r.t. the reactant | – | `1.0` |
+| `n` | Reaction order w.r.t. the reactant, on its conversion when not 1 (§4.5) | – | `1.0` |
+| `basis` | The reference as a fraction of the initial condensed mass, in place of the lineage rules (§4.5) | – | `NaN` (lineage rules) |
 | `T_min` | Lower temperature gate | K | `0.0` |
 | `T_max` | Upper temperature gate | K | `Inf` |
 | `gate_width` | Width of the tanh ramp of both gates (finite, > 0) | K | `1.0` |
@@ -2545,11 +2551,10 @@ product carrying `+yield · r_i`. See Technical Reference §6.5.
 - `A` (pre-exponential factor) and `E` (activation energy, J·mol⁻¹) are stored as
   plain scalars (`Float64`). They are **temperature-independent**: a
   temperature-dependent `A(T)` is not supported directly (see §4.14).
-- The units of `A` depend on the reaction order. For the standard first-order
-  case (`n = 1.0`) the rate constant `A·exp(−E/R_gT)` has units s⁻¹ and the rate
-  `r` comes out in kg·m⁻³·s⁻¹ because it is multiplied by a concentration. For a
-  bimolecular convention `A` would be m³·kg⁻¹·s⁻¹. **The constructor does not
-  check these units** — getting them right is your responsibility.
+- `A` is in s⁻¹ for every reaction order: the rate constant `A·exp(−E/R_gT)` has
+  units s⁻¹ and the rate `r` comes out in kg·m⁻³·s⁻¹ because it carries one
+  concentration, the reactant's at first order and its reference at any other.
+  A rate constant fitted to `dx/dt = −k xⁿ` is your `A` as it stands.
 
 ```julia
 Reaction(:pyrolysis, :virgin => (:char, :gas);
@@ -2566,8 +2571,7 @@ temperature and peak rate, FDS-style.
 
 ## 4.5 Reaction order `n`
 
-The keyword `n` sets the order with respect to the reactant concentration: the
-rate carries the factor `ξ_reactant^n`. The default is first order (`n = 1.0`),
+The keyword `n` sets the reaction order. The default is first order (`n = 1.0`),
 which is the usual choice for solid-state thermal decomposition. Non-integer
 orders are allowed.
 
@@ -2575,6 +2579,60 @@ orders are allowed.
 # Half-order decomposition
 Reaction(:decomp, :virgin => :gas; A = 1e12, E = 180e3, h = 500e3, n = 0.5)
 ```
+
+**An order other than one acts on the conversion.** A fit to thermogravimetric data
+defines the order on `x = m/m₀`, and that is how the solver evaluates it: the rate
+per cell is `k · M_ref · xⁿ`, with `M_ref` the reactant's **lineage inventory**, the
+condensed mass its lineage started with at the material point. On a mesh that
+moves with the solid a pure reactant's concentration stays at its bulk density
+while it burns, so an order on the concentration would behave as first order; on
+the conversion the law is the same on fixed and moving meshes, and `n = 0` burns a
+slab linearly, `L = L₀(1 − k t)`.
+
+**The lineage inventory.** A reactant present at the start is its own lineage. An
+intermediate's inventory is what its parents can yield: for the Douglas fir chain
+with 94.3 mg of wood and 5.7 mg of water in a 100 mg cell and yields 0.95, 0.80,
+0.37, 0.79, 0.74, the references are 94.3, 89.585, 71.668, 26.517, 20.949 and
+15.502 mg, and 5.7 mg for the water. The solver computes this from the reaction
+network and the initial fields at `setup`, cell by cell, and it stays a constant of
+the cell, so the state gains no row.
+
+**The supported network class.** A reaction of order other than one is refused,
+naming the reaction, when:
+
+- its reactant is a gas, or is formed from a gas (directly or further down a
+  chain), or the solve has external mass `sources`: such a lineage has no initial
+  inventory, and `basis` is no remedy;
+- the reactant's ancestors hold a cycle, or two competing channels of an ancestor
+  reach it with different yields, so the reference would depend on the rates:
+  give `basis`;
+- a cell holds the reactant and also an ancestor it can be formed from: give
+  `basis`;
+- a positive reference is below `1e-12` of the cell's condensed mass, or `basis` is
+  below `1e-6`;
+- the mesh has more than one dimension;
+- the solve has `deactivation = true`, or a `correction` (Technical Reference §6.10).
+
+A reaction whose reactant has no initial mass anywhere in its lineage is
+**inactive**: it never runs, and needs no row.
+
+**`basis`.** The keyword gives the reference directly, as a fraction of the initial
+condensed mass, on the cells the reactant's lineage can reach:
+
+```julia
+# Fitted against the total initial mass of a blend
+Reaction(:second, :b => :gas; A = 3e8, E = 150e3, h = 0.0, n = 2.0, basis = 1.0)
+```
+
+`basis` must lie in `(0, 1]` and is refused at first order, where the reference
+cancels. Use it for a fit normalised to something other than the lineage: an
+Aria/Sierra parallel or series member (normalised to the total initial mass,
+`basis = 1.0`) or a fit on wet mass of a dry-lineage reactant (`basis = 1.0`).
+
+**Prefer first-order steps.** Where a fit allows it, more first-order steps are
+the better choice over fewer steps of other orders: they need no reference, no
+extra state and no refusal, and they transfer between codes without a
+normalisation convention. See Technical Reference §6.4 and §6.5.5.
 
 The rate evaluation has a fast path for orders 0 and 1 (avoiding a general
 power), so first-order reactions are both the most common and the cheapest.
@@ -2799,9 +2857,16 @@ ThermaKin, and Gpyro V2 kinetic formulations.
 For a transferred reaction, also compare the rate over the relevant
 temperature and conversion range. ThermaKin2Ds reaction extent may require
 normalization; Gpyro V2 reaction order can depend on cumulative available
-mass; FDS rates can include oxygen and temperature factors absent here.
+mass; FDS rates can include oxygen and temperature factors absent here, and its
+order acts on the concentration, not the conversion.
 Technical Reference §6.9 gives the mappings and their limits. A matching
 `A` and `E` pair alone does not establish matching kinetics.
+
+For a published parameter set with `n ≠ 1`, use `A` unchanged from a Kinetics Neo
+or a single-step Gpyro fit, and give `basis = 1.0` for a fit normalised to the
+total initial mass (an Aria/Sierra parallel or series member). A Gpyro series
+scheme with `n ≠ 1` on an intermediate does not transfer: its cumulative mass
+accounting is a different convention.
 
 ---
 
@@ -2815,7 +2880,8 @@ slightly negative. Pyrolysis.jl therefore multiplies the rate, per reactant, by
 a one-sided factor and evaluates the order's power on a finite base:
 
 ```
-r ∝ b(ξ)^n · g(ξ / threshold)
+first order:      r ∝ b(ξ) · g(ξ / threshold)
+any other order:  r ∝ ξ_ref · b(x)^n · g(x / conversion_threshold),   x = ξ/ξ_ref
 
 g(x) = 0                                   for x ≤ 0
 g(x) = (s − 2y) t³ + (3y − s) t²           for 0 < x < join,  t = x/join,
@@ -2830,28 +2896,37 @@ its slope at `x = join`, so it is C¹ everywhere. The rate and every derivative
 of it are exactly zero at and below zero concentration, for every order
 `n ≥ 0`, including zero order: an absent or negative trial concentration is
 never consumed. The base `b(ξ)` equals `ξ` to within `base_scale · ln 2` and is
-finite for every real `ξ`, so the derivative of `ξⁿ` stays finite at
+finite for every real `ξ`, so the derivative of the power stays finite at
 depletion for fractional orders. Far above the threshold the factor rounds to
 one and the bare Arrhenius rate is recovered: the relative deficit is
 `2 e^{−2ξ/threshold}`, below 4 % at `2·threshold` and below 5e-9 at
 `10·threshold`, and the factor is exactly 1 from `20·threshold`.
 
+For a reaction of order other than one the same factor acts on the conversion, on
+the dimensionless scales `conversion_threshold` and `conversion_base`: a
+concentration scale would never engage on a moving mesh, where a pure reactant's
+concentration stays at its bulk density. The onset is exactly one for
+`x ≥ 20 conversion_threshold` at `join ≤ 20`.
+
 The limiter is configured by the `DepletionLimiter` type (exported at the top
 level, and by the `Physics` and `Materials` submodules):
 
 ```julia
-DepletionLimiter(; threshold = 1.0, join = 1.0, base_scale = 1e-8, enabled = true)
+DepletionLimiter(; threshold = 1.0, join = 1.0, base_scale = 1e-8, enabled = true,
+                 conversion_threshold = 1e-3, conversion_base = 1e-8)
 ```
 
 | Field | Meaning | Units | Default |
 |---|---|---|---|
-| `threshold` | Concentration scale of the roll-off | kg·m⁻³ | `1.0` |
-| `join` | Where the onset joins `tanh`, in units of `threshold` | – | `1.0` |
-| `base_scale` | Scale of the finite power base | kg·m⁻³ | `1e-8` |
+| `threshold` | Concentration scale of the roll-off, first order | kg·m⁻³ | `1.0` |
+| `join` | Where the onset joins `tanh`, in units of its threshold | – | `1.0` |
+| `base_scale` | Scale of the finite power base, first order | kg·m⁻³ | `1e-8` |
 | `enabled` | Apply the onset factor | – | `true` |
+| `conversion_threshold` | Conversion scale of the roll-off, other orders | – | `1e-3` |
+| `conversion_base` | Conversion scale of the finite power base, other orders | – | `1e-8` |
 
-`threshold`, `join` and `base_scale` must be positive (an `ArgumentError`
-otherwise). With `enabled = false` the onset factor is one and only the finite
+`threshold`, `join`, `base_scale`, `conversion_threshold` and `conversion_base`
+must be positive (an `ArgumentError` otherwise). With `enabled = false` the onset factor is one and only the finite
 base remains: an order-zero reaction then runs at its full rate at any
 concentration, and an absent reactant reacts at the rate of a `base_scale`
 concentration; the integrator's admissibility check is then the only guard.
@@ -2891,7 +2966,9 @@ one_sided_factor(2.0, 1.0)                        # g(2) = tanh(2) ≈ 0.964
 
 `reaction_rate(rxn, ξ, T; limiter)` takes a resolved (index-form) reaction, the
 concentration `NTuple` of the cell and its temperature; without `limiter` it
-uses `DepletionLimiter()`, not the material's.
+uses `DepletionLimiter()`, not the material's. It refuses an order other than one,
+which needs a reference concentration: `reaction_rate(rxn, ξ, T, ξ_ref; limiter)`,
+with `ξ_ref` finite and positive.
 
 ---
 
@@ -3015,8 +3092,10 @@ volume, since the component masses are the states; see Technical Reference §6.7
 
 ## 4.14 Summary and limitations
 
-- A `Reaction` is `A·exp(−E/R_gT)·ξ^n`, times the limiter's onset, with smooth
-  `T_min`/`T_max` gates of width `gate_width` and a heat of reaction `h`.
+- A `Reaction` is `A·exp(−E/R_gT)·ξ` at first order and
+  `A·exp(−E/R_gT)·ξ_ref·xⁿ` on the conversion otherwise, `A` in s⁻¹ for every order,
+  times the limiter's onset, with smooth `T_min`/`T_max` gates of width
+  `gate_width` and a heat of reaction `h`.
 - Reference components by **symbol** (recommended) or integer index; product
   `yields` must sum to **1.0**, enforced at construction unless
   `validate_mass = false`.
@@ -3026,11 +3105,19 @@ volume, since the component masses are the states; see Technical Reference §6.7
   chains of single-reactant reactions. Multi-reactant (e.g. O₂-dependent)
   kinetics, temperature-dependent `A`, and pressure-dependent rates are not
   supported (Technical Reference §6.10).
-- The **depletion limiter** (default `threshold = 1.0` kg·m⁻³) is applied
+- The **depletion limiter** (default `threshold = 1.0` kg·m⁻³, and
+  `conversion_threshold = 1e-3` for orders other than one) is applied
   automatically: each reactant's rate factor is exactly zero at and below zero
-  concentration and joins `tanh(ξ/threshold)` above it. It is rarely tuned;
-  lower it only for genuinely dilute species and raise it only to relieve
-  stiffness near full conversion.
+  mass and joins `tanh` above it. It is rarely tuned; lower it only for genuinely
+  dilute species and raise it only to relieve stiffness near full conversion.
+- An order other than one reads one conversion per cell, so each cell must keep its
+  material. Besides gas reactants, gas-fed lineages, external mass sources and
+  multi-dimensional meshes (§4.5), such a solve refuses deactivation and any
+  correction. Leave both off: each cell then follows its own material, to the end
+  of the span wherever a residue keeps the cells from emptying, and above order one
+  with no residue too. Below order one with no residue a cell empties in finite time
+  and the solve stalls at the first one; a small inert or char residue avoids this
+  (0.2 % on the decks measured; Technical Reference §6.10).
 - Re-check a reaction's mass balance with `verify_stoichiometry`.
 
 For the mathematics behind the rate law, the smooth gates, the depletion limiter,
@@ -4581,8 +4668,8 @@ problem = PyrolysisProblem(
 
 Under a lateral shrinkage law (§7.6) the initial state also holds each cell's conversion
 history, `G_i = 0` and `M_i` the cell's initial solid mass, the denominator of the column
-conversion `χ̄`. A lumped gas transport material's pore gas is initialized through `ξ_initial` as well
-(§7.5.1). See Technical Reference §12 for the initial and boundary conditions.
+conversion `χ̄`. A lumped gas
+transport material's pore gas is initialized through `ξ_initial` as well (§7.5.1). See Technical Reference §12 for the initial and boundary conditions.
 
 ### 7.1.3 Time span and output times
 
@@ -4687,13 +4774,14 @@ less condensed mass than `threshold` of what it started with (`Pyrolysis.Closure
 gives the fraction each component leaves). The correction moves the mesh relative to the
 solid, thinning a vanishing layer's cells together so that the layer leaves in one event;
 the near-threshold band then defaults to `0.1`. Otherwise (a fixed mesh, deactivation off,
-or a charring layer whose residue stays above the threshold) the solve has no correction and
-a moving mesh moves with the solid.
+or a charring layer whose residue stays above the threshold) the solve has no correction
+and a moving mesh moves with the solid. A reaction of order other than one refuses
+deactivation and the correction (§4.14).
 
 | Keyword | Effect |
 |---|---|
 | `correction = NoCorrection()` | Keeps the mesh with the solid whatever `setup` would install. |
-| `correction = EquidistributionCorrection(; ...)` | Configures the correction (Chapter 10); needs `use_ale = true`. |
+| `correction = EquidistributionCorrection(; ...)` | Configures the correction (Chapter 10); needs `use_ale = true`; refused at a reaction order other than one. |
 | `lagrangian = [nodes...]` | Nodes that always move with the solid. Under the equidistribution correction every interior node between cells that start with different condensed components must be among them, and by default they are exactly those nodes. |
 | `band` | The near-threshold band of a moving mesh, in `[threshold, 1)`. |
 
@@ -8949,7 +9037,7 @@ Reference §17.
 > **Coordinate and symbol conventions.** `z = 0` is the back face (tag
 > `:bottom`); `z = L` is the exposed surface (tag `:top`); heat enters from the
 > top. The Arrhenius parameters are the
-> pre-exponential `A_i` [s⁻¹] (or [m³·kg⁻¹·s⁻¹] for higher-order reactions), the
+> pre-exponential `A_i` [s⁻¹], the
 > activation energy `E_i` [J·mol⁻¹], and the heat of reaction `h` [J·kg⁻¹] with
 > the **`h > 0` endothermic** storage convention (Technical Reference §2 and §6).
 > Component cell masses are the integrated species states; mass concentrations
@@ -10376,6 +10464,8 @@ a combination it does not implement:
 | `a lateral shrinkage law needs planar coordinates`; `in-depth radiation needs planar coordinates` | a `Cylindrical()` or `Spherical()` mesh with a lateral law or `BEER_LAMBERT` | a planar mesh, or `SURFACE_ABSORPTION` |
 | `the lateral shrinkage law must be positive and finite on [-0.001, 1.001]`; `… must equal one at zero conversion` | a law that vanishes or is not one at `χ̄ = 0` | a law such as `χ̄ -> 1 - 0.3χ̄` |
 | `a correction moves the mesh relative to the solid, which needs use_ale = true` | a `correction` other than `NoCorrection()` on a fixed mesh | `use_ale = true` |
+| `reaction :r has an order other than one, read on one conversion per cell, … solve without deactivation` | `deactivation = true` with a reaction of order other than one | leave deactivation off (§4.14) |
+| `reaction :r has an order other than one, whose cells must keep their material, … give no correction` | a `correction` with a reaction of order other than one | give no correction (§4.14) |
 | `a prescribed mesh velocity needs use_ale = true`, and its siblings | `w_override` on a fixed mesh, on a reacting material, with `deactivation`, or with a `correction` | `w_override` is a verification hook (§16.7) |
 | `the cells beside node(s) … start with different condensed components: give the layer interfaces as lagrangian nodes …` | an explicit `lagrangian` list that omits a layer interface under the equidistribution correction | leave `lagrangian` at its default, which lists the interfaces, or add them |
 | `the mass conditions name the tag :x, which the mesh does not have` | a mass condition keyed by a tag the mesh lacks | key the conditions by the mesh's tags |
@@ -10670,11 +10760,13 @@ test rejects anything below that. Small negative values of that order in
 `sol.m` or `sol.ξ` are expected, not an error.
 
 - **The depletion limiter.** Each reactant's rate factor is exactly zero at and
-  below zero concentration and C¹ through it, for every reaction order:
-  `DepletionLimiter(; threshold = 1.0, join = 1.0, base_scale = 1e-8, enabled = true)`,
-  the `threshold` [kg·m⁻³] the concentration scale of the roll-off. With
+  below zero mass and C¹ through it, for every reaction order:
+  `DepletionLimiter(; threshold = 1.0, join = 1.0, base_scale = 1e-8, enabled = true,
+  conversion_threshold = 1e-3, conversion_base = 1e-8)`, the `threshold` [kg·m⁻³]
+  the concentration scale of the roll-off at first order and the
+  `conversion_threshold` its conversion scale at any other order. With
   `enabled = false` the factor is one, an absent reactant reacts at the rate of
-  a `base_scale` concentration, and the admissibility check is the only guard
+  a base-scale concentration, and the admissibility check is the only guard
   (§4.10; Technical Reference §6.3).
 - **Upwind advection.** The lumped gas transport advective gas flux is first-order upwind
   of the intrinsic gas density `ξ/φ`, stable and diffusive (Technical Reference
@@ -11164,17 +11256,18 @@ Reaction(name, reactant::Symbol => product::Symbol; A, E, h, n = 1.0, …)
 # two products
 Reaction(name, reactant::Int => (p1::Int, p2::Int);
          A, E, h, yields, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
-         validate_mass = true)
+         validate_mass = true, basis = NaN)
 Reaction(name, reactant::Symbol => (p1::Symbol, p2::Symbol); A, E, h, yields, n = 1.0, …)
 ```
 
 | Keyword | Meaning (symbol) | Units | Default |
 |---|---|---|---|
-| `A` | pre-exponential factor `A_i` | s⁻¹ (first order) | required |
+| `A` | pre-exponential factor `A_i` | s⁻¹ | required |
 | `E` | activation energy `E_i` | J·mol⁻¹ | required |
 | `h` | heat of reaction, **`h > 0` endothermic**; number, `(a, b)` tuple (`a + b·T`) or property object | J per kg of reactant | required |
 | `yields` | mass yields `(y1, y2)` of the two products | – | required (two products) |
-| `n` | reaction order, `n ≥ 0` | – | `1.0` |
+| `n` | reaction order, `n ≥ 0`, on the conversion when not 1 | – | `1.0` |
+| `basis` | the reference as a fraction of the initial condensed mass, in `(0, 1]`, refused at `n = 1`; `NaN` for the lineage rules | – | `NaN` |
 | `T_min`, `T_max` | smooth lower and upper temperature gates | K | `0.0`, `Inf` |
 | `gate_width` | width of the tanh gates, positive | K | `1.0` |
 | `validate_mass` | require the yields to sum to one | – | `true` |
@@ -11286,17 +11379,20 @@ pmma = Material(
 ```
 
 ```julia
-DepletionLimiter(; threshold = 1.0, join = 1.0, base_scale = 1e-8, enabled = true)
+DepletionLimiter(; threshold = 1.0, join = 1.0, base_scale = 1e-8, enabled = true,
+                 conversion_threshold = 1e-3, conversion_base = 1e-8)
 ```
 
 The depletion limiter multiplies each reactant's rate by a factor that is
-exactly zero at and below zero concentration and rises to one above
-`threshold` [kg·m⁻³]: a cubic onset from zero up to `join · threshold`, joined
-with value and slope to `tanh(ξ/threshold)` above. The rate is `C¹` through zero
-for every reaction order, so an absent or negative trial concentration is never
-consumed. The order's power is taken of `base_scale · softplus(ξ/base_scale)`,
-which equals `ξ` to within `base_scale` [kg·m⁻³]. `threshold`, `join` and
-`base_scale` must be positive. With `enabled = false` the factor is one and
+exactly zero at and below zero mass and rises to one above its threshold,
+`threshold` [kg·m⁻³] on the concentration at first order and the dimensionless
+`conversion_threshold` on the conversion at any other order: a cubic onset from
+zero up to `join` times the threshold, joined with value and slope to `tanh`
+above. The rate is `C¹` through zero for every reaction order, so an absent or
+negative trial mass is never consumed. The order's power is taken of a softplus
+that equals its argument to within `base_scale` [kg·m⁻³] or `conversion_base`.
+`threshold`, `join`, `base_scale`, `conversion_threshold` and `conversion_base` must
+be positive. With `enabled = false` the factor is one and
 only the finite power base remains, so a zero-order reaction then runs at its
 full rate at any concentration (Chapter 4, §4.10; Technical Reference §6).
 
