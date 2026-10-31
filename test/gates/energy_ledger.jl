@@ -67,7 +67,7 @@ const N_CELLS = 80
 const T_WINDOW = 120.0
 const TOL = (abstol = 1e-8, reltol = 1e-6)
 const REFINEMENT_CELLS = 20
-const STEPS = (2.0, 1.0, 0.5)
+const STEPS = (1.0, 0.5, 0.25)
 const VBO04_CELLS = 40
 const VBO04_WINDOW = 290.0
 const VBO04_TOL = (abstol = 1e-9, reltol = 1e-7)
@@ -289,9 +289,15 @@ function ledger_defect(cp, dt, t_end)
         adaptive = false,
         dt,
     )
+    # A fixed step can run away and still return success.
+    sol.t[end] == t_end && all(v -> all(isfinite, v), sol.u) ||
+        error("the fixed-step solve at dt = $dt ran away")
     H0 = total_enthalpy(def, ws, cp.u0)
     defect = maximum(abs(total_enthalpy(def, ws, v[1:n]) - H0 - v[n+1]) for v in sol.u)
-    return sol.retcode, defect, maximum(abs(v[n+1]) for v in sol.u)
+    scale = maximum(abs(v[n+1]) for v in sol.u)
+    defect <= 1e-6 * scale ||
+        error("the ledger at dt = $dt misses by $defect J on a scale of $scale J")
+    return sol.retcode, defect, scale
 end
 
 load_start = Sys.loadavg()

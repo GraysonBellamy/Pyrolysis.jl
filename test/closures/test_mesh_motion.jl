@@ -335,7 +335,7 @@ end
     mat = Material(
         name = :m,
         components = (a, g),
-        reactions = (),
+        reactions = (Reaction(:r, 1 => 2; A = 1.0, E = 0.0, h = 0.0),),
         lateral_shrinkage_law = law,
     )
     lat = LateralShrinkage(mat, 2.0, 3.0)
