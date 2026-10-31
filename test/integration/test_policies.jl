@@ -69,6 +69,30 @@ function _slab(n; κ = 0.0, radiating = false)
     )
 end
 
+# A domain rejection reaches FBDF between two accepted steps: the history it
+# keeps there must survive for the next proposal, which the floor on
+# OrdinaryDiffEqBDF guarantees.
+@testset "FBDF continues after a single domain rejection" begin
+    function f!(du, u, p, t)
+        du[1] = -50.0 * (u[1] - cos(t))
+        du[2] = -0.5 * (u[2] - sin(t)) + 0.1 * u[1]
+        return nothing
+    end
+    ode = ODEProblem(f!, [1.0, 0.0], (0.0, 20.0))
+    fired = Ref(false)
+    reject_once = (u, p, t) -> !fired[] && t > 5.0 ? (fired[] = true) : false
+    sol = OrdinaryDiffEq.solve(
+        ode,
+        fbdf_policy(LinearSolve.LUFactorization()).alg;
+        isoutofdomain = reject_once,
+        reltol = 1e-6,
+        abstol = 1e-8,
+    )
+    @test fired[]
+    @test OrdinaryDiffEq.SciMLBase.successful_retcode(sol)
+    @test sol.t[end] == 20.0
+end
+
 @testset "a policy names a known restart and flag rule" begin
     alg = OrdinaryDiffEq.Rodas5P()
     @test IntegratorPolicy(alg, :forced_dt, :keep, 1e-6).restart === :forced_dt
