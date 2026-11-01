@@ -357,7 +357,13 @@ dies only where the onset acts, so a cell should leave once its conversion is a
 decade inside it. It applies with deactivation only; a deck without it keeps
 $10^{-2}$, which scales its mass tolerances. Above order one the cells decay
 algebraically and at this default may never reach it: V-BO-10c's column reaches its
-thickness floor with no event, and at $\varepsilon_m=10^{-2}$ with 37. Three
+thickness floor with no event, and at $\varepsilon_m=10^{-2}$ with 37. The default is a
+numerical choice, not a physical one: a fitted rate law says nothing about the last
+fraction of a percent of a reactant, and any $\varepsilon_m \le 10^{-2}$ keeps the mass a
+merge moves below one percent of a cell (§14.3.3). A cell that persists at an order
+above one carries the fitted law's own tail: the bare law needs $kt = 10^{4}$ to bring
+$x$ to $10^{-4}$ at $n = 2$, about a day at a PMMA surface, and removing the cell
+earlier is a choice the threshold makes, not one the law makes. Three
 properties of these criteria are deliberate.
 
 - **Mass, not thickness.** Masses are the states, the criterion reads them
@@ -482,7 +488,9 @@ inventory.
 conversion-history pair (the cumulative dry gas it produced and its initial dry
 solid mass, §10). Both are extensive and are summed into the receiver; the dead
 cells' pairs are zeroed. The column's conversion, the ratio of the two sums, is
-unchanged by the event, and so is the cross section.
+unchanged by the event, and so is the cross section. This column conversion is a
+different quantity from the reactant conversion of §6.4: the pair is summed into the
+receiver, the lineage reference is not (below).
 
 **Volume and the pore rule (moving mesh).** The receiver encloses the dead
 cells' volume. Inward, its far node moves out to the position that bounds the merged
@@ -526,7 +534,14 @@ R_1F(x_1)+R_2F(x_2)$. The update
 goes to the initial reference table of the receiver's cell and to the event
 (`reference_updates`), so a replay reproduces it and a reset removes it. Any other
 receiver keeps its reference: the dead cell's leaves with it, and the tail burns at
-the receiver's conversion.
+the receiver's conversion. The extensive rule, under which the receiver's reference
+would grow by the dead cells' and its conversion become the mass-weighted mean, is
+not used. The tail therefore burns at the receiver's specific rate
+$k\,n\,x_r^{\,n-1}$ instead of its own $k\,x_d^{\,n-1}$, a ratio that is large in either
+direction but acts on a mass of at most $\varepsilon_m$ of a cell's reference, so the
+receiver's rate changes by at most $n\,\varepsilon_m$ of itself: $10^{-4}$ at the default,
+one percent at $\varepsilon_m = 10^{-2}$. The rule is admissible because
+$\varepsilon_m \ll 1$; a threshold above a few percent would need the extensive rule.
 
 **Conservation.** Mass is conserved to round-off with the vented mass, and
 sensible enthalpy with the vented enthalpy and the regularization; the tests

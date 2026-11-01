@@ -488,7 +488,7 @@ The physics below is absent from the model. It is ordered by its expected effect
 **Relevant to near-term applications**
 
 3. **Oxidative pyrolysis and char oxidation with O₂ ingress** (about 32.8 MJ per kg of carbon). It dominates at sub-critical fluxes, after flameout, and in smoldering, and it controls the late-time MLR tail and the residue mass of the Douglas-fir case. It needs multi-reactant kinetics (item 2) and an explicit reservoir composition supplied by `GasReservoir`. The upwind Darcy outflow suppresses ingress at high MLR.
-4. **Equilibrium (pressure-dependent) moisture evaporation and recondensation.** Drying is a pressure-independent Arrhenius reaction; no saturation pressure $P_{\text{sat}}(T)$ appears anywhere. Vapor recondensation ahead of the drying front (which raises the local moisture content by 30–50 %) is absent, and at the 1.5–2 atm pore pressure of pressure-treated wood the boiling point shifts to 112–121 °C, which Arrhenius drying cannot represent. It needs item 2 and a smooth $r \propto (P_v - P_{\text{sat}}(T))$ closure; the pressure is evaluated for all gas-bearing materials.
+4. **Equilibrium (pressure-dependent) moisture evaporation and recondensation.** Drying is a pressure-independent Arrhenius reaction; no saturation pressure $P_{\text{sat}}(T)$ appears anywhere. Vapor recondensation ahead of the drying front (which raises the local moisture content by 30–50 %) is absent, and at the 1.5–2 atm pore pressure of pressure-treated wood the boiling point shifts to 112–121 °C, which Arrhenius drying cannot represent. An Arrhenius drying step is also only admissible while its rate at ambient temperature is negligible over the test; the wood examples' parameters are not (§6.10 item 11). It needs item 2 and a smooth $r \propto (P_v - P_{\text{sat}}(T))$ closure; the pressure is evaluated for all gas-bearing materials.
 5. **Backing layer and contact resistance at the back face.** There is no contact-resistance or substrate model. An adiabatic back face over-predicts late-time back-half temperatures (the missing loss is about 0.7–3 kW·m⁻² for 25 mm of wood over 10–20 min); a lumped Robin condition on the bottom face (radiative + convective, as in example `06_cone_calorimeter.jl`) is the available approximation. A contact conductance plus a semi-infinite-substrate $h(t)$ would close the gap.
 6. **Kinetics expressiveness.** A $T^n$ pre-factor and DAEM-style stacking are absent. Any real order $n \ge 0$ acts on the conversion of the reactant against its lineage inventory, on fixed and moving meshes alike (§6.4); a lineage fed through the gas is refused, and a lineage whose reference would depend on the rates needs an explicit `basis` (§6.5.5).
 7. **Transport-closure accuracy** (item 5 above). The gas viscosity is a material curve without composition-dependent mixing. Binary diffusivity and pore geometry must be supplied for the dusty-gas model. Both closures exclude thermal diffusion and gravity; donor advection is first order. A matrix endpoint supplies finite porous resistance, not a free-flow momentum model (§9).
@@ -4314,11 +4314,12 @@ colored Jacobian (§15) propagate cleanly through it.
 
 ### 6.2.1 Why hard steps are unacceptable
 
-The temperature window $[T_{\min,i}, T_{\max,i}]$ serves two purposes (following
-ThermaKin's original motivation): it spares the solver from evaluating a reaction
-where it is kinetically negligible, and it lets a reaction be used to represent a
-thermodynamically-controlled phase transition that is sharply switched on at a
-threshold. The textbook expression of this is the product of two Heaviside steps,
+The temperature window $[T_{\min,i}, T_{\max,i}]$ lets a reaction represent a
+thermodynamically controlled phase transition that is switched on sharply at a
+threshold, as the Stefan verification case does (§6.2.3). It is not needed to spare
+the solver work: outside the window of a decomposition step the Arrhenius factor is
+already negligible, the default gates are off at no cost, and the example decks run
+ungated. The textbook expression of a window is the product of two Heaviside steps,
 $H(T - T_{\min,i})\,H(T_{\max,i} - T)$, equal to 1 inside the window and 0 outside.
 
 A hard step is, however, **non-differentiable** at the threshold and has a zero
@@ -4916,8 +4917,10 @@ A product listed with yield zero is not an edge.
    condensed mass (exactly zero in a cell that starts empty), the coefficient is
    $c_{a,i} = \sum_v Y_{v,i}\,\Phi_a(v)$ and the reference $c_{a,i}M_{0,i}$. A cell
    that holds the reactant and also an ancestor it can be formed from is refused
-   unless `basis` is given: no fitting convention covers a node both present and
-   formed.
+   unless `basis` is given. The maximum the reactant could ever reach there, the mass
+   present plus what the ancestors can yield, is well defined, but no fitting software
+   is known to normalise a node both present and formed that way, so the reference is
+   left to `basis` rather than assumed.
 5. *`basis`.* A reaction with `basis` $= b$ has $c_{r,i} = b$ on the cells holding an
    ancestor of its reactant and zero elsewhere, with no cycle or channel check.
    `basis` is a fraction of the material point's initial condensed mass.
@@ -4947,6 +4950,11 @@ which reproduces the bare and the limited law; the alternative
 $A \leftarrow A\,c_a^{\,n-1}$ reproduces the bare law only. A fit on wet mass of a
 dry-lineage reactant takes `basis = 1.0`. A Gpyro single step carries $A$ over; a
 Gpyro series scheme with $n \ne 1$ on an intermediate differs by convention (§6.9.2).
+An order other than one on an intermediate is a fitting convention in every one of
+these codes, not a mechanism: the fraction reacted of a material that is generated and
+consumed at the same time has no single value, which is why the ICTAC multi-step
+recommendations reserve the pseudo-order form for initial reactants. Such parameters
+are valid only with the normalisation of the software that produced them.
 
 > **Implementation note.** Graph rules: `lineage_graph`, `LineageGraph`,
 > src/Materials/materials.jl. Per-cell rules: `lineage_references`,
@@ -5444,6 +5452,40 @@ intumescent solids, moisture). Its boundaries, with the source-of-truth guards:
    reference, no extra state, and no refusal, and transfers between codes without a
    normalisation convention. Where a fit allows it, more first-order steps are the
    better choice over a smaller number of steps of other orders.
+
+9. **Yields are those of the fit.** The mass yields are constants (§6.5.3), so a char
+   yield measured at thermogravimetric heating rates is applied at the surface of a
+   cone sample, where the material heats a decade faster. Wood char yields fall with
+   heating rate and final temperature, 20–35 % at TGA rates against 10–15 % in fast
+   pyrolysis, while secondary charring of volatiles retained in a thick sample raises
+   them; the net uncertainty on a TGA-calibrated residue at cone scale is of the order
+   of ±5 % of initial mass, above the repeatability of residue measurements. Only a
+   competitive scheme can make the yield depend on conditions, at the cost of two more
+   kinetic pairs per component; the yields should be read as valid at the conditions
+   of the fit.
+
+10. **The triplet is extrapolated.** Kinetic parameters fitted at TGA heating rates,
+   where the steps peak at 600–750 K, are applied at cone surface temperatures up to
+   900 K and at heating rates of 1–10 K s⁻¹. The rate's sensitivity to temperature is
+   $\partial \ln r/\partial T = E/R_gT^2 = 0.03$–$0.05$ K⁻¹ for $E$ = 150–200 kJ mol⁻¹
+   at 650–750 K, so a 10 K error in the temperature a cell is fed changes its rate by
+   30–50 %: within the decomposition window the kinetics are only as good as the
+   temperature.
+
+11. **Evaporation has no equilibrium limit.** A liquid modelled as a reactant
+   evaporates one way at $k(T)\,\xi_w$ whatever the vapour partial pressure (§1.8.1
+   item 4). The step is admissible only while $k(T_{\rm ambient})\,t_{\rm test} \ll 1$ and
+   the pore pressure stays near the one at which its onset was placed ($T_{\rm sat}$ is
+   384 K at 1.5 bar and 393 K at 2 bar). The wood examples do not meet the first
+   condition: their parameters give $k(300\ {\rm K})\,t = 0.35$ (`examples/07`) and
+   $0.25$ (`examples/08`) over a 600 s test, so the cold interior dries before it
+   reaches 330 K. Measured on `examples/07` against the same deck with the water step
+   gated at 373 K, the back-face temperature differs by up to 20 K during the heating
+   phase, while the mass loss rate and the surface temperature move by less than 1 %
+   and 4 K. A parameter set with a negligible ambient rate and an onset near
+   $T_{\rm sat}$ removes two thirds of the difference; the factor
+   $\max(0, 1 - p_v/p_{\rm sat}(T))$ on the water step would remove the rest and hold at
+   any pore pressure without a new material parameter.
 
 These limitations are consistent across the kinetics and materials chapters; where a richer model is required (bimolecular oxidation, oxygen-sensitive
 char burnout, DAEM), the present architecture's chief virtue is that the
@@ -12486,7 +12528,13 @@ dies only where the onset acts, so a cell should leave once its conversion is a
 decade inside it. It applies with deactivation only; a deck without it keeps
 $10^{-2}$, which scales its mass tolerances. Above order one the cells decay
 algebraically and at this default may never reach it: V-BO-10c's column reaches its
-thickness floor with no event, and at $\varepsilon_m=10^{-2}$ with 37. Three
+thickness floor with no event, and at $\varepsilon_m=10^{-2}$ with 37. The default is a
+numerical choice, not a physical one: a fitted rate law says nothing about the last
+fraction of a percent of a reactant, and any $\varepsilon_m \le 10^{-2}$ keeps the mass a
+merge moves below one percent of a cell (§14.3.3). A cell that persists at an order
+above one carries the fitted law's own tail: the bare law needs $kt = 10^{4}$ to bring
+$x$ to $10^{-4}$ at $n = 2$, about a day at a PMMA surface, and removing the cell
+earlier is a choice the threshold makes, not one the law makes. Three
 properties of these criteria are deliberate.
 
 - **Mass, not thickness.** Masses are the states, the criterion reads them
@@ -12611,7 +12659,9 @@ inventory.
 conversion-history pair (the cumulative dry gas it produced and its initial dry
 solid mass, §10). Both are extensive and are summed into the receiver; the dead
 cells' pairs are zeroed. The column's conversion, the ratio of the two sums, is
-unchanged by the event, and so is the cross section.
+unchanged by the event, and so is the cross section. This column conversion is a
+different quantity from the reactant conversion of §6.4: the pair is summed into the
+receiver, the lineage reference is not (below).
 
 **Volume and the pore rule (moving mesh).** The receiver encloses the dead
 cells' volume. Inward, its far node moves out to the position that bounds the merged
@@ -12655,7 +12705,14 @@ R_1F(x_1)+R_2F(x_2)$. The update
 goes to the initial reference table of the receiver's cell and to the event
 (`reference_updates`), so a replay reproduces it and a reset removes it. Any other
 receiver keeps its reference: the dead cell's leaves with it, and the tail burns at
-the receiver's conversion.
+the receiver's conversion. The extensive rule, under which the receiver's reference
+would grow by the dead cells' and its conversion become the mass-weighted mean, is
+not used. The tail therefore burns at the receiver's specific rate
+$k\,n\,x_r^{\,n-1}$ instead of its own $k\,x_d^{\,n-1}$, a ratio that is large in either
+direction but acts on a mass of at most $\varepsilon_m$ of a cell's reference, so the
+receiver's rate changes by at most $n\,\varepsilon_m$ of itself: $10^{-4}$ at the default,
+one percent at $\varepsilon_m = 10^{-2}$. The rule is admissible because
+$\varepsilon_m \ll 1$; a threshold above a few percent would need the extensive rule.
 
 **Conservation.** Mass is conserved to round-off with the vented mass, and
 sensible enthalpy with the vented enthalpy and the regularization; the tests

@@ -167,11 +167,12 @@ colored Jacobian (§15) propagate cleanly through it.
 
 ### 6.2.1 Why hard steps are unacceptable
 
-The temperature window $[T_{\min,i}, T_{\max,i}]$ serves two purposes (following
-ThermaKin's original motivation): it spares the solver from evaluating a reaction
-where it is kinetically negligible, and it lets a reaction be used to represent a
-thermodynamically-controlled phase transition that is sharply switched on at a
-threshold. The textbook expression of this is the product of two Heaviside steps,
+The temperature window $[T_{\min,i}, T_{\max,i}]$ lets a reaction represent a
+thermodynamically controlled phase transition that is switched on sharply at a
+threshold, as the Stefan verification case does (§6.2.3). It is not needed to spare
+the solver work: outside the window of a decomposition step the Arrhenius factor is
+already negligible, the default gates are off at no cost, and the example decks run
+ungated. The textbook expression of a window is the product of two Heaviside steps,
 $H(T - T_{\min,i})\,H(T_{\max,i} - T)$, equal to 1 inside the window and 0 outside.
 
 A hard step is, however, **non-differentiable** at the threshold and has a zero
@@ -769,8 +770,10 @@ A product listed with yield zero is not an edge.
    condensed mass (exactly zero in a cell that starts empty), the coefficient is
    $c_{a,i} = \sum_v Y_{v,i}\,\Phi_a(v)$ and the reference $c_{a,i}M_{0,i}$. A cell
    that holds the reactant and also an ancestor it can be formed from is refused
-   unless `basis` is given: no fitting convention covers a node both present and
-   formed.
+   unless `basis` is given. The maximum the reactant could ever reach there, the mass
+   present plus what the ancestors can yield, is well defined, but no fitting software
+   is known to normalise a node both present and formed that way, so the reference is
+   left to `basis` rather than assumed.
 5. *`basis`.* A reaction with `basis` $= b$ has $c_{r,i} = b$ on the cells holding an
    ancestor of its reactant and zero elsewhere, with no cycle or channel check.
    `basis` is a fraction of the material point's initial condensed mass.
@@ -800,6 +803,11 @@ which reproduces the bare and the limited law; the alternative
 $A \leftarrow A\,c_a^{\,n-1}$ reproduces the bare law only. A fit on wet mass of a
 dry-lineage reactant takes `basis = 1.0`. A Gpyro single step carries $A$ over; a
 Gpyro series scheme with $n \ne 1$ on an intermediate differs by convention (§6.9.2).
+An order other than one on an intermediate is a fitting convention in every one of
+these codes, not a mechanism: the fraction reacted of a material that is generated and
+consumed at the same time has no single value, which is why the ICTAC multi-step
+recommendations reserve the pseudo-order form for initial reactants. Such parameters
+are valid only with the normalisation of the software that produced them.
 
 > **Implementation note.** Graph rules: `lineage_graph`, `LineageGraph`,
 > src/Materials/materials.jl. Per-cell rules: `lineage_references`,
@@ -1297,6 +1305,40 @@ intumescent solids, moisture). Its boundaries, with the source-of-truth guards:
    reference, no extra state, and no refusal, and transfers between codes without a
    normalisation convention. Where a fit allows it, more first-order steps are the
    better choice over a smaller number of steps of other orders.
+
+9. **Yields are those of the fit.** The mass yields are constants (§6.5.3), so a char
+   yield measured at thermogravimetric heating rates is applied at the surface of a
+   cone sample, where the material heats a decade faster. Wood char yields fall with
+   heating rate and final temperature, 20–35 % at TGA rates against 10–15 % in fast
+   pyrolysis, while secondary charring of volatiles retained in a thick sample raises
+   them; the net uncertainty on a TGA-calibrated residue at cone scale is of the order
+   of ±5 % of initial mass, above the repeatability of residue measurements. Only a
+   competitive scheme can make the yield depend on conditions, at the cost of two more
+   kinetic pairs per component; the yields should be read as valid at the conditions
+   of the fit.
+
+10. **The triplet is extrapolated.** Kinetic parameters fitted at TGA heating rates,
+   where the steps peak at 600–750 K, are applied at cone surface temperatures up to
+   900 K and at heating rates of 1–10 K s⁻¹. The rate's sensitivity to temperature is
+   $\partial \ln r/\partial T = E/R_gT^2 = 0.03$–$0.05$ K⁻¹ for $E$ = 150–200 kJ mol⁻¹
+   at 650–750 K, so a 10 K error in the temperature a cell is fed changes its rate by
+   30–50 %: within the decomposition window the kinetics are only as good as the
+   temperature.
+
+11. **Evaporation has no equilibrium limit.** A liquid modelled as a reactant
+   evaporates one way at $k(T)\,\xi_w$ whatever the vapour partial pressure (§1.8.1
+   item 4). The step is admissible only while $k(T_{\rm ambient})\,t_{\rm test} \ll 1$ and
+   the pore pressure stays near the one at which its onset was placed ($T_{\rm sat}$ is
+   384 K at 1.5 bar and 393 K at 2 bar). The wood examples do not meet the first
+   condition: their parameters give $k(300\ {\rm K})\,t = 0.35$ (`examples/07`) and
+   $0.25$ (`examples/08`) over a 600 s test, so the cold interior dries before it
+   reaches 330 K. Measured on `examples/07` against the same deck with the water step
+   gated at 373 K, the back-face temperature differs by up to 20 K during the heating
+   phase, while the mass loss rate and the surface temperature move by less than 1 %
+   and 4 K. A parameter set with a negligible ambient rate and an onset near
+   $T_{\rm sat}$ removes two thirds of the difference; the factor
+   $\max(0, 1 - p_v/p_{\rm sat}(T))$ on the water step would remove the rest and hold at
+   any pore pressure without a new material parameter.
 
 These limitations are consistent across the kinetics and materials chapters; where a richer model is required (bimolecular oxidation, oxygen-sensitive
 char burnout, DAEM), the present architecture's chief virtue is that the
