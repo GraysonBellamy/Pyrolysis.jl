@@ -105,7 +105,7 @@ The organizing principle of Pyrolysis.jl is a **single generalized model with op
 | Radiation | `radiation_model` | under `BEER_LAMBERT` the face intensities (algebraic) and `BeerLambertKernel`; otherwise the incident flux enters the surface energy balance (§8) |
 | Gas transport | material model and mass conditions | `LumpedTransfer` or `DustyGas`; sealed gas retains its pore EOS |
 | Cross section | the material's `lateral_shrinkage_law` | the conversion-history pair per cell and the global rows of $A$ and $\theta_A$ (`LateralShrinkage`, §10); needs `use_ale = true` |
-| Burnout | `deactivation`, `threshold`, `band` | `CellDeactivation`: an event that removes cells whose condensed mass falls below the threshold (§14) |
+| Burnout | `deactivation`, `threshold`, `band` | `CellDeactivation`: an event that removes cells whose condensed mass, or at an order other than one whose reactive inventory, falls below the threshold (§14) |
 
 The kernels run in a fixed order, each present only when its physics is: `ReactionKernel`, `GasTransportKernel`, `BeerLambertKernel`, `ConductionKernel`, `ThermalBoundaryKernel`, `RelativeFluxKernel` (`_kernels`, `src/Integration/setup.jl`). The order matters where one kernel reads another's output: the surface energy balance of the thermal boundary kernel reads the outward gas fluxes of the gas transport for its blowing models and for the enthalpy those fluxes carry (§7.6, §15.3).
 
@@ -750,7 +750,7 @@ Conventions:
 | $\delta_{\text{mov}}$, $\delta_{\text{BL}}$, $\delta_{\chi}$ | Configuration flags of the state layout: one on a moving mesh / under Beer–Lambert radiation / under a lateral-shrinkage law, zero otherwise (§3.1.2, §15.1.1) | – |
 | $\varepsilon$, $\varepsilon_j$ | Emissivity (of component *j*) | – |
 | $\varepsilon_{\text{eff}}$ | Effective (composition-weighted) emissivity | – |
-| $\varepsilon_m$ | Deactivation threshold: fraction of a cell's reference condensed mass below which it deactivates (`threshold`, default 1e-2; overload E1) | – |
+| $\varepsilon_m$ | Deactivation threshold: fraction of a cell's reference below which it deactivates (`threshold`, default 1e-2, at an order other than one a tenth of the limiter's `conversion_threshold`; overload E1) | – |
 | $\varepsilon_{\text{band}}$ | Near-threshold band of deactivation, $\varepsilon_m \le \varepsilon_{\text{band}} < 1$ (`band`) | – |
 | $\varepsilon_{AB}$ | Lennard-Jones well depth (collision integral) | J |
 | $\epsilon_{\xi}$, $\epsilon_T$, $\epsilon_G$ | Slope scales of the van Albada reconstruction for the concentrations, the temperature and the history values: the square of a tolerance over the upwind cell's reference thickness (§11.6.2; overload E1) | (field units)²·m⁻² |
@@ -4729,8 +4729,7 @@ it reads the reference, and requires a finite positive `ξ_ref` otherwise.
 
 **The reference.** $M_{\mathrm{ref},r,i}$ is computed at `setup` for every reaction of
 order other than one (§6.5.5) and stays a constant of the cell: at such an order the
-cells keep their material, since `setup` refuses deactivation and any correction
-(§6.10). The reference concentration is $\xi_{\mathrm{ref},r,i} = M_{\mathrm{ref},r,i}/V_i$.
+cells keep their material, since `setup` refuses any correction (§6.10). The reference concentration is $\xi_{\mathrm{ref},r,i} = M_{\mathrm{ref},r,i}/V_i$.
 The reference adds no row to the state and no entry to the Jacobian's pattern.
 
 > **Implementation note.** Detection: `needs_lineage`, src/Materials/materials.jl.
@@ -5411,20 +5410,30 @@ intumescent solids, moisture). Its boundaries, with the source-of-truth guards:
 6. **One conversion per cell.** The rate at an order other than one reads one
    conversion per cell, so a cell must hold one material: one conversion cannot
    reproduce the sum of the rates of material at different conversions, and a heated
-   column holds a range of them. At such an order `setup` therefore refuses
-   deactivation, which merges cells, and any correction, which moves material between
-   them. Measured on `examples/06` at 72 cells against the same deck with neither,
-   allowing both moves the mass-loss rate by a factor of up to 5.8 at $n = 0.5$, and the
-   correction alone, before any merge, by 2.2 % of the peak at $n = 0.5$, 8.8 % at
-   $n = 0.25$ and 32 % at $n = 0$. These compare two discretisations, and the $n = 0$
-   curve itself moves by 12 % of the peak from 72 to 144 cells, so that last figure is
-   an indication only. No test at a merge can bound what follows it: below order one a
-   relative difference $d$ grows as $\mathrm{d}\ln(|d|/x)/\mathrm{d}t = k(1-n)x^{n-1}$.
-   With the cells on their material a heated deck runs to the end of the span wherever
-   a residue keeps the cells from emptying, and above order one without a residue,
-   since the conversion falls without reaching zero. Below order one with no residue a
-   cell empties in finite time and the solve stalls at the first one; a small residue
-   avoids this (0.2 % on the decks measured).
+   column holds a range of them. At such an order `setup` therefore refuses any
+   correction, which moves material between cells. Measured on `examples/06` at 72
+   cells against the same deck without one, the correction alone moves the mass-loss
+   rate by 2.2 % of the peak at $n = 0.5$, 8.8 % at $n = 0.25$ and 32 % at $n = 0$.
+   No test at a merge can bound what follows a merge of live material: below order one
+   a relative difference $d$ grows as
+   $\mathrm{d}\ln(|d|/x)/\mathrm{d}t = k(1-n)x^{n-1}$. Deactivation is allowed, on a
+   line, for a cell that vanishes: the threshold reads the reactive inventory
+   (§14.3.2), the dead cell's reference leaves with it, and the tail burns at the
+   receiver's conversion. A cell that would keep 1 % or more of its volume stays. The
+   threshold alone bounds neither what the transfer does to the rate nor what it does
+   to the column: at a receiver near the limiter's onset the net change of the rate is
+   several times the dead cell's own (3.2 × at $n=0$, 7.4 × at $n=0.5$, at conversions
+   $9.9\times10^{-5}$ and $2\times10^{-4}$), so accuracy here is a measurement on
+   each deck. On the exact solution of V-BO-09 the rate
+   error falls as $\varepsilon^n$ and as $1/N$, to $4.4\times10^{-4}$ of the peak at
+   $n = 0.5$, 40 cells and $\varepsilon_m = 10^{-4}$. On `examples/06` at the default
+   threshold, against the same deck without deactivation, $n = 0.5$ lands within 0.06 %
+   of the peak at 72 cells and 0.03 % at 144, 0.01 % integrated at both. At $n = 0$ the
+   mass-loss rate is a staircase of single-cell burnouts: the deck's steps lead its
+   reference by up to 2 s, 15 % of the peak pointwise, 1.0 % integrated, with the mass
+   curve $3\times10^{-4}$ of the initial mass away. That is inside what the mesh costs:
+   4.3 % integrated and $6.9\times10^{-4}$ between 72 and 144 cells without
+   deactivation (V-BO-12a, `burnout_order_zero.jl`).
 
 7. **Networks with no fixed lineage.** A lineage fed through the gas phase, a
    solve with external mass sources, gas reactants at orders other than one and
@@ -6765,8 +6774,8 @@ The assembler writes `r_intensity[f]` into the intensity row of face $f$
   differ, so a transparent cell would absorb $I\,(A_{\text{up}}-A_{\text{down}})$.
   `setup` refuses `BEER_LAMBERT` off planar coordinates
   (`"in-depth radiation needs planar coordinates"`).
-- **Deactivation.** After cells are deactivated from the exposed side (§14), the
-  beam enters the first live cell of `order` through its upstream face
+- **Deactivation.** After cells are deactivated (§14), the beam enters the first
+  live cell of `order` through its upstream face
   (`exposed_face`), the exposed-face row moves there, and $a$ is that cell's
   absorptivity. The intensity rows of the faces upstream of it are masked with
   the dead cells (§14.3.1): they become identity rows, and their intensities are
@@ -9876,9 +9885,9 @@ is set to about 172 s at $t \approx 35$ s, and the 30 PMMA cells leave in two
 invocations, at $t \approx 91.9$ s and $96.6$ s, the solve then continuing on the
 board to the end of its time span (return code `:Success`). The explicit correction
 reproduces the default bit for bit. At `threshold = 3e-3` the layer leaves in one
-invocation. With `correction = NoCorrection()` a PMMA cell falls below the threshold
-inward of a live one at $t \approx 69$ s and the solve ends with outcome `:interior`
-(Chapter 14).
+invocation. With `correction = NoCorrection()` the 30 cells leave in 30 invocations,
+from $t \approx 58.7$ s to $96.8$ s, some from under live cells (Chapter 14), at 887
+accepted steps against the correction's 530.
 
 ### 11.7.8 The prescribed mesh velocity (`w_override`)
 
@@ -11012,9 +11021,9 @@ boundary-condition set that names a tag the mesh does not have.
 A patch is applied on the face that bounds the live cells on its side,
 `live_face(topology, active, f)`: $f$ while its owner is live; otherwise, walking
 inward across the block of dead cells, the first face whose owner is live; zero
-when no live cell remains on that side. After cells are deactivated from the
-exposed side, the `:top` condition therefore applies at the upper face of the
-outermost live cell, an interior face whose $+z$ normal points out of the live
+when no live cell remains on that side. After cells are deactivated, the dead
+slots are the outermost ones, so the `:top` condition applies at the upper face of
+the outermost live cell, an interior face whose $+z$ normal points out of the live
 region (§14.3.1).
 
 ### 13.1.3 What a cell-centered scheme means for accuracy
@@ -11407,8 +11416,7 @@ to the entering intensity minus the transmitted one
 (`test/kernels/test_radiation.jl`, "the beam's energy telescopes"). Each row reads
 one cell and its two faces, so the Jacobian stays banded where the eliminated
 recurrence would couple every cell to every cell above it. After cells are
-deactivated from the exposed side the beam enters the first live cell's upstream
-face, and the faces upstream of it carry identity rows. Under `BEER_LAMBERT` the
+deactivated the beam enters the first live cell's upstream face, and the faces upstream of it carry identity rows. Under `BEER_LAMBERT` the
 incident flux contributes nothing to the surface balance; the condition's other
 members (re-radiation, convection) stay at the surface. `setup` refuses in-depth
 radiation off planar coordinates, where the attenuated intensity and the face
@@ -11900,6 +11908,20 @@ $W=V-\sum_{condensed}m_j/\rho_{i,j}(T)$. Temperature, condensed masses,
 positions, cross section and caloric inversion therefore contribute to the
 pressure-error estimate. Each species shares the absolute budget, and the
 sum of absolute partial-pressure errors is controlled by the total budget.
+Neither budget lies below a floor set by the round-off of the pore volume: on a moving
+line the pore volume is a difference of node positions, known to
+$A_f\,\mathrm{eps}(z)$, so the budget of a cell is at least
+$16\,p\,A_f\,\mathrm{eps}(z)/W$ (`PORE_VOLUME_ROUNDOFF`). It is a floor on the budget,
+not a filter of the noise: it relaxes every direction of the error, gas masses
+included, and it depends on the cell's distance from the coordinate origin. Below it a
+tight budget stalls on a sub-micron cell at a low porosity: the ratio the error norm
+reads does not fall with the step and sits in the PI controller's unit-growth band, from
+0.17 up, so the step neither grows nor is rejected. Measured on `examples/06` at reltol
+$10^{-9}$ and a $10^{-4}$ Pa budget, on cells of 0.33 to 0.42 µm at porosity 0.01: accepted
+ratios 0.19 to 0.30, 1.1 to 2.2 times the $P\,\mathrm{eps}(z)/(\phi h)$ of round-off,
+50 000 steps at $1.7\times10^{-10}$ s without the floor. With it the largest ratio is
+0.137, so 16 clears the stall by a factor 1.3 on that deck; it is an empirical constant,
+and it acts only on such cells under such a budget.
 This is a local estimate; accumulated global error is qualified against
 tighter trajectories. No residual evaluation mutates solver tolerances.
 
@@ -12125,7 +12147,7 @@ Conventions used in this chapter (binding, from §2, Nomenclature):
 
 - The spatial coordinate is $z$ (axial, through-thickness). **$z=0$ is the
   bottom/substrate** (tag `:bottom`); **$z=L$ is the top/exposed surface** (tag
-  `:top`). Heat enters from the top and cells die from the top. On a line, cell
+  `:top`). Heat enters from the top. On a line, cell
   $i$ lies between nodes $i$ and $i+1$, which are also its faces; the pinned
   node of a moving mesh is node 1, the back face.
 - $i$ is a cell index, $j$ a component index, $n$ a node index. The receiver of
@@ -12174,18 +12196,23 @@ volume a concentration divides by is smoothly floored at $10^{-8}$ of the cell's
 initial volume, the heat-capacity sum at $C_{{\rm floor},i}=\rho c_{p,{\rm floor}}V_i(0)$ with
 `RHO_CP_FLOOR` $=\rho c_{p,{\rm floor}}=10^{3}$ J m⁻³ K⁻¹, and the masses enter the
 property laws through a one-sided positive part below the cell's mass
-tolerance. These guards keep a trial state evaluable; they are not physics,
-and a cell deactivates long before it reaches them.
+tolerance. These guards keep a trial state evaluable; they are not physics. At the
+default threshold of order one a cell deactivates before it reaches them. The default
+at an order other than one lies below the capacity floor's switch, so the last of such
+a cell runs on the floor (§14.10).
 
-**Deactivation** takes a cell out of the system once its condensed mass falls
-below the fraction $\varepsilon_m$ of its own initial condensed mass: its
-inventories go to the live cell inward of it, its rows become identity rows,
-and the boundary conditions move to the face of the outermost live cell. The
-state length and the Jacobian's sparsity pattern never change, so the
-integrator continues on the same vector and the same matrices. Deactivation is
-off by default and is turned on by `solve(problem; deactivation = true)`, with
-the keywords `threshold` ($\varepsilon_m$, default $10^{-2}$), `band`
-($\varepsilon_{\rm band}$) and `located_events` (default `true`).
+**Deactivation** takes a cell out of the system once its condensed mass, or at an
+order other than one its reactive inventory, falls below the fraction
+$\varepsilon_m$ of its reference: its inventories go to the live cell beside it,
+on a moving mesh the live cells above it move down a slot, the outermost slot's
+rows become identity rows, and the boundary conditions move to the face of the
+outermost live cell. The state length and the Jacobian's sparsity pattern never
+change, so the integrator continues on the same vector and the same matrices.
+Deactivation is off by default and is turned on by
+`solve(problem; deactivation = true)`, with the keywords `threshold`
+($\varepsilon_m$, default $10^{-2}$, at an order other than one a tenth of the
+limiter's `conversion_threshold`), `band` ($\varepsilon_{\rm band}$) and
+`located_events` (default `true`).
 
 ---
 
@@ -12204,9 +12231,9 @@ events as possible:
    relative-flux kernel, §11), and the balance rows hold the solid velocity
    $w-c$ to the volume balance.
 2. **The near-threshold band** $\varepsilon_{\rm band}$: when a cell crosses
-   $\varepsilon_m$, the cells of the contiguous run from the exposed side
-   inward that hold less than $\varepsilon_{\rm band}$ of their initial
-   condensed mass go with it, in one merge (§14.3.4).
+   $\varepsilon_m$, the contiguous cells around it that hold less than
+   $\varepsilon_{\rm band}$ of their reference go with it, in one merge
+   (§14.3.4).
 
 A callback invocation that deactivates cells is counted once
 (`sol.statistics.invocations`, and each event's `invocation` field), however
@@ -12302,10 +12329,11 @@ which case only the cells below the threshold go. A given `band` must satisfy
 $\varepsilon_m\le\varepsilon_{\rm band}<1$, or `setup` throws an
 `ArgumentError`. The band is read on a moving mesh only.
 
-The band must exceed what the slowest cell of a layer still holds when the
+The band should exceed what the slowest cell of a layer still holds when the
 first reaches $\varepsilon_m$. A narrower band (or none) stops the run at a cell
-above it; the crossing cell below the threshold then lies inward of a live one,
-and the solve ends with outcome `:interior` (§14.6). On the five burnout decks
+above it: the layer then leaves a few cells at a time, and a crossing cell below
+the threshold may lie inward of a live one and leave from under it (§14.3.4). On
+the five burnout decks
 of the supported envelope that fraction is 0.4 to 3.9 % at
 $\varepsilon_m=3\times10^{-3}$ and 1.4 to 9.9 % at $\varepsilon_m=10^{-2}$; on
 the mixed-composition layer of V-BO-07 the other cells still hold up to about
@@ -12341,16 +12369,32 @@ cells. The full statement, with its limits, is User Guide chapter 10.
 
 ![Surface-connected burnout transfers inventory to an inward receiver while retaining inactive state slots; insets show fixed-mesh gas venting and interior-void termination.](assets/figures/05_deactivation.svg)
 
-**Figure 5. Burnout and retained state (schematic).** Here $r_i$ is the remaining condensed-mass ratio. A threshold crossing selects a surface-connected band; on a moving mesh its inventories and volume transfer to the inward receiver. Dead nodes coincide at the merged face, while state slots and topology remain allocated. The insets show fixed-mesh gas venting and an interior void blocked by live material. A callback can re-test the receiver and emit multiple per-cell records; gas venting and a final cell without a receiver enter the loss ledger.
+**Figure 5. Burnout and retained state (schematic).** Here $r_i$ is the remaining condensed-mass ratio. A threshold crossing selects a surface-connected band; on a moving mesh its inventories and volume transfer to the inward receiver, and a band beneath live cells goes the same way with those cells moving down into its slots. Dead nodes coincide at the merged face, while state slots and topology remain allocated. The insets show fixed-mesh gas venting and an interior void blocked by live material. A callback can re-test the receiver and emit multiple per-cell records; gas venting and a final cell without a receiver enter the loss ledger.
 
 The deactivation state of a solve is a `CellDeactivation{P,NC,E}`
 (`src/Deactivation/events.jl`), built by `setup` when `deactivation = true`:
 the policy (`ConservativeTransfer()`), the threshold $\varepsilon_m$, the band
 $\varepsilon_{\rm band}$, the reference masses $m^s_i(0)$, the condensed
 flags, the caloric extension that merged temperatures are found with, the
-events so far, and the outcome. `integrate` resets it at the start of every
-integration (`reset_cells!`: every row live, no events, outcome `:running`),
-so repeated integrations of one set-up problem are bit-identical.
+events so far, the outcome, the `SlotTables` of the solve and, at an order other
+than one, what the threshold reads there (§14.3.2). `integrate` resets it at the
+start of every integration (`reset_cells!`: every row live, every cell in its
+initial slot with the tables as set up, no events, outcome `:running`), so repeated
+integrations of one set-up problem are bit-identical.
+
+Every table a solve reads by cell, node, face or row is held in two forms
+(`SlotTables`, `src/Deactivation/slots.jl`): its copy as set up, indexed by the
+cell of the initial mesh, and the live array, indexed by slot, with `origin[s]`
+the initial cell in slot $s$. `permute_slots!` is the one writer of the live
+arrays: an event moves cells between slots (§14.3.4), `reset_cells!` restores the
+identity, and `replay_events!` writes the arrangement of a saved time, so outputs
+re-evaluated at that state read the tables it had. Each event records the
+permutation after it. The tables are `CellReference` (volume, masses, floors,
+thickness, positions; the caloric extension reads the same arrays), the tolerance
+vector, the distance floors of the kernels, the reaction references, and under a
+correction the relative-flux tables, the monitor scale and the gains; a test
+against a fresh setup of the mesh without the cell guards the list
+(`test/deactivation/test_slots.jl`).
 
 ### 14.3.1 Live rows and dead rows: the mask
 
@@ -12403,7 +12447,47 @@ m^s_i<\varepsilon_m\,m^s_i(0)\,(1+s),
 $$
 
 with the slack $s=0$ except at a located event (§14.3.5)
-(`below_threshold`). Three properties of this criterion are deliberate.
+(`below_threshold`).
+
+At an order other than one the test reads the **reactive inventory** instead,
+
+$$
+\sum_r m_{a(r),i}<\varepsilon_m\,R_i\,(1+s),\qquad R_i=\sum_r M_{\mathrm{ref},r,i},
+$$
+
+over the reactions $r$ with a condensed reactant $a(r)$, the reference of a
+first-order reaction being its reactant's initial mass in the cell (`reactive_mass`,
+`CellDeactivation.reactive`). A small residue then does not hold a spent cell live:
+under the condensed-mass test a receiver of $\varepsilon_m/y$ tails of char at yield $y$
+cannot cross, and stays as a sub-micron skin.
+
+Only a cell that **vanishes** is tested. Its reference $R_i$ is zero when the cell would
+keep $V^{\rm kept}_i/V_i(0)\ge10^{-2}$ of its volume once fully converted
+(`VANISHING_VOLUME`, `retained_volumes`), the volume each component leaves following the
+reactions to the products no reaction consumes, at the densities of the initial
+temperature. Such a cell is a layer the front burns beneath. Merged into its
+neighbour it stops being resolved: the receiver grows to the thickness of the layer, its
+temperature is the temperature of the middle of the layer, and the reactant it then
+takes burns there, so the top of the reaction zone moves inward cell by cell. The test is
+on volume because that is what acts: on `examples/06` with a 20 % or 1 % char that keeps
+the volume the rate moves by 20–22 % integrated either way, and with the volume kept by
+the char at 0.2, 0.05 and 0.02 of the cell by 2.0, 0.04 and 0.01 % at $n=0.5$ and 7.8,
+6.1 and 4.0 % at $n=0$. Every no-deactivation run of those decks finishes, so a cell
+that stays costs nothing, and a deck of such cells runs as it does without deactivation
+(V-BO-12b).
+
+The reference $R_i$ is the
+cell's as set up, so a cell that started with none, an inert layer, is never tested,
+even after it received a tail. The last live cell has no receiver and is tested on
+its condensed mass whatever the order, so a column that leaves a residue ends with
+that residue. The default threshold at such an order is a tenth of the limiter's
+`conversion_threshold`, $10^{-4}$ with the default limiter: below order one the rate
+dies only where the onset acts, so a cell should leave once its conversion is a
+decade inside it. It applies with deactivation only; a deck without it keeps
+$10^{-2}$, which scales its mass tolerances. Above order one the cells decay
+algebraically and at this default may never reach it: V-BO-10c's column reaches its
+thickness floor with no event, and at $\varepsilon_m=10^{-2}$ with 37. Three
+properties of these criteria are deliberate.
 
 - **Mass, not thickness.** Masses are the states, the criterion reads them
   directly, and it applies unchanged on a fixed mesh, where a cell does not
@@ -12419,14 +12503,15 @@ with the slack $s=0$ except at a located event (§14.3.5)
 - **A cell that starts with no condensed mass is never tested.** A gas-only cell
   has $m^s_i(0)=0$ and stays live whatever its contents.
 
-The **threshold margin** is the smallest relative excess over the threshold,
+The **threshold margin** is the smallest relative excess over the threshold, in
+the cell's measure,
 
 $$
 g(u)=\min_{i\ \text{live},\ m^s_i(0)>0}
 \frac{m^s_i-\varepsilon_m m^s_i(0)}{\varepsilon_m m^s_i(0)},
 $$
 
-`Inf` when no live cell started with condensed mass (`threshold_margin`). It is
+`Inf` when no live cell is tested (`threshold_margin`). It is
 zero exactly when some cell holds exactly its threshold and negative exactly
 when one is below it; its first root in a step is the located event's time.
 
@@ -12440,10 +12525,11 @@ relative tolerance.
 ### 14.3.3 The conservative transfer
 
 `ConservativeTransfer` moves the inventories of the dead cells $\mathcal{D}$ to
-the receiver $k$, the live cell inward of them (`_merge!`). It conserves mass
-and sensible enthalpy and finds the merged temperature from them; on a moving
-mesh the receiver also absorbs the dead cells' volume, and on a fixed mesh the
-dead cells' gas is vented.
+the receiver $k$, the live cell inward of them, or for a run from the innermost
+cell under live cells the live cell outward of it (`_merge!`, one transfer for both
+directions). It conserves mass and sensible enthalpy and finds the merged
+temperature from them; on a moving mesh the receiver also absorbs the dead cells'
+volume, and on a fixed mesh the dead cells' gas is vented.
 
 **Masses.** On a moving mesh every component is transferred:
 
@@ -12472,22 +12558,28 @@ H^{\rm lost}_e=\sum_{d\in\mathcal D}\sum_{j\ \rm gas}m^{\rm vent}_{j,d}\,h_j(T_d
 $$
 
 with $m^{\rm vent}_{j,d}=0$ on a moving mesh, and the merged temperature $T_m$ is the root
-of the receiver's extended caloric relation at the merged masses,
+of the physical relation at the merged masses, between the temperatures merged,
 
 $$
-\mathcal{E}_k(T_m;\,\hat m)=H_m,\qquad
+\sum_j \hat m_{j,k}\,h_j(T_m)=H_m,
+$$
+
+solved by `merged_temperature`. The relation the integrator reads in the enthalpy form
+is the extended one,
+
+$$
 \mathcal{E}_k(T;m)=\sum_j (m_j)^{+}\,h_j(T)+C_{{\rm reg},k}(m)\,(T-T_{\rm ref}),
 $$
 
-solved by the bracketed Newton iteration of `invert_caloric` (§13). Here
-$(m_j)^{+}$ is the one-sided positive part of $m_j$ below the cell's mass
-tolerance and $C_{{\rm reg},k}$ the capacity switch of the caloric extension,
-zero while the cell's guaranteed heat capacity is at least twice its floor
-$C_{{\rm floor},k}$. On every state the tolerances resolve (each component
-absent or above its mass tolerance, the receiver above twice its floor) the
-relation is the physical one, $\sum_j \hat m_{j,k}\,h_j(T_m)=H_m$.
-The receiver's energy state becomes $T_m$ in the temperature form and
-$\mathcal{E}_k(T_m;\hat m)$ in the enthalpy form.
+with $(m_j)^{+}$ the one-sided positive part of $m_j$ below the cell's mass tolerance and
+$C_{{\rm reg},k}$ the capacity switch of the caloric extension, zero while the cell's
+guaranteed heat capacity is at least twice its floor $C_{{\rm floor},k}$. On every state
+the tolerances resolve (each component absent or above its mass tolerance, the receiver
+above twice its floor) the two agree, and `invert_caloric` (§13) gives the root. Below
+the floor they do not, and only the physical relation carries the sensible enthalpy of
+what merged: two cells at 600 K stay at 600 K. Masses with no heat capacity leave the
+receiver's temperature. The receiver's energy state becomes $T_m$ in the temperature
+form and $\mathcal{E}_k(T_m;\hat m)$ in the enthalpy form.
 
 Two choices matter. First, the enthalpy is the integral $\int c_p\,dT$, not the
 product $c_p(T)\,T$, which for a temperature-dependent heat capacity is not an
@@ -12522,11 +12614,15 @@ cells' pairs are zeroed. The column's conversion, the ratio of the two sums, is
 unchanged by the event, and so is the cross section.
 
 **Volume and the pore rule (moving mesh).** The receiver encloses the dead
-cells' volume: its far node moves out to the position that bounds the merged
+cells' volume. Inward, its far node moves out to the position that bounds the merged
 volume $\hat V_k$ from its inner node (`_enclose!`; on a planar mesh
 $z_{\rm far}=z_{\rm inner}+\hat V_k/A$, on a radial mesh the corresponding shell),
 and every far node of the dead cells is placed on it with zero velocity, the
-moving-boundary collapse. A merge never destroys pore space. With
+moving-boundary collapse. Outward, the merged volume is what lies between the
+innermost node and the receiver's far node, and no node moves unless the merge
+creates volume. Created volume moves the receiver's far node and every live node
+beyond it, each live cell keeping its volume, so the column grows by what the event
+records and the cell above keeps its pores. A merge never destroys pore space. With
 $V_{\rm s}(m,T)=\sum_{j\ \rm condensed}m_j/\rho_{i,j}(T)$ the skeletal volume of
 the masses $m$ (intrinsic densities, §4; a component without one falls back to
 its bulk density and contributes no pore volume),
@@ -12550,6 +12646,17 @@ the retained gas keeps at least the pore volume it had, at a finite pressure
 that Darcy transport then relaxes. On a fixed mesh the receiver keeps its
 volume and no volume is created.
 
+**The zero-reference receiver.** A receiver that holds no lineage of a reaction whose
+lineage the dead cells hold takes the sum of their references: the reactant it
+received then keeps the dead cells' conversion, and its rate does not vanish. This is
+exact for dead cells at one conversion under one rate constant; cells at different
+conversions leave only their weighted mean, since $(R_1+R_2)F(\bar x)\ne
+R_1F(x_1)+R_2F(x_2)$. The update
+goes to the initial reference table of the receiver's cell and to the event
+(`reference_updates`), so a replay reproduces it and a reset removes it. Any other
+receiver keeps its reference: the dead cell's leaves with it, and the tail burns at
+the receiver's conversion.
+
 **Conservation.** Mass is conserved to round-off with the vented mass, and
 sensible enthalpy with the vented enthalpy and the regularization; the tests
 check $\sum m+\text{lost}$ to $10^{-14}$ and the energy ledger to $10^{-12}$ in
@@ -12557,47 +12664,60 @@ both energy forms, on both meshes, for single merges, runs of cells, a run
 through the innermost cell and a run through a layer's innermost cell into the
 substrate (`test/deactivation/test_deactivation.jl`).
 
-### 14.3.4 The deactivation pass: the block-and-band rule
+### 14.3.4 The deactivation pass: runs anywhere, the block-and-band rule
 
 `deactivate!(u, d, def, t; slack)` deactivates, in one pass, the cells below the
-threshold at the exposed side, in place on the state $u$. Every event of one
-call shares one invocation number. The pass repeats:
+threshold, in place on the state $u$. Every event of one call shares one invocation
+number. The pass repeats:
 
-1. Let `top` be the outermost live cell (`top_live_cell`); if none is left,
-   stop.
-2. **Moving mesh.** Find the run of live cells from `top` inward whose condensed
-   mass is below $\varepsilon_{\rm band}(1+s)$ of their reference
-   (`_run_start`); let `lo` be its inward end. **Fixed mesh.** The run is the
-   outermost live cell alone, `lo = top`.
-3. If no cell of the run is below $\varepsilon_m(1+s)$, stop.
-4. If `top` is the innermost cell (cell 1), it goes with no receiver
-   (`_lose!`): its masses, its sensible enthalpy and its regularization are
-   written to the event as lost, its rows are masked, and the pass returns
-   `:burned_out`.
-5. Otherwise the receiver is the live cell beneath the run, $k=\max(\texttt{lo}-1,1)$,
-   and the cells $\mathcal D=\{k+1,\dots,\texttt{top}\}$ merge into it in one
-   transfer (§14.3.3). A run that reaches the innermost cell leaves that cell,
-   holding the run's inventories, as the survivor.
+1. Let `top` be the outermost live cell (`top_live_cell`); if none is left, stop.
+2. Let $c$ be the outermost live cell below $\varepsilon_m(1+s)$; if there is none,
+   stop. **Moving mesh.** The run `lo:hi` is the contiguous live cells around $c$
+   below $\varepsilon_{\rm band}(1+s)$ of their reference (`_band_run`); if a live
+   cell outward of the run is a **skin**, stop. **Fixed
+   mesh.** The geometry stays with the slots, so only the outermost live cell can
+   go: if $c$ is not `top`, stop; the run is `top` alone.
+3. If `top` is the innermost cell (cell 1), it goes with no receiver (`_lose!`): its
+   masses, its sensible enthalpy and its regularization are written to the event
+   as lost, its rows are masked, and the pass returns `:burned_out`.
+4. A run of the whole column leaves the innermost cell, holding the run's
+   inventories, as the survivor (`lo = 2`). The receiver is the live cell beneath
+   the run, or above it for a run from the innermost cell, and the run merges into
+   it in one transfer (§14.3.3).
+5. If live cells lay above the run they move down into its slots (`_compact!`): cell
+   blocks and node blocks alike, every table with them (§14.3), the dead slots
+   zeroed with their nodes on the new top node. The events of the merge take the
+   rows of the dead top slots and the permutation after the move.
 6. Return to step 1: the receiver, holding the run's inventories against its own
-   reference, is tested in turn, and when it starts a run below the band with a
-   cell below the threshold, that run merges on in the same invocation. On a
-   fixed mesh the receiver is re-tested with the dead cell's condensed
-   inventories added.
+   reference, is tested in turn. On a fixed mesh it is re-tested with the dead cell's
+   condensed inventories added.
 
-After the loop the pass looks for any live cell still below the threshold. If
-one remains, it lies inward of a live cell that the pass leaves, which no
-policy here handles: the pass sets the outcome `:interior` and returns it.
-Otherwise it returns `:transferred` (`:burned_out` from step 4). A crossing
-inward of a cell above the band is therefore never merged across: on a moving
-mesh the cells between it and the exposed face would have to go too, and they
-hold more than the band allows.
+After the loop the pass looks for any live cell still below the threshold. One that
+is left lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one:
+the pass sets the outcome `:interior` and returns it. Otherwise it returns
+`:transferred` (`:burned_out` from step 3).
 
-The rule takes a contiguous block of dead cells touching the exposed boundary
-and a band around the crossing cell; this is what keeps the live cells a
-contiguous range $1,\dots,\texttt{top}$ ordered from the back, the receiver a
-neighbour of every dead cell it takes, and the exposed face the far face of the
-receiver. A positive `slack` widens both tests to $1+s$ times $\varepsilon_m$
-and $\varepsilon_{\rm band}$ (§14.3.5).
+An event's `cell` and `receiver` are cells of the initial mesh, not slots, and the
+live cells stay a contiguous range $1,\dots,\texttt{top}$ ordered from the back, the
+receiver a neighbour of every dead cell it takes and the exposed face the far face
+of the outermost live cell. For a run that reaches the top this is the block-and-band
+rule: the same cells as the run from the exposed side, the same transfer, no cell
+moved, so a deck that meets no interior crossing follows the same arithmetic to the
+bit. A positive `slack` widens both tests to $1+s$ times $\varepsilon_m$ and
+$\varepsilon_{\rm band}$ (§14.3.5).
+
+A crossing under live cells has two origins, and the pass separates them. On
+Lagrangian cells the tail a receiver takes delays it past its inward neighbour, which
+crosses first under a receiver holding $\varepsilon(e^{k\tau}+1)$ at $k\tau<0.48$; at
+order one this is V-BO-11. That void is the transfer's: the cells above it are spent,
+the run leaves, and the column closes over it, each such event marked `interior`
+(`interior_events`). Under in-depth absorption a cell beneath the surface can instead
+empty under cells that still hold their material, a pocket that is physical in PMMA and
+that the model has no gap to carry heat across. A live cell outward of the run is a
+skin when it holds `VOID_SKIN` $=10$ thresholds or more of its reference, or has no
+reference. On 17 decks, 163 crossings of the first kind hold 1.07 to 5.99 thresholds and
+45 under in-depth absorption 29 to 4760; 10 sits in the gap. The rule reads magnitude
+alone, so a thin, nearly spent skin reads as spent.
 
 ### 14.3.5 The event in the integrator: location and the safety net
 
@@ -12612,8 +12732,7 @@ and $\varepsilon_{\rm band}$ (§14.3.5).
   `deactivate!` with the slack $s=\mathrm{rtol}$, the mass rows' relative error
   scale there: the crossing cell goes, and with it the cells of its run within
   the tolerance of their thresholds, whose crossing the solve does not resolve
-  from the located one. A cell within `reltol` of its threshold inward of a
-  cell above the band stays.
+  from the located one.
 - **The safety net.** A discrete callback at the end of every accepted step
   whose condition is that some live cell is below the threshold (`any_below`),
   running `deactivate!` with $s=0$. Without `located_events` it is the only
@@ -12643,7 +12762,7 @@ Each status has one consequence:
 |---|---|---|
 | `:transferred` | continues, with the policy's restart step | — |
 | `:burned_out` | `terminate!` (`:Terminated`) | — |
-| `:interior` | `terminate!` (`:Terminated`) | names the cell below its threshold inward of a live cell |
+| `:interior` | `terminate!` (`:Terminated`) | names the cell below its threshold inward of a live cell on a fixed mesh, or beneath a skin on a moving one |
 | `:inconsistent` | `terminate!(…, ReturnCode.Failure)` | no consistent node velocities after deactivating cells |
 | `:inadmissible` | `terminate!(…, ReturnCode.Failure)` | the state after deactivating cells is inadmissible |
 
@@ -12712,10 +12831,10 @@ is the surface balance's at the exposed face. The beam transmitted through a
 void column lands on the first condensed cell below it, which can return that
 heat upward only by conduction through the gas, so continued past its first
 void the deck would heat the substrate beneath it far outside the property
-bracket. On a moving mesh the configuration rarely arises: an emptying cell
-collapses, and the correction brings the
-layer to the threshold together. The same outcome ends a moving-mesh solve
-whose crossing cell lies inward of a cell above the band (§14.2.3).
+bracket. On a moving mesh the configuration rarely arises under the correction: an
+emptying cell collapses, and the correction brings the layer to the threshold
+together. A crossing cell under spent cells leaves and the column closes over it; beneath
+a skin the solve stops as it does here (§14.3.4).
 
 ---
 
@@ -12766,6 +12885,7 @@ Every deactivated cell writes one `DeactivationEvent`:
 | `lost_mass` | the masses lost, per component [kg] (vented gas; a last cell's inventories) |
 | `lost_enthalpy` | the sensible enthalpy lost [J] |
 | `regularization` | the caloric regularization the cells held that the receiver does not [J] |
+| `interior` | whether live cells lay outward of the dead cell, a void of the tail's making closed (§14.3.4) |
 
 A merge of several cells into one receiver records one event per dead cell, the
 outermost first; the merge's created volume, losses and regularization are
@@ -12785,9 +12905,9 @@ A solve ends in one of these ways:
 | End | `sol.retcode` | `sol.outcome` | `succeeded(sol)` |
 |---|---|---|---|
 | the time span reached | `:Success` | `:running` | `true` |
-| the last live cell went (§14.3.4, step 4) | `:Terminated` | `:burned_out` | `true` |
+| the last live cell went (§14.3.4, step 3) | `:Terminated` | `:burned_out` | `true` |
 | the live thickness fell below `min_thickness` (moving mesh) | `:Terminated` | `:min_thickness` | `true` |
-| a cell below the threshold inward of a live cell | `:Terminated` | `:interior` | `false` |
+| a cell below the threshold inward of a live cell on a fixed mesh, or beneath a skin on a moving one | `:Terminated` | `:interior` | `false` |
 | no consistent node velocities after an event, or an inadmissible state after it | `:Failure` | `:running` | `false` |
 | any other integrator failure | its return code | `:running` | `false` |
 
@@ -12953,8 +13073,11 @@ how to choose a threshold and distinguish deactivation from a thickness stop.
 $$
 m^s_i<\varepsilon_m\,m^s_i(0)(1+s),\qquad
 g(u)=\min_i\frac{m^s_i-\varepsilon_m m^s_i(0)}{\varepsilon_m m^s_i(0)},
-\qquad \varepsilon_m=10^{-2}\ \text{by default},\quad s=\mathrm{rtol}\ \text{at a located event}.
+\qquad \varepsilon_m=10^{-2}\ \text{by default},\quad s=\mathrm{rtol}\ \text{at a located event},
 $$
+
+with the reactive inventory and its reference in place of the condensed masses at an
+order other than one, where the default is `conversion_threshold`/10.
 
 **Band** (`src/Integration/setup.jl`): $\varepsilon_{\rm band}=\max(\varepsilon_m,0.1)$
 when the bound correction moves some layer, $\varepsilon_m$ otherwise;
@@ -12984,25 +13107,28 @@ $$
 **Dead rows** (`src/Assembly/residual.jl`): $du_r/dt=0$ on a differential row,
 $0=u_r$ on an algebraic row; identity rows of $W$.
 
-**Pass**: moving mesh, the run from the outermost live cell inward below
-$\varepsilon_{\rm band}$, if it holds a cell below $\varepsilon_m$, into the cell
-beneath it, repeated on the receiver; fixed mesh, the outermost live cell while
-below $\varepsilon_m$; the last cell lost; a remaining crossing inward of a live
-cell ends the solve with `:interior`.
+**Pass**: moving mesh, the run below $\varepsilon_{\rm band}$ around the outermost
+cell below $\varepsilon_m$ into the live cell beneath it, a bottom run into the live
+cell above it, the live cells above moving down into its slots, repeated, a skin over the
+run ending the solve with `:interior`; fixed mesh, the outermost live cell while below
+$\varepsilon_m$, a remaining crossing inward of a live cell ending the solve with
+`:interior`; the last cell lost.
 
 ---
 
 ## 14.10 Limitations and open issues
 
 1. **Interior voids.** The model carries no conduction or radiation model for a
-   gas gap, so a cell below the threshold inward of a live cell ends the solve
-   with outcome `:interior` (§14.4). On a fixed mesh under in-depth absorption a
-   non-charring polymer reaches this before its first deactivation.
+   gas gap. On a fixed mesh a cell below the threshold inward of a live cell ends
+   the solve with outcome `:interior` (§14.4), which a non-charring polymer under
+   in-depth absorption reaches before its first deactivation. A moving mesh stops the
+   same way beneath a skin, and closes only a void under spent cells (§14.3.4). The
+   skin is read from magnitude, at a limit measured on the decks there.
 2. **One invocation per layer is not guaranteed.** The correction and the band
    bring a layer to the threshold together on the decks of the envelope
    (§14.2.4), but graded meshes, heterogeneous layers and non-uniform reaction
    work against it; the number of invocations is reported, and a band narrower
-   than what the slowest cell keeps ends the solve with `:interior`.
+   than what the slowest cell keeps takes the layer a few cells at a time.
 3. **The burst after a layer's deactivation.** At 30 cells across the layer the
    largest per-step rate just after a layer's deactivation can exceed the main
    peak, up to threefold on the graded mesh; it falls below the main peak by 60
@@ -13021,7 +13147,14 @@ cell ends the solve with `:interior`.
 6. **Fixed-mesh losses.** On a fixed mesh the dead cells' gas is vented to the
    event, not to the boundary flux; the conservation audit closes with it as a
    loss (§16).
-7. **Sensitivities across events.** An objective sampled at fixed times is rough
+7. **The energy forms near the capacity floor.** The temperature form divides by a
+   smoothly floored capacity and the enthalpy form inverts the extended relation, and
+   the two differ in a cell near emptying. On the gasifier without a residue at order
+   0.5 they part when the top cell nears 0.3 % of its mass and end about 1 % of the
+   peak, 0.2 % integrated and $10^{-3}$ of the initial mass apart, at 40 and 80 cells,
+   with or without events; scaling the floor by $10^{-6}$ removes the difference.
+   Neither form is the reference there. V-BO-10b bounds the difference.
+8. **Sensitivities across events.** An objective sampled at fixed times is rough
    on the scale of one sample interval in the event time; the finite-difference
    step must exclude such steps (§17.2.2).
 
@@ -15978,7 +16111,7 @@ against an exact or manufactured solution; the burnout cases V-BO-01, 02, 03 and
 | Gas transport | V-GT-01 – V-GT-08 | Gaussian plane source, integrated wall/Darcy resistance, binary dusty-gas exchange, coupled thermal-film solution, Robin diffusion, prescribed-inflow Darcy $P^2$ profile | wall transport and conservation, pressure closure and upwinding, interfaces and flow reversal, binary exchange, nonisothermal transport, transient mass-film uptake, imposed gas inflow and pressure outflow |
 | Coupled physics | V-CPL-01 – V-CPL-05 | Neumann two-phase Stefan solution, Landau ablation wave, exact shrink/swell endpoints, Frank-Kamenetskii slab, 0D TGA curve | a latent-heat front (apparent heat capacity, V-CPL-01; gated reaction, V-CPL-01b), surface regression on a moving mesh (V-CPL-02, 02b), volume change and the lateral-shrinkage law, the reaction–conduction bifurcation, the boundary and volume coupling of the kinetics |
 | Manufactured solutions | V-MMS-01 – V-MMS-04 | the manufactured-solution driver of §18.2 | design order of the coupled residual on a fixed mesh in space and time, free-stream preservation under prescribed motion, order under prescribed and reaction-driven motion |
-| Burnout | V-BO-01 – V-BO-08 | exact exponential thickness (V-BO-04); otherwise exact mass and thickness budgets, conservation ledgers and termination constraints | deactivation through complete burnout on a moving mesh under in-depth absorption (V-BO-01) and on a fixed mesh under surface absorption (V-BO-02); the transmitted-flux series (V-BO-03); the interior-void stop (V-BO-05, `expected_retcode = :Terminated`); a graded mesh (V-BO-06), a layer of mixed composition (V-BO-07) and a thin layer on a deep substrate (V-BO-08) |
+| Burnout | V-BO-01 – V-BO-12 | exact exponential thickness (V-BO-04); otherwise exact mass and thickness budgets, conservation ledgers and termination constraints | deactivation through complete burnout on a moving mesh under in-depth absorption (V-BO-01) and on a fixed mesh under surface absorption (V-BO-02); the transmitted-flux series (V-BO-03); the interior-void stop (V-BO-05, `expected_retcode = :Terminated`); a graded mesh (V-BO-06), a layer of mixed composition (V-BO-07) and a thin layer on a deep substrate (V-BO-08); burnout through the event path on the exact conversion at orders 0.5 and 1.2 (V-BO-09a, b); heated burnout without a residue at orders 0, 0.5 and 1.2 with its threshold and mesh pairs (V-BO-10a–c); a cell that dies under a live one at order one against the corrected default (V-BO-11) |
 
 **Gpyro guide adaptations.** V-GT-07a/b, V-GT-08a/b and V-RX-05a–c cite
 Abdelhafiz et al., [*Gpyro Verification and Validation Manual*, version 1.0
@@ -16034,6 +16167,20 @@ half the density and a tenth of the pre-exponential factor, graded from none at
 the substrate to half at the surface, against its own reference run at 240 PMMA
 cells; V-BO-08 burns a 1 mm layer off the 12 mm substrate and requires the correction
 velocity to be exactly zero at every Kaowool node at every saved time.
+
+The cases from V-BO-09 hold the event path at reaction orders other than one and on
+Lagrangian cells. V-BO-09 compares it with the exact solution of each material point at
+orders 0.5 and 1.2. V-BO-10 burns a column without a residue through to the thickness floor
+at orders 0, 0.5 and 1.2; at 0.5 the threshold pair and the mesh pair are saved every
+0.025 s over the window they compare, since each event is a step in the rate and their
+peak differences read the time between two runs' steps, and a further pair keeps the
+temperature and enthalpy forms' difference in sight (§14.10). V-BO-11 runs `examples/06`
+at order one on Lagrangian cells, where cells leave from under spent ones, against the
+corrected default. V-BO-12a holds what deactivation costs at order zero to what the mesh
+costs, between 40 and 80 cells of the same deck without deactivation, in the integrated
+rate and the mass; the gate `burnout_order_zero.jl` holds `examples/06` to the same rule at
+72 and 144 cells. V-BO-12b requires a char that keeps its volume to keep its cells: no
+event, and the burn without deactivation.
 
 Kernel-level checks sit beside the suite in the module tests: the Beer–Lambert beam's
 energy telescoping and the incident intensity under Kirchhoff's law and an explicit

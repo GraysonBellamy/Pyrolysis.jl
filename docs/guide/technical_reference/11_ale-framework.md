@@ -986,9 +986,9 @@ is set to about 172 s at $t \approx 35$ s, and the 30 PMMA cells leave in two
 invocations, at $t \approx 91.9$ s and $96.6$ s, the solve then continuing on the
 board to the end of its time span (return code `:Success`). The explicit correction
 reproduces the default bit for bit. At `threshold = 3e-3` the layer leaves in one
-invocation. With `correction = NoCorrection()` a PMMA cell falls below the threshold
-inward of a live one at $t \approx 69$ s and the solve ends with outcome `:interior`
-(Chapter 14).
+invocation. With `correction = NoCorrection()` the 30 cells leave in 30 invocations,
+from $t \approx 58.7$ s to $96.8$ s, some from under live cells (Chapter 14), at 887
+accepted steps against the correction's 530.
 
 ### 11.7.8 The prescribed mesh velocity (`w_override`)
 

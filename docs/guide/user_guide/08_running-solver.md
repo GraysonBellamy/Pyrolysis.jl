@@ -51,7 +51,7 @@ The full keyword set, with defaults, is:
 | `linear_solver` | `nothing` → `StructuredKLU()` | Linear solve of the default policy; §8.4 |
 | `abstol` | `1e-8` | Temperature tolerance [K]; the other rows derive theirs (§8.3) |
 | `reltol` | `1e-6` | Relative tolerance of every row; §8.3 |
-| `threshold` | `1e-2` | `ε_m`, the deactivation threshold as a fraction of a cell's initial condensed mass; also scales the mass, position and velocity tolerances; §8.3, §8.9 |
+| `threshold` | `1e-2`; with `deactivation` at an order other than one `conversion_threshold/10` | `ε_m`, the deactivation threshold as a fraction of a cell's reference; also scales the mass, position and velocity tolerances; §8.3, §8.9 |
 | `maxiters` | `1_000_000` | Maximum number of integrator steps; §8.3 |
 | `dt` | `problem.dt_initial` | First step [s] (the fixed step with `adaptive = false`); also the time scale of the node-velocity tolerances; §8.3 |
 | `adaptive` | `true` | Adaptive step-size control; §8.3 |
@@ -534,8 +534,8 @@ The keywords:
 | Keyword | Default | Effect |
 |---|---|---|
 | `deactivation` | `false` | Deactivate cells during the solve |
-| `threshold` | `1e-2` | `ε_m`; a cell that starts with no condensed mass never deactivates |
-| `band` | `max(threshold, 0.1)` when the equidistribution correction moves a layer, else `threshold` | `ε_band` in `[threshold, 1)`: on a moving mesh, the run of cells from the exposed side whose condensed mass is below this fraction goes together with a cell that crosses `ε_m` |
+| `threshold` | `1e-2`; `conversion_threshold/10` at an order other than one | `ε_m`; a cell that starts with no condensed mass, or at such an order with no reactive lineage, never deactivates |
+| `band` | `max(threshold, 0.1)` when the equidistribution correction moves a layer, else `threshold` | `ε_band` in `[threshold, 1)`: on a moving mesh, the contiguous cells below this fraction around a cell that crosses `ε_m` go with it |
 | `located_events` | `true` | Locate each event inside the step at the first time a live cell reaches its threshold, and apply it at the interpolated state there; at the end of every step, cells below the threshold go in one event as a safety net (the only events with `located_events = false`) |
 | `correction` | by rule (§8.7) | On a moving mesh with `deactivation`, the equidistribution correction makes a layer's cells thin together and leave in one event |
 
@@ -557,15 +557,15 @@ The ways a deactivating solve ends:
 | `:running` | `:Success` | Reached the end of the time span; cells may have been deactivated on the way |
 | `:burned_out` | `:Terminated` | The last live cell went |
 | `:min_thickness` | `:Terminated` | A moving mesh thinned below `min_thickness` |
-| `:interior` | `:Terminated` | A cell below the threshold lies inward of a live cell; `solve` warns, naming the cell |
+| `:interior` | `:Terminated` | A cell below the threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one; `solve` warns, naming the cell |
 
-The interior case is the material gasifying from within (for example a slab
-heated from its back face): deactivation removes cells from the exposed side
-only, so `solve` stops with the warning
-`solve(): cell 1 is below its threshold inward of a live cell at t = …; the
-solve ends with outcome :interior`. A band narrower than what the slowest cell
-of a layer keeps when the first reaches the threshold also ends a solve this
-way; Chapter 10 states the band the verified decks need.
+A fixed mesh's geometry stays with its slots, so only the outermost live cell can go,
+and a material gasifying from within (for example a slab heated from its back face)
+stops with the warning `solve(): cell 1 is below its threshold inward of a live cell
+at t = …; the solve ends with outcome :interior`. On a moving mesh a cell under spent
+cells goes into the live cell beneath it, or a bottom cell into the live cell above
+it, and the cells above move down; beneath a skin the solve stops the same way
+(§10.7).
 
 An event can also end the solve with return code `:Failure`, with a warning:
 when the state after the merge is inadmissible (the receiver held to its own

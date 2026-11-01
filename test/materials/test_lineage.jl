@@ -399,12 +399,9 @@ end
     for n in (0.0, 0.5, 2.0)
         @test setup(problem(n); use_ale = true) isa core
         @test setup(problem(n)) isa core
-        @test_throws "solve without deactivation" setup(problem(n); deactivation = true)
-        @test_throws "solve without deactivation" setup(
-            problem(n);
-            use_ale = true,
-            deactivation = true,
-        )
+        @test setup(problem(n); deactivation = true) isa core
+        moving = setup(problem(n); use_ale = true, deactivation = true)
+        @test moving.def.closure.correction isa NoCorrection
         @test_throws "give no correction" setup(
             problem(n);
             use_ale = true,

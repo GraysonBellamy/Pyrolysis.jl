@@ -34,6 +34,7 @@ completed
 get_cell_positions
 get_profile
 interpolate_solution
+interior_events
 ```
 
 ## Conservation

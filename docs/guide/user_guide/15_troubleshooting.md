@@ -42,8 +42,8 @@ completed(sol)     # :Success only: the solve reached tspan[2]
 | `retcode` | Meaning | Typical cause | See |
 |---|---|---|---|
 | `:Success` | reached `tspan[2]` | — | — |
-| `:Terminated` | an event ended the solve | the last live cell deactivated (outcome `:burned_out`); a moving mesh thinner than `min_thickness` (`:min_thickness`); a cell below the deactivation threshold inward of a live one (`:interior`); a `terminate!` in a callback of yours (outcome `:running`) | §15.4 |
-| `:Failure` | the solve's own checks ended it | more than 50 consecutive proposals rejected on a constraint residual; an inadmissible state, or no consistent node velocities, after a deactivation event; an inadmissible state accepted by a fixed-step solve | §15.3, §15.4.3 |
+| `:Terminated` | an event ended the solve | the last live cell deactivated (outcome `:burned_out`); a moving mesh thinner than `min_thickness` (`:min_thickness`); on a fixed mesh, a cell below the deactivation threshold inward of a live one (`:interior`); a `terminate!` in a callback of yours (outcome `:running`) | §15.4 |
+| `:Failure` | the solve's own checks ended it | more than 50 consecutive proposals rejected on a constraint residual; an inadmissible state, or no consistent node velocities, after a deactivation event; an inadmissible state accepted by a fixed-step solve | §15.3, §15.4.4 |
 | `:DtLessThanMin` | the step fell below `dtmin` (default `1e-12` s) | every proposal rejected: a cell driven to absolute zero, a trajectory leaving the physical domain | §15.3.2 |
 | `:MaxIters` | the step count reached `maxiters` (default `1_000_000`) | a step size that collapsed long before the end | §15.3 |
 | `:Unstable`, `:DtNaN` | a non-finite state or step | a property law, rate or boundary function of yours returning `NaN` or `Inf` | §15.6.3 |
@@ -53,7 +53,7 @@ completed(sol)     # :Success only: the solve reached tspan[2]
 | `:running` | neither the deactivation nor the thickness stop ended the solve (it reached the end, failed, or a callback of yours ended it) | `true` only with `:Success` |
 | `:burned_out` | the last live cell deactivated | `true` |
 | `:min_thickness` | on a moving mesh, the distance from the back node to the outermost live node fell below `min_thickness` | `true` |
-| `:interior` | a cell below its threshold lies inward of a live cell | `false` |
+| `:interior` | a cell below its threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one | `false` |
 
 `succeeded(sol)` is the test to use for a burnout run, which normally ends with
 `:Terminated`; `completed(sol)` is the strict test that the solve reached the
@@ -84,9 +84,9 @@ solve time.
 | `solve(): stopped at t = …: the last proposed state, at t = …, takes cell i to or below absolute zero` | the solve stopped while rejecting proposals that cool a cell to 0 K | §15.3.2 |
 | `solve(): a constraint residual stayed above its tolerance for N consecutive steps at t = … (scaled residual r)` | the domain test gave up; the solve ends with `:Failure` | §15.3.3 |
 | `solve(): the fixed step accepted at t = … is inadmissible …` | a fixed-step solve left the physical domain; `:Failure` | §15.3.4 |
-| `solve(): cell i is below its threshold inward of a live cell at t = …; the solve ends with outcome :interior` | an interior void | §15.4.2 |
-| `solve(): the state after deactivating cell(s) at t = … is inadmissible` | an event left the receiver outside its tolerances; `:Failure` | §15.4.3 |
-| `solve(): no consistent node velocities after deactivating cell(s) at t = …` | the mesh closure has no solution after an event; `:Failure` | §15.4.3 |
+| `solve(): cell i is below its threshold inward of a live cell at t = …; the solve ends with outcome :interior` | an interior void: any on a fixed mesh, beneath a skin on a moving one | §15.4.2 |
+| `solve(): the state after deactivating cell(s) at t = … is inadmissible` | an event left the receiver outside its tolerances; `:Failure` | §15.4.4 |
+| `solve(): no consistent node velocities after deactivating cell(s) at t = …` | the mesh closure has no solution after an event; `:Failure` | §15.4.4 |
 
 The surface energy balance prints nothing when its Newton iteration does not
 converge (§15.6.2).
@@ -162,7 +162,6 @@ a combination it does not implement:
 | `a lateral shrinkage law needs planar coordinates`; `in-depth radiation needs planar coordinates` | a `Cylindrical()` or `Spherical()` mesh with a lateral law or `BEER_LAMBERT` | a planar mesh, or `SURFACE_ABSORPTION` |
 | `the lateral shrinkage law must be positive and finite on [-0.001, 1.001]`; `… must equal one at zero conversion` | a law that vanishes or is not one at `χ̄ = 0` | a law such as `χ̄ -> 1 - 0.3χ̄` |
 | `a correction moves the mesh relative to the solid, which needs use_ale = true` | a `correction` other than `NoCorrection()` on a fixed mesh | `use_ale = true` |
-| `reaction :r has an order other than one, read on one conversion per cell, … solve without deactivation` | `deactivation = true` with a reaction of order other than one | leave deactivation off (§4.14) |
 | `reaction :r has an order other than one, whose cells must keep their material, … give no correction` | a `correction` with a reaction of order other than one | give no correction (§4.14) |
 | `a prescribed mesh velocity needs use_ale = true`, and its siblings | `w_override` on a fixed mesh, on a reacting material, with `deactivation`, or with a `correction` | `w_override` is a verification hook (§16.7) |
 | `the cells beside node(s) … start with different condensed components: give the layer interfaces as lagrangian nodes …` | an explicit `lagrangian` list that omits a layer interface under the equidistribution correction | leave `lagrangian` at its default, which lists the interfaces, or add them |
@@ -271,9 +270,10 @@ runs use the adaptive default.
 ## 15.4 Burnout runs
 
 With `deactivation = true`, cells whose condensed mass falls below the fraction
-`threshold` (`ε_m`, default `1e-2`) of their initial condensed mass deactivate,
-and their inventories pass to the live cell beneath. Chapter 10 states the
-rule, the band, the equidistribution correction, located events and the
+`threshold` (`ε_m`, default `1e-2`) of their initial condensed mass deactivate, at
+a reaction order other than one on their reactive inventory (`conversion_threshold/10`
+by default), and their inventories pass to the live cell beside them. Chapter 10
+states the rule, the band, the equidistribution correction, located events and the
 supported envelope; this section covers what goes wrong.
 
 ### 15.4.1 Reading a burnout run
@@ -286,10 +286,14 @@ sol.extras.live_cells               # live cells at each saved time
 ```
 
 Each `DeactivationEvent` in `sol.events` records one dead cell: its time, the
-invocation it belongs to, the cell, the receiver (zero when the last live cell
-went), the condensed-mass fraction it held, and the masses and enthalpy the
-event lost. The number of invocations per vanishing layer is reported, not a
-criterion of correctness.
+invocation it belongs to, the cell and the receiver as cells of the initial mesh
+(the receiver zero when the last live cell went), the condensed-mass fraction it
+held, the masses and enthalpy the event lost, the initial cell in each slot after
+it (`origin`), and any reference it gave a receiver with no lineage of a reaction
+(`reference_updates`). The fields of the solution are by slot: after a cell has
+left from under live ones a slot holds another cell, and `e.origin[s]` says which.
+The number of invocations per vanishing layer is reported, not a criterion of
+correctness.
 
 The integrator's interpolant on the step that ends at an event is not the
 trajectory, so `sol(t)` and `interpolate_solution(sol, t)` refuse a time
@@ -303,30 +307,33 @@ save it with `saveat`.
 solve(): cell i is below its threshold inward of a live cell at t = …; the solve ends with outcome :interior
 ```
 
-Cells deactivate from the exposed side only, so a cell that empties beneath a
-live cell ends the solve with `:Terminated`, outcome `:interior`, and
-`succeeded(sol) == false`. The solution up to the stop is valid.
+On a fixed mesh only the outermost live cell can go, so a cell that empties beneath
+a live cell ends the solve with `:Terminated`, outcome `:interior`, and
+`succeeded(sol) == false`. The solution up to the stop is valid. On a moving mesh the
+same stop comes from a cell that empties beneath a skin, cells that still hold
+`VOID_SKIN` thresholds or more (§10.7). A layer that empties from within, as one does
+when the temperature maximum lies below the surface under in-depth absorption, ends
+the solve at the first such void: the model cannot carry heat across it. The verification
+case V-BO-05 runs the PMMA-on-Kaowool deck of V-BO-01 with in-depth absorption on a
+fixed mesh and stops at 259.6 s with outcome `:interior`: the surface cell persists as
+a low-density skin while the cells beneath it empty. A material that regresses
+belongs on a moving mesh (`use_ale = true`), where its cells thin instead of
+emptying; V-BO-01 burns the same layer out on a moving mesh in one invocation, with the
+correction. Without the correction, and at an order other than one, which has none, a
+tail's void under spent cells closes and is reported by `interior_events(sol)`, and a
+void beneath a skin stops the solve here too.
 
-- **On a fixed mesh** only the outermost live cell can go. A layer that empties
-  from within, as one does when the temperature maximum lies below the surface
-  under in-depth absorption, ends the solve at the first interior void. The
-  verification case V-BO-05 runs the PMMA-on-Kaowool deck of V-BO-01 with
-  in-depth absorption on a fixed mesh and stops at 259.6 s with outcome
-  `:interior`: the surface cell persists as a low-density skin while the cells
-  beneath it empty. A material that regresses belongs on a moving mesh
-  (`use_ale = true`), where its cells thin instead of emptying; V-BO-01 burns
-  the same layer out on a moving mesh in one invocation.
-- **On a moving mesh** the run of cells from the exposed side whose condensed
-  mass is below the band `ε_band` goes together with the cell that crosses the
-  threshold. The band must exceed what the slowest cell of a layer keeps when
-  the first reaches the threshold; a narrower band, or none, ends the solve with
-  `:interior`. The default band is `0.1` where the equidistribution correction
-  moves a layer and the threshold otherwise, so `correction = NoCorrection()`
-  with deactivation leaves no band beyond the threshold. Widen `band`, or lower
-  `threshold`, which lowers what the slowest cell keeps at the first crossing
-  (Chapter 10 gives the measured fractions).
+### 15.4.3 A step pinned on a thin cell
 
-### 15.4.3 Inadmissible or inconsistent states after an event
+A moving-mesh deck can take a run of steps near `1e-10` s on a sub-micron cell at a low
+porosity, at a very tight `pressure_tolerance` and `reltol`. The pore volume is a
+difference of node positions, so a pressure tolerance below `P eps(z)/(φ h)` cannot be
+met. The error norm stops the pressure budget at that round-off, so the step recovers;
+what remains is the cost of the events and of the thin cells' gas. Where a deck still
+crawls, raise `threshold`, which lets the cell leave thicker, or `reltol`, or
+`pressure_tolerance`.
+
+### 15.4.4 Inadmissible or inconsistent states after an event
 
 Two warnings end a burnout run with `:Failure`, the outcome left `:running`:
 
@@ -339,7 +346,7 @@ Two warnings end a burnout run with `:Failure`, the outcome left `:running`:
 Neither occurs on the decks of the supported envelope (Chapter 10). Report the
 deck and the time the warning names.
 
-### 15.4.4 The thickness stop
+### 15.4.5 The thickness stop
 
 On a moving mesh the solve ends with `:Terminated` and outcome `:min_thickness`
 when the distance from the back node to the outermost live node falls below
@@ -349,7 +356,7 @@ never fires. Without `deactivation`, a cell that gasifies completely thins
 toward zero width and the step collapses as it approaches it; turn on
 `deactivation`, or raise `min_thickness` to end the run first.
 
-### 15.4.5 The end-of-layer burst
+### 15.4.6 The end-of-layer burst
 
 Just after a layer deactivates, the per-step mass-loss rate can spike: at 30
 cells across the layer the largest per-step rate can exceed the main peak, up

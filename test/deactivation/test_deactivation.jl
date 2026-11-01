@@ -10,8 +10,14 @@ using Pyrolysis.Assembly: residual!, buffers
 using Pyrolysis.Deactivation
 using Pyrolysis.Deactivation: ConservativeTransfer
 using Pyrolysis.Closures:
-    NoCorrection, EquidistributionCorrection, EQUIDISTRIBUTION_TIME, LayerCorrection
+    NoCorrection,
+    EquidistributionCorrection,
+    EQUIDISTRIBUTION_TIME,
+    LayerCorrection,
+    residues,
+    retained_volumes
 using Pyrolysis.ColoredJacobian
+using Pyrolysis.Kernels: ReactionKernel, find_kernel
 using Pyrolysis.Integration
 using Pyrolysis.Integration: setup, consistent_state!, integrate
 using Pyrolysis.Integration: fbdf_policy, rodas5p_policy, kencarp4_policy
@@ -272,12 +278,20 @@ _ledger(cp, u, events) =
     @test last(cells.events).invocation == 2
     @test (last(cells.events).cell, last(cells.events).receiver) == (5, 4)
 
-    # A cell below the threshold inward of a live one is not handled.
+    # A cell below the threshold beneath a skin stays, and the pass says so.
     reset_cells!(cells, layout)
     u = _deplete!(copy(cp.u0), cp, 4, 0.2 * cells.threshold)
     @test deactivate!(u, cells, def, 1.0) === :interior
-    @test cells.outcome[] === :interior
     @test isempty(cells.events)
+    # Spent cells above it lie in the band, and go with it.
+    reset_cells!(cells, layout)
+    for i = 5:8
+        _deplete!(u, cp, i, 2 * cells.threshold)
+    end
+    @test deactivate!(u, cells, def, 1.0) === :transferred
+    @test cells.outcome[] === :running
+    @test [(e.cell, e.receiver) for e in cells.events] == [(8, 3), (7, 3), (6, 3), (5, 3), (4, 3)]
+    @test top_live_cell(layout) == 3
 end
 
 @testset "a merge carries the history pair to the receiver and keeps the cross section: $(energy) form" for energy in
@@ -523,10 +537,11 @@ end
         _deplete!(u, cp, i, f)
     end
     # Only the cells below the threshold go; the receiver, with their residue
-    # added, stays; the cell below it inward of a live one is not handled.
-    @test deactivate!(u, cells, def, 1.0) === :interior
-    @test cells.outcome[] === :interior
-    @test [e.cell => e.receiver for e in cells.events] == [8 => 6, 7 => 6]
+    # added, stays; the cell below it inward of a live one goes into the cell
+    # beneath it.
+    @test deactivate!(u, cells, def, 1.0) === :transferred
+    @test cells.outcome[] === :running
+    @test [e.cell => e.receiver for e in cells.events] == [8 => 6, 7 => 6, 4 => 3]
     @test all(e.fraction < ε_m for e in cells.events)
     # The band of the correction takes the run through the cell below.
     banded = setup(_ablator(8); use_ale = true, deactivation = true)
@@ -1416,22 +1431,24 @@ end
     @test all(r -> r.intensity <= 1e-12, results)
 end
 
-@testset "a void under a live cell ends the solve" begin
-    for moving in (true, false)
-        sol =
-            @test_logs (:warn, r"cell 1 is below its threshold.*outcome :interior") Integration.solve(
-                _ablator(6; from_bottom = true, t_end = 5.0);
-                use_ale = moving,
-                deactivation = true,
-                abstol = 1e-8,
-                reltol = 1e-6,
-                pressure_tolerance = 1e-3,
-            )
-        @test sol.retcode === :Terminated
-        @test sol.outcome === :interior
-        @test isempty(sol.events)
-        @test sol.t[end] < 5.0
-    end
+@testset "a void beneath a skin ends the solve: $(moving ? "moving" : "fixed") mesh" for moving in
+                                                                                         (
+    true,
+    false,
+)
+    sol =
+        @test_logs (:warn, r"cell 1 is below its threshold.*outcome :interior") Integration.solve(
+            _ablator(6; from_bottom = true, t_end = 5.0);
+            use_ale = moving,
+            deactivation = true,
+            abstol = 1e-8,
+            reltol = 1e-6,
+            pressure_tolerance = 1e-3,
+        )
+    @test sol.retcode === :Terminated
+    @test sol.outcome === :interior
+    @test isempty(sol.events)
+    @test sol.t[end] < 5.0
 end
 
 @testset "deactivation under UMFPACK" begin
@@ -1457,7 +1474,8 @@ end
     ),
     energy in (:temperature, :enthalpy)
 
-    # The outermost cell merges, then a void lies inward of the live cells.
+    # The outermost cell merges, then a cell below the threshold lies inward of
+    # live cells that hold their mass: the solve ends.
     solid = SolidComponent(:a; φ = 0.3, ρ = 500.0, c = 1000.0, k = 0.2, λ = 1e-6, α = 3.0)
     gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02)
     problem = PyrolysisProblem(
@@ -1505,12 +1523,10 @@ end
         )
     end
     consistent_state!(u, cp.def, cp.ws, 0.0)
+    options = (u0 = u, dt = 1e-6, dtmax = 1e-6, saveat = [0.0, 0.001])
     sol = @test_logs (:warn, r"cell 1 is below its threshold") match_mode = :any integrate(
         cp;
-        u0 = u,
-        dt = 1e-6,
-        dtmax = 1e-6,
-        saveat = [0.0, 0.001],
+        options...,
     )
     @test sol.outcome === :interior
     @test [(e.cell, e.receiver) for e in sol.events] == [(4, 3)]
@@ -1527,4 +1543,842 @@ end
             [k for k in (velocity_index(layout, nd) for nd = 1:5) if layout.mask[k]]
         @test maximum(abs, du[velocities]) < 1e-12
     end
+end
+
+# A column of `n` cells that burns at order `order` with a rate that reads no
+# temperature, adiabatic at 600 K; `char` adds an inert component to the solid
+# column's cells where `z` falls below it, as a substrate, and `law`, `density`
+# and `radiating` a lateral shrinkage law, a temperature-dependent intrinsic
+# density and in-depth absorption.
+function _burning(
+    n;
+    order = 1.0,
+    L = 0.01,
+    k = 1.0,
+    substrate = 0.0,
+    law = nothing,
+    density = nothing,
+    radiating = false,
+    t_end = 1.0,
+)
+    pores = density === nothing ? (φ = 0.3,) : (ρ_intrinsic = density,)
+    solid =
+        SolidComponent(:a; ρ = 500.0, c = 1000.0, k = 0.2, λ = 1e-6, α = 100.0, pores...)
+    inert =
+        SolidComponent(:sub; ρ = 250.0, φ = 0.5, c = 1200.0, k = 0.1, λ = 1e-6, α = 300.0)
+    gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02)
+    return PyrolysisProblem(
+        mesh = create_uniform_mesh(L, n),
+        material = Material(
+            name = :burning,
+            components = (solid, inert, gas),
+            reactions = (Reaction(:burn, 1 => 3; A = k, E = 0.0, h = 0.0, n = order),),
+            lateral_shrinkage_law = law,
+        ),
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = radiating ? RadiativeFluxBC(flux = 1000.0) : AdiabaticBC(),
+                bottom = AdiabaticBC(),
+            ),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 600.0)),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> 600.0,
+        ξ_initial = [
+            z -> z < substrate ? 0.0 : 500.0,
+            z -> z < substrate ? 250.0 : 0.0,
+            z -> 0.0,
+        ],
+        tspan = (0.0, t_end),
+        output_times = collect(range(0.0, t_end; length = 21)),
+    )
+end
+
+# The initial state with each cell's inventories and thickness scaled by its
+# fraction and its temperature `T[i]`.
+function _prepared(cp, fractions, T = fill(600.0, length(fractions)))
+    u = copy(cp.u0)
+    layout, s = cp.def.layout, cp.def.setup
+    NC = n_components(layout)
+    x = is_moving(layout) ? u[position_index(layout, 1)] : 0.0
+    for i in eachindex(fractions)
+        for j = 1:NC
+            u[mass_index(layout, i, j)] *= fractions[i]
+        end
+        m = ntuple(j -> u[mass_index(layout, i, j)], Val(NC))
+        u[energy_index(layout, i)] =
+            Pyrolysis.States.energy_state_value(energy_state(layout), s, T[i], m, i)
+        if is_moving(layout)
+            x += s.reference.thickness[i] * fractions[i]
+            u[position_index(layout, i + 1)] = x
+        end
+    end
+    return u
+end
+
+# The live column's masses, sensible enthalpy, volume and pore volume.
+function _column_inventory(cp, u)
+    layout, s = cp.def.layout, cp.def.setup
+    cells = cp.deactivation
+    top = top_live_cell(layout)
+    ds = cp.ws.derived
+    Pyrolysis.States.derive!(ds, u, layout, s)
+    m = [sum(u[mass_index(layout, i, j)] for i = 1:top) for j = 1:n_components(layout)]
+    H = sum(
+        ds.m[j, i] * sensible_enthalpy(s.laws.h[j], ds.T[i]) for
+        i = 1:top, j = 1:n_components(layout)
+    )
+    V =
+        (u[position_index(layout, top + 1)] - u[position_index(layout, 1)]) *
+        s.topology.cross_section
+    skeletal = sum(
+        Pyrolysis.Physics.skeletal_volume_fraction(
+            ntuple(j -> ds.m[j, i], n_components(layout)),
+            ds.T[i],
+            s.material,
+        ) for i = 1:top
+    )
+    return (; m, H, V, pores = V - skeletal)
+end
+
+_cell_size(u, layout, s) = u[position_index(layout, s + 1)] - u[position_index(layout, s)]
+
+@testset "an interior run leaves the column whole: $(width) cell(s), $(energy) form" for width in
+                                                                                         (
+        1,
+        2,
+    ),
+    energy in (:temperature, :enthalpy)
+
+    cp = setup(
+        _burning(6);
+        use_ale = true,
+        deactivation = true,
+        correction = NoCorrection(),
+        energy_state = energy,
+    )
+    layout, cells, def = cp.def.layout, cp.deactivation, cp.def
+    fractions = [0.8, 0.7, width == 2 ? 0.006 : 0.6, 0.005, 0.05, 0.04]
+    u = _prepared(cp, fractions)
+    before = _column_inventory(cp, u)
+    next_size = _cell_size(u, layout, 5)
+    @test deactivate!(u, cells, def, 0.5) === :transferred
+    after = _column_inventory(cp, u)
+    @test after.m ≈ before.m rtol = 1e-14
+    @test after.H ≈ before.H rtol = 1e-13
+    @test after.V ≈ before.V rtol = 1e-13
+    @test abs(cells.events[1].created_volume) <= 1e-13 * before.V
+    @test _cell_size(u, layout, 5 - width) ≈ next_size rtol = 1e-12
+    top = 6 - width
+    @test top_live_cell(layout) == top
+    @test all(
+        layout.mask[cell_rows(layout, i)] == fill(i <= top, length(cell_rows(layout, i)))
+        for i = 1:6
+    )
+    @test all(all(layout.mask[node_rows(layout, nd)]) == (nd <= top + 1) for nd = 1:7)
+    expected = width == 1 ? [(4, 3)] : [(4, 2), (3, 2)]
+    @test [(e.cell, e.receiver) for e in cells.events] == expected
+    for (k, e) in enumerate(cells.events)
+        slot = 7 - k
+        @test e.rows ==
+              vcat(collect(cell_rows(layout, slot)), collect(node_rows(layout, slot + 1)))
+        @test e.origin == cells.tables.origin
+    end
+    @test cells.tables.origin == (width == 1 ? [1, 2, 3, 5, 6, 4] : [1, 2, 5, 6, 3, 4])
+    @test all(
+        u[position_index(layout, nd)] == u[position_index(layout, top + 1)] for
+        nd = (top+2):7
+    )
+    consistent_state!(u, def, cp.ws, 0.5)
+    @test !inadmissible(u, layout, def.setup, cp.abstol)
+    du = zeros(length(u))
+    residual!(du, u, def, 0.5, cp.ws)
+    @test all(isfinite, du)
+end
+
+@testset "a run from the innermost cell goes outward: $(width) cell(s), $(energy) form" for width in
+                                                                                            (
+        1,
+        2,
+    ),
+    energy in (:temperature, :enthalpy)
+
+    cp = setup(
+        _burning(6);
+        use_ale = true,
+        deactivation = true,
+        correction = NoCorrection(),
+        energy_state = energy,
+    )
+    layout, cells, def = cp.def.layout, cp.deactivation, cp.def
+    fractions = [0.005, width == 2 ? 0.006 : 0.06, 0.07, 0.08, 0.05, 0.04]
+    u = _prepared(cp, fractions)
+    before = _column_inventory(cp, u)
+    x_bottom = u[position_index(layout, 1)]
+    x_far = u[position_index(layout, width + 2)]
+    next_size = _cell_size(u, layout, width + 2)
+    @test deactivate!(u, cells, def, 0.5) === :transferred
+    after = _column_inventory(cp, u)
+    @test after.m ≈ before.m rtol = 1e-14
+    @test after.H ≈ before.H rtol = 1e-13
+    @test after.V ≈ before.V rtol = 1e-13
+    @test u[position_index(layout, 1)] == x_bottom
+    @test u[position_index(layout, 2)] == x_far
+    @test _cell_size(u, layout, 2) ≈ next_size rtol = 1e-12
+    @test top_live_cell(layout) == 6 - width
+    expected = width == 1 ? [(1, 2)] : [(2, 3), (1, 3)]
+    @test [(e.cell, e.receiver) for e in cells.events] == expected
+    @test cells.tables.origin == (width == 1 ? [2, 3, 4, 5, 6, 1] : [3, 4, 5, 6, 1, 2])
+    consistent_state!(u, def, cp.ws, 0.5)
+    @test !inadmissible(u, layout, def.setup, cp.abstol)
+end
+
+@testset "a merge between densities keeps the pores and books the volume: $(run), $(energy) form" for run in
+                                                                                                      (
+        :interior,
+        :bottom,
+    ),
+    energy in (:temperature, :enthalpy)
+
+    density = CallableProperty(T -> 600 / (1 - 2e-6 * (clamp(T, 400.0, 800.0) - 600)^2))
+    cp = setup(
+        _burning(3; density);
+        use_ale = true,
+        deactivation = true,
+        threshold = 1e-2,
+        correction = NoCorrection(),
+        energy_state = energy,
+    )
+    layout, cells = cp.def.layout, cp.deactivation
+    interior = run === :interior
+    u = _prepared(
+        cp,
+        interior ? [0.8, 0.009, 0.06] : [0.009, 0.08, 0.06],
+        interior ? [400.0, 800.0, 600.0] : [800.0, 400.0, 600.0],
+    )
+    before = _column_inventory(cp, u)
+    above = _cell_size(u, layout, 3)
+    @test deactivate!(u, cells, cp.def, 0.5) === :transferred
+    after = _column_inventory(cp, u)
+    created = sum(e.created_volume for e in cells.events)
+    @test created > 1e-3 * before.V
+    @test after.V - before.V ≈ created rtol = 1e-10
+    @test abs(after.pores - before.pores) <= 1e-12 * before.V
+    @test after.m ≈ before.m rtol = 1e-14
+    @test _cell_size(u, layout, 2) ≈ above rtol = 1e-10
+end
+
+@testset "one interior event through the solve: $(name), $(energy) form" for name in (
+        :beam,
+        :lateral,
+        :layers,
+    ),
+    energy in (:temperature, :enthalpy)
+
+    problem =
+        name === :beam ? _burning(5; k = 0.02, radiating = true, t_end = 0.2) :
+        name === :lateral ? _burning(5; k = 0.02, law = χ -> 1 - 0.2χ, t_end = 0.2) :
+        _burning(5; k = 0.02, substrate = 0.004, t_end = 0.2)
+    cp = setup(
+        problem;
+        use_ale = true,
+        deactivation = true,
+        correction = NoCorrection(),
+        energy_state = energy,
+        radiation_model = name === :beam ? BEER_LAMBERT : SURFACE_ABSORPTION,
+        reltol = 1e-6,
+        abstol = 1e-8,
+    )
+    u = _prepared(cp, [0.8, 0.8, 0.005, 0.07, 0.06])
+    consistent_state!(u, cp.def, cp.ws, 0.0)
+    sol = integrate(cp; u0 = u, maxiters = 30_000, dtmin = 1e-14)
+    @test sol.retcode === :Success
+    @test [(e.cell, e.receiver) for e in sol.events] == [(3, 2)]
+    @test sol.statistics.domain_rejections == 0
+    @test all(v -> all(isfinite, v), sol.raw_solution.u)
+    layout = cp.def.layout
+    v = sol.raw_solution.u[end]
+    @test !inadmissible(v, layout, cp.def.setup, cp.abstol)
+    du = similar(v)
+    residual!(du, v, cp.def, sol.t[end], cp.ws)
+    velocities = [k for k in (velocity_index(layout, nd) for nd = 1:6) if layout.mask[k]]
+    @test maximum(abs, du[velocities]) < 1e-10
+end
+
+@testset "an interior crossing ends a fixed mesh's pass and changes nothing" begin
+    cp = setup(_burning(5); deactivation = true, reltol = 1e-6, abstol = 1e-8)
+    u = _prepared(cp, [0.8, 0.8, 0.005, 0.7, 0.6])
+    v = copy(u)
+    @test deactivate!(u, cp.deactivation, cp.def, 0.5) === :interior
+    @test u == v
+    @test isempty(cp.deactivation.events)
+    @test cp.deactivation.tables.origin == 1:5
+end
+
+@testset "location and the end-of-step test take the same cells on an interior crossing" begin
+    problem = _burning(6; t_end = 6.0)
+    fractions = [0.8, 0.05, 0.07, 0.03, 0.06, 0.04]
+    cells(located) = begin
+        cp = setup(
+            problem;
+            use_ale = true,
+            deactivation = true,
+            correction = NoCorrection(),
+            reltol = 1e-6,
+            abstol = 1e-8,
+            pressure_tolerance = 1e-3,
+        )
+        u = _prepared(cp, fractions)
+        consistent_state!(u, cp.def, cp.ws, 0.0)
+        integrate(cp; u0 = u, located_events = located, maxiters = 30_000, dtmin = 1e-14)
+    end
+    discrete, root = cells(false), cells(true)
+    @test [(e.cell, e.receiver) for e in root.events] == [(e.cell, e.receiver) for e in discrete.events]
+    @test length(root.events) >= 3
+    @test all(
+        minimum(e.fraction for e in root.events if e.invocation == k) ≈ 1e-2 for
+        k in unique(e.invocation for e in root.events)
+    )
+end
+
+@testset "a time saved in the step of an event reads the state before the cells moved" begin
+    # Every cell's thickness decays exactly with its condensed mass.
+    fractions = [0.8, 0.7, 0.0105, 0.06, 0.05]
+    t_end = 1.0
+    cp = setup(
+        _burning(5; t_end);
+        use_ale = true,
+        deactivation = true,
+        correction = NoCorrection(),
+        reltol = 1e-8,
+        abstol = 1e-8,
+        pressure_tolerance = 1e-3,
+    )
+    u = _prepared(cp, fractions)
+    consistent_state!(u, cp.def, cp.ws, 0.0)
+    h = cp.def.setup.reference.thickness
+    sol = integrate(
+        cp;
+        u0 = u,
+        saveat = collect(range(0.0, t_end; length = 2001)),
+        maxiters = 30_000,
+    )
+    t_event = only(sol.events).t
+    @test t_event ≈ log(1.05) rtol = 1e-5
+    before = findall(<(t_event), sol.t)
+    @test length(before) > 5
+    for k in before, s = 1:5
+        exact = h[s] * fractions[s] * exp(-sol.t[k])
+        @test sol.z[s+1, k] - sol.z[s, k] ≈ exact rtol = 1e-3
+    end
+end
+
+@testset "a solve that compacts and then stops on the thickness saves a consistent last state" begin
+    cp = setup(
+        _burning(6; t_end = 8.0);
+        use_ale = true,
+        deactivation = true,
+        correction = NoCorrection(),
+        reltol = 1e-6,
+        abstol = 1e-8,
+        pressure_tolerance = 1e-3,
+    )
+    u = _prepared(cp, [0.8, 0.02, 0.09, 0.095, 0.09, 0.08])
+    consistent_state!(u, cp.def, cp.ws, 0.0)
+    sol = integrate(cp; u0 = u, min_thickness = 2e-4, maxiters = 30_000, dtmin = 1e-14)
+    @test sol.outcome === :min_thickness
+    @test !isempty(sol.events)
+    top = top_live_cell(cp.def.layout)
+    @test sol.extras.live_cells[end] == top
+    @test all(isfinite, sol.T[1:top, end])
+    @test all(isnan, sol.T[(top+1):end, end])
+    @test all(>(0), diff(sol.z[1:(top+1), end]))
+    @test sol.extras.thickness_history[end] ≈ 2e-4 rtol = 1e-3
+end
+
+@testset "a set-up problem integrates again to the same solution after its cells moved: $(energy) form" for energy in
+                                                                                                            (
+    :temperature,
+    :enthalpy,
+)
+    cp = setup(
+        _burning(6; t_end = 5.0);
+        use_ale = true,
+        deactivation = true,
+        correction = NoCorrection(),
+        energy_state = energy,
+        reltol = 1e-6,
+        abstol = 1e-8,
+        pressure_tolerance = 1e-3,
+    )
+    u = _prepared(cp, [0.8, 0.02, 0.09, 0.03, 0.09, 0.08])
+    consistent_state!(u, cp.def, cp.ws, 0.0)
+    first_run = integrate(cp; u0 = u, maxiters = 30_000, dtmin = 1e-14)
+    second_run = integrate(cp; u0 = u, maxiters = 30_000, dtmin = 1e-14)
+    @test length(first_run.events) >= 2
+    @test first_run.t == second_run.t
+    @test first_run.m == second_run.m
+    @test isequal(first_run.T, second_run.T)
+    @test [e.origin for e in first_run.events] == [e.origin for e in second_run.events]
+end
+
+# The reactant of `_burning` in the cells above a substrate of the same mass of
+# inert solid: the merge's receiver starts with no lineage of the reaction.
+@testset "a receiver with no lineage takes the dead run's: $(energy) form" for energy in (
+    :temperature,
+    :enthalpy,
+)
+    cp = setup(
+        _burning(4; order = 0.5, substrate = 0.005);
+        use_ale = true,
+        deactivation = true,
+        threshold = 1e-2,
+        energy_state = energy,
+    )
+    layout, cells = cp.def.layout, cp.deactivation
+    kernel = find_kernel(ReactionKernel, cp.def.kernels)
+    @test kernel.reference[1, 2] == 0
+    R = kernel.reference[1, 3]
+    @test R > 0
+    u = _prepared(cp, [0.9, 0.9, 0.005, 0.06])
+    fraction = 0.005
+    @test below_threshold(cells, layout, u, 3)
+    @test !below_threshold(cells, layout, u, 2)
+    @test deactivate!(u, cells, cp.def, 0.5) === :transferred
+    e = only(cells.events)
+    @test (e.cell, e.receiver) == (3, 2)
+    @test e.reference_updates == [(1, 2, R)]
+    @test kernel.reference[1, 2] == R
+    @test kernel.reference[1, 3] ≈ R rtol = 1e-14
+    @test cells.tables.origin == [1, 2, 4, 3]
+    # The receiver stays: it was an inert cell, which the threshold never tests.
+    @test top_live_cell(layout) == 3
+    @test !below_threshold(cells, layout, u, 2)
+    consistent_state!(u, cp.def, cp.ws, 0.5)
+    du = zeros(length(u))
+    residual!(du, u, cp.def, 0.5, cp.ws)
+    c = cp.ws.contributions
+    @test u[mass_index(layout, 2, 1)] ≈ fraction * R rtol = 1e-12
+    @test c.S_mass[1, 2] < 0
+    @test c.S_mass[3, 2] > 0
+    # A replay before the event has no update; after it, the update.
+    replay_events!(cells, layout, 0.1)
+    @test kernel.reference[1, 2] == 0
+    replay_events!(cells, layout, 1.0)
+    @test kernel.reference[1, 2] == R
+    reset_cells!(cells, layout)
+    @test kernel.reference[1, 2] == 0
+    @test kernel.reference[1, 3] == R
+end
+
+@testset "the threshold at an order other than one reads the reactive inventory" begin
+    a = SolidComponent(:a; ρ = 500.0, φ = 0.3, c = 1000.0, k = 0.2, λ = 1e-6)
+    char = SolidComponent(:char; ρ = 500.0, φ = 0.3, c = 1000.0, k = 0.2, λ = 1e-6)
+    inert = SolidComponent(:inert; ρ = 500.0, φ = 0.3, c = 1000.0, k = 0.2, λ = 1e-6)
+    gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02)
+    problem(order) = PyrolysisProblem(
+        mesh = create_uniform_mesh(0.01, 5),
+        material = Material(
+            name = :charring,
+            components = (a, char, inert, gas),
+            reactions = (
+                Reaction(
+                    :burn,
+                    :a => (:char, :gas);
+                    A = 1.0,
+                    E = 0.0,
+                    h = 0.0,
+                    n = order,
+                    yields = (0.005, 0.995),
+                ),
+            ),
+        ),
+        bc_set = BoundaryConditionSet(
+            thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 600.0)),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> 600.0,
+        ξ_initial = [
+            z -> z < 0.002 ? 0.0 : 500.0,
+            z -> 0.0,
+            z -> z < 0.002 ? 500.0 : 0.0,
+            z -> 0.0,
+        ],
+        tspan = (0.0, 1.0),
+    )
+    cp = setup(problem(0.5); use_ale = true, deactivation = true, threshold = 1e-3)
+    layout, cells = cp.def.layout, cp.deactivation
+    @test cells.reactants == [1]
+    R = cells.reactive[3]
+    u = copy(cp.u0)
+    # Reactant below ε, char far above it: the cell is below the threshold.
+    u[mass_index(layout, 3, 1)] = 0.5e-3 * R
+    u[mass_index(layout, 3, 2)] = 0.1 * R
+    @test condensed_mass(cells, layout, u, 3) > cells.threshold * cells.reference[3]
+    @test below_threshold(cells, layout, u, 3)
+    @test threshold_margin(cells, layout, u) ≈ -0.5 rtol = 1e-12
+    @test !below_threshold(cells, layout, u, 4)
+    # An inert layer is never tested.
+    @test cells.reactive[1] == 0
+    @test !below_threshold(cells, layout, u, 1)
+    v = copy(u)
+    v[mass_index(layout, 1, 3)] = 0.0
+    @test !below_threshold(cells, layout, v, 1)
+    # The band reads the same measure.
+    cp2 = setup(
+        problem(0.5);
+        use_ale = true,
+        deactivation = true,
+        threshold = 1e-3,
+        band = 0.008,
+    )
+    w = copy(u)
+    w[mass_index(layout, 4, 1)] = 0.005 * R
+    w[mass_index(layout, 4, 2)] = 0.5 * R
+    w[mass_index(layout, 5, 1)] = 0.009 * R
+    @test deactivate!(w, cp2.deactivation, cp2.def, 0.5) === :transferred
+    @test sort([e.cell for e in cp2.deactivation.events]) == [3, 4]
+    # At order one the measure is the total condensed mass.
+    first_order = setup(
+        problem(1.0);
+        use_ale = true,
+        deactivation = true,
+        threshold = 1e-3,
+        correction = NoCorrection(),
+    )
+    @test isempty(first_order.deactivation.reactants)
+    @test isempty(first_order.deactivation.reactive)
+    @test !below_threshold(first_order.deactivation, first_order.def.layout, u, 3)
+    # The last live cell has no receiver and is read on its condensed mass.
+    one_cell = setup(
+        PyrolysisProblem(
+            mesh = create_uniform_mesh(0.002, 1),
+            material = problem(0.5).material,
+            bc_set = problem(0.5).bc_set,
+            T_initial = z -> 600.0,
+            ξ_initial = [z -> 500.0, z -> 0.0, z -> 0.0, z -> 0.0],
+            tspan = (0.0, 1.0),
+        );
+        use_ale = true,
+        deactivation = true,
+        threshold = 1e-3,
+    )
+    d = one_cell.deactivation
+    y = copy(one_cell.u0)
+    y[mass_index(one_cell.def.layout, 1, 1)] = 0.5e-3 * d.reactive[1]
+    y[mass_index(one_cell.def.layout, 1, 2)] = 0.1 * d.reactive[1]
+    @test !below_threshold(d, one_cell.def.layout, y, 1)
+    y[mass_index(one_cell.def.layout, 1, 2)] = 0.1e-3 * d.reactive[1]
+    @test below_threshold(d, one_cell.def.layout, y, 1)
+end
+
+@testset "the default threshold at an order other than one sits a decade inside the onset" begin
+    deck(order) = _burning(3; order)
+    @test setup(deck(0.5); use_ale = true, deactivation = true).deactivation.threshold ==
+          1e-4
+    @test setup(deck(1.0); use_ale = true, deactivation = true).deactivation.threshold ==
+          1e-2
+    @test setup(deck(0.5); use_ale = true, deactivation = true, threshold = 3e-3).deactivation.threshold ==
+          3e-3
+end
+
+@testset "a mixed-order column agrees with itself without deactivation" begin
+    a = SolidComponent(:a; ρ = 500.0, φ = 0.3, c = 1000.0, k = 0.2, λ = 1e-6)
+    b = SolidComponent(:b; ρ = 500.0, φ = 0.3, c = 1000.0, k = 0.2, λ = 1e-6)
+    gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02)
+    problem = PyrolysisProblem(
+        mesh = create_uniform_mesh(0.01, 20),
+        material = Material(
+            name = :mixed,
+            components = (a, b, gas),
+            reactions = (
+                Reaction(:half, 1 => 3; A = 0.05, E = 0.0, h = 0.0, n = 0.5, basis = 1.0),
+                Reaction(:one, 2 => 3; A = 0.3, E = 0.0, h = 0.0),
+            ),
+        ),
+        bc_set = BoundaryConditionSet(
+            thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 600.0)),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> 600.0,
+        ξ_initial = [
+            z -> 250.0 - 200.0 * z / 0.01,
+            z -> 250.0 + 200.0 * z / 0.01,
+            z -> 0.0,
+        ],
+        tspan = (0.0, 30.0),
+        output_times = collect(0.0:0.1:30.0),
+    )
+    options = (use_ale = true, reltol = 1e-6, abstol = 1e-8, min_thickness = 1e-4)
+    off = Integration.solve(problem; options...)
+    on = Integration.solve(problem; options..., deactivation = true, threshold = 1e-2)
+    @test !isempty(on.events)
+    # The saved times they share; each ends on the time its thickness stopped it.
+    k = 1:(min(length(on.t), length(off.t))-1)
+    @test on.t[k] == off.t[k]
+    peak = maximum(off.extras.gas_generation_rate)
+    @test maximum(
+        abs,
+        on.extras.gas_generation_rate[k] .- off.extras.gas_generation_rate[k],
+    ) < 0.02 * peak
+end
+
+# The state with each cell's inventories and volume scaled by its fraction, on
+# any coordinates.
+function _prepared_shells(cp, fractions)
+    u = _prepared(cp, fractions)
+    layout, s = cp.def.layout, cp.def.setup
+    x = cp.u0[position_index(layout, 1)]
+    for i in eachindex(fractions)
+        x = outer_position(
+            s.topology.coordinates,
+            x,
+            s.reference.volume[i] * fractions[i],
+            s.reference.cross_section,
+        )
+        u[position_index(layout, i + 1)] = x
+    end
+    consistent_state!(u, cp.def, cp.ws, 0.0)
+    return u
+end
+
+_on_mesh(p, mesh) = PyrolysisProblem(
+    mesh = mesh,
+    material = p.material,
+    bc_set = p.bc_set,
+    T_initial = p.T_initial,
+    ξ_initial = p.ξ_initial,
+    tspan = p.tspan,
+    output_times = p.output_times,
+)
+
+@testset "a merge below the capacity floor keeps the cells' temperature: $(energy) form, $(name)" for energy in
+                                                                                                      (
+        :temperature,
+        :enthalpy,
+    ),
+    (name, fractions) in
+    (("inward", [1.1e-4, 9e-5, 5e-4]), ("outward", [9e-5, 1.1e-4, 5e-4]))
+
+    cp = setup(
+        _burning(3; k = 0.02, order = 0.5, t_end = 0.2);
+        use_ale = true,
+        deactivation = true,
+        correction = NoCorrection(),
+        threshold = 1e-4,
+        energy_state = energy,
+    )
+    layout = cp.def.layout
+    u = _prepared(cp, fractions)
+    held = _column_inventory(cp, u)
+    deactivate!(u, cp.deactivation, cp.def, 0.0)
+    @test top_live_cell(layout) == 2
+    @test Pyrolysis.Deactivation._temperature(
+        energy_state(layout),
+        u,
+        cp.deactivation,
+        cp.def.setup.laws,
+        layout,
+        1,
+        Pyrolysis.Deactivation._masses(u, layout, 1),
+    ) ≈ 600.0 rtol = 1e-12
+    @test _column_inventory(cp, u).H ≈ held.H rtol = 1e-12
+end
+
+@testset "a void beneath a skin ends a moving column's solve" begin
+    # Cell 3 empties under in-depth absorption beneath cells that hold their mass.
+    problem = _burning(5; k = 2.0, radiating = true, t_end = 1.0)
+    cp = setup(
+        problem;
+        use_ale = true,
+        deactivation = true,
+        correction = NoCorrection(),
+        radiation_model = BEER_LAMBERT,
+    )
+    u = _prepared(cp, [0.8, 0.8, 0.015, 0.7, 0.6])
+    consistent_state!(u, cp.def, cp.ws, 0.0)
+    cp.u0 .= u
+    sol =
+        @test_logs (:warn, r"cell 3 is below its threshold.*outcome :interior") match_mode =
+            :any integrate(cp; maxiters = 50_000, dtmin = 1e-14)
+    @test sol.outcome === :interior
+    @test !succeeded(sol)
+    @test isempty(sol.events)
+end
+
+@testset "a void under spent cells closes and is reported: $(energy) form" for energy in (
+    :temperature,
+    :enthalpy,
+)
+    problem = _burning(5; k = 2.0, radiating = true, t_end = 0.4)
+    cp = setup(
+        problem;
+        use_ale = true,
+        deactivation = true,
+        correction = NoCorrection(),
+        energy_state = energy,
+    )
+    u = _prepared(cp, [0.8, 0.8, 0.015, 0.05, 0.06])
+    consistent_state!(u, cp.def, cp.ws, 0.0)
+    cp.u0 .= u
+    sol = integrate(cp; maxiters = 50_000, dtmin = 1e-14)
+    @test completed(sol)
+    reported = interior_events(sol)
+    @test (first(reported).cell, first(reported).receiver) == (3, 2)
+    @test all(e -> e.interior, reported)
+    @test occursin(
+        "Interior events: $(length(reported))",
+        sprint(show, MIME"text/plain"(), sol),
+    )
+end
+
+@testset "the skin starts at VOID_SKIN thresholds" begin
+    ε = 1e-2
+    for (outward, status) in ((0.99, :transferred), (1.01, :interior))
+        cp = setup(
+            _burning(3; t_end = 0.2);
+            use_ale = true,
+            deactivation = true,
+            correction = NoCorrection(),
+            threshold = ε,
+        )
+        u = _prepared(cp, [0.8, 0.5ε, outward * VOID_SKIN * ε])
+        @test deactivate!(u, cp.deactivation, cp.def, 0.0) === status
+        @test length(cp.deactivation.events) == (status === :interior ? 0 : 1)
+    end
+end
+
+@testset "the tables follow a surface removal after an interior one" begin
+    problem = _on_mesh(
+        _burning(5; k = 0.02, t_end = 0.2),
+        create_mesh_from_nodes([0.0, 0.001, 0.003, 0.006, 0.00601, 0.01101]),
+    )
+    cp = setup(problem; use_ale = true, deactivation = true, correction = NoCorrection())
+    layout, cells = cp.def.layout, cp.deactivation
+    u = _prepared(cp, [0.8, 0.8, 0.8, 0.005, 0.05])
+    deactivate!(u, cells, cp.def, 0.1)
+    @test cells.tables.origin == [1, 2, 3, 5, 4]
+    for j = 1:n_components(layout)
+        u[mass_index(layout, 4, j)] *= 0.001
+    end
+    deactivate!(u, cells, cp.def, 0.2)
+    @test top_live_cell(layout) == 3
+    tolerances = copy(cp.abstol)
+    positions = copy(cp.def.setup.reference.positions)
+    permute_slots!(cells.tables, layout)
+    @test cp.abstol == tolerances
+    @test cp.def.setup.reference.positions == positions
+    # A replay reads the same tables whichever times it passed through.
+    replay_events!(cells, layout, 0.0)
+    replay_events!(cells, layout, 0.1)
+    replay_events!(cells, layout, 0.2)
+    @test cp.abstol == tolerances
+    @test cp.def.setup.reference.positions == positions
+end
+
+@testset "the outputs' exposed area is the initial one after an interior event: $(typeof(coordinates)), $(energy) form" for coordinates in
+                                                                                                                            (
+        Planar(),
+        Cylindrical(),
+        Spherical(),
+    ),
+    energy in (:temperature, :enthalpy)
+
+    problem = _on_mesh(
+        _burning(5; k = 0.02, t_end = 0.2),
+        create_uniform_mesh(0.01, 5; coordinates),
+    )
+    cp = setup(
+        problem;
+        use_ale = true,
+        deactivation = true,
+        correction = NoCorrection(),
+        energy_state = energy,
+    )
+    cp.u0 .= _prepared_shells(cp, [0.8, 0.8, 0.005, 0.07, 0.06])
+    sol = integrate(cp; maxiters = 30_000, dtmin = 1e-14)
+    @test !isempty(interior_events(sol))
+    area = face_area(coordinates, 0.01, cp.def.setup.reference.cross_section)
+    @test sol.extras.total_mass[1] ≈ sum(sol.m[:, :, 1]) / area rtol = 1e-12
+end
+
+@testset "a query at a saved time reads the tables of that time: $(energy) form" for energy in
+                                                                                     (
+    :temperature,
+    :enthalpy,
+)
+    problem = _on_mesh(
+        _burning(3; k = 0.02, t_end = 0.2),
+        create_mesh_from_nodes([0.0, 0.001, 0.0011, 0.01]),
+    )
+    cp = setup(
+        problem;
+        use_ale = true,
+        deactivation = true,
+        threshold = 1e-4,
+        correction = NoCorrection(),
+        energy_state = energy,
+    )
+    cp.u0 .= _prepared_shells(cp, [0.8, 9e-5, 5e-4])
+    sol = integrate(cp; maxiters = 30_000, dtmin = 1e-14)
+    @test !isempty(interior_events(sol))
+    held = copy(cp.abstol)
+    @test sol(0.0).T ≈ sol.T[:, 1] rtol = 1e-12
+    @test cp.abstol == held
+end
+
+# One solid to a char and a gas: a yield `y` of a char of density `ρ_c`.
+_charring(y, ρ_c, n) = Material(
+    name = :charring,
+    components = (
+        SolidComponent(:a; ρ = 500.0, φ = 0.3, c = 1000.0, k = 0.2, λ = 1e-6),
+        SolidComponent(:char; ρ = ρ_c, φ = 0.3, c = 1000.0, k = 0.1, λ = 1e-6),
+        GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02),
+    ),
+    reactions = (
+        Reaction(:r, 1 => (2, 3); A = 1.0, E = 0.0, h = 0.0, n, yields = (y, 1 - y)),
+    ),
+)
+
+@testset "retained_volumes" begin
+    v = retained_volumes(_charring(0.2, 100.0, 0.5), 300.0)
+    @test v[1] ≈ 0.2 / 100.0
+    @test v[2] ≈ 1 / 100.0
+    @test v[3] == 0.0
+    @test residues(_charring(0.2, 100.0, 0.5)) == (0.2, 1.0, 0.0)
+end
+
+@testset "only a cell that vanishes is tested at an order other than one: y = $(y), ρ_c = $(ρ_c)" for (
+    y,
+    ρ_c,
+    tested,
+) in (
+    (0.002, 500.0, true),
+    (0.001, 100.0, true),
+    (0.02, 500.0, false),
+    (0.2, 100.0, false),
+    # Little of the mass stays, all of the volume.
+    (0.01, 5.0, false),
+)
+    problem = _on_mesh(_burning(4; t_end = 0.2), create_uniform_mesh(0.01, 4))
+    problem = PyrolysisProblem(
+        mesh = problem.mesh,
+        material = _charring(y, ρ_c, 0.5),
+        bc_set = problem.bc_set,
+        T_initial = problem.T_initial,
+        ξ_initial = problem.ξ_initial,
+        tspan = problem.tspan,
+        output_times = problem.output_times,
+    )
+    cp = setup(problem; use_ale = true, deactivation = true, correction = NoCorrection())
+    @test all(>(0), cp.deactivation.reactive) == tested
+    @test all(iszero, cp.deactivation.reactive) == !tested
 end

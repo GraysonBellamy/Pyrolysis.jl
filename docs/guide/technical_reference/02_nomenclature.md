@@ -237,7 +237,7 @@ Conventions:
 | $\delta_{\text{mov}}$, $\delta_{\text{BL}}$, $\delta_{\chi}$ | Configuration flags of the state layout: one on a moving mesh / under Beer–Lambert radiation / under a lateral-shrinkage law, zero otherwise (§3.1.2, §15.1.1) | – |
 | $\varepsilon$, $\varepsilon_j$ | Emissivity (of component *j*) | – |
 | $\varepsilon_{\text{eff}}$ | Effective (composition-weighted) emissivity | – |
-| $\varepsilon_m$ | Deactivation threshold: fraction of a cell's reference condensed mass below which it deactivates (`threshold`, default 1e-2; overload E1) | – |
+| $\varepsilon_m$ | Deactivation threshold: fraction of a cell's reference below which it deactivates (`threshold`, default 1e-2, at an order other than one a tenth of the limiter's `conversion_threshold`; overload E1) | – |
 | $\varepsilon_{\text{band}}$ | Near-threshold band of deactivation, $\varepsilon_m \le \varepsilon_{\text{band}} < 1$ (`band`) | – |
 | $\varepsilon_{AB}$ | Lennard-Jones well depth (collision integral) | J |
 | $\epsilon_{\xi}$, $\epsilon_T$, $\epsilon_G$ | Slope scales of the van Albada reconstruction for the concentrations, the temperature and the history values: the square of a tolerance over the upwind cell's reference thickness (§11.6.2; overload E1) | (field units)²·m⁻² |

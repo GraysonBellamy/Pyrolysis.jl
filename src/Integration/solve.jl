@@ -33,7 +33,7 @@ const _SOLVE_KEYWORDS = (
 
 """
 	solve(problem::PyrolysisProblem; energy_state = :temperature, abstol = 1e-8,
-	      reltol = 1e-6, threshold = 1e-2, maxiters = 1_000_000,
+	      reltol = 1e-6, threshold = nothing, maxiters = 1_000_000,
 	      dt = problem.dt_initial, adaptive = true, dtmin = 1e-12, dtmax = Inf,
 	      saveat = problem.output_times, callback = nothing, validate = true,
 	      linear_solver = nothing, integrator_policy = nothing,
@@ -46,7 +46,8 @@ Solve `problem`.
 The integrator is handed the mass-matrix system with the colored Jacobian, the
 per-row absolute tolerances (`abstol` is the temperature tolerance [K]; the mass
 and enthalpy rows take theirs from the cell's initial condensed mass and
-`threshold`), no initialization of its own, and [`DomainCheck`](@ref) as its
+`threshold`, whose default [`setup`](@ref) states), no initialization of its own,
+and [`DomainCheck`](@ref) as its
 domain test (admissibility, porosity and the constraint residuals of the
 algebraic rows, on the proposals its error test accepts). `dt` is the first
 step, and with `adaptive = false` the fixed step. `integrator_policy`
@@ -68,18 +69,16 @@ callbacks. `progress` draws a progress bar, a read-only observer as well.
 `:Terminated` and outcome `:min_thickness` when the thickness falls below
 `min_thickness` [m] (default 1e-6). With `deactivation`, cells are deactivated in events
 ([`deactivate!`](@ref)): with `located_events` an event is located inside the
-step at the first time a live cell's condensed mass reaches its threshold (the
-first root of [`threshold_margin`](@ref)) and applied at the interpolated state
+step at the first time a live cell reaches its threshold (the first root of
+[`threshold_margin`](@ref)) and applied at the interpolated state
 there, the threshold and the band widened by `reltol` (`deactivate!`'s
-`slack`): the cells that go are the contiguous run from the exposed side that
-the widened tests take, which holds the crossing cell, and a cell within
-`reltol` of its threshold inward of a cell above the band stays; at the end
-of every step the cells below the
+`slack`): the cells that go are the runs the widened tests take, which hold the
+crossing cell; at the end of every step the cells below the
 threshold go in one event, the only events without `located_events` and with
 it the safety net for a crossing the location does not see. The
-solve ends with `:Terminated` when the last cell goes or a cell below the
-threshold lies inward of a live one (outcome `:interior`, with a warning
-naming the cell), and with `:Failure` when an event leaves
+solve ends with `:Terminated` when the last cell goes or when a cell below the
+threshold lies inward of a live one on a fixed mesh or beneath a skin on a moving
+one (outcome `:interior`, with a warning naming the cell), and with `:Failure` when an event leaves
 the state inadmissible (a merge's receiver held to its own mass tolerances,
 as the domain test holds every later proposal) or no consistent node
 velocities. The state a solve
@@ -97,7 +96,7 @@ function _solve(
     energy_state::Symbol = :temperature,
     abstol::Real = 1e-8,
     reltol::Real = 1e-6,
-    threshold::Real = 1e-2,
+    threshold::Union{Nothing,Real} = nothing,
     pressure_tolerance::Real = 1.0,
     maxiters::Int = 1_000_000,
     dt::Real = problem.dt_initial,
@@ -201,14 +200,14 @@ function integrate(
         throw(ArgumentError("min_thickness must be positive, got $min_thickness"))
     def, ws, cj = cp.def, cp.ws, cp.jacobian
     layout = def.layout
+    cells = cp.deactivation
+    cells === nothing || reset_cells!(cells, layout)
     inadmissible(u0, layout, def.setup, cp.abstol) && throw(
         ArgumentError(
             "the initial state is inadmissible: a live component mass below its " *
             "tolerance, a live cell at or below absolute zero, or crossed nodes",
         ),
     )
-    cells = cp.deactivation
-    cells === nothing || reset_cells!(cells, layout)
     corr = _layer_correction(def)
     corr === nothing || reset_layer_times!(corr)
     copyto!(ws.T_warm, cp.T0)
@@ -305,6 +304,9 @@ function integrate(
         initializealg = NoInit(),
         save_end = true,
     )
+    # The integrator takes a copy; an event's permutation reaches it through
+    # this one array.
+    integrator.opts.abstol = cp.abstol
     bind_pressure_norm!(pressure_norm, integrator)
     bind_error_test!(check, integrator)
     raw = OrdinaryDiffEq.solve!(integrator)

@@ -119,6 +119,7 @@ components.
 | `statistics` | `SolverStatistics` | — | The solver's counters (§9.3) |
 | `raw_solution` | ODE solution | — | The integrator's solution: the raw states and the interpolant |
 | `definition` | `CoreDefinition` | — | The definition of the solve, through which `solution(t)` reconstructs the fields |
+| `deactivation` | `CellDeactivation` or `nothing` | — | The deactivation state of the solve, whose tables `solution(t)` replays |
 
 A few points worth internalizing:
 
@@ -233,18 +234,21 @@ is reachable through `Pyrolysis.Internal`). Its fields:
 |---|---|
 | `t` | Time of the event [s] |
 | `invocation` | The deactivation callback's invocation it belongs to, numbered from one over the solve and shared by every cell one invocation deactivates |
-| `cell` | The deactivated cell |
-| `receiver` | The live cell that took its inventories (zero when none was left, the inventories then lost) |
+| `cell` | The deactivated cell, numbered on the initial mesh |
+| `receiver` | The live cell that took its inventories, numbered on the initial mesh (zero when none was left, the inventories then lost) |
 | `fraction` | The cell's condensed mass as a fraction of its initial condensed mass when it went |
-| `rows` | The state rows masked |
+| `rows` | The state rows masked, the outermost slots once the live cells have moved down |
 | `created_volume` | Volume the merge created to keep the pore space [m³] |
 | `lost_mass` | Masses lost per component [kg] (the vented gas on a fixed mesh) |
 | `lost_enthalpy` | Sensible enthalpy lost [J] |
 | `regularization` | Caloric regularization the cells held that the receiver does not [J] |
+| `origin` | The initial cell in each slot after the event |
+| `reference_updates` | Each a reaction, an initial cell and the lineage reference a receiver with none took |
+| `interior` | Whether live cells lay outward of the dead cell (§10.7) |
 
 A merge of several cells into one receiver records one event per dead cell, the outermost
-first; the merge's created volume, losses and regularization are written to that first
-event, so the sums over the events are the merges'. In the example of §9.1 the 19 events
+first; the merge's created volume, losses, regularization and reference updates are written
+to that first event, so the sums over the events are the merges'. In the example of §9.1 the 19 events
 share invocation 1:
 
 ```julia
@@ -278,6 +282,7 @@ All accessors are exported by `using Pyrolysis`:
 | `get_cell_positions(sol; at = lastindex(sol.t))` | The cell centres at saved time `at` |
 | `get_profile(sol, field, i)` | One field at saved time `i` |
 | `sol(t)`, `interpolate_solution(sol, t)` | The fields reconstructed at any time `t` |
+| `interior_events(sol)` | The events whose cell left from under spent cells (§10.7) |
 | `succeeded(sol)`, `completed(sol)` | How the solve ended |
 | `conservation_audit(sol[, recorder])` | The mass and energy closures (§9.8) |
 

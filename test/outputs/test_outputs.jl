@@ -218,11 +218,7 @@ end
     @test !isempty(thin.events) && live < 6
     @test thin.extras.thickness_history[end] == thin.z[live+1, end] - thin.z[1, end]
 
-    void = Integration.solve(
-        _ablator(6; from_bottom = true, t_end = 5.0);
-        use_ale = true,
-        options...,
-    )
+    void = Integration.solve(_ablator(6; from_bottom = true, t_end = 5.0); options...)
     @test void.retcode === :Terminated && void.outcome === :interior
     @test !succeeded(void) && !completed(void)
 

@@ -109,13 +109,6 @@ function _require_supported(
     end
     if needs_lineage(material)
         name = first(r for r in material.reactions if last(r.reactants[1]) != 1).name
-        deactivation && throw(
-            ArgumentError(
-                "reaction :$name has an order other than one, read on one conversion per " *
-                "cell, which a merge of cells at different conversions cannot hold: " *
-                "solve without deactivation",
-            ),
-        )
         correction isa NoCorrection || throw(
             ArgumentError(
                 "reaction :$name has an order other than one, whose cells must keep " *
@@ -264,11 +257,61 @@ function _reaction_references(
     return table
 end
 
+# The fraction of its initial volume a cell may keep once fully converted and
+# still leave at an order other than one. A cell that keeps more is a layer the
+# front burns beneath: merged into its neighbour it would stop resolving that layer,
+# and the reactant then taken in would burn at the temperature of the middle of it.
+const VANISHING_VOLUME = 1e-2
+
+# The fraction of its initial volume each cell keeps once its components are
+# converted completely ([`retained_volumes`](@ref)), `m0` its initial masses
+# (`NC × n`) and `T0` its initial temperatures. Zero in a cell with no condensed mass.
+function _retained_volume(material::Material{NC}, m0, T0) where {NC}
+    return map(axes(m0, 2)) do i
+        v = retained_volumes(material, T0[i])
+        kept, initial = 0.0, 0.0
+        for j = 1:NC
+            is_gas(material.components[j]) && continue
+            kept += m0[j, i] * v[j]
+            initial += m0[j, i] / material.components[j].density(T0[i])
+        end
+        initial > 0 ? kept / initial : 0.0
+    end
+end
+
+# What the deactivation threshold of `material` reads at an order other than one:
+# the component of each reaction with a condensed reactant, and each cell's
+# reactive reference, the sum over those reactions of the reaction's lineage
+# reference or, at order one, where the lineage is not defined for every network,
+# its reactant's initial mass, zero in a cell that keeps `VANISHING_VOLUME` or more
+# of its volume, which is then never tested. Nothing at order one.
+function _reactive_references(material::Material, references::Matrix{Float64}, m0, T0)
+    needs_lineage(material) || return Int[], Float64[]
+    reactants = Int[]
+    reactive = zeros(size(m0, 2))
+    for (r, reaction) in enumerate(material.reactions)
+        a, order = reaction.reactants[1]
+        is_gas(material.components[a]) && continue
+        push!(reactants, a)
+        reactive .+= order == 1 ? view(m0, a, :) : view(references, r, :)
+    end
+    reactive[_retained_volume(material, m0, T0) .>= VANISHING_VOLUME] .= 0.0
+    return reactants, reactive
+end
+
+# The deactivation threshold of a solve that names none: below order one the
+# rate dies only where the conversion onset acts, so a cell should leave once
+# its conversion is a decade inside it.
+_default_threshold(material::Material, deactivation::Bool) =
+    deactivation && needs_lineage(material) ?
+    material.depletion_limiter.conversion_threshold / 10 : 1e-2
+
 # The correction of a solve that names none: the equidistribution correction
 # where the mesh moves, cells are deactivated and deactivation at `threshold`
 # can remove some cell ([`vanishes`](@ref)), so that a layer's cells thin
-# together and leave in one event; no correction otherwise. `ξ0` holds the cells'
-# initial concentrations (`NC × n`).
+# together and leave in one event; no correction otherwise, and none at a
+# reaction order other than one, whose cells keep their material. `ξ0` holds the
+# cells' initial concentrations (`NC × n`).
 function _installed_correction(
     material::Material{NC},
     ξ0::AbstractMatrix{Float64},
@@ -276,7 +319,7 @@ function _installed_correction(
     deactivation::Bool,
     threshold::Real,
 ) where {NC}
-    (use_ale && deactivation) || return NoCorrection()
+    (use_ale && deactivation && !needs_lineage(material)) || return NoCorrection()
     r = residues(material)
     condensed = ntuple(j -> !is_gas(material.components[j]), Val(NC))
     any(i -> vanishes(r, ξ0, i:i, condensed, threshold), axes(ξ0, 2)) ||
@@ -303,10 +346,10 @@ end
 	CORRECTION_BAND
 
 The default near-threshold band `ε_band` of a solve whose bound
-[`EquidistributionCorrection`](@ref) moves some layer: cells next to the
-exposed side whose condensed mass is below this fraction of their reference
-go with a cell that crosses the threshold, so a layer that the correction
-carries to burnout together leaves in one invocation.
+[`EquidistributionCorrection`](@ref) moves some layer: cells beside a cell
+that crosses the threshold whose condensed mass is below this fraction of their
+reference go with it, so a layer that the correction carries to burnout together
+leaves in one invocation.
 """
 const CORRECTION_BAND = 0.1
 
@@ -511,9 +554,64 @@ function _consistent_intensities!(u, def::CoreDefinition, ws::CoreWorkspace, t)
     return u
 end
 
+# The array of the slots' initial cells: the one a bound correction reads.
+_slot_origin(cl::BalanceRowClosure{<:LayerCorrection}, n) = cl.correction.origin
+_slot_origin(cl, n) = collect(1:n)
+
+_register_kernel!(t::SlotTables, kernel) = t
+_register_kernel!(t::SlotTables, k::ReactionKernel) = register_lineage!(t, k.reference)
+_register_kernel!(
+    t::SlotTables,
+    k::Union{ConductionKernel,GasTransportKernel,ThermalBoundaryKernel},
+) = register_tables!(t, :face, k.d_floor)
+_register_kernel!(t::SlotTables, k::BeerLambertKernel) =
+    register_tables!(t, :matrix, k.d_floor)
+function _register_kernel!(t::SlotTables, k::RelativeFluxKernel)
+    register_tables!(t, :matrix, k.ε)
+    register_tables!(t, :cell, k.η, k.mass_scale)
+    return register_tables!(t, :sides, k.d_floor)
+end
+
+_register_closure!(t::SlotTables, closure) = t
+function _register_closure!(t::SlotTables, cl::BalanceRowClosure{<:LayerCorrection})
+    corr = cl.correction
+    register_tables!(t, :cell, corr.monitor_scale)
+    push!(t.gains, () -> slot_gains!(corr))
+    return t
+end
+
+# Every table of the solve that is read by slot. The caloric extension reads
+# the mass scale and capacity floor of `reference`, the same arrays.
+function _register_tables!(
+    t::SlotTables,
+    cells::CellDeactivation,
+    reference::CellReference,
+    def::CoreDefinition,
+    tol::Vector{Float64};
+    scale::Float64,
+    time_scale::Float64,
+)
+    register_tables!(
+        t,
+        :cell,
+        reference.volume,
+        reference.solid_mass,
+        reference.mass_scale,
+        reference.volume_floor,
+        reference.capacity_floor,
+        reference.thickness,
+        cells.reference,
+    )
+    isempty(cells.reactive) || register_tables!(t, :cell, cells.reactive)
+    register_tables!(t, :node, reference.positions)
+    register_rows!(t, tol, reference.thickness; scale, time_scale)
+    foreach(k -> _register_kernel!(t, k), def.kernels)
+    return _register_closure!(t, def.closure)
+end
+
 """
 	setup(problem; energy_state = :temperature, reltol = 1e-6, abstol = 1e-8,
-	      threshold = 1e-2, use_ale = false, radiation_model = NO_RADIATION,
+	      threshold = nothing, use_ale = false, radiation_model = NO_RADIATION,
 	      w_override = nothing, correction = nothing, lagrangian = nothing,
 	      deactivation = false, band = nothing, closure = nothing, slip = (),
 	      tensor = nothing, history = false, deformation = false,
@@ -563,19 +661,21 @@ scales the velocity tolerances (the first step).
 A reaction of order other than one is evaluated on the conversion of its
 reactant against its lineage inventory, a constant of each cell
 ([`lineage_references`](@ref)): the cells keep their material. Such a reaction
-is refused on a mesh of more than one dimension, with `deactivation` and with a
-correction, which would mix material at different conversions.
+is refused on a mesh of more than one dimension and with a correction, which
+would mix material at different conversions.
 
 `deactivation` deactivates, during the solve, every cell whose condensed mass
-falls below the fraction `threshold` (`ε_m`) of its initial condensed mass
-([`CellDeactivation`](@ref), [`ConservativeTransfer`](@ref)), from the
-exposed `:top` side, on a moving mesh together with the run of cells outward
-of it whose condensed mass is below the fraction `band` (`ε_band`, in
-`[threshold, 1)`; by default the larger of the threshold and
-[`CORRECTION_BAND`](@ref) when the bound equidistribution correction moves
-some layer, otherwise the threshold, so that only the cells below it go) of
-theirs
-([`deactivate!`](@ref)).
+falls below the fraction `threshold` (`ε_m`, 1e-2 by default) of its initial
+condensed mass, or, at a reaction order other than one, whose reactive inventory
+falls below that fraction of its reference ([`below_threshold`](@ref); the default
+is then a tenth of the limiter's `conversion_threshold`, 1e-4 with the default
+limiter) ([`CellDeactivation`](@ref), [`ConservativeTransfer`](@ref)): on a moving
+mesh wherever it sits, together with the contiguous cells around it below the
+fraction `band` (`ε_band`, in `[threshold, 1)`; by default the larger of the
+threshold and [`CORRECTION_BAND`](@ref) when the bound equidistribution correction
+moves some layer, otherwise the threshold, so that only the cells below it go),
+the live cells above moving down into their slots; on a fixed mesh from the exposed
+`:top` side only ([`deactivate!`](@ref)).
 `threshold` also scales the mass tolerances; `sources` is the external-source
 hook.
 
@@ -599,7 +699,7 @@ function setup(
     energy_state::Symbol = :temperature,
     reltol::Real = 1e-6,
     abstol::Real = 1e-8,
-    threshold::Real = 1e-2,
+    threshold::Union{Nothing,Real} = nothing,
     pressure_tolerance::Real = 1.0,
     use_ale::Bool = false,
     radiation_model = NO_RADIATION,
@@ -625,6 +725,7 @@ function setup(
     material = problem.material
     NC = n_components(material)
     mesh = problem.mesh
+    threshold = something(threshold, _default_threshold(material, deactivation))
     T0, ξ0 = initial_fields(problem, mesh)
     isfinite(pressure_tolerance) && pressure_tolerance>0 ||
         throw(ArgumentError("pressure_tolerance must be finite and positive"))
@@ -741,6 +842,7 @@ function setup(
             ),
         )
     band = something(band, _moves(cl) ? max(threshold, CORRECTION_BAND) : threshold)
+    reactants, reactive = _reactive_references(material, references, m0, T0)
     cells =
         deactivation ?
         CellDeactivation(
@@ -752,7 +854,11 @@ function setup(
             something(
                 caloric,
                 CaloricExtension(laws, reference.mass_scale, reference.capacity_floor),
-            ),
+            );
+            origin = _slot_origin(cl, n),
+            reactants,
+            reactive,
+            lineage = references,
         ) : nothing
     tensors = D == 1 ? nothing : _tensors(tensor, g0, n, Val(D))
     kernels = _kernels(
@@ -801,6 +907,15 @@ function setup(
         abstol = Float64(abstol),
         threshold = Float64(threshold),
         intensity_scale = _intensity_scale(kernels, ws.derived, problem.tspan),
+        time_scale = Float64(time_scale),
+    )
+    cells === nothing || _register_tables!(
+        cells.tables,
+        cells,
+        reference,
+        def,
+        tol;
+        scale = reltol * threshold,
         time_scale = Float64(time_scale),
     )
     cj = ColoredJacobianCache(def, ws, u0, t0)

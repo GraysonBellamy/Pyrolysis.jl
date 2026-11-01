@@ -794,7 +794,7 @@ open(joinpath(OUT, "burnout_ladder.md"), "w") do io
         "steps of the two solves up to the last saved time compared, and the time of the first ",
         "step at which they part (a changed sequence is reported with the difference, as ",
         "`burnout_identity.jl` does). The run without the correction is this comparison's ",
-        "reference only: its layer ends `:interior`, and its one-invocation verdict and QoIs ",
+        "reference only: its cells go one at a time, and its one-invocation verdict and QoIs ",
         "are not read.\n",
     )
     println(

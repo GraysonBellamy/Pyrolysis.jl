@@ -105,9 +105,9 @@ boundary-condition set that names a tag the mesh does not have.
 A patch is applied on the face that bounds the live cells on its side,
 `live_face(topology, active, f)`: $f$ while its owner is live; otherwise, walking
 inward across the block of dead cells, the first face whose owner is live; zero
-when no live cell remains on that side. After cells are deactivated from the
-exposed side, the `:top` condition therefore applies at the upper face of the
-outermost live cell, an interior face whose $+z$ normal points out of the live
+when no live cell remains on that side. After cells are deactivated, the dead
+slots are the outermost ones, so the `:top` condition applies at the upper face of
+the outermost live cell, an interior face whose $+z$ normal points out of the live
 region (§14.3.1).
 
 ### 13.1.3 What a cell-centered scheme means for accuracy
@@ -500,8 +500,7 @@ to the entering intensity minus the transmitted one
 (`test/kernels/test_radiation.jl`, "the beam's energy telescopes"). Each row reads
 one cell and its two faces, so the Jacobian stays banded where the eliminated
 recurrence would couple every cell to every cell above it. After cells are
-deactivated from the exposed side the beam enters the first live cell's upstream
-face, and the faces upstream of it carry identity rows. Under `BEER_LAMBERT` the
+deactivated the beam enters the first live cell's upstream face, and the faces upstream of it carry identity rows. Under `BEER_LAMBERT` the
 incident flux contributes nothing to the surface balance; the condition's other
 members (re-radiation, convection) stay at the surface. `setup` refuses in-depth
 radiation off planar coordinates, where the attenuated intensity and the face
@@ -993,6 +992,20 @@ $W=V-\sum_{condensed}m_j/\rho_{i,j}(T)$. Temperature, condensed masses,
 positions, cross section and caloric inversion therefore contribute to the
 pressure-error estimate. Each species shares the absolute budget, and the
 sum of absolute partial-pressure errors is controlled by the total budget.
+Neither budget lies below a floor set by the round-off of the pore volume: on a moving
+line the pore volume is a difference of node positions, known to
+$A_f\,\mathrm{eps}(z)$, so the budget of a cell is at least
+$16\,p\,A_f\,\mathrm{eps}(z)/W$ (`PORE_VOLUME_ROUNDOFF`). It is a floor on the budget,
+not a filter of the noise: it relaxes every direction of the error, gas masses
+included, and it depends on the cell's distance from the coordinate origin. Below it a
+tight budget stalls on a sub-micron cell at a low porosity: the ratio the error norm
+reads does not fall with the step and sits in the PI controller's unit-growth band, from
+0.17 up, so the step neither grows nor is rejected. Measured on `examples/06` at reltol
+$10^{-9}$ and a $10^{-4}$ Pa budget, on cells of 0.33 to 0.42 µm at porosity 0.01: accepted
+ratios 0.19 to 0.30, 1.1 to 2.2 times the $P\,\mathrm{eps}(z)/(\phi h)$ of round-off,
+50 000 steps at $1.7\times10^{-10}$ s without the floor. With it the largest ratio is
+0.137, so 16 clears the stall by a factor 1.3 on that deck; it is an empirical constant,
+and it acts only on such cells under such a budget.
 This is a local estimate; accumulated global error is qualified against
 tighter trajectories. No residual evaluation mutates solver tolerances.
 

@@ -34,8 +34,9 @@ export PotentialClosure, consistent_multipliers, multiplier_rows!
 export Correction, NoCorrection, PrescribedCorrection, EquidistributionCorrection
 export LayerCorrection, EQUIDISTRIBUTION_TIME, bind_correction, activation, correction!
 export ActivationTime, ACTIVATION_TIME_FACTOR, estimates_layer_times, reset_layer_times!
+export slot_gains!
 export layer_time_margin, estimate_layer_times!
-export residues, vanishes
+export residues, retained_volumes, vanishes
 export LateralShrinkage, LATERAL_CLAMP_WIDTH, chi_bar, lateral_rows, consistent_lateral
 
 end # module Closures

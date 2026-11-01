@@ -352,8 +352,9 @@ detect grid points that did not finish: `succeeded(sol)` is true for `:Success`
 and for a `:Terminated` solve whose outcome is a complete burnout
 (`:burned_out`) or the `min_thickness` stop; `completed(sol)` is true for
 `:Success` only. `:Failure` (among its causes an event that leaves the state
-inadmissible or the node velocities inconsistent) and the outcome `:interior` (a
-cell below the threshold inward of a live one) flag a solve that did not finish.
+inadmissible or the node velocities inconsistent) and the outcome `:interior` (a cell
+below the threshold inward of a live one on a fixed mesh, or beneath a skin on a moving
+one) flag a solve that did not finish.
 
 A per-point conservation check costs nothing extra: `conservation_audit(sol)`
 closes mass and energy by the trapezoid over the saved series (Chapter 9), so an

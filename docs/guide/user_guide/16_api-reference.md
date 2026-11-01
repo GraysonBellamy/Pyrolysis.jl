@@ -752,6 +752,7 @@ filled at every saved time.
 | `statistics` | `SolverStatistics` | the solver's counters (§16.5.4) |
 | `raw_solution` | ODE solution | the integrator's solution: the raw states and the interpolant |
 | `definition` | `CoreDefinition` | the definition of the solve, through which `sol(t)` reconstructs the fields |
+| `deactivation` | `CellDeactivation` or `nothing` | the deactivation state of the solve, whose tables `sol(t)` replays |
 
 `T`, `ξ` and `m` are cell-centred, cell 1 at the back (`z = 0`); `ξ[k, i, n]`
 is component `k` in cell `i` at saved time `n`. An event that leaves the state
@@ -782,6 +783,7 @@ All top-level exports:
 | `get_profile(sol, field, i)` | one field at saved time `sol.t[i]`: `:T`; `:ξ` (`NC × n_cells`) or `:ξj` / `:xij` for component `j`; `:m` (`NC × n_cells`) or `:mj`; `:z`, the node positions (on a fixed mesh the mesh's). Deactivated cells, and nodes beyond the outermost live one, are `NaN`; another symbol is an `ArgumentError` |
 | `get_cell_positions(sol; at = lastindex(sol.t))` | the cell centres at saved time `sol.t[at]` [m], `NaN` for a deactivated cell; the initial centres are `at = 1` when the first saved time is the start |
 | `sol(t)`, `interpolate_solution(sol, t)` | the NamedTuple `(; t, T, ξ, m, z, cell_centers)` at any `t` in the span, reconstructed from the integrator's interpolant through the state mapping, with the mask of the last event at or before `t` (`z` empty on a fixed mesh) |
+| `interior_events(sol)` | the events of `sol` whose cell left from under spent cells; a void beneath a skin is never among them, since it ends the solve |
 | `succeeded(sol)` | `true` for `retcode` `:Success`, and for `:Terminated` with outcome `:burned_out` or `:min_thickness`; `false` for `:interior`, `:Failure`, and a termination by a callback of yours |
 | `completed(sol)` | `true` for `:Success` only, the end of the time span reached |
 | `conservation_audit(sol[, recorder])` | the mass and energy closures (§16.12) |
@@ -826,13 +828,17 @@ faces they name unless noted.
 
 `sol.events` lists one `DeactivationEvent` (`Pyrolysis.Deactivation`) per
 deactivated cell, with the fields `t` [s], `invocation` (numbered from one,
-shared by the cells one invocation deactivates), `cell`, `receiver` (zero when
-no live cell was left), `fraction` (the cell's condensed mass as a fraction of
-its initial one when it went), `rows` (the state rows masked),
-`created_volume` [m³], `lost_mass` (per component, kg), `lost_enthalpy` [J] and
-`regularization` [J]. A merge of several cells records one event per dead cell,
-the outermost first, and writes the merge's created volume, losses and
-regularization to that first event (Chapter 9, §9.3; Technical Reference §14).
+shared by the cells one invocation deactivates), `cell` and `receiver` as cells
+of the initial mesh (the receiver zero when no live cell was left), `fraction`
+(the cell's condensed mass as a fraction of its initial one when it went), `rows`
+(the state rows masked, the outermost slots once the live cells have moved down),
+`created_volume` [m³], `lost_mass` (per component, kg), `lost_enthalpy` [J],
+`regularization` [J], `origin` (the initial cell in each slot after the event),
+`reference_updates` (each a reaction, an initial cell and the reference it took) and
+`interior` (whether live cells lay outward of it). A
+merge of several cells records one event per dead cell, the outermost first, and
+writes the merge's created volume, losses, regularization and reference updates to
+that first event (Chapter 9, §9.3; Technical Reference §14).
 
 `sol.statistics` is a `SolverStatistics` with the fields `accepted`,
 `rejected`, `rhs_evaluations`, `jacobians`, `linear_solves`,
@@ -899,7 +905,7 @@ layer interface under the equidistribution correction; with deactivation, a
 | `abstol` | `Real` | `1e-8` | Absolute tolerance of the temperature rows [K]; the enthalpy rows take `threshold · m_s,i(0) · c_p,ref · abstol`, the other rows derive theirs from `reltol` and `threshold` |
 | `pressure_tolerance` | `1.0` | Absolute local pressure-error budget [Pa], with proposed-state pore/thermal/geometry sensitivities |
 | `reltol` | `Real` | `1e-6` | Relative tolerance of every row; also scales the mass, position, velocity, intensity and cross-section tolerances, the domain test's constraint allowance, and the widening of a located event's threshold |
-| `threshold` | `Real` | `1e-2` | `ε_m`, the deactivation threshold as a fraction of a cell's initial condensed mass; also scales the mass and position tolerances, with or without `deactivation` |
+| `threshold` | `Real` or `nothing` | `nothing`, which is `1e-2`, or with `deactivation` at an order other than one `conversion_threshold/10` | `ε_m`, the deactivation threshold as a fraction of a cell's reference; also scales the mass and position tolerances, with or without `deactivation` |
 | `maxiters` | `Int` | `1_000_000` | Maximum number of integrator steps |
 | `dt` | `Real` | `problem.dt_initial` | First step [s]; the fixed step when `adaptive = false`; the time scale of the node-velocity tolerances |
 | `adaptive` | `Bool` | `true` | Adaptive step control; `false` takes fixed steps of `dt` without the domain test and ends with `:Failure` at the first inadmissible accepted state |
@@ -916,8 +922,8 @@ layer interface under the equidistribution correction; with deactivation, a
 | `linear_solver` | factorization or `nothing` | `nothing`, which is `StructuredKLU()` | Linear solver of the default policy; ignored when `integrator_policy` is given |
 | `integrator_policy` | `IntegratorPolicy` or `nothing` | `nothing`, which is `default_policy(linear_solver)` | The integrator with its restart and observer-flag rules (§16.8) |
 | `sources` | sources object | `NoSources()` | External volumetric sources for verification: `Pyrolysis.Assembly.VolumetricSources(mass, energy)` |
-| `deactivation` | `Bool` | `false` | Deactivate cells whose condensed mass falls below `threshold` of their initial one (§16.11) |
-| `band` | `Real` or `nothing` | `nothing`, which is `max(threshold, 0.1)` when the equidistribution correction moves a layer and `threshold` otherwise | `ε_band` in `[threshold, 1)`: on a moving mesh, the run of cells from the exposed side below this fraction goes with a cell that crosses `ε_m` |
+| `deactivation` | `Bool` | `false` | Deactivate cells whose condensed mass, or at an order other than one whose reactive inventory, falls below `threshold` of its reference (§16.11) |
+| `band` | `Real` or `nothing` | `nothing`, which is `max(threshold, 0.1)` when the equidistribution correction moves a layer and `threshold` otherwise | `ε_band` in `[threshold, 1)`: on a moving mesh, the contiguous cells below this fraction around a cell that crosses `ε_m` go with it |
 | `correction` | `Correction` or `nothing` | `nothing`, which is the rule of §16.6 | `NoCorrection()` or `EquidistributionCorrection(...)` (§16.11) |
 | `lagrangian` | vector of node ids or `nothing` | `nothing`, which is the layer interfaces | Nodes that always move with the solid, beside the mesh's own |
 | `located_events` | `Bool` | `true` | Locate each deactivation inside the step at the first threshold crossing; the end-of-step test stays as a safety net |
@@ -975,7 +981,7 @@ How a solve ends:
 | `:Success` | `:running` | reached `tspan[2]` (cells may have been deactivated on the way) |
 | `:Terminated` | `:burned_out` | the last live cell was deactivated |
 | `:Terminated` | `:min_thickness` | a moving mesh thinned below `min_thickness` |
-| `:Terminated` | `:interior` | a cell below the threshold lies inward of a live cell; `solve` warns, naming the cell and the time |
+| `:Terminated` | `:interior` | a cell below the threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one; `solve` warns, naming the cell and the time |
 | `:Terminated` | `:running` | a callback of yours called `terminate!` |
 | `:Failure` | `:running` | the domain test gave up, a fixed step left the physical domain, or a deactivation event left the state inadmissible or the node velocities inconsistent; `solve` warns with the reason |
 | `:MaxIters` | `:running` | `maxiters` steps before the end |
@@ -1242,7 +1248,7 @@ top-level exports; deactivation is switched by `solve` keywords.
 | Keyword | Default | Effect |
 |---|---|---|
 | `deactivation` | `false` | deactivate cells whose condensed mass falls below `threshold` of their initial condensed mass |
-| `threshold` | `1e-2` | `ε_m`; a cell that starts without condensed mass never deactivates |
+| `threshold` | `1e-2`; `conversion_threshold/10` at an order other than one | `ε_m`; a cell that starts without condensed mass, or at such an order without reactive lineage, never deactivates |
 | `band` | `max(threshold, 0.1)` when the equidistribution correction moves a layer, else `threshold` | `ε_band` in `[threshold, 1)`, read on a moving mesh |
 | `located_events` | `true` | locate each event inside the step at the first crossing |
 | `correction` | the rule of §16.6 | `NoCorrection()` or `EquidistributionCorrection(...)` |
@@ -1313,6 +1319,7 @@ sol = solve(problem; use_ale = true, deactivation = true,
 | `EQUIDISTRIBUTION_TIME` | `720.0` s, the default `fallback` | `Pyrolysis.Closures` |
 | `DT_AFTER_EVENT` | `1e-6` s, the `:forced_dt` restart step | `Pyrolysis.Integration` |
 | `residues(material)` | per component, the condensed mass fraction left after complete conversion | `Pyrolysis.Closures` |
+| `retained_volumes(material, T)` | per component, the volume left per unit of its mass after complete conversion, which decides whether a cell is tested at an order other than one (§10.4) | `Pyrolysis.Closures` |
 | `top_live_cell(layout)` | the outermost live cell (zero when none) | `Pyrolysis.Deactivation` |
 | `replay_events!(cells, layout, t)` | set the layout's mask to the one a state saved at `t` had, `cells = cp.deactivation` | `Pyrolysis.Deactivation` |
 | `DeactivationEvent` | one deactivated cell (§16.5.4) | `Pyrolysis.Deactivation` |
@@ -1383,7 +1390,7 @@ Technical Reference chapter.
 | `energy_state` | `:temperature` |
 | `abstol` / `reltol` | `1e-8` (K) / `1e-6` |
 | `pressure_tolerance` | `1.0` Pa |
-| `threshold` | `1e-2` |
+| `threshold` | `1e-2`; `conversion_threshold/10` at an order other than one |
 | `maxiters` | `1_000_000` |
 | `dt` | `problem.dt_initial` |
 | `adaptive` | `true` |

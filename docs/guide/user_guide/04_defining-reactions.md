@@ -729,12 +729,13 @@ volume, since the component masses are the states; see Technical Reference §6.7
   dilute species and raise it only to relieve stiffness near full conversion.
 - An order other than one reads one conversion per cell, so each cell must keep its
   material. Besides gas reactants, gas-fed lineages, external mass sources and
-  multi-dimensional meshes (§4.5), such a solve refuses deactivation and any
-  correction. Leave both off: each cell then follows its own material, to the end
-  of the span wherever a residue keeps the cells from emptying, and above order one
-  with no residue too. Below order one with no residue a cell empties in finite time
-  and the solve stalls at the first one; a small inert or char residue avoids this
-  (0.2 % on the decks measured; Technical Reference §6.10).
+  multi-dimensional meshes (§4.5), such a solve refuses any correction. Deactivation
+  works on a line: below order one a cell empties in finite time, so turn it on for
+  a column that burns through. Its threshold then reads the reactive inventory, not
+  the total condensed mass, and defaults to a tenth of the limiter's
+  `conversion_threshold`; a cell that would keep 1 % or more of its volume, as a
+  char layer does, is not tested and stays (§7.3.3, §10.4, Technical Reference
+  §6.10). Without deactivation a cell that empties stalls the solve there.
 - Re-check a reaction's mass balance with `verify_stoichiometry`.
 
 For the mathematics behind the rate law, the smooth gates, the depletion limiter,

@@ -36,6 +36,7 @@ Closures.Correction
 Closures.PrescribedCorrection
 Closures.bind_correction
 Closures.residues
+Closures.retained_volumes
 Closures.vanishes
 Closures.consistent_multipliers
 Closures.correction!

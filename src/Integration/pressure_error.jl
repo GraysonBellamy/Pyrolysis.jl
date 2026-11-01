@@ -100,6 +100,22 @@ function bind_pressure_norm!(norm::PressureErrorNorm, integrator)
     return norm
 end
 
+# The pore volume is a difference of node positions, resolved no better than
+# this many units in the last place of the positions; the pressure of a thin,
+# nearly closed cell is known no better than that, whatever the budget asks.
+const PORE_VOLUME_ROUNDOFF = 16
+
+# The share of the pore volume `W` of cell `i` that round-off leaves unresolved:
+# zero where no node moves, on a line a share of what the cell's faces sweep.
+@inline _pore_roundoff(moving::Bool, x, A, topo, i, W) = 0.0
+@inline function _pore_roundoff(moving::Bool, x, A, topo::MeshTopology{1}, i, W)
+    moving || return 0.0
+    n0, n1=topo.cells[i].nodes
+    r=max(abs(ForwardDiff.value(x[n0])), abs(ForwardDiff.value(x[n1])))
+    area=face_area(topo.coordinates, r, ForwardDiff.value(A))
+    return PORE_VOLUME_ROUNDOFF*eps(r)*area/W
+end
+
 """
     pressure_error(norm,u,uprev,scaled_error,abstol,reltol)
 
@@ -107,8 +123,9 @@ Largest local pressure-error ratio using the actual proposed pore volume and
 thermal state. The error direction reconstructs the stepper's unscaled error;
 forward sensitivities propagate through geometry and the selected caloric map.
 The absolute budget is divided among gas species; their absolute pressure
-errors also share one total budget. This controls a local estimate, not
-accumulated global solution error.
+errors also share one total budget, and neither budget lies below the pressure
+the round-off of the cell's pore volume leaves unresolved. This controls a local
+estimate, not accumulated global solution error.
 """
 function pressure_error(norm::PressureErrorNorm, u, uprev, scaled_error, abstol, reltol)
     cp=norm.cp
@@ -156,16 +173,24 @@ function pressure_error(norm::PressureErrorNorm, u, uprev, scaled_error, abstol,
         ForwardDiff.value(W)>0 && ForwardDiff.value(T)>0 || return Inf
         sumerror=0.0
         P=0.0
+        unresolved=_pore_roundoff(
+            is_moving(layout),
+            norm.positions,
+            A,
+            setup.topology,
+            i,
+            ForwardDiff.value(W),
+        )
         for k = 1:ng
             p=m[norm.gas[k]]*R_GAS*T/(norm.masses[k]*W)
             ep=abs(ForwardDiff.partials(p)[1])
             pj=max(ForwardDiff.value(p), 0.0)
             isfinite(ep) || return Inf
-            worst=max(worst, ep/(ref.pressure_tolerance/ng+reltol*pj))
+            worst=max(worst, ep/max(ref.pressure_tolerance/ng+reltol*pj, unresolved*pj))
             sumerror+=ep
             P+=pj
         end
-        worst=max(worst, sumerror/(ref.pressure_tolerance+reltol*P))
+        worst=max(worst, sumerror/max(ref.pressure_tolerance+reltol*P, unresolved*P))
     end
     return worst
 end

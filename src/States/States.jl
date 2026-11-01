@@ -47,7 +47,7 @@ export is_differential, mass_matrix
 export sensible_enthalpy, enthalpy_slope, enthalpy_law, TabulatedEnthalpy, CaloricLaws
 export component_enthalpies, component_enthalpy_slopes, component_heat_capacities
 export CaloricExtension, regularization, extended_energy, extended_capacity
-export invert_caloric
+export invert_caloric, merged_temperature
 export GasTransport, NoGasTransport
 export CellReference, StateSetup, DerivedState, derive!, energy_state_value
 export abstol_vector

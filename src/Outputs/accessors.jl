@@ -107,24 +107,14 @@ function get_profile(sol::PyrolysisSolution, field::Symbol, i::Integer)
     throw(ArgumentError("unknown field :$field; use :T, :ξ, :ξj, :m, :mj or :z"))
 end
 
-# The mask of a state at time `t`: every event at or before `t` applied.
-function _mask_at!(layout, events, t)
-    fill!(layout.mask, true)
-    for e in events
-        e.t <= t || break
-        layout.mask[e.rows] .= false
-    end
-    return layout
-end
-
 """
 	(sol::PyrolysisSolution)(t) -> NamedTuple
 	interpolate_solution(sol::PyrolysisSolution, t) -> NamedTuple
 
 The fields at time `t`: `(; t, T, ξ, m, z, cell_centers)` as one saved time
 of the solution holds them, reconstructed from the integrator's interpolant
-between the saved states through the state mapping, with the mask of the
-last deactivation event at or before `t`. The interpolant between two saved
+between the saved states through the state mapping, with the mask and the
+tables of the last deactivation event at or before `t`. The interpolant between two saved
 states that an event separates is not the trajectory, so a `t` strictly
 inside such an interval is refused.
 """
@@ -150,14 +140,14 @@ function (sol::PyrolysisSolution)(t::Real)
         end
     end
     u = ts[k] == t ? raw.u[k] : raw(t)
-    def = sol.definition
-    # Replay the mask locally: a query must not change the solution's layout,
+    # Replay on a copy: a query must not change the solution's mask or tables,
     # including when a property evaluation throws.
-    layout = deepcopy(def.layout)
+    def, cells = deepcopy((sol.definition, sol.deactivation))
+    layout = def.layout
     topo = def.setup.topology
+    cells === nothing || replay_events!(cells, layout, t)
     warm = [isfinite(x) ? x : T_REF for x in sol.T[:, k]]
     ws = CoreWorkspace(def, warm)
-    _mask_at!(layout, sol.events, t)
     ds, _ = buffers(ws, def, Float64)
     derive!(ds, u, layout, def.setup)
     n = n_cells(layout)
@@ -179,6 +169,15 @@ function (sol::PyrolysisSolution)(t::Real)
     end
     return (; t = Float64(t), T, ξ, m, z, cell_centers = centers)
 end
+
+"""
+	interior_events(sol::PyrolysisSolution) -> Vector{DeactivationEvent}
+
+The events of `sol` whose cell left from under live cells, which were spent: a
+void of the transfer's making that the pass closed ([`deactivate!`](@ref)). A void
+beneath a skin is never among them: it ends the solve with outcome `:interior`.
+"""
+interior_events(sol::PyrolysisSolution) = filter(e -> e.interior, sol.events)
 
 """
 	interpolate_solution(sol::PyrolysisSolution, t) -> NamedTuple
@@ -205,6 +204,7 @@ function Base.show(io::IO, ::MIME"text/plain", sol::PyrolysisSolution)
     isempty(sol.t) ||
         println(io, "  Live cells: $(sol.extras.live_cells[end]) of $(size(sol.T, 1))")
     println(io, "  Invocations: $(sol.statistics.invocations)")
+    println(io, "  Interior events: $(length(interior_events(sol)))")
     println(io, "  Accepted steps: $(sol.statistics.accepted)")
     print(io, "  Solve time: $(round(sol.solve_time, digits = 3)) s")
 end

@@ -197,7 +197,7 @@ against an exact or manufactured solution; the burnout cases V-BO-01, 02, 03 and
 | Gas transport | V-GT-01 – V-GT-08 | Gaussian plane source, integrated wall/Darcy resistance, binary dusty-gas exchange, coupled thermal-film solution, Robin diffusion, prescribed-inflow Darcy $P^2$ profile | wall transport and conservation, pressure closure and upwinding, interfaces and flow reversal, binary exchange, nonisothermal transport, transient mass-film uptake, imposed gas inflow and pressure outflow |
 | Coupled physics | V-CPL-01 – V-CPL-05 | Neumann two-phase Stefan solution, Landau ablation wave, exact shrink/swell endpoints, Frank-Kamenetskii slab, 0D TGA curve | a latent-heat front (apparent heat capacity, V-CPL-01; gated reaction, V-CPL-01b), surface regression on a moving mesh (V-CPL-02, 02b), volume change and the lateral-shrinkage law, the reaction–conduction bifurcation, the boundary and volume coupling of the kinetics |
 | Manufactured solutions | V-MMS-01 – V-MMS-04 | the manufactured-solution driver of §18.2 | design order of the coupled residual on a fixed mesh in space and time, free-stream preservation under prescribed motion, order under prescribed and reaction-driven motion |
-| Burnout | V-BO-01 – V-BO-08 | exact exponential thickness (V-BO-04); otherwise exact mass and thickness budgets, conservation ledgers and termination constraints | deactivation through complete burnout on a moving mesh under in-depth absorption (V-BO-01) and on a fixed mesh under surface absorption (V-BO-02); the transmitted-flux series (V-BO-03); the interior-void stop (V-BO-05, `expected_retcode = :Terminated`); a graded mesh (V-BO-06), a layer of mixed composition (V-BO-07) and a thin layer on a deep substrate (V-BO-08) |
+| Burnout | V-BO-01 – V-BO-12 | exact exponential thickness (V-BO-04); otherwise exact mass and thickness budgets, conservation ledgers and termination constraints | deactivation through complete burnout on a moving mesh under in-depth absorption (V-BO-01) and on a fixed mesh under surface absorption (V-BO-02); the transmitted-flux series (V-BO-03); the interior-void stop (V-BO-05, `expected_retcode = :Terminated`); a graded mesh (V-BO-06), a layer of mixed composition (V-BO-07) and a thin layer on a deep substrate (V-BO-08); burnout through the event path on the exact conversion at orders 0.5 and 1.2 (V-BO-09a, b); heated burnout without a residue at orders 0, 0.5 and 1.2 with its threshold and mesh pairs (V-BO-10a–c); a cell that dies under a live one at order one against the corrected default (V-BO-11) |
 
 **Gpyro guide adaptations.** V-GT-07a/b, V-GT-08a/b and V-RX-05a–c cite
 Abdelhafiz et al., [*Gpyro Verification and Validation Manual*, version 1.0
@@ -253,6 +253,20 @@ half the density and a tenth of the pre-exponential factor, graded from none at
 the substrate to half at the surface, against its own reference run at 240 PMMA
 cells; V-BO-08 burns a 1 mm layer off the 12 mm substrate and requires the correction
 velocity to be exactly zero at every Kaowool node at every saved time.
+
+The cases from V-BO-09 hold the event path at reaction orders other than one and on
+Lagrangian cells. V-BO-09 compares it with the exact solution of each material point at
+orders 0.5 and 1.2. V-BO-10 burns a column without a residue through to the thickness floor
+at orders 0, 0.5 and 1.2; at 0.5 the threshold pair and the mesh pair are saved every
+0.025 s over the window they compare, since each event is a step in the rate and their
+peak differences read the time between two runs' steps, and a further pair keeps the
+temperature and enthalpy forms' difference in sight (§14.10). V-BO-11 runs `examples/06`
+at order one on Lagrangian cells, where cells leave from under spent ones, against the
+corrected default. V-BO-12a holds what deactivation costs at order zero to what the mesh
+costs, between 40 and 80 cells of the same deck without deactivation, in the integrated
+rate and the mass; the gate `burnout_order_zero.jl` holds `examples/06` to the same rule at
+72 and 144 cells. V-BO-12b requires a char that keeps its volume to keep its cells: no
+event, and the burn without deactivation.
 
 Kernel-level checks sit beside the suite in the module tests: the Beer–Lambert beam's
 energy telescoping and the incident intensity under Kirchhoff's law and an explicit

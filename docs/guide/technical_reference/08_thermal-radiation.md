@@ -346,8 +346,8 @@ The assembler writes `r_intensity[f]` into the intensity row of face $f$
   differ, so a transparent cell would absorb $I\,(A_{\text{up}}-A_{\text{down}})$.
   `setup` refuses `BEER_LAMBERT` off planar coordinates
   (`"in-depth radiation needs planar coordinates"`).
-- **Deactivation.** After cells are deactivated from the exposed side (§14), the
-  beam enters the first live cell of `order` through its upstream face
+- **Deactivation.** After cells are deactivated (§14), the beam enters the first
+  live cell of `order` through its upstream face
   (`exposed_face`), the exposed-face row moves there, and $a$ is that cell's
   absorptivity. The intensity rows of the faces upstream of it are masked with
   the dead cells (§14.3.1): they become identity rows, and their intensities are

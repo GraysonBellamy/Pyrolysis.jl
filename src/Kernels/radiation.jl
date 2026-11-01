@@ -23,7 +23,7 @@ attenuated beam; the flux leaving the last face is transmitted. Each row
 reads one cell and its two faces, so the Jacobian stays banded where the
 eliminated recurrence would couple every cell to every cell above it.
 
-After cells are deactivated from the exposed side, the beam enters the first
+After cells are deactivated, the beam enters the first
 live cell of `order` through its upstream face ([`exposed_face`](@ref)); the
 faces upstream of it carry no rows.
 

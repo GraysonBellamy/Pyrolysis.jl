@@ -41,6 +41,13 @@
 #    located where the smallest threshold margin is `PRE_EVENT` gives the
 #    ledger its last node before each event; the steps after it to the event
 #    are what location shortens.
+# 4. An interior death: a five-cell column at order 0.5, reltol 1e-7, abstol 1e-9,
+#    with its third cell prepared just below the threshold beneath spent cells,
+#    a pressure tolerance of 1e-3 for the gas they then release, under an in-depth
+#    flux and on a mesh with a layer, a lateral shrinkage law and neither, through
+#    the callback on Lagrangian cells over 0.2 s. The closure is the conservation
+#    recorder's: the defect of the live inventories over the initial inventory, to
+#    hold 1e-12 in mass and 1e-9 in the extended energy.
 #
 # Run from the repository root:
 #   julia --project=test --startup-file=no --threads=1 test/gates/energy_ledger.jl
@@ -361,6 +368,99 @@ for energy_state in (:temperature, :enthalpy), located in (false, true)
     flush(stdout)
 end
 
+# A column of five cells with its third nearly empty, through its interior event.
+function interior_closure(config, energy_state)
+    a = SolidComponent(:a; ρ = 500.0, φ = 0.3, c = 1000.0, k = 0.2, λ = 1e-6, α = 100.0)
+    inert =
+        SolidComponent(:sub; ρ = 250.0, φ = 0.5, c = 1200.0, k = 0.1, λ = 1e-6, α = 300.0)
+    gas = GaseousComponent(:gas; M = 0.03, c = 1000.0, k = 0.02)
+    material = Material(
+        name = :interior,
+        components = (a, inert, gas),
+        reactions = (Reaction(:burn, 1 => 3; A = 0.02, E = 0.0, h = 0.0, n = 0.5),),
+        lateral_shrinkage_law = config === :lateral ? (x -> 1 - 0.2x) : nothing,
+    )
+    layered = config === :layers
+    problem = PyrolysisProblem(
+        mesh = create_uniform_mesh(0.01, 5),
+        material = material,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = RadiativeFluxBC(1000.0), bottom = AdiabaticBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 600.0)),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> 600.0,
+        ξ_initial = [
+            z -> layered && z < 0.004 ? 0.0 : 500.0,
+            z -> layered && z < 0.004 ? 250.0 : 0.0,
+            z -> 0.0,
+        ],
+        tspan = (0.0, 0.2),
+        output_times = collect(0.0:0.02:0.2),
+    )
+    cp = Integration.setup(
+        problem;
+        use_ale = true,
+        deactivation = true,
+        threshold = 1e-2,
+        energy_state,
+        radiation_model = config === :beam ? BEER_LAMBERT : SURFACE_ABSORPTION,
+        reltol = 1e-7,
+        abstol = 1e-9,
+        pressure_tolerance = 1e-3,
+    )
+    layout = cp.def.layout
+    u = copy(cp.u0)
+    fractions = (0.8, 0.8, 0.005, 0.07, 0.06)
+    x = 0.0
+    for i = 1:5
+        for j = 1:3
+            u[States.mass_index(layout, i, j)] *= fractions[i]
+        end
+        m = ntuple(j -> u[States.mass_index(layout, i, j)], 3)
+        u[States.energy_index(layout, i)] = States.energy_state_value(
+            States.energy_state(layout),
+            cp.def.setup,
+            600.0,
+            m,
+            i,
+        )
+        x += cp.def.setup.reference.thickness[i] * fractions[i]
+        u[States.position_index(layout, i + 1)] = x
+    end
+    Integration.consistent_state!(u, cp.def, cp.ws, 0.0)
+    # The recorder starts from the problem's state.
+    cp.u0 .= u
+    recorder = ConservationRecorder()
+    sol = Integration.integrate(
+        cp;
+        u0 = u,
+        callback = recorder,
+        maxiters = 30_000,
+        dtmin = 1e-14,
+    )
+    audit = conservation_audit(sol, recorder)
+    return (;
+        config,
+        energy_state,
+        retcode = sol.retcode,
+        events = [(e.cell, e.receiver) for e in sol.events],
+        mass = abs(audit.mass.defect) / abs(audit.mass.initial),
+        energy = abs(audit.energy.defect) / abs(audit.energy.initial),
+    )
+end
+
+interior_event = []
+for config in (:beam, :lateral, :layers), energy_state in (:temperature, :enthalpy)
+    push!(interior_event, interior_closure(config, energy_state))
+    println(interior_event[end])
+    flush(stdout)
+    interior_event[end].mass < 1e-12 && interior_event[end].energy < 1e-9 ||
+        error("the interior event does not close: $(interior_event[end])")
+end
+
 refinement = []
 for use_ale in (false, true)
     column = use_ale ? "moving" : "Eulerian"
@@ -497,6 +597,21 @@ open(joinpath(OUT, "energy_ledger.md"), "w") do io
             "$(r.events) | $(_g(r.t_event; d = 7)) | $(_g(r.energy_closure)) | $(_g(r.mass_closure)) | ",
             "$(_g(abs(r.lost_energy) / abs(r.ΔE))) | $(_g(abs(r.regularization) / abs(r.ΔE))) | ",
             "$(_g(r.created_volume)) | $(r.steps) |",
+        )
+    end
+    println(
+        io,
+        "\n## An interior event\n\nFive cells at order 0.5 with the third prepared below ",
+        "the threshold, 0.2 s through the callback on Lagrangian cells, reltol 1e-7, abstol ",
+        "1e-9. Closure: the conservation recorder's defect over the initial inventory.\n",
+    )
+    println(io, "| deck | form | retcode | events | mass closure | energy closure |")
+    println(io, "|" * repeat("---|", 6))
+    for r in interior_event
+        println(
+            io,
+            "| $(r.config) | $(r.energy_state) | $(r.retcode) | $(r.events) | ",
+            "$(_g(r.mass)) | $(_g(r.energy)) |",
         )
     end
 end

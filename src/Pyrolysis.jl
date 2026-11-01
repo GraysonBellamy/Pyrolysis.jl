@@ -120,7 +120,7 @@ using .Outputs:
     gas_species_audit
 using .Outputs: get_times, get_temperatures, get_concentrations, get_gas_generation_rate
 using .Outputs: n_timesteps, succeeded, completed
-using .Outputs: get_profile, get_cell_positions, interpolate_solution
+using .Outputs: get_profile, get_cell_positions, interpolate_solution, interior_events
 using .Outputs: ConservationRecorder, conservation_audit
 using .Integration: solve, setup, integrate, CoreProblem, parameter_sweep
 using .Integration: default_policy, rodas5p_policy, fbdf_policy, kencarp4_policy
@@ -193,7 +193,7 @@ export GasDiagnostics,
     gas_species_audit
 export get_times, get_temperatures, get_concentrations, get_gas_generation_rate
 export n_timesteps, succeeded, completed
-export get_profile, get_cell_positions, interpolate_solution
+export get_profile, get_cell_positions, interpolate_solution, interior_events
 export ConservationRecorder, conservation_audit
 
 # ============================================================================

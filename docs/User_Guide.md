@@ -1189,7 +1189,7 @@ combinations you can meet are:
 | `:Success` | `:running` | reached the end of `tspan` | true | true |
 | `:Terminated` | `:burned_out` | the last cell deactivated | true | false |
 | `:Terminated` | `:min_thickness` | the thickness fell below `min_thickness` | true | false |
-| `:Terminated` | `:interior` | a cell below the threshold lies inward of a live one; the solve warns and ends | false | false |
+| `:Terminated` | `:interior` | a cell below the threshold lies inward of a live one on a fixed mesh, or beneath a skin on a moving one; the solve warns and ends | false | false |
 | `:Failure` | — | the integrator gave up, or an event left an inadmissible state (with a warning) | false | false |
 
 `succeeded(solution)` and `completed(solution)` read these for you (UG 9). Run
@@ -1287,6 +1287,7 @@ The solution's accessors are exported with the package:
 | `get_profile(sol, field, i)` | the field `:T`, `:ξ`, `:ξj`, `:m`, `:mj` or `:z` at saved index `i` |
 | `get_cell_positions(sol; at = lastindex(sol.t))` | the cell centres at saved index `at` |
 | `sol(t)`, `interpolate_solution(sol, t)` | the fields `(; t, T, ξ, m, z, cell_centers)` at any `t` in the span |
+| `interior_events(sol)` | the events whose cell left from under spent cells (§10.7) |
 
 ```julia
 T_at_step = get_profile(solution, :T, i600)   # the same as solution.T[:, i600]
@@ -3112,12 +3113,13 @@ volume, since the component masses are the states; see Technical Reference §6.7
   dilute species and raise it only to relieve stiffness near full conversion.
 - An order other than one reads one conversion per cell, so each cell must keep its
   material. Besides gas reactants, gas-fed lineages, external mass sources and
-  multi-dimensional meshes (§4.5), such a solve refuses deactivation and any
-  correction. Leave both off: each cell then follows its own material, to the end
-  of the span wherever a residue keeps the cells from emptying, and above order one
-  with no residue too. Below order one with no residue a cell empties in finite time
-  and the solve stalls at the first one; a small inert or char residue avoids this
-  (0.2 % on the decks measured; Technical Reference §6.10).
+  multi-dimensional meshes (§4.5), such a solve refuses any correction. Deactivation
+  works on a line: below order one a cell empties in finite time, so turn it on for
+  a column that burns through. Its threshold then reads the reactive inventory, not
+  the total condensed mass, and defaults to a tenth of the limiter's
+  `conversion_threshold`; a cell that would keep 1 % or more of its volume, as a
+  char layer does, is not tested and stays (§7.3.3, §10.4, Technical Reference
+  §6.10). Without deactivation a cell that empties stalls the solve there.
 - Re-check a reaction's mass balance with `verify_stoichiometry`.
 
 For the mathematics behind the rate law, the smooth gates, the depletion limiter,
@@ -4763,9 +4765,13 @@ formulation.
 ### 7.3.3 Deactivation and the correction
 
 `deactivation = true` deactivates, during the solve, every cell whose condensed mass falls
-below `threshold` (default `1e-2`) of its initial condensed mass, from the exposed side, in
-an event located inside the step; its inventories go to the live cell beneath it. Chapter 10
-describes the burnout path, its parameters and the envelope in which it is verified.
+below `threshold` (default `1e-2`) of its initial condensed mass, in an event located inside
+the step; its inventories go to the live cell beneath it. At a reaction order other than one
+the test reads the cell's reactive inventory against its lineage reference, and `threshold`
+defaults to a tenth of the limiter's `conversion_threshold`, `1e-4` by default. On a moving
+mesh a cell can go from under spent cells, which move down a slot; on a fixed mesh from the
+exposed side only. Chapter 10 describes the burnout path, its parameters and the
+envelope in which it is verified.
 
 On a moving mesh with deactivation on, `setup` installs the **equidistribution correction**
 (`EquidistributionCorrection()`, its layer time set at each layer's first activation,
@@ -4775,8 +4781,8 @@ gives the fraction each component leaves). The correction moves the mesh relativ
 solid, thinning a vanishing layer's cells together so that the layer leaves in one event;
 the near-threshold band then defaults to `0.1`. Otherwise (a fixed mesh, deactivation off,
 or a charring layer whose residue stays above the threshold) the solve has no correction
-and a moving mesh moves with the solid. A reaction of order other than one refuses
-deactivation and the correction (§4.14).
+and a moving mesh moves with the solid. A reaction of order other than one gets no
+correction and refuses one (§4.14).
 
 | Keyword | Effect |
 |---|---|
@@ -5323,7 +5329,7 @@ The full keyword set, with defaults, is:
 | `linear_solver` | `nothing` → `StructuredKLU()` | Linear solve of the default policy; §8.4 |
 | `abstol` | `1e-8` | Temperature tolerance [K]; the other rows derive theirs (§8.3) |
 | `reltol` | `1e-6` | Relative tolerance of every row; §8.3 |
-| `threshold` | `1e-2` | `ε_m`, the deactivation threshold as a fraction of a cell's initial condensed mass; also scales the mass, position and velocity tolerances; §8.3, §8.9 |
+| `threshold` | `1e-2`; with `deactivation` at an order other than one `conversion_threshold/10` | `ε_m`, the deactivation threshold as a fraction of a cell's reference; also scales the mass, position and velocity tolerances; §8.3, §8.9 |
 | `maxiters` | `1_000_000` | Maximum number of integrator steps; §8.3 |
 | `dt` | `problem.dt_initial` | First step [s] (the fixed step with `adaptive = false`); also the time scale of the node-velocity tolerances; §8.3 |
 | `adaptive` | `true` | Adaptive step-size control; §8.3 |
@@ -5806,8 +5812,8 @@ The keywords:
 | Keyword | Default | Effect |
 |---|---|---|
 | `deactivation` | `false` | Deactivate cells during the solve |
-| `threshold` | `1e-2` | `ε_m`; a cell that starts with no condensed mass never deactivates |
-| `band` | `max(threshold, 0.1)` when the equidistribution correction moves a layer, else `threshold` | `ε_band` in `[threshold, 1)`: on a moving mesh, the run of cells from the exposed side whose condensed mass is below this fraction goes together with a cell that crosses `ε_m` |
+| `threshold` | `1e-2`; `conversion_threshold/10` at an order other than one | `ε_m`; a cell that starts with no condensed mass, or at such an order with no reactive lineage, never deactivates |
+| `band` | `max(threshold, 0.1)` when the equidistribution correction moves a layer, else `threshold` | `ε_band` in `[threshold, 1)`: on a moving mesh, the contiguous cells below this fraction around a cell that crosses `ε_m` go with it |
 | `located_events` | `true` | Locate each event inside the step at the first time a live cell reaches its threshold, and apply it at the interpolated state there; at the end of every step, cells below the threshold go in one event as a safety net (the only events with `located_events = false`) |
 | `correction` | by rule (§8.7) | On a moving mesh with `deactivation`, the equidistribution correction makes a layer's cells thin together and leave in one event |
 
@@ -5829,15 +5835,15 @@ The ways a deactivating solve ends:
 | `:running` | `:Success` | Reached the end of the time span; cells may have been deactivated on the way |
 | `:burned_out` | `:Terminated` | The last live cell went |
 | `:min_thickness` | `:Terminated` | A moving mesh thinned below `min_thickness` |
-| `:interior` | `:Terminated` | A cell below the threshold lies inward of a live cell; `solve` warns, naming the cell |
+| `:interior` | `:Terminated` | A cell below the threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one; `solve` warns, naming the cell |
 
-The interior case is the material gasifying from within (for example a slab
-heated from its back face): deactivation removes cells from the exposed side
-only, so `solve` stops with the warning
-`solve(): cell 1 is below its threshold inward of a live cell at t = …; the
-solve ends with outcome :interior`. A band narrower than what the slowest cell
-of a layer keeps when the first reaches the threshold also ends a solve this
-way; Chapter 10 states the band the verified decks need.
+A fixed mesh's geometry stays with its slots, so only the outermost live cell can go,
+and a material gasifying from within (for example a slab heated from its back face)
+stops with the warning `solve(): cell 1 is below its threshold inward of a live cell
+at t = …; the solve ends with outcome :interior`. On a moving mesh a cell under spent
+cells goes into the live cell beneath it, or a bottom cell into the live cell above
+it, and the cells above move down; beneath a skin the solve stops the same way
+(§10.7).
 
 An event can also end the solve with return code `:Failure`, with a warning:
 when the state after the merge is inadmissible (the receiver held to its own
@@ -6261,6 +6267,7 @@ components.
 | `statistics` | `SolverStatistics` | — | The solver's counters (§9.3) |
 | `raw_solution` | ODE solution | — | The integrator's solution: the raw states and the interpolant |
 | `definition` | `CoreDefinition` | — | The definition of the solve, through which `solution(t)` reconstructs the fields |
+| `deactivation` | `CellDeactivation` or `nothing` | — | The deactivation state of the solve, whose tables `solution(t)` replays |
 
 A few points worth internalizing:
 
@@ -6375,18 +6382,21 @@ is reachable through `Pyrolysis.Internal`). Its fields:
 |---|---|
 | `t` | Time of the event [s] |
 | `invocation` | The deactivation callback's invocation it belongs to, numbered from one over the solve and shared by every cell one invocation deactivates |
-| `cell` | The deactivated cell |
-| `receiver` | The live cell that took its inventories (zero when none was left, the inventories then lost) |
+| `cell` | The deactivated cell, numbered on the initial mesh |
+| `receiver` | The live cell that took its inventories, numbered on the initial mesh (zero when none was left, the inventories then lost) |
 | `fraction` | The cell's condensed mass as a fraction of its initial condensed mass when it went |
-| `rows` | The state rows masked |
+| `rows` | The state rows masked, the outermost slots once the live cells have moved down |
 | `created_volume` | Volume the merge created to keep the pore space [m³] |
 | `lost_mass` | Masses lost per component [kg] (the vented gas on a fixed mesh) |
 | `lost_enthalpy` | Sensible enthalpy lost [J] |
 | `regularization` | Caloric regularization the cells held that the receiver does not [J] |
+| `origin` | The initial cell in each slot after the event |
+| `reference_updates` | Each a reaction, an initial cell and the lineage reference a receiver with none took |
+| `interior` | Whether live cells lay outward of the dead cell (§10.7) |
 
 A merge of several cells into one receiver records one event per dead cell, the outermost
-first; the merge's created volume, losses and regularization are written to that first
-event, so the sums over the events are the merges'. In the example of §9.1 the 19 events
+first; the merge's created volume, losses, regularization and reference updates are written
+to that first event, so the sums over the events are the merges'. In the example of §9.1 the 19 events
 share invocation 1:
 
 ```julia
@@ -6420,6 +6430,7 @@ All accessors are exported by `using Pyrolysis`:
 | `get_cell_positions(sol; at = lastindex(sol.t))` | The cell centres at saved time `at` |
 | `get_profile(sol, field, i)` | One field at saved time `i` |
 | `sol(t)`, `interpolate_solution(sol, t)` | The fields reconstructed at any time `t` |
+| `interior_events(sol)` | The events whose cell left from under spent cells (§10.7) |
 | `succeeded(sol)`, `completed(sol)` | How the solve ended |
 | `conservation_audit(sol[, recorder])` | The mass and energy closures (§9.8) |
 
@@ -6909,7 +6920,7 @@ Technical Reference §11.
 > **Coordinate reminder.** `z = 0` is the back face (boundary tag
 > `:bottom`); `z = L` is the exposed surface (tag `:top`). Heat enters from
 > the top and the material recedes downward, so the surface cell is the
-> outermost (highest-`z`) live cell and cells die from the exposed side. See
+> outermost (highest-`z`) live cell. See
 > Chapter 6 (Meshes and Geometry).
 
 ---
@@ -6922,7 +6933,7 @@ empty, and size the mesh up front for everything else:
 | Situation | Symptom without deactivation | What to do |
 |---|---|---|
 | A layer that gasifies completely (an ablating polymer, a layer on an inert substrate) | On a moving mesh the cells thin toward zero thickness, the domain test rejects many proposals, and the step count rises steeply | `deactivation = true` (§10.2) |
-| A charring layer whose residue stays above the threshold | none: its cells keep their char and never reach the threshold | nothing; deactivation would remove no cell |
+| A charring layer | none: its cells keep their char | nothing; deactivation removes no cell |
 | The whole sample is consumed | the live thickness approaches zero | the thickness stop, `min_thickness` (§10.3), and the `:burned_out` outcome (§10.7) |
 | A steep thermal or reaction front | the front is under-resolved | more cells or a mesh graded toward the surface (Chapter 6) |
 
@@ -6931,13 +6942,16 @@ when converting its components completely would leave less condensed mass
 than the threshold of what it started with (§10.5.1). A wood whose
 pyrolysis leaves 20 % char never reaches a 1 % threshold, whatever the
 heating; it needs a char-oxidation reaction to gasify the residue before
-deactivation has anything to do.
+deactivation has anything to do. At a reaction order other than one the test
+is on volume: a cell that would keep 1 % or more of its initial volume is
+not tested, so a char layer stays a resolved layer whatever its mass yield
+(§10.4).
 
 As a measure of the cost of leaving it off: the moving-mesh example of
-§10.2.1, run without deactivation over the same 600 s, collapses its 30 PMMA
-cells to zero thickness and takes 7,861 accepted steps with 1,603 domain
-rejections, against 449 accepted steps when the layer is deactivated (both
-with the default integrator and tolerances, measured on that deck).
+§10.2.1, run without deactivation, thins its PMMA cells to 0.24 µm and ends at
+307 s with outcome `:pore_closure` after 882 accepted steps and 634 domain
+rejections; with the layer deactivated it reaches 600 s in 695 accepted steps
+and no rejection (both at the tolerances of that example).
 
 ---
 
@@ -6945,7 +6959,7 @@ with the default integrator and tolerances, measured on that deck).
 
 ![Surface-connected burnout transfers inventory to an inward receiver while retaining inactive state slots; insets show fixed-mesh gas venting and interior-void termination.](assets/figures/05_deactivation.svg)
 
-**Figure 5. Burnout and retained state (schematic).** Here $r_i$ is the remaining condensed-mass ratio. A threshold crossing selects a surface-connected band; on a moving mesh its inventories and volume transfer to the inward receiver. Dead nodes coincide at the merged face, while state slots and topology remain allocated. The insets show fixed-mesh gas venting and an interior void blocked by live material. A callback can re-test the receiver and emit multiple per-cell records; gas venting and a final cell without a receiver enter the loss ledger.
+**Figure 5. Burnout and retained state (schematic).** Here $r_i$ is the remaining condensed-mass ratio. A threshold crossing selects a surface-connected band; on a moving mesh its inventories and volume transfer to the inward receiver, and a band beneath live cells goes the same way with those cells moving down into its slots. Dead nodes coincide at the merged face, while state slots and topology remain allocated. The insets show fixed-mesh gas venting and an interior void blocked by live material. A callback can re-test the receiver and emit multiple per-cell records; gas venting and a final cell without a receiver enter the loss ledger.
 
 A deactivated cell keeps its slots: nothing changes size. The state vector,
 the mesh arrays and the Jacobian's pattern keep their allocation for the
@@ -7004,6 +7018,8 @@ sol = solve(problem;
     deactivation    = true,          # cells below the threshold leave the system
     radiation_model = BEER_LAMBERT,
     min_thickness   = 1e-3,          # [m] stop if the live column ever thins this far
+    reltol          = 1e-7,          # the default 1e-6 ends in pore closure on the
+    abstol          = 1e-9,          # layer's last cells, just before the event
 )
 
 sol.retcode                          # :Success
@@ -7012,14 +7028,14 @@ sol.extras.live_cells[end]           # 61: the Kaowool cells
 sol.extras.thickness_history[end]    # ≈ 0.012 m: the bare substrate
 ```
 
-On this deck the 30 PMMA cells leave together at t ≈ 315.6 s into the top
+On this deck the 30 PMMA cells leave together at t ≈ 315.5 s into the top
 Kaowool cell, and the solve runs on to 600 s heating the bare substrate.
 
 | Keyword | Default | Meaning |
 |---|---|---|
 | `deactivation` | `false` | Deactivate cells during the solve. |
-| `threshold` | `1e-2` | `ε_m`: a live cell deactivates when its condensed (solid and liquid) mass falls below this fraction of its own initial condensed mass (§10.4). Also scales the mass rows' absolute tolerances. |
-| `band` | `nothing` | `ε_band`, in `[threshold, 1)`: on a moving mesh, the cells next to the exposed side below this fraction of their initial condensed mass go with a cell that crosses the threshold (§10.4). `nothing` gives `max(threshold, 0.1)` when the equidistribution correction moves some layer, `threshold` otherwise. |
+| `threshold` | `1e-2`; at an order other than one a tenth of the limiter's `conversion_threshold` | `ε_m`: a live cell deactivates when its condensed (solid and liquid) mass falls below this fraction of its own initial condensed mass, or at an order other than one when its reactive inventory falls below this fraction of its reactive reference (§10.4). Also scales the mass rows' absolute tolerances. |
+| `band` | `nothing` | `ε_band`, in `[threshold, 1)`: on a moving mesh, the contiguous cells around a crossing cell below this fraction of their initial condensed mass go with a cell that crosses the threshold (§10.4). `nothing` gives `max(threshold, 0.1)` when the equidistribution correction moves some layer, `threshold` otherwise. |
 | `correction` | `nothing` | The mesh velocity relative to the solid on a moving mesh (§10.5). `nothing` installs the equidistribution correction by the rule of §10.5.1. |
 | `lagrangian` | `nothing` | Node ids that always move with the solid, the layer interfaces. `nothing` gives, under an equidistribution correction, every interior node between cells that start with different condensed components. |
 | `located_events` | `true` | Locate each event inside the step at the threshold crossing (§10.6). |
@@ -7047,7 +7063,8 @@ block, Technical Reference §14).
 
 With `deactivation = true`, `setup` builds the deactivation state
 (`cp.deactivation`, a `CellDeactivation` holding the threshold, the band,
-each cell's initial condensed mass and the events) and, on a moving mesh,
+each cell's initial condensed mass, the events and the tables of the solve by
+slot) and, on a moving mesh,
 decides the correction (§10.5.1). `solve` then adds to the integrator's
 callbacks:
 
@@ -7112,7 +7129,7 @@ event's own time is the one after the event. The events and the series:
 
 | Where | What |
 |---|---|
-| `sol.events` | One `DeactivationEvent` per dead cell, in order: `t`, `invocation` (shared by the cells one event deactivates, numbered from one), `cell`, `receiver` (zero when none was left), `fraction` (its condensed mass over its reference when it went), `rows`, `created_volume` [m³], `lost_mass` [kg, per component], `lost_enthalpy` [J], `regularization` [J]. A merge of several cells records the outermost first, with the merge's created volume and losses on that first event. |
+| `sol.events` | One `DeactivationEvent` per dead cell, in order: `t`, `invocation` (shared by the cells one event deactivates, numbered from one), `cell` and `receiver` as cells of the initial mesh (the receiver zero when none was left), `fraction` (its condensed mass over its reference when it went), `rows`, `created_volume` [m³], `lost_mass` [kg, per component], `lost_enthalpy` [J], `regularization` [J], `origin` (the initial cell in each slot after it), `reference_updates`. A merge of several cells records the outermost first, with the merge's created volume and losses on that first event. |
 | `sol.statistics.invocations` | The events that deactivated cells. |
 | `sol.outcome` | How deactivation or the thickness stop ended the solve (§10.7). |
 | `sol.extras.deactivation_times` | The time of every deactivation, one entry per dead cell [s]. |
@@ -7127,7 +7144,7 @@ for k in unique(e.invocation for e in sol.events)
     println("invocation $k at t = $(first(es).t) s: $(length(es)) cells into cell ",
             first(es).receiver, ", largest fraction ", maximum(e.fraction for e in es))
 end
-# invocation 1 at t = 315.6… s: 30 cells into cell 61, largest fraction 0.0339…
+# invocation 1 at t = 315.5… s: 30 cells into cell 61, largest fraction 0.0339…
 ```
 
 The largest fraction says how much of its mass the slowest cell of the layer
@@ -7137,7 +7154,7 @@ the mass-loss rate shows a short burst just after the event, whose
 convergence under refinement is part of the envelope (§10.9).
 
 `sol(t)` and `interpolate_solution(sol, t)` reconstruct the fields at `t`
-with the mask of the last event at or before `t`, and refuse a `t` strictly
+with the mask and the tables of the last event at or before `t`, and refuse a `t` strictly
 inside a saving interval that an event separates, since the integrator's
 interpolant there is not the trajectory; read the saved states on either
 side instead (Chapter 9).
@@ -7227,18 +7244,36 @@ The band exists because the cells of a vanishing layer never reach the
 threshold at exactly the same time. Under the equidistribution correction
 they thin together, but when the first crosses `ε_m` the slowest still holds
 a few percent of its mass (3.4 % on the deck of §10.2.1). Without a band the
-layer would leave one cell at a time, each event a restart; worse, a cell
-beneath the surface can cross first, and a cell below the threshold inward of
-a live one ends the solve with outcome `:interior`. The band must therefore
-exceed what the slowest cell of a layer keeps when the first reaches the
-threshold: on the verification decks 0.4 to 3.9 % at `ε_m = 3e-3` and 1.4 to
-9.9 % at `ε_m = 1e-2` (§10.9). The default, `0.1`, covers them; the deck of
-§10.2.1 run with `band = 1e-2` (the threshold, so no band) ends with outcome
-`:interior` after its first event.
+layer would leave one cell at a time, each event a restart, and a cell beneath
+the surface can cross first and leave from under live cells. The band should
+therefore exceed what the slowest cell of a layer keeps when the first reaches
+the threshold: on the verification decks 0.4 to 3.9 % at `ε_m = 3e-3` and 1.4 to
+9.9 % at `ε_m = 1e-2` (§10.9). The default, `0.1`, covers them.
+
+At a reaction order other than one the threshold reads the cell's **reactive
+inventory**, the mass of each reaction's condensed reactant, against the sum of
+the reactions' lineage references (a first-order reaction's being its reactant's
+initial mass); the band reads the same measure. Only a cell that vanishes is tested. One
+that would keep 1 % or more of its initial volume once fully converted
+(`retained_volumes`) is a layer the front burns beneath: merged into its neighbour it
+would stop resolving that layer, and the reactant then taken in would burn at the
+temperature of the middle of it. A char that keeps its volume moves the mass-loss rate
+by about 20 % integrated that way, at any mass yield; 5 % of the volume moves it
+0.04 % at order 0.5. Such a cell stays, and the deck runs as it does without
+deactivation. A cell that started with none of a reaction's lineage, an inert layer, is
+not tested either, and the last live cell, which has no receiver, is tested on its
+condensed mass, so a column that leaves a residue ends with that residue. The default
+`conversion_threshold/10` puts a cell's exit a decade inside the limiter's onset.
+Measured on the PMMA cone at order 0.5 against the same deck without deactivation: 0.06 %
+of the peak at 72 cells, 0.03 % at 144, 0.01 % integrated at both. Above order one the
+cells decay algebraically and may reach the thickness stop before this default, which
+is not an error; a larger `threshold` makes them leave earlier. At order zero the
+mass-loss rate is a staircase of single-cell burnouts, so its pointwise difference from
+any neighbouring run is a whole step (Technical Reference §6.10).
 
 | Keyword | Default | Constraint |
 |---|---|---|
-| `threshold` | `1e-2` | the mass fraction `ε_m` |
+| `threshold` | `1e-2`; `conversion_threshold/10` at an order other than one | the fraction `ε_m` |
 | `band` | `max(threshold, 0.1)` with a moving correction, `threshold` otherwise | `threshold ≤ band < 1`, refused otherwise |
 
 On a fixed mesh the band is not read: the outermost live cell goes while it
@@ -7400,10 +7435,13 @@ sol = solve(problem; use_ale = true, deactivation = true, radiation_model = BEER
 without `0 < r_lo < r_hi`, and a monitor without `α_M > 0` and `β_M ≥ 0`; any
 correction other than `NoCorrection()` needs `use_ale = true`. Under
 `NoCorrection()` the band defaults to the threshold, so only the cells
-already below the threshold go in an event. Under in-depth absorption, where a cell beneath the surface is the
-hottest, the Lagrangian mesh empties that cell first: the deck of §10.2.1
-with `correction = NoCorrection()` ends with outcome `:interior` at
-t ≈ 236 s. The correction is what carries such a layer through burnout.
+already below the threshold go in an event, one invocation to a cell or so: a tail
+handed to a receiver delays it past its inward neighbour, so cells leave from under
+live ones (V-BO-11), and the live cells above move down a slot. Under in-depth
+absorption, where a cell beneath the surface is the hottest, the Lagrangian mesh
+empties that cell first beneath a skin, and the solve ends there: the model has no gap
+to carry heat across a pocket (§10.7). The correction is what carries such a layer
+through burnout in one event.
 
 `w_override = (x, t) -> w` prescribes every node's velocity instead, moving
 the mesh over a solid at rest; it is a verification device (the material
@@ -7432,8 +7470,8 @@ inside one step, which the downward-root search does not see.
 
 `located_events = false` keeps only the end-of-step event: the cells below
 the threshold at the end of an accepted step go there. The event then lags
-the crossing by up to a step (on the deck of §10.2.1, 315.94 s against
-315.64 s located).
+the crossing by up to a step (on the deck of §10.2.1, 315.90 s against
+315.55 s located).
 
 After every event the integrator restarts with the step its policy names:
 the default Rodas5P policy proposes its initial-step estimate at the state
@@ -7454,31 +7492,39 @@ the strict test, `:Success` only.
 | `:Success` | `:running` | `true` | The solve reached the end of `tspan`, with or without deactivations. |
 | `:Terminated` | `:burned_out` | `true` | The last live cell went; its inventories are written to the last event as lost. |
 | `:Terminated` | `:min_thickness` | `true` | The live thickness of a moving mesh fell below `min_thickness` (§10.3). |
-| `:Terminated` | `:interior` | `false` | A cell below the threshold lies inward of a live cell that deactivation leaves; the solve warns and ends. |
+| `:Terminated` | `:interior` | `false` | A cell below the threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one; the solve warns and ends. |
+| `:DtLessThanMin` | `:pore_closure` | `false` | The domain test kept rejecting a cell whose porosity left the resolved pore domain until the step fell below `dtmin`: on a moving mesh a thinning cell's pore volume falls to its own uncertainty before the cell reaches the threshold. Tighter tolerances resolve it (§10.2.1). |
 | `:Failure` | `:running` | `false` | The state after an event was inadmissible (a receiver outside its own mass tolerances, crossed nodes, a cell at or below absolute zero, under gas transport a porosity outside `[0, 1]`), or no consistent node velocities exist after it; the solve warns naming the event's time. |
 
 The state a solve ends on is always saved, whether or not `saveat` names its
 time.
 
-**The interior void.** Cells die from the exposed side only, so the live
-cells are always `1:top_live_cell`. A cell that reaches the threshold
-beneath a live cell, with no run of the band connecting it to the surface,
-cannot be removed: it would leave a void that the model has no way to carry
-heat across. The solve warns once,
+**The interior void.** A cell can reach the threshold under live cells in two ways.
+On a moving mesh a tail handed to a receiver delays it past the cell inward of it, so
+that cell crosses first under a receiver that is itself spent. That void is the
+transfer's, and the pass closes it: the cell merges into the live cell beneath it, or a
+bottom run into the live cell above it, and the live cells above move down into its
+slots with their tables, so the live cells are always `1:top_live_cell`.
+`interior_events(sol)` lists these events and `show(sol)` counts them.
+
+Under in-depth absorption a cell beneath the surface can empty under a skin that still
+holds its material: a pocket, physical in PMMA, which the model has no gap to carry heat
+across. A live cell outward of the crossing is a skin when it holds `VOID_SKIN` (10)
+thresholds or more of its reference, or is never tested. On the decks measured the
+cells above a tail's void hold at most 6 thresholds and a skin at least 29; this is a
+measured separation, so a thin, nearly spent skin reads as spent. On a fixed mesh
+the geometry stays with its slots, so any cell under a live one is such a stop. The
+solve warns once,
 
 ```
-┌ Warning: solve(): cell 85 is below its threshold inward of a live cell at t = 236.1…; the solve ends with outcome :interior
+┌ Warning: solve(): cell 85 is below its threshold inward of a live cell at t = 236.2…; the solve ends with outcome :interior
 ```
 
-and ends with `:Terminated`. On a fixed mesh this is the regressing polymer
-under in-depth absorption (§10.2.1; the V-BO-05 case asserts the stop). On a
-moving mesh it means the band is too narrow for the layer (§10.4), or the
-correction is off where a cell beneath the surface heats fastest (§10.5.5).
-The remedy is the moving mesh with the installed correction and the default
-band, or a wider band.
+and ends with `:Terminated`: the regressing polymer under in-depth absorption
+(§10.2.1; the V-BO-05 case asserts the stop). The remedy at order one is the moving mesh
+with its correction, which carries such a layer through burnout in one event.
 
 ---
-
 ## 10.8 Fixed-mesh deactivation: the gas is vented
 
 On a fixed mesh (`use_ale = false`) no node moves, so there is no correction
@@ -7585,7 +7631,7 @@ fraction against the band.
 | Option | Where | Default | Section |
 |---|---|---|---|
 | `deactivation` | `solve`, `setup` | `false` | 10.2 |
-| `threshold` | `solve`, `setup` | `1e-2` | 10.4 |
+| `threshold` | `solve`, `setup` | `1e-2`; `conversion_threshold/10` at an order other than one | 10.4 |
 | `band` | `solve`, `setup` | `max(threshold, 0.1)` with a moving correction, else `threshold` | 10.4 |
 | `use_ale` | `solve`, `setup` | `false` | 10.2.1 |
 | `correction` | `solve`, `setup` | installed by rule | 10.5.1 |
@@ -7599,10 +7645,10 @@ fraction against the band.
 **Key correctness reminders.** Deactivation conserves every component mass
 exactly (on a fixed mesh the dead cell's gas is vented and recorded) and the
 sensible enthalpy of everything the receiver takes; the state size and the
-Jacobian's pattern never change; cells die from the exposed side only, and a
-cell below the threshold beneath a live one ends the solve with outcome
-`:interior`; the band must exceed the residue of a layer's slowest cell; and
-the verified envelope is that of §10.9. For the theory behind these
+Jacobian's pattern never change; on a moving mesh a cell leaves from under spent cells,
+which move down a slot, while beneath a skin, and on a fixed mesh beneath any live cell,
+a cell below the threshold ends the solve with outcome `:interior`; the band should exceed
+the residue of a layer's slowest cell; and the verified envelope is that of §10.9. For the theory behind these
 operations, see Technical Reference §11 (the mesh motion and the correction),
 §14 (deactivation), §15 (the integrator and the Jacobian) and §16 (the
 conservation ledgers).
@@ -7891,7 +7937,7 @@ solver:
 |---|---|---|
 | `abstol` | `1e-8` | The temperature rows' absolute tolerance [K]; the other rows take theirs from it, `reltol` and `threshold`. |
 | `reltol` | `1e-6` | Relative tolerance, every row. |
-| `threshold` | `1e-2` | The deactivation threshold, which also scales the mass tolerances. |
+| `threshold` | `1e-2`; with `deactivation` at an order other than one `conversion_threshold/10` | The deactivation threshold, which also scales the mass tolerances. |
 | `maxiters` | `1_000_000` | Maximum integration steps. |
 | `dt` | `problem.dt_initial` | The first step [s]; the fixed step with `adaptive = false`. Also scales the velocity tolerances. |
 | `adaptive` | `true` | Adaptive stepping. |
@@ -8550,8 +8596,9 @@ detect grid points that did not finish: `succeeded(sol)` is true for `:Success`
 and for a `:Terminated` solve whose outcome is a complete burnout
 (`:burned_out`) or the `min_thickness` stop; `completed(sol)` is true for
 `:Success` only. `:Failure` (among its causes an event that leaves the state
-inadmissible or the node velocities inconsistent) and the outcome `:interior` (a
-cell below the threshold inward of a live one) flag a solve that did not finish.
+inadmissible or the node velocities inconsistent) and the outcome `:interior` (a cell
+below the threshold inward of a live one on a fixed mesh, or beneath a skin on a moving
+one) flag a solve that did not finish.
 
 A per-point conservation check costs nothing extra: `conservation_audit(sol)`
 closes mass and energy by the trapezoid over the saved series (Chapter 9), so an
@@ -10344,8 +10391,8 @@ completed(sol)     # :Success only: the solve reached tspan[2]
 | `retcode` | Meaning | Typical cause | See |
 |---|---|---|---|
 | `:Success` | reached `tspan[2]` | — | — |
-| `:Terminated` | an event ended the solve | the last live cell deactivated (outcome `:burned_out`); a moving mesh thinner than `min_thickness` (`:min_thickness`); a cell below the deactivation threshold inward of a live one (`:interior`); a `terminate!` in a callback of yours (outcome `:running`) | §15.4 |
-| `:Failure` | the solve's own checks ended it | more than 50 consecutive proposals rejected on a constraint residual; an inadmissible state, or no consistent node velocities, after a deactivation event; an inadmissible state accepted by a fixed-step solve | §15.3, §15.4.3 |
+| `:Terminated` | an event ended the solve | the last live cell deactivated (outcome `:burned_out`); a moving mesh thinner than `min_thickness` (`:min_thickness`); on a fixed mesh, a cell below the deactivation threshold inward of a live one (`:interior`); a `terminate!` in a callback of yours (outcome `:running`) | §15.4 |
+| `:Failure` | the solve's own checks ended it | more than 50 consecutive proposals rejected on a constraint residual; an inadmissible state, or no consistent node velocities, after a deactivation event; an inadmissible state accepted by a fixed-step solve | §15.3, §15.4.4 |
 | `:DtLessThanMin` | the step fell below `dtmin` (default `1e-12` s) | every proposal rejected: a cell driven to absolute zero, a trajectory leaving the physical domain | §15.3.2 |
 | `:MaxIters` | the step count reached `maxiters` (default `1_000_000`) | a step size that collapsed long before the end | §15.3 |
 | `:Unstable`, `:DtNaN` | a non-finite state or step | a property law, rate or boundary function of yours returning `NaN` or `Inf` | §15.6.3 |
@@ -10355,7 +10402,7 @@ completed(sol)     # :Success only: the solve reached tspan[2]
 | `:running` | neither the deactivation nor the thickness stop ended the solve (it reached the end, failed, or a callback of yours ended it) | `true` only with `:Success` |
 | `:burned_out` | the last live cell deactivated | `true` |
 | `:min_thickness` | on a moving mesh, the distance from the back node to the outermost live node fell below `min_thickness` | `true` |
-| `:interior` | a cell below its threshold lies inward of a live cell | `false` |
+| `:interior` | a cell below its threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one | `false` |
 
 `succeeded(sol)` is the test to use for a burnout run, which normally ends with
 `:Terminated`; `completed(sol)` is the strict test that the solve reached the
@@ -10386,9 +10433,9 @@ solve time.
 | `solve(): stopped at t = …: the last proposed state, at t = …, takes cell i to or below absolute zero` | the solve stopped while rejecting proposals that cool a cell to 0 K | §15.3.2 |
 | `solve(): a constraint residual stayed above its tolerance for N consecutive steps at t = … (scaled residual r)` | the domain test gave up; the solve ends with `:Failure` | §15.3.3 |
 | `solve(): the fixed step accepted at t = … is inadmissible …` | a fixed-step solve left the physical domain; `:Failure` | §15.3.4 |
-| `solve(): cell i is below its threshold inward of a live cell at t = …; the solve ends with outcome :interior` | an interior void | §15.4.2 |
-| `solve(): the state after deactivating cell(s) at t = … is inadmissible` | an event left the receiver outside its tolerances; `:Failure` | §15.4.3 |
-| `solve(): no consistent node velocities after deactivating cell(s) at t = …` | the mesh closure has no solution after an event; `:Failure` | §15.4.3 |
+| `solve(): cell i is below its threshold inward of a live cell at t = …; the solve ends with outcome :interior` | an interior void: any on a fixed mesh, beneath a skin on a moving one | §15.4.2 |
+| `solve(): the state after deactivating cell(s) at t = … is inadmissible` | an event left the receiver outside its tolerances; `:Failure` | §15.4.4 |
+| `solve(): no consistent node velocities after deactivating cell(s) at t = …` | the mesh closure has no solution after an event; `:Failure` | §15.4.4 |
 
 The surface energy balance prints nothing when its Newton iteration does not
 converge (§15.6.2).
@@ -10464,7 +10511,6 @@ a combination it does not implement:
 | `a lateral shrinkage law needs planar coordinates`; `in-depth radiation needs planar coordinates` | a `Cylindrical()` or `Spherical()` mesh with a lateral law or `BEER_LAMBERT` | a planar mesh, or `SURFACE_ABSORPTION` |
 | `the lateral shrinkage law must be positive and finite on [-0.001, 1.001]`; `… must equal one at zero conversion` | a law that vanishes or is not one at `χ̄ = 0` | a law such as `χ̄ -> 1 - 0.3χ̄` |
 | `a correction moves the mesh relative to the solid, which needs use_ale = true` | a `correction` other than `NoCorrection()` on a fixed mesh | `use_ale = true` |
-| `reaction :r has an order other than one, read on one conversion per cell, … solve without deactivation` | `deactivation = true` with a reaction of order other than one | leave deactivation off (§4.14) |
 | `reaction :r has an order other than one, whose cells must keep their material, … give no correction` | a `correction` with a reaction of order other than one | give no correction (§4.14) |
 | `a prescribed mesh velocity needs use_ale = true`, and its siblings | `w_override` on a fixed mesh, on a reacting material, with `deactivation`, or with a `correction` | `w_override` is a verification hook (§16.7) |
 | `the cells beside node(s) … start with different condensed components: give the layer interfaces as lagrangian nodes …` | an explicit `lagrangian` list that omits a layer interface under the equidistribution correction | leave `lagrangian` at its default, which lists the interfaces, or add them |
@@ -10573,9 +10619,10 @@ runs use the adaptive default.
 ## 15.4 Burnout runs
 
 With `deactivation = true`, cells whose condensed mass falls below the fraction
-`threshold` (`ε_m`, default `1e-2`) of their initial condensed mass deactivate,
-and their inventories pass to the live cell beneath. Chapter 10 states the
-rule, the band, the equidistribution correction, located events and the
+`threshold` (`ε_m`, default `1e-2`) of their initial condensed mass deactivate, at
+a reaction order other than one on their reactive inventory (`conversion_threshold/10`
+by default), and their inventories pass to the live cell beside them. Chapter 10
+states the rule, the band, the equidistribution correction, located events and the
 supported envelope; this section covers what goes wrong.
 
 ### 15.4.1 Reading a burnout run
@@ -10588,10 +10635,14 @@ sol.extras.live_cells               # live cells at each saved time
 ```
 
 Each `DeactivationEvent` in `sol.events` records one dead cell: its time, the
-invocation it belongs to, the cell, the receiver (zero when the last live cell
-went), the condensed-mass fraction it held, and the masses and enthalpy the
-event lost. The number of invocations per vanishing layer is reported, not a
-criterion of correctness.
+invocation it belongs to, the cell and the receiver as cells of the initial mesh
+(the receiver zero when the last live cell went), the condensed-mass fraction it
+held, the masses and enthalpy the event lost, the initial cell in each slot after
+it (`origin`), and any reference it gave a receiver with no lineage of a reaction
+(`reference_updates`). The fields of the solution are by slot: after a cell has
+left from under live ones a slot holds another cell, and `e.origin[s]` says which.
+The number of invocations per vanishing layer is reported, not a criterion of
+correctness.
 
 The integrator's interpolant on the step that ends at an event is not the
 trajectory, so `sol(t)` and `interpolate_solution(sol, t)` refuse a time
@@ -10605,30 +10656,33 @@ save it with `saveat`.
 solve(): cell i is below its threshold inward of a live cell at t = …; the solve ends with outcome :interior
 ```
 
-Cells deactivate from the exposed side only, so a cell that empties beneath a
-live cell ends the solve with `:Terminated`, outcome `:interior`, and
-`succeeded(sol) == false`. The solution up to the stop is valid.
+On a fixed mesh only the outermost live cell can go, so a cell that empties beneath
+a live cell ends the solve with `:Terminated`, outcome `:interior`, and
+`succeeded(sol) == false`. The solution up to the stop is valid. On a moving mesh the
+same stop comes from a cell that empties beneath a skin, cells that still hold
+`VOID_SKIN` thresholds or more (§10.7). A layer that empties from within, as one does
+when the temperature maximum lies below the surface under in-depth absorption, ends
+the solve at the first such void: the model cannot carry heat across it. The verification
+case V-BO-05 runs the PMMA-on-Kaowool deck of V-BO-01 with in-depth absorption on a
+fixed mesh and stops at 259.6 s with outcome `:interior`: the surface cell persists as
+a low-density skin while the cells beneath it empty. A material that regresses
+belongs on a moving mesh (`use_ale = true`), where its cells thin instead of
+emptying; V-BO-01 burns the same layer out on a moving mesh in one invocation, with the
+correction. Without the correction, and at an order other than one, which has none, a
+tail's void under spent cells closes and is reported by `interior_events(sol)`, and a
+void beneath a skin stops the solve here too.
 
-- **On a fixed mesh** only the outermost live cell can go. A layer that empties
-  from within, as one does when the temperature maximum lies below the surface
-  under in-depth absorption, ends the solve at the first interior void. The
-  verification case V-BO-05 runs the PMMA-on-Kaowool deck of V-BO-01 with
-  in-depth absorption on a fixed mesh and stops at 259.6 s with outcome
-  `:interior`: the surface cell persists as a low-density skin while the cells
-  beneath it empty. A material that regresses belongs on a moving mesh
-  (`use_ale = true`), where its cells thin instead of emptying; V-BO-01 burns
-  the same layer out on a moving mesh in one invocation.
-- **On a moving mesh** the run of cells from the exposed side whose condensed
-  mass is below the band `ε_band` goes together with the cell that crosses the
-  threshold. The band must exceed what the slowest cell of a layer keeps when
-  the first reaches the threshold; a narrower band, or none, ends the solve with
-  `:interior`. The default band is `0.1` where the equidistribution correction
-  moves a layer and the threshold otherwise, so `correction = NoCorrection()`
-  with deactivation leaves no band beyond the threshold. Widen `band`, or lower
-  `threshold`, which lowers what the slowest cell keeps at the first crossing
-  (Chapter 10 gives the measured fractions).
+### 15.4.3 A step pinned on a thin cell
 
-### 15.4.3 Inadmissible or inconsistent states after an event
+A moving-mesh deck can take a run of steps near `1e-10` s on a sub-micron cell at a low
+porosity, at a very tight `pressure_tolerance` and `reltol`. The pore volume is a
+difference of node positions, so a pressure tolerance below `P eps(z)/(φ h)` cannot be
+met. The error norm stops the pressure budget at that round-off, so the step recovers;
+what remains is the cost of the events and of the thin cells' gas. Where a deck still
+crawls, raise `threshold`, which lets the cell leave thicker, or `reltol`, or
+`pressure_tolerance`.
+
+### 15.4.4 Inadmissible or inconsistent states after an event
 
 Two warnings end a burnout run with `:Failure`, the outcome left `:running`:
 
@@ -10641,7 +10695,7 @@ Two warnings end a burnout run with `:Failure`, the outcome left `:running`:
 Neither occurs on the decks of the supported envelope (Chapter 10). Report the
 deck and the time the warning names.
 
-### 15.4.4 The thickness stop
+### 15.4.5 The thickness stop
 
 On a moving mesh the solve ends with `:Terminated` and outcome `:min_thickness`
 when the distance from the back node to the outermost live node falls below
@@ -10651,7 +10705,7 @@ never fires. Without `deactivation`, a cell that gasifies completely thins
 toward zero width and the step collapses as it approaches it; turn on
 `deactivation`, or raise `min_thickness` to end the run first.
 
-### 15.4.5 The end-of-layer burst
+### 15.4.6 The end-of-layer burst
 
 Just after a layer deactivates, the per-step mass-loss rate can spike: at 30
 cells across the layer the largest per-step rate can exceed the main peak, up
@@ -11784,6 +11838,7 @@ filled at every saved time.
 | `statistics` | `SolverStatistics` | the solver's counters (§16.5.4) |
 | `raw_solution` | ODE solution | the integrator's solution: the raw states and the interpolant |
 | `definition` | `CoreDefinition` | the definition of the solve, through which `sol(t)` reconstructs the fields |
+| `deactivation` | `CellDeactivation` or `nothing` | the deactivation state of the solve, whose tables `sol(t)` replays |
 
 `T`, `ξ` and `m` are cell-centred, cell 1 at the back (`z = 0`); `ξ[k, i, n]`
 is component `k` in cell `i` at saved time `n`. An event that leaves the state
@@ -11814,6 +11869,7 @@ All top-level exports:
 | `get_profile(sol, field, i)` | one field at saved time `sol.t[i]`: `:T`; `:ξ` (`NC × n_cells`) or `:ξj` / `:xij` for component `j`; `:m` (`NC × n_cells`) or `:mj`; `:z`, the node positions (on a fixed mesh the mesh's). Deactivated cells, and nodes beyond the outermost live one, are `NaN`; another symbol is an `ArgumentError` |
 | `get_cell_positions(sol; at = lastindex(sol.t))` | the cell centres at saved time `sol.t[at]` [m], `NaN` for a deactivated cell; the initial centres are `at = 1` when the first saved time is the start |
 | `sol(t)`, `interpolate_solution(sol, t)` | the NamedTuple `(; t, T, ξ, m, z, cell_centers)` at any `t` in the span, reconstructed from the integrator's interpolant through the state mapping, with the mask of the last event at or before `t` (`z` empty on a fixed mesh) |
+| `interior_events(sol)` | the events of `sol` whose cell left from under spent cells; a void beneath a skin is never among them, since it ends the solve |
 | `succeeded(sol)` | `true` for `retcode` `:Success`, and for `:Terminated` with outcome `:burned_out` or `:min_thickness`; `false` for `:interior`, `:Failure`, and a termination by a callback of yours |
 | `completed(sol)` | `true` for `:Success` only, the end of the time span reached |
 | `conservation_audit(sol[, recorder])` | the mass and energy closures (§16.12) |
@@ -11858,13 +11914,17 @@ faces they name unless noted.
 
 `sol.events` lists one `DeactivationEvent` (`Pyrolysis.Deactivation`) per
 deactivated cell, with the fields `t` [s], `invocation` (numbered from one,
-shared by the cells one invocation deactivates), `cell`, `receiver` (zero when
-no live cell was left), `fraction` (the cell's condensed mass as a fraction of
-its initial one when it went), `rows` (the state rows masked),
-`created_volume` [m³], `lost_mass` (per component, kg), `lost_enthalpy` [J] and
-`regularization` [J]. A merge of several cells records one event per dead cell,
-the outermost first, and writes the merge's created volume, losses and
-regularization to that first event (Chapter 9, §9.3; Technical Reference §14).
+shared by the cells one invocation deactivates), `cell` and `receiver` as cells
+of the initial mesh (the receiver zero when no live cell was left), `fraction`
+(the cell's condensed mass as a fraction of its initial one when it went), `rows`
+(the state rows masked, the outermost slots once the live cells have moved down),
+`created_volume` [m³], `lost_mass` (per component, kg), `lost_enthalpy` [J],
+`regularization` [J], `origin` (the initial cell in each slot after the event),
+`reference_updates` (each a reaction, an initial cell and the reference it took) and
+`interior` (whether live cells lay outward of it). A
+merge of several cells records one event per dead cell, the outermost first, and
+writes the merge's created volume, losses, regularization and reference updates to
+that first event (Chapter 9, §9.3; Technical Reference §14).
 
 `sol.statistics` is a `SolverStatistics` with the fields `accepted`,
 `rejected`, `rhs_evaluations`, `jacobians`, `linear_solves`,
@@ -11931,7 +11991,7 @@ layer interface under the equidistribution correction; with deactivation, a
 | `abstol` | `Real` | `1e-8` | Absolute tolerance of the temperature rows [K]; the enthalpy rows take `threshold · m_s,i(0) · c_p,ref · abstol`, the other rows derive theirs from `reltol` and `threshold` |
 | `pressure_tolerance` | `1.0` | Absolute local pressure-error budget [Pa], with proposed-state pore/thermal/geometry sensitivities |
 | `reltol` | `Real` | `1e-6` | Relative tolerance of every row; also scales the mass, position, velocity, intensity and cross-section tolerances, the domain test's constraint allowance, and the widening of a located event's threshold |
-| `threshold` | `Real` | `1e-2` | `ε_m`, the deactivation threshold as a fraction of a cell's initial condensed mass; also scales the mass and position tolerances, with or without `deactivation` |
+| `threshold` | `Real` or `nothing` | `nothing`, which is `1e-2`, or with `deactivation` at an order other than one `conversion_threshold/10` | `ε_m`, the deactivation threshold as a fraction of a cell's reference; also scales the mass and position tolerances, with or without `deactivation` |
 | `maxiters` | `Int` | `1_000_000` | Maximum number of integrator steps |
 | `dt` | `Real` | `problem.dt_initial` | First step [s]; the fixed step when `adaptive = false`; the time scale of the node-velocity tolerances |
 | `adaptive` | `Bool` | `true` | Adaptive step control; `false` takes fixed steps of `dt` without the domain test and ends with `:Failure` at the first inadmissible accepted state |
@@ -11948,8 +12008,8 @@ layer interface under the equidistribution correction; with deactivation, a
 | `linear_solver` | factorization or `nothing` | `nothing`, which is `StructuredKLU()` | Linear solver of the default policy; ignored when `integrator_policy` is given |
 | `integrator_policy` | `IntegratorPolicy` or `nothing` | `nothing`, which is `default_policy(linear_solver)` | The integrator with its restart and observer-flag rules (§16.8) |
 | `sources` | sources object | `NoSources()` | External volumetric sources for verification: `Pyrolysis.Assembly.VolumetricSources(mass, energy)` |
-| `deactivation` | `Bool` | `false` | Deactivate cells whose condensed mass falls below `threshold` of their initial one (§16.11) |
-| `band` | `Real` or `nothing` | `nothing`, which is `max(threshold, 0.1)` when the equidistribution correction moves a layer and `threshold` otherwise | `ε_band` in `[threshold, 1)`: on a moving mesh, the run of cells from the exposed side below this fraction goes with a cell that crosses `ε_m` |
+| `deactivation` | `Bool` | `false` | Deactivate cells whose condensed mass, or at an order other than one whose reactive inventory, falls below `threshold` of its reference (§16.11) |
+| `band` | `Real` or `nothing` | `nothing`, which is `max(threshold, 0.1)` when the equidistribution correction moves a layer and `threshold` otherwise | `ε_band` in `[threshold, 1)`: on a moving mesh, the contiguous cells below this fraction around a cell that crosses `ε_m` go with it |
 | `correction` | `Correction` or `nothing` | `nothing`, which is the rule of §16.6 | `NoCorrection()` or `EquidistributionCorrection(...)` (§16.11) |
 | `lagrangian` | vector of node ids or `nothing` | `nothing`, which is the layer interfaces | Nodes that always move with the solid, beside the mesh's own |
 | `located_events` | `Bool` | `true` | Locate each deactivation inside the step at the first threshold crossing; the end-of-step test stays as a safety net |
@@ -12007,7 +12067,7 @@ How a solve ends:
 | `:Success` | `:running` | reached `tspan[2]` (cells may have been deactivated on the way) |
 | `:Terminated` | `:burned_out` | the last live cell was deactivated |
 | `:Terminated` | `:min_thickness` | a moving mesh thinned below `min_thickness` |
-| `:Terminated` | `:interior` | a cell below the threshold lies inward of a live cell; `solve` warns, naming the cell and the time |
+| `:Terminated` | `:interior` | a cell below the threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one; `solve` warns, naming the cell and the time |
 | `:Terminated` | `:running` | a callback of yours called `terminate!` |
 | `:Failure` | `:running` | the domain test gave up, a fixed step left the physical domain, or a deactivation event left the state inadmissible or the node velocities inconsistent; `solve` warns with the reason |
 | `:MaxIters` | `:running` | `maxiters` steps before the end |
@@ -12274,7 +12334,7 @@ top-level exports; deactivation is switched by `solve` keywords.
 | Keyword | Default | Effect |
 |---|---|---|
 | `deactivation` | `false` | deactivate cells whose condensed mass falls below `threshold` of their initial condensed mass |
-| `threshold` | `1e-2` | `ε_m`; a cell that starts without condensed mass never deactivates |
+| `threshold` | `1e-2`; `conversion_threshold/10` at an order other than one | `ε_m`; a cell that starts without condensed mass, or at such an order without reactive lineage, never deactivates |
 | `band` | `max(threshold, 0.1)` when the equidistribution correction moves a layer, else `threshold` | `ε_band` in `[threshold, 1)`, read on a moving mesh |
 | `located_events` | `true` | locate each event inside the step at the first crossing |
 | `correction` | the rule of §16.6 | `NoCorrection()` or `EquidistributionCorrection(...)` |
@@ -12345,6 +12405,7 @@ sol = solve(problem; use_ale = true, deactivation = true,
 | `EQUIDISTRIBUTION_TIME` | `720.0` s, the default `fallback` | `Pyrolysis.Closures` |
 | `DT_AFTER_EVENT` | `1e-6` s, the `:forced_dt` restart step | `Pyrolysis.Integration` |
 | `residues(material)` | per component, the condensed mass fraction left after complete conversion | `Pyrolysis.Closures` |
+| `retained_volumes(material, T)` | per component, the volume left per unit of its mass after complete conversion, which decides whether a cell is tested at an order other than one (§10.4) | `Pyrolysis.Closures` |
 | `top_live_cell(layout)` | the outermost live cell (zero when none) | `Pyrolysis.Deactivation` |
 | `replay_events!(cells, layout, t)` | set the layout's mask to the one a state saved at `t` had, `cells = cp.deactivation` | `Pyrolysis.Deactivation` |
 | `DeactivationEvent` | one deactivated cell (§16.5.4) | `Pyrolysis.Deactivation` |
@@ -12415,7 +12476,7 @@ Technical Reference chapter.
 | `energy_state` | `:temperature` |
 | `abstol` / `reltol` | `1e-8` (K) / `1e-6` |
 | `pressure_tolerance` | `1.0` Pa |
-| `threshold` | `1e-2` |
+| `threshold` | `1e-2`; `conversion_threshold/10` at an order other than one |
 | `maxiters` | `1_000_000` |
 | `dt` | `problem.dt_initial` |
 | `adaptive` | `true` |

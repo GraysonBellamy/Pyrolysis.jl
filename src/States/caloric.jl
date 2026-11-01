@@ -396,6 +396,40 @@ function invert_caloric(
     return _invert_primal(ext, laws, Float64(H), m, i, T_start, maxiters)
 end
 
+"""
+	merged_temperature(ext, laws, H, m, i, T_start, T_lo, T_hi) -> T
+
+The temperature at which the masses `m` of cell `i` hold the sensible enthalpy
+`H`, the root of the physical relation `Σⱼ mⱼ hⱼ(T) = H` in `[T_lo, T_hi]`, the
+temperatures of what was merged. Where the extended relation agrees with the
+physical one this is [`invert_caloric`](@ref); below the capacity floor the two
+differ, and only the physical one carries the sensible enthalpy of what merged.
+Masses with no heat capacity leave `T_start`.
+"""
+function merged_temperature(ext, laws, H, m, i, T_start, T_lo, T_hi; maxiters::Int = 160)
+    δ = ext.δ[i]
+    iszero(regularization(ext, m, i)) &&
+        all(x -> iszero(x) || x >= δ, m) &&
+        return first(invert_caloric(ext, laws, H, m, i, T_start))
+    enthalpy(T) = sum(map(*, m, component_enthalpies(laws, T)))
+    capacity(T) = sum(map(*, m, component_enthalpy_slopes(laws, T)))
+    T, lo, hi = T_start, T_lo, T_hi
+    capacity(T) > 0 || return T
+    for _ = 1:maxiters
+        r, C = enthalpy(T) - H, capacity(T)
+        abs(r) <= 4eps(Float64) * max(abs(H), C * abs(T - T_REF), C) && return T
+        if r > 0
+            hi = T
+        else
+            lo = T
+        end
+        hi - lo <= 4eps(max(abs(lo), abs(hi))) && return T
+        candidate = T - r / C
+        T = lo < candidate < hi ? candidate : lo + (hi - lo) / 2
+    end
+    error("the merged temperature of cell $i did not converge (H = $H, m = $m)")
+end
+
 function _invert_primal(ext, laws, H::Float64, m, i, T_start, maxiters)
     isfinite(H) && all(isfinite, m) || return NaN, 0
     Cmin = _guaranteed_capacity(ext, m, i) + regularization(ext, m, i)

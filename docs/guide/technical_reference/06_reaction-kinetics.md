@@ -582,8 +582,7 @@ it reads the reference, and requires a finite positive `ξ_ref` otherwise.
 
 **The reference.** $M_{\mathrm{ref},r,i}$ is computed at `setup` for every reaction of
 order other than one (§6.5.5) and stays a constant of the cell: at such an order the
-cells keep their material, since `setup` refuses deactivation and any correction
-(§6.10). The reference concentration is $\xi_{\mathrm{ref},r,i} = M_{\mathrm{ref},r,i}/V_i$.
+cells keep their material, since `setup` refuses any correction (§6.10). The reference concentration is $\xi_{\mathrm{ref},r,i} = M_{\mathrm{ref},r,i}/V_i$.
 The reference adds no row to the state and no entry to the Jacobian's pattern.
 
 > **Implementation note.** Detection: `needs_lineage`, src/Materials/materials.jl.
@@ -1264,20 +1263,30 @@ intumescent solids, moisture). Its boundaries, with the source-of-truth guards:
 6. **One conversion per cell.** The rate at an order other than one reads one
    conversion per cell, so a cell must hold one material: one conversion cannot
    reproduce the sum of the rates of material at different conversions, and a heated
-   column holds a range of them. At such an order `setup` therefore refuses
-   deactivation, which merges cells, and any correction, which moves material between
-   them. Measured on `examples/06` at 72 cells against the same deck with neither,
-   allowing both moves the mass-loss rate by a factor of up to 5.8 at $n = 0.5$, and the
-   correction alone, before any merge, by 2.2 % of the peak at $n = 0.5$, 8.8 % at
-   $n = 0.25$ and 32 % at $n = 0$. These compare two discretisations, and the $n = 0$
-   curve itself moves by 12 % of the peak from 72 to 144 cells, so that last figure is
-   an indication only. No test at a merge can bound what follows it: below order one a
-   relative difference $d$ grows as $\mathrm{d}\ln(|d|/x)/\mathrm{d}t = k(1-n)x^{n-1}$.
-   With the cells on their material a heated deck runs to the end of the span wherever
-   a residue keeps the cells from emptying, and above order one without a residue,
-   since the conversion falls without reaching zero. Below order one with no residue a
-   cell empties in finite time and the solve stalls at the first one; a small residue
-   avoids this (0.2 % on the decks measured).
+   column holds a range of them. At such an order `setup` therefore refuses any
+   correction, which moves material between cells. Measured on `examples/06` at 72
+   cells against the same deck without one, the correction alone moves the mass-loss
+   rate by 2.2 % of the peak at $n = 0.5$, 8.8 % at $n = 0.25$ and 32 % at $n = 0$.
+   No test at a merge can bound what follows a merge of live material: below order one
+   a relative difference $d$ grows as
+   $\mathrm{d}\ln(|d|/x)/\mathrm{d}t = k(1-n)x^{n-1}$. Deactivation is allowed, on a
+   line, for a cell that vanishes: the threshold reads the reactive inventory
+   (§14.3.2), the dead cell's reference leaves with it, and the tail burns at the
+   receiver's conversion. A cell that would keep 1 % or more of its volume stays. The
+   threshold alone bounds neither what the transfer does to the rate nor what it does
+   to the column: at a receiver near the limiter's onset the net change of the rate is
+   several times the dead cell's own (3.2 × at $n=0$, 7.4 × at $n=0.5$, at conversions
+   $9.9\times10^{-5}$ and $2\times10^{-4}$), so accuracy here is a measurement on
+   each deck. On the exact solution of V-BO-09 the rate
+   error falls as $\varepsilon^n$ and as $1/N$, to $4.4\times10^{-4}$ of the peak at
+   $n = 0.5$, 40 cells and $\varepsilon_m = 10^{-4}$. On `examples/06` at the default
+   threshold, against the same deck without deactivation, $n = 0.5$ lands within 0.06 %
+   of the peak at 72 cells and 0.03 % at 144, 0.01 % integrated at both. At $n = 0$ the
+   mass-loss rate is a staircase of single-cell burnouts: the deck's steps lead its
+   reference by up to 2 s, 15 % of the peak pointwise, 1.0 % integrated, with the mass
+   curve $3\times10^{-4}$ of the initial mass away. That is inside what the mesh costs:
+   4.3 % integrated and $6.9\times10^{-4}$ between 72 and 144 cells without
+   deactivation (V-BO-12a, `burnout_order_zero.jl`).
 
 7. **Networks with no fixed lineage.** A lineage fed through the gas phase, a
    solve with external mass sources, gas reactants at orders other than one and

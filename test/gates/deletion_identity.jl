@@ -5,8 +5,9 @@
 # The decks are `burnout_identity.jl`'s (eight decks at their CI resolutions
 # with their solve keywords, and the Douglas fir deck over its first 60 s),
 # each in both energy forms. Per solve: the digest of the saved temperatures,
-# masses, positions and times; the digest of the event records (every field
-# of every event, vectors by value); the outcome and the return code; the
+# masses, positions and times; the digest of the event records (ten fields of
+# each event, vectors by value; `origin`, `reference_updates` and `interior` are
+# tested with the pass); the outcome and the return code; the
 # accepted and rejected steps. The containment suite
 # (`test/jacobian/test_containment.jl`) runs in a module whose
 # `dense_jacobian` and `jacobian!` record the digest of every Jacobian they
@@ -31,10 +32,22 @@ using Test
 const IDENTITY_REFERENCE = joinpath(OUT, "deletion_identity_reference.csv")
 const CONTAINMENT = joinpath(@__DIR__, "..", "jacobian", "test_containment.jl")
 
+# The fields of an event the record holds.
+const EVENT_FIELDS = (
+    :t,
+    :invocation,
+    :cell,
+    :receiver,
+    :fraction,
+    :rows,
+    :created_volume,
+    :lost_mass,
+    :lost_enthalpy,
+    :regularization,
+)
+
 events_digest(sol) = string(
-    hash([
-        Tuple(getfield(e, f) for f in fieldnames(Pyrolysis.Deactivation.DeactivationEvent)) for e in sol.events
-    ]);
+    hash([Tuple(getfield(e, f) for f in EVENT_FIELDS) for e in sol.events]);
     base = 16,
 )
 

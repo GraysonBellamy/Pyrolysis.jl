@@ -280,7 +280,7 @@ solver:
 |---|---|---|
 | `abstol` | `1e-8` | The temperature rows' absolute tolerance [K]; the other rows take theirs from it, `reltol` and `threshold`. |
 | `reltol` | `1e-6` | Relative tolerance, every row. |
-| `threshold` | `1e-2` | The deactivation threshold, which also scales the mass tolerances. |
+| `threshold` | `1e-2`; with `deactivation` at an order other than one `conversion_threshold/10` | The deactivation threshold, which also scales the mass tolerances. |
 | `maxiters` | `1_000_000` | Maximum integration steps. |
 | `dt` | `problem.dt_initial` | The first step [s]; the fixed step with `adaptive = false`. Also scales the velocity tolerances. |
 | `adaptive` | `true` | Adaptive stepping. |

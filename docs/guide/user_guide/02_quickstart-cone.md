@@ -575,7 +575,7 @@ combinations you can meet are:
 | `:Success` | `:running` | reached the end of `tspan` | true | true |
 | `:Terminated` | `:burned_out` | the last cell deactivated | true | false |
 | `:Terminated` | `:min_thickness` | the thickness fell below `min_thickness` | true | false |
-| `:Terminated` | `:interior` | a cell below the threshold lies inward of a live one; the solve warns and ends | false | false |
+| `:Terminated` | `:interior` | a cell below the threshold lies inward of a live one on a fixed mesh, or beneath a skin on a moving one; the solve warns and ends | false | false |
 | `:Failure` | — | the integrator gave up, or an event left an inadmissible state (with a warning) | false | false |
 
 `succeeded(solution)` and `completed(solution)` read these for you (UG 9). Run
@@ -673,6 +673,7 @@ The solution's accessors are exported with the package:
 | `get_profile(sol, field, i)` | the field `:T`, `:ξ`, `:ξj`, `:m`, `:mj` or `:z` at saved index `i` |
 | `get_cell_positions(sol; at = lastindex(sol.t))` | the cell centres at saved index `at` |
 | `sol(t)`, `interpolate_solution(sol, t)` | the fields `(; t, T, ξ, m, z, cell_centers)` at any `t` in the span |
+| `interior_events(sol)` | the events whose cell left from under spent cells (§10.7) |
 
 ```julia
 T_at_step = get_profile(solution, :T, i600)   # the same as solution.T[:, i600]

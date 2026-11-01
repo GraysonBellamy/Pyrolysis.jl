@@ -182,6 +182,7 @@ struct PyrolysisSolution{P,D<:CoreDefinition}
     statistics::SolverStatistics
     raw_solution::Any
     definition::D
+    deactivation::Union{Nothing,CellDeactivation}
 end
 
 # The extras of `nt` saved times: every series zero except the blowing
@@ -328,6 +329,7 @@ function PyrolysisSolution(
     ds, c = buffers(ws, def, Float64)
     du = zeros(state_length(layout))
     ref = def.setup.reference
+    deactivation === nothing || replay_events!(deactivation, layout, -Inf)
     g0 = MeshGeometry{Float64}(topo)
     geometry!(g0, ref.positions, ref.cross_section, topo)
     has_top = haskey(topo.boundary_tags, :top)
@@ -497,5 +499,6 @@ function PyrolysisSolution(
         statistics,
         raw,
         def,
+        deactivation,
     )
 end
