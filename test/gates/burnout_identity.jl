@@ -222,11 +222,13 @@ largest_c(sol) = maximum(abs, filter(isfinite, sol.correction_velocity); init = 
 
 # Why a class A row fails, `nothing` if it holds.
 function class_a_failure(r)
-    r.check === nothing || r.installed || begin
-        r.check.largest == 0.0 || return "the explicit correction is not zero"
-        r.check.difference <= r.check.reltol ||
-            return "difference $(r.check.difference) above reltol $(r.check.reltol)"
-    end
+    r.check === nothing ||
+        r.installed ||
+        begin
+            r.check.largest == 0.0 || return "the explicit correction is not zero"
+            r.check.difference <= r.check.reltol ||
+                return "difference $(r.check.difference) above reltol $(r.check.reltol)"
+        end
     return nothing
 end
 
@@ -237,7 +239,8 @@ function failures(rows, reference; record = RECORD)
     for r in rows
         failure = class_a_failure(r)
         failure === nothing || push!(wrong, "$(r.deck): $failure")
-        record || get(reference, r.deck, "") == r.digest ||
+        record ||
+            get(reference, r.deck, "") == r.digest ||
             push!(wrong, "$(r.deck): digest differs from the reference")
     end
     return wrong
