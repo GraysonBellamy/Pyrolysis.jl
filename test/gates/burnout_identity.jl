@@ -16,10 +16,10 @@
 # first solve's, relative to the field's largest. The explicit correction adds
 # its couplings to the Jacobian's prototype, and so moves the KLU ordering taken
 # from it: the two solves are apart by that ordering's round-off and their step
-# counts may differ. (B) A deck the rule installs the correction on records its digest at
-# the package defaults as the reference, beside its steps without the
+# counts may differ. (B) A deck the rule installs the correction on records its
+# digest at the package defaults as the reference, beside its steps without the
 # correction and the largest correction velocity; on V-BO-04's uniform column
-# that velocity must be exactly zero.
+# that velocity is round-off.
 #
 # Per moving deck, the thinnest live cell over its initial thickness at the
 # saved states of both of its solves (class A's smallest `h/h₀`). Per class
