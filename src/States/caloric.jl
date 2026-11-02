@@ -364,8 +364,8 @@ end
 Solve the extended caloric relation of cell `i` for its temperature by a
 bracketed Newton iteration started at `T_start` (the previous temperature of
 the cell). The bracket follows from `E(T_REF) = 0` and a slope of at least the
-guaranteed capacity; a Newton step that does not contract the bracket is
-replaced by bisection. Dual-number inventories are differentiated through the
+guaranteed capacity; a Newton step that leaves the bracket, or does not halve
+the step before it, is replaced by bisection. Dual-number inventories are differentiated through the
 defining relation: the primal root is corrected by one Newton step per nesting
 level, which carries the implicit-function derivatives exactly. A non-finite
 inventory has temperature `NaN`, so the residual of a trial state carrying one
@@ -428,9 +428,20 @@ function merged_temperature(ext, laws, H, m, i, T_start, T_lo, T_hi; maxiters::I
     error("the merged temperature of cell $i did not converge (H = $H, m = $m)")
 end
 
+# The extended relation at `T` and its slope, with the masses' positive parts `p`
+# and the capacity switch `κ` of the cell.
+@inline function _energy_and_capacity(laws::CaloricLaws, T, p, κ)
+    h = component_enthalpies(laws, T)
+    c = component_enthalpy_slopes(laws, T)
+    return sum_products(κ * (T - T_REF), p, h), sum_products(κ, p, c)
+end
+
 function _invert_primal(ext, laws, H::Float64, m, i, T_start, maxiters)
     isfinite(H) && all(isfinite, m) || return NaN, 0
-    Cmin = _guaranteed_capacity(ext, m, i) + regularization(ext, m, i)
+    δ = ext.δ[i]
+    p = map(x -> positive_part(x, δ), m)
+    κ = regularization(ext, m, i)
+    Cmin = _guaranteed_capacity(ext, m, i) + κ
     H == 0 && return T_REF, 0
     endpoint = T_REF + H / Cmin
     isfinite(endpoint) ||
@@ -439,9 +450,10 @@ function _invert_primal(ext, laws, H::Float64, m, i, T_start, maxiters)
     T =
         lo <= T_start <= hi ? T_start :
         clamp(T_REF + H / extended_capacity(ext, laws, T_REF, m, i), lo, hi)
+    step = Inf
     for its = 1:maxiters
-        r = extended_energy(ext, laws, T, m, i) - H
-        C = extended_capacity(ext, laws, T, m, i)
+        E, C = _energy_and_capacity(laws, T, p, κ)
+        r = E - H
         # Converged when the residual is at the round-off of the inventory, or
         # of one kelvin's worth of it near the datum.
         abs(r) <= 4eps(Float64) * max(abs(H), C * abs(T - T_REF), C) && return T, its
@@ -460,12 +472,22 @@ function _invert_primal(ext, laws, H::Float64, m, i, T_start, maxiters)
             else
                 lo = T_REF + 2 * (lo - T_REF)
             end
+            step = hi - lo
             T = lo + (hi - lo) / 2
             continue
         end
-        candidate = T - r / C
-        margin = 0.05 * (hi - lo)
-        T = lo + margin < candidate < hi - margin ? candidate : lo + (hi - lo) / 2
+        newton = r / C
+        candidate = T - newton
+        # A Newton step too small to move the temperature has reached its
+        # resolution.
+        candidate == T && return T, its
+        if lo <= candidate <= hi && 2abs(newton) <= abs(step)
+            step = newton
+            T = candidate
+        else
+            step = (hi - lo) / 2
+            T = lo + step
+        end
     end
     error(
         "caloric inversion of cell $i did not converge in $maxiters iterations " *

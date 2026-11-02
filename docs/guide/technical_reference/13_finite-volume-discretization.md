@@ -973,7 +973,8 @@ has exactly one root for every real $H_i$, and it agrees with the physical relat
 on every state in which each component is absent or holds at least $\delta_i$ and the
 guaranteed capacity is at least $2C_{\mathrm{floor},i}$. `invert_caloric` solves it by a
 bracketed Newton iteration started at the cell's temperature from the latest plain
-evaluation, replacing a step that does not contract the bracket by bisection. A
+evaluation, replacing a step that leaves the bracket or does not halve the step
+before it by bisection. A
 dual-number inventory is differentiated through the defining relation: the primal
 root is corrected by one Newton step per nesting level, which carries the
 implicit-function derivatives exactly. A non-finite inventory has temperature `NaN`,

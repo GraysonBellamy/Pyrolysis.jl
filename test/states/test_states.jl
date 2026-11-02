@@ -310,6 +310,13 @@ end
             1e-12
         @test extended_capacity(cold_ext, cold_laws, target, m, 1) >= floor
     end
+    # A warm start lies far inside the bracket, and Newton's method converges from
+    # it in a few iterations, whatever the bracket's width.
+    for T_root in (320.0, 650.0, 1400.0), δ in (1e-6, 1e-3, 1.0)
+        m = (1.0, 0.5, 0.25)
+        H = extended_energy(ext, laws, T_root, m, 1)
+        @test last(invert_caloric(ext, laws, H, m, 1, T_root + δ)) <= 4
+    end
     @test isnan(first(invert_caloric(ext, laws, Inf, (1.0, 0.0, 0.0), 1, T_REF)))
     @test isnan(first(invert_caloric(ext, laws, NaN, (1.0, 0.0, 0.0), 1, T_REF)))
     @test isnan(first(invert_caloric(ext, laws, 1e3, (NaN, 0.0, 0.0), 1, T_REF)))
