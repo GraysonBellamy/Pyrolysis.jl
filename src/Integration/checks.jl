@@ -130,6 +130,8 @@ struct DomainCheck{D<:ResidualDefinition,W<:ResidualWorkspace}
     max_consecutive::Int
     monitor::ConstraintMonitor
     error_test::Base.RefValue{_ErrorTestWrapper}
+    gas::Vector{Int}
+    gas_masses::Vector{Float64}
 end
 
 function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
@@ -144,6 +146,10 @@ function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
     end
     I_scale =
         has_intensities(layout) ? cp.abstol[intensity_index(layout, 1)] / cp.reltol : 1.0
+    # The components differ in type, so the per-cell loop reads these plain
+    # vectors: indexing the tuple at run time would dispatch at every cell.
+    comps = def.setup.material.components
+    gas = collect(Int, gas_component_indices(comps))
     return DomainCheck(
         def,
         cp.ws,
@@ -155,6 +161,8 @@ function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
         max_consecutive,
         ConstraintMonitor(),
         Ref(_ErrorTestWrapper(() -> true)),
+        gas,
+        Float64[molar_mass(comps[j]) for j in gas],
     )
 end
 
@@ -279,19 +287,26 @@ function _pore_margin(check, ds, i)
         has_chi(layout) &&
             (δV+=abs(V/ds.A[])*(check.abstol[area_index(layout)]+check.reltol*abs(ds.A[])))
     end
-    δφ=0.0
-    skeleton=0.0
-    for j = 1:NC
-        comp=mat.components[j]
-        is_gas(comp) && continue
+    δφ, skeleton=_skeleton_margin(mat.components, check, ds, i, 1, T, V, δT, 0.0, 0.0)
+    return δφ+abs(skeleton/V^2)*δV
+end
+
+# The mass and thermal uncertainty of cell `i`'s skeletal fraction and the
+# volume its skeleton holds, by recursion over the components, which differ in
+# type.
+@inline _skeleton_margin(::Tuple{}, check, ds, i, j, T, V, δT, δφ, skeleton) =
+    (δφ, skeleton)
+@inline function _skeleton_margin(cs::Tuple, check, ds, i, j, T, V, δT, δφ, skeleton)
+    comp=first(cs)
+    if !is_gas(comp)
         ρ=get_intrinsic_density(comp, T)
         dρ=ForwardDiff.derivative(z->get_intrinsic_density(comp, z), T)
-        skeleton+=ds.m[j, i]/ρ
-        δφ+=(check.abstol[mass_index(layout, i, j)]+check.reltol*abs(ds.m[j, i]))/(ρ*V)+abs(
-            ds.m[j, i]*dρ/(ρ^2*V),
-        )*δT
+        m=ds.m[j, i]
+        k=mass_index(check.def.layout, i, j)
+        skeleton+=m/ρ
+        δφ+=(check.abstol[k]+check.reltol*abs(m))/(ρ*V)+abs(m*dρ/(ρ^2*V))*δT
     end
-    return δφ+abs(skeleton/V^2)*δV
+    return _skeleton_margin(Base.tail(cs), check, ds, i, j+1, T, V, δT, δφ, skeleton)
 end
 function _porosity_out(check::DomainCheck, ds::DerivedState{NC}, ::GasTransport) where {NC}
     layout=check.def.layout
@@ -306,11 +321,12 @@ function _porosity_out(check::DomainCheck, ds::DerivedState{NC}, ::GasTransport)
             check.monitor.message="cell $i: raw porosity $φ is outside the resolved pore domain (uncertainty $δφ)"
             return true
         end
-        ng=count(is_gas, mat.components)
-        for j in gas_component_indices(mat.components)
-            budget=check.def.setup.reference.pressure_tolerance/ng*molar_mass(
-                mat.components[j],
-            )*φ*ds.V[i]/(R_GAS*ds.T[i])
+        ng=length(check.gas)
+        for k = 1:ng
+            j=check.gas[k]
+            budget=check.def.setup.reference.pressure_tolerance/ng*check.gas_masses[k]*φ*ds.V[i]/(
+                R_GAS*ds.T[i]
+            )
             if ds.m[j, i]<-budget
                 check.monitor.outcome=:negative_gas_pressure
                 check.monitor.message="cell $i: gas :$(mat.components[j].name) exceeds the negative-pressure tolerance at its current pore state"
