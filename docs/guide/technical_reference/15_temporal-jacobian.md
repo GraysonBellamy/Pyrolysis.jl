@@ -677,7 +677,7 @@ lateral rate as ordinary columns of the pattern.
 
 The default linear solver of every layout is `StructuredKLU()`
 (`default_linear_solver()`, `src/Integration/linear_solve.jl`), KLU applied to
-$W$ on the entries of $W$ that have been nonzero at some step of the solve.
+$W$ on the entries of $W$ that have counted at some step of the solve.
 
 $W$ has the structure of the Jacobian's prototype, which holds every entry the
 connectivity allows, most of which are zero at any one step, and KLU factors a
@@ -687,26 +687,50 @@ identity is a `Diagonal` of a `LumpedMass`, which forms $W$ in place: the
 Jacobian's stored values, with $1/(\gamma\Delta t)$ taken from the diagonal of the
 rows with a time derivative.
 
-The cache keeps the union of the prototype's entries that have been nonzero in
-this solve, with the diagonal, and copies each fresh $W$ into a matrix of that
-structure, where the inner KLU refactors it numerically. A nonzero outside the
-union grows it, and the grown structure is factored afresh, pivots included, on
-the solve's one ordering: AMD of the prototype's pattern, taken once when the
-cache is built, with KLU's block triangular form of each union. The ordering is
+The cache keeps the union of the prototype's entries that have counted in this
+solve, with the diagonal, and copies each fresh $W$ into a matrix of that
+structure, where the inner KLU refactors it numerically. An entry outside the
+union that counts grows it, and the grown structure is factored afresh, pivots
+included, on the solve's one ordering: AMD of the prototype's pattern, taken
+once when the cache is built, with KLU's block triangular form of each union. The
+ordering is
 a symmetric permutation and the union holds the diagonal, so the diagonal is a
 transversal of every union. A row of a nonsingular $W$ with a zero on the diagonal
 then never stands in a block of one: a transversal of its nonzeros moves that row
 along a cycle, and the cycle lies in one block. The union only grows, so its size
 alone tells the inner KLU that the structure changed, and the growths stop once
-every entry the solve reaches has appeared. The inner KLU reduces no stored zeros
-of its own, which would break that signal. A $W$ on any other structure than the
+every entry that counts has appeared. The inner KLU reduces no stored zeros of its
+own, which would break that signal. A $W$ on any other structure than the
 prototype's, which the integrator hands the solver's initialization as an all-ones
-$W$, is an error. The tests check that the union is smaller than the prototype,
-that each growth makes one factorization on the one ordering, that every $W$ on
-the union is factored as it stands, and that repeated solves are bit-identical
-under `StructuredKLU()`, LinearSolve's `KLUFactorization()` and
-`UMFPACKFactorization()`, on fixed and moving meshes and under in-depth radiation
-(`test/integration/test_policies.jl`).
+$W$, is an error.
+
+On a reacting deck most of the entries that reach $W$ are products of a rate and a
+mass far below anything the solve resolves, and a union of every nonzero would
+carry their fill to the end of the solve. A solve therefore binds its per-row
+absolute tolerances $\tau$ to the cache, and an entry $w_{ij}$ outside the union
+counts unless
+
+$$|w_{ij}|\,\tau_j\le\varepsilon\,|w_{ii}|\,\tau_i,$$
+
+with $\varepsilon$ the machine epsilon. To first order, with the pivots on the
+diagonal, such an entry moves unknown $i$ by $|w_{ij}x_j/w_{ii}|$, which is at most
+$\varepsilon|x_j|/\tau_j$ of that unknown's tolerance. The row's scale cancels and
+the tolerances carry the unknowns' units, so the test depends on the units of
+neither. An entry of a row with a zero diagonal, and a value that does not compare,
+counts. A growth takes in every entry above a thousandth of the bar, so that an entry
+on its way up does not grow the union at every step. Nothing else about $W$ changes:
+an entry in the union stays there whatever its size, and a direct `OrdinaryDiffEq`
+solve, which binds no tolerances, factors every nonzero. The accuracy this leaves
+is that of the exact $W$ to within the scatter of a 0.1 % change of the tolerances,
+measured against a reference with both tolerances 100 times tighter on the Douglas
+fir deck in both energy forms.
+
+The tests check that the union is smaller than the prototype, that each growth makes
+one factorization on the one ordering, that every $W$ on the union is factored as it
+stands, that the test on an entry changes with neither a row's scale nor an unknown's
+units, and that repeated solves are bit-identical under `StructuredKLU()`,
+LinearSolve's `KLUFactorization()` and `UMFPACKFactorization()`, on fixed and moving
+meshes and under in-depth radiation (`test/integration/test_policies.jl`).
 
 Another LinearSolve factorization is selected by passing a policy built with it
 (`integrator_policy = default_policy(UMFPACKFactorization())`,
@@ -982,8 +1006,8 @@ Its Jacobian $J=\partial\boldsymbol f/\partial\boldsymbol u$ is the colored
 forward-mode derivative of the whole residual on the connectivity pattern, with
 the two dense rows of a variable cross section assembled from six column sums;
 each stage solves a linear system in
-$W=J-\mathsf M/(\gamma_{\rm RK}\Delta t)$, factored by KLU on the union of its
-nonzeros; accepted states pass the domain test; and the whole construction is
+$W=J-\mathsf M/(\gamma_{\rm RK}\Delta t)$, factored by KLU on the union of the
+entries that count; accepted states pass the domain test; and the whole construction is
 checked against the dense forward-mode reference.
 
 ---
@@ -1005,8 +1029,8 @@ checked against the dense forward-mode reference.
   assumed.
 - **The union structure only grows.** `StructuredKLU` factors afresh at each
   growth of its union, so the first steps of a solve, and any step at which a
-  fresh entry becomes nonzero, carry a fresh factorization, and an entry that was
-  nonzero once stays in the factorization.
+  fresh entry comes to count, carry a fresh factorization, and an entry that
+  counted once stays in the factorization.
 - **The enthalpy form's history dependence.** Its residual depends on the
   evaluation history at the caloric inversion's round-off (§15.2).
 - **Fixed-step solves** bypass the domain test; only the admissibility of each

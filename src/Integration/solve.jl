@@ -257,6 +257,7 @@ function integrate(
     integrator.opts.abstol = cp.abstol
     bind_pressure_norm!(pressure_norm, integrator)
     bind_error_test!(check, integrator)
+    bind_tolerances!(integrator, cp.abstol)
     raw = SciMLBase.solve!(integrator)
     monitor.cold == 0 ||
         @warn "solve(): stopped at t = $(raw.t[end]): the last proposed state, at t = $(monitor.cold_t), takes cell $(monitor.cold) to or below absolute zero"

@@ -36,23 +36,31 @@ end
 	StructuredKLU(inner = KLUFactorization(check_pattern = false))
 
 KLU for the integrator's `W = J − M/(γΔt)` on the entries of `W` that have
-been nonzero at some step of the solve. `W` has the structure of the Jacobian's
+counted at some step of the solve. `W` has the structure of the Jacobian's
 prototype, which holds every entry the residual's connectivity allows, most of
 which are zero at any one step, and KLU factors a stored zero like any other
 entry, so factoring `W` on that structure carries the fill of entries that
 never matter.
 
-The cache keeps the union of the prototype's entries that have been nonzero
-in this solve, with the diagonal, and copies each fresh `W` into a matrix of
-that structure, where the inner KLU refactors it numerically. A nonzero
-outside the union grows it, and the grown structure is factored afresh, pivots
+The cache keeps the union of the prototype's entries that have counted in this
+solve, with the diagonal, and copies each fresh `W` into a matrix of that
+structure, where the inner KLU refactors it numerically. An entry outside the
+union that counts grows it, and the grown structure is factored afresh, pivots
 included, on the solve's one ordering: AMD of the prototype's pattern, taken
 once, with KLU's block triangular form of each union. The ordering is symmetric
 and the union holds the diagonal, so it suits every union, and nothing is ordered
 again as the union grows. The union only grows, so its size alone tells the inner
-KLU that the structure changed, and the growths stop once every entry the solve
-reaches has appeared. A `W` on any other structure than the prototype's, which
-the integrator hands `init` as an all-ones `W`, is an error.
+KLU that the structure changed, and the growths stop once every entry that counts
+has appeared. A `W` on any other structure than the prototype's, which the
+integrator hands `init` as an all-ones `W`, is an error.
+
+Every nonzero counts until `integrate` binds the solve's per-row `abstol` `τ`.
+From then on an entry stays out while `|w_ij| τ_j ≤ ε |w_ii| τ_i`, with `ε` the
+machine epsilon. To first order such an entry moves unknown `i` by at most
+`ε |x_j|/τ_j` of its tolerance; the row's scale cancels and the tolerances carry
+the unknowns' units, so the test depends on the units of neither. A growth takes
+in every entry above a thousandth of that bar, so that an entry on its way up
+does not grow the union at every step.
 """
 struct StructuredKLU <: LinearSolve.AbstractSparseFactorization
     inner::KLUFactorization
@@ -62,17 +70,26 @@ StructuredKLU() = StructuredKLU(KLUFactorization(check_pattern = false))
 
 # The prototype's structure; which of its entries are in the union and where
 # each lies in the union's matrix (zero outside it); the ordering of every
-# factorization, zero-based; that matrix; the inner KLU cache that factors it;
-# and the number of times the union grew.
+# factorization, zero-based; each entry's column and each row's diagonal entry in
+# the prototype's stored order (zero if not stored); that matrix; the inner KLU
+# cache that factors it; the per-row tolerances, empty until bound; and the number
+# of times the union grew.
 mutable struct StructuredKLUCache{C}
     const prototype::SparseMatrixCSC{Float64,Int}
     const in_union::BitVector
     const slot::Vector{Int}
     const order::Vector{Int}
+    const column::Vector{Int}
+    const diagonal::Vector{Int}
     union::SparseMatrixCSC{Float64,Int}
     const inner::C
+    tolerance::Vector{Float64}
     growths::Int
 end
+
+# The bar on an entry outside the union, and the lower one a growth takes in at.
+const _NEGLIGIBLE = eps(Float64)
+const _TAKEN_IN = 1e-3 * _NEGLIGIBLE
 
 function LinearSolve.init_cacheval(
     alg::StructuredKLU,
@@ -89,9 +106,15 @@ function LinearSolve.init_cacheval(
 )
     prototype = copy(A)
     in_union = falses(nnz(prototype))
+    column = zeros(Int, nnz(prototype))
+    diagonal = zeros(Int, size(prototype, 2))
     rows = rowvals(prototype)
     for col = 1:size(prototype, 2), k in nzrange(prototype, col)
-        rows[k] == col && (in_union[k] = true)
+        column[k] = col
+        if rows[k] == col
+            in_union[k] = true
+            diagonal[col] = k
+        end
     end
     slot = zeros(Int, nnz(prototype))
     union = _union_matrix!(slot, prototype, in_union, zeros(nnz(prototype)))
@@ -111,8 +134,11 @@ function LinearSolve.init_cacheval(
         in_union,
         slot,
         _fill_reducing_order(prototype),
+        column,
+        diagonal,
         union,
         inner,
+        Float64[],
         0,
     )
 end
@@ -164,8 +190,21 @@ function _union_matrix!(
     return SparseMatrixCSC(size(prototype, 1), n, colptr, rowval, nzval)
 end
 
-# Copy `A` into the union's matrix up to the first nonzero of `A` outside the
-# union, whose place it returns; zero when there is none.
+# Whether the nonzero of `from` at place `k` stands above `bar`. A comparison that
+# fails, on a NaN, counts, and so does any entry of a row with a zero diagonal.
+@inline function _counts(c::StructuredKLUCache, from::Vector{Float64}, k::Int, bar::Float64)
+    τ = c.tolerance
+    isempty(τ) && return true
+    @inbounds begin
+        i = rowvals(c.prototype)[k]
+        d = c.diagonal[i]
+        iszero(d) && return true
+        return !(abs(from[k]) * τ[c.column[k]] <= bar * abs(from[d]) * τ[i])
+    end
+end
+
+# Copy `A` into the union's matrix; false when an entry of `A` outside the union
+# counts.
 function _load!(c::StructuredKLUCache, A::SparseMatrixCSC)
     vals = nonzeros(c.union)
     from = nonzeros(A)
@@ -174,20 +213,22 @@ function _load!(c::StructuredKLUCache, A::SparseMatrixCSC)
         s = slot[k]
         if s > 0
             vals[s] = from[k]
-        elseif !iszero(from[k])
-            return k
+        elseif !iszero(from[k]) && _counts(c, from, k, _NEGLIGIBLE)
+            return false
         end
     end
-    return 0
+    return true
 end
 
-# Add `A`'s nonzeros from place `first` on to the union, every nonzero before it
-# being in the union already, and rebuild its matrix with `A`'s values.
-function _grow!(c::StructuredKLUCache, A::SparseMatrixCSC, first::Int)
+# Take `A`'s entries above the lower bar into the union and rebuild its matrix with
+# `A`'s values.
+function _grow!(c::StructuredKLUCache, A::SparseMatrixCSC)
     in_union = c.in_union
     from = nonzeros(A)
-    @inbounds for k = first:length(from)
-        iszero(from[k]) || (in_union[k] = true)
+    @inbounds for k in eachindex(from)
+        if !in_union[k] && !iszero(from[k]) && _counts(c, from, k, _TAKEN_IN)
+            in_union[k] = true
+        end
     end
     c.union = _union_matrix!(c.slot, c.prototype, in_union, from)
     c.growths += 1
@@ -212,11 +253,10 @@ function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::StructuredKLU; kw
         A = cache.A
         same_structure(A, c.prototype) ||
             error("StructuredKLU: W is not on the Jacobian prototype's structure")
-        outside = _load!(c, A)
-        if iszero(outside)
+        if _load!(c, A)
             c.inner.A = c.union
         else
-            _grow!(c, A, outside)
+            _grow!(c, A)
             _factor_union!(c)
         end
         cache.isfresh = false
@@ -231,6 +271,29 @@ function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::StructuredKLU; kw
         cache;
         retcode = sol.retcode,
     )
+end
+
+# The cache of a `StructuredKLU` in an integrator's cache, its own or its nonlinear
+# solver's; `nothing` with any other linear solver.
+function _structured_cache(cache)
+    hasproperty(cache, :nlsolver) && (cache = cache.nlsolver.cache)
+    hasproperty(cache, :linsolve) || return nothing
+    c = cache.linsolve.cacheval
+    return c isa StructuredKLUCache ? c : nothing
+end
+
+"""
+	bind_tolerances!(integrator, abstol) -> integrator
+
+Hand `StructuredKLU` the solve's per-row `abstol`, the one array an event's
+permutation reaches, so that it can leave negligible entries of `W` out. Unbound,
+as under a direct `OrdinaryDiffEq` solve, or with a tolerance that is not positive,
+which gives no scale, every nonzero counts.
+"""
+function bind_tolerances!(integrator, abstol::Vector{Float64})
+    c = _structured_cache(integrator.cache)
+    c !== nothing && all(>(0.0), abstol) && (c.tolerance = abstol)
+    return integrator
 end
 
 """

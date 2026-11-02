@@ -776,6 +776,122 @@ end
     @test LinearSolve.solve!(cache).u ≈ Matrix(A) \ b
 end
 
+@testset "the structured KLU leaves out entries negligible to the solve" begin
+    n = 6
+    rows = Int[]
+    cols = Int[]
+    for j = 1:n, i in (j - 1, j, j + 1)
+        1 <= i <= n && (push!(rows, i); push!(cols, j))
+    end
+    prototype = sparse(rows, cols, ones(length(rows)), n, n)
+    # One entry w₂₁ on a diagonal of 4; the others of the prototype are stored zeros.
+    W(entry; diagonal = fill(4.0, n)) = sparse(
+        vcat(1:n, 2:n, 1:(n-1)),
+        vcat(1:n, 1:(n-1), 2:n),
+        vcat(diagonal, entry, zeros(n - 2), zeros(n - 1)),
+        n,
+        n,
+    )
+    b = collect(1.0:n)
+    bar = eps() * 4.0
+    fresh() =
+        LinearSolve.init(LinearSolve.LinearProblem(copy(prototype), b), StructuredKLU())
+    grown(cache, A) = (cache.A = A; LinearSolve.solve!(cache); cache.cacheval)
+
+    # Unbound, every nonzero counts, however small.
+    c = grown(fresh(), W(1e-3bar))
+    @test c.growths == 1
+    @test nnz(c.union) == n + 1
+
+    # Bound, an entry under the bar stays out and one over it grows the union.
+    cache = fresh()
+    c = cache.cacheval
+    c.tolerance = ones(n)
+    grown(cache, W(0.5bar))
+    @test c.growths == 0
+    @test nnz(c.union) == n
+    grown(cache, W(2bar))
+    @test c.growths == 1
+    @test nnz(c.union) == n + 1
+
+    # The test depends on neither the row's scale nor the unknowns' units: a row
+    # taken by `r` and an unknown taken by `s`, tolerance with it, change nothing.
+    for r in (1e-12, 1.0, 1e12),
+        s in (1e-12, 1.0, 1e12),
+        (entry, growths) in ((0.5bar, 0), (2bar, 1))
+
+        cache = fresh()
+        c = cache.cacheval
+        c.tolerance = ones(n)
+        c.tolerance[1] = s
+        d = fill(4.0, n)
+        d[1] *= 1 / s
+        d[2] *= r
+        grown(cache, W(entry * r / s; diagonal = d))
+        @test c.growths == growths
+    end
+
+    # A growth takes in what stands above the lower bar, and nothing under it.
+    cache = fresh()
+    c = cache.cacheval
+    c.tolerance = ones(n)
+    A = W(2bar)
+    A[3, 2] = 0.5bar
+    A[4, 3] = 1e-4bar
+    grown(cache, A)
+    @test c.growths == 1
+    @test nnz(c.union) == n + 2
+    @test LinearSolve.solve!(cache).u ≈ Matrix(A) \ b
+
+    # A zero diagonal gives no bar, and a NaN does not pass one.
+    cache = fresh()
+    c = cache.cacheval
+    c.tolerance = ones(n)
+    d = fill(4.0, n)
+    d[2] = 0.0
+    grown(cache, W(1e-30; diagonal = d))
+    @test c.growths == 1
+    cache = fresh()
+    c = cache.cacheval
+    c.tolerance = ones(n)
+    grown(cache, W(NaN))
+    @test c.growths == 1
+
+    # A tolerance that is not positive gives no scale, so it is not bound.
+    cache = fresh()
+    c = cache.cacheval
+    binder = (; cache = (; linsolve = cache))
+    Integration.bind_tolerances!(binder, zeros(n))
+    @test isempty(c.tolerance)
+    Integration.bind_tolerances!(binder, ones(n))
+    @test c.tolerance == ones(n)
+end
+
+@testset "a solve binds its tolerances to the structured KLU" begin
+    problem = _slab(6)
+    for policy in (default_policy(), fbdf_policy(), kencarp4_policy())
+        bound = Ref{Any}(nothing)
+        probe = DiscreteCallback(
+            (u, t, integrator) -> true,
+            integrator -> begin
+                bound[] = (
+                    Integration._structured_cache(integrator.cache),
+                    integrator.opts.abstol,
+                )
+            end;
+            save_positions = (false, false),
+        )
+        sol = Integration.solve(problem; integrator_policy = policy, callback = probe)
+        @test sol.retcode === :Success
+        c, abstol = bound[]
+        @test c isa Integration.StructuredKLUCache
+        @test c.tolerance === abstol
+    end
+    # Any other linear solver has no cache to bind.
+    @test Integration._structured_cache((; linsolve = (; cacheval = nothing))) === nothing
+    @test Integration._structured_cache((;)) === nothing
+end
+
 @testset "the lumped mass forms W in place on the Jacobian's structure" begin
     n = 5
     J = sparse(
