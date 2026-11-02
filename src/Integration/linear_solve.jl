@@ -87,17 +87,23 @@ function LinearSolve.init_cacheval(
         rows[k] == col && (in_union[k] = true)
     end
     slot = zeros(Int, nnz(prototype))
-    union = _union_matrix!(slot, prototype, in_union)
+    union = _union_matrix!(slot, prototype, in_union, zeros(nnz(prototype)))
     inner = LinearSolve.init(LinearSolve.LinearProblem(union, zeros(length(b))), alg.inner)
     return StructuredKLUCache(prototype, in_union, slot, union, inner, 0)
 end
 
-# The matrix on the prototype's entries in the union, zero-valued, with each
-# entry's place in it written to `slot`.
-function _union_matrix!(slot::Vector{Int}, prototype::SparseMatrixCSC, in_union::BitVector)
+# The matrix on the prototype's entries in the union, holding `values`, the
+# prototype's stored values, with each entry's place in it written to `slot`.
+function _union_matrix!(
+    slot::Vector{Int},
+    prototype::SparseMatrixCSC,
+    in_union::BitVector,
+    values::Vector{Float64},
+)
     n = size(prototype, 2)
     colptr = Vector{Int}(undef, n + 1)
     rowval = Vector{Int}(undef, count(in_union))
+    nzval = Vector{Float64}(undef, length(rowval))
     rows = rowvals(prototype)
     colptr[1] = 1
     m = 0
@@ -106,6 +112,7 @@ function _union_matrix!(slot::Vector{Int}, prototype::SparseMatrixCSC, in_union:
             if in_union[k]
                 m += 1
                 rowval[m] = rows[k]
+                nzval[m] = values[k]
                 slot[k] = m
             else
                 slot[k] = 0
@@ -113,11 +120,11 @@ function _union_matrix!(slot::Vector{Int}, prototype::SparseMatrixCSC, in_union:
         end
         colptr[col+1] = m + 1
     end
-    return SparseMatrixCSC(size(prototype, 1), n, colptr, rowval, zeros(m))
+    return SparseMatrixCSC(size(prototype, 1), n, colptr, rowval, nzval)
 end
 
-# Copy `A` into the union's matrix; false when a nonzero of `A` lies outside the
-# union.
+# Copy `A` into the union's matrix up to the first nonzero of `A` outside the
+# union, whose place it returns; zero when there is none.
 function _load!(c::StructuredKLUCache, A::SparseMatrixCSC)
     vals = nonzeros(c.union)
     from = nonzeros(A)
@@ -127,20 +134,21 @@ function _load!(c::StructuredKLUCache, A::SparseMatrixCSC)
         if s > 0
             vals[s] = from[k]
         elseif !iszero(from[k])
-            return false
+            return k
         end
     end
-    return true
+    return 0
 end
 
-# Add `A`'s nonzeros to the union and rebuild its matrix.
-function _grow!(c::StructuredKLUCache, A::SparseMatrixCSC)
+# Add `A`'s nonzeros from place `first` on to the union, every nonzero before it
+# being in the union already, and rebuild its matrix with `A`'s values.
+function _grow!(c::StructuredKLUCache, A::SparseMatrixCSC, first::Int)
     in_union = c.in_union
     from = nonzeros(A)
-    @inbounds for k in eachindex(from)
+    @inbounds for k = first:length(from)
         iszero(from[k]) || (in_union[k] = true)
     end
-    c.union = _union_matrix!(c.slot, c.prototype, in_union)
+    c.union = _union_matrix!(c.slot, c.prototype, in_union, from)
     c.growths += 1
     return c
 end
@@ -151,10 +159,8 @@ function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::StructuredKLU; kw
         A = cache.A
         same_structure(A, c.prototype) ||
             error("StructuredKLU: W is not on the Jacobian prototype's structure")
-        if !_load!(c, A)
-            _grow!(c, A)
-            _load!(c, A)
-        end
+        outside = _load!(c, A)
+        iszero(outside) || _grow!(c, A, outside)
         c.inner.A = c.union
         cache.isfresh = false
     end
