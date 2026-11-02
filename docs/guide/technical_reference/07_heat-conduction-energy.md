@@ -681,7 +681,7 @@ Q_{\text{rxn},i} \;=\; -\sum_r h_r\,r_r
 $$
 
 where $r_r$ is the rate of reaction $r$ (units $\text{kg}\,\text{m}^{-3}\text{s}^{-1}$; §6)
-and $h_r$ is its heat of reaction per unit mass of the first reactant (units
+and $h_r$ is its heat of reaction per unit mass of the reactant (units
 $\text{J}\,\text{kg}^{-1}$), quoted at the local temperature. The **internal storage sign
 convention** (§2, overload note H1) is
 
@@ -714,10 +714,10 @@ reactions, so an exothermic reaction ($h_r<0$) produces $Q>0$.
 
 The absorbed radiation depends on the radiation model of the solve (`radiation_model`):
 
-- **`NO_RADIATION`** and **`SURFACE_ABSORPTION`**: no volumetric source. The absorbed flux
+- **`SURFACE_ABSORPTION`**: no volumetric source. The absorbed flux
   $a\,q_{\text{inc}}$ of a `RadiativeFluxBC` is applied through the surface energy balance of
   its face (§12.3.5), not as a volumetric deposit (opaque surface: the absorbed power raises
-  $T_s$ directly). The two models give identical residuals.
+  $T_s$ directly).
 - **`BEER_LAMBERT`**: in-depth absorption, $q'''(z)=\alpha(z)I(z)$ with
   $I(z)=I_{\text{inc}}\exp(-\!\int\!\alpha\,dz')$. The face intensities are algebraic unknowns
   of the state, with the rows $0 = I_{\text{down}} - I_{\text{up}}\,e^{-\alpha_i\Delta_i}$ for
@@ -752,7 +752,7 @@ rather than skipped (§15.2). The sequence is:
    properties the gas transport needs; on a moving mesh, the geometry from the node positions.
 2. **The node corrections** (`correction!`): zero without a correction, the node
    velocities themselves under a prescribed mesh velocity, the solid being at rest
-   (§11.7.8), and the relaxed
+   (§11.7.7), and the relaxed
    equidistribution of each layer under the equidistribution correction (§11.7).
 3. **Reset** (`reset!`): every face flux and cell source of the contributions is zeroed.
 4. **The kernels**, in assembler order (`_kernels`, `src/Integration/setup.jl`), each adding
@@ -837,7 +837,7 @@ The cell properties the kernels read are the fields of the derived state (§5.13
 
 ### 7.7.2 The workspace and the element type
 
-The derived state and the contributions are held in the workspace (`CoreWorkspace`,
+The derived state and the contributions are held in the workspace (`ResidualWorkspace`,
 `src/Assembly/definition.jl`) with `Float64` elements, together with a twin of both for every
 dual-number element type at which automatic differentiation evaluates the residual, built on
 first use and selected by the element type of the state (`buffers`). In ordinary

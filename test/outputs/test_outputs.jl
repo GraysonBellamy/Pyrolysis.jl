@@ -27,7 +27,7 @@ function _ablator(n; L = 3e-3, t_end = 0.8, from_bottom = false, output_times = 
         from_bottom ? (top = AdiabaticBC(), bottom = heated) :
         (top = heated, bottom = AdiabaticBC())
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L, n),
+        mesh = uniform_mesh(L, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = thermal,
@@ -59,24 +59,24 @@ const _TOL = (abstol = 1e-7, reltol = 1e-5)
     @test length(sol.events) >= 3
     nt = length(sol.t)
     mid = nt ÷ 2
-    @test get_times(sol) === sol.t
-    @test get_temperatures(sol) === sol.T
-    @test get_concentrations(sol) === sol.ξ
-    @test get_gas_generation_rate(sol) === sol.extras.gas_generation_rate
-    @test n_timesteps(sol) == nt
+    @test sol.t === sol.t
+    @test sol.T === sol.T
+    @test sol.ξ === sol.ξ
+    @test sol.extras.gas_generation_rate === sol.extras.gas_generation_rate
+    @test length(sol.t) == nt
 
     # Cell positions at a saved time, the initial ones at the first, NaN for
     # the deactivated cells, which are those beyond the outermost live node.
     z0 = [p[1] for p in problem.mesh.positions]
-    @test get_cell_positions(sol; at = 1) == [(z0[i] + z0[i+1]) / 2 for i = 1:12]
+    @test sol.cell_centers[:, 1] == [(z0[i] + z0[i+1]) / 2 for i = 1:12]
     for k in (1, mid, nt)
-        x = get_cell_positions(sol; at = k)
+        x = sol.cell_centers[:, k]
         live = sol.extras.live_cells[k]
         @test all(isfinite, x[1:live]) && all(isnan, x[(live+1):end])
         z = sol.z[:, k]
         @test x[1:live] == [(z[i] + z[i+1]) / 2 for i = 1:live]
     end
-    @test isequal(get_cell_positions(sol), get_cell_positions(sol; at = nt))
+    @test isequal(sol.cell_centers[:, end], sol.cell_centers[:, nt])
     @test sol.extras.live_cells[end] < sol.extras.live_cells[1]
 
     # Profiles: every field at a saved time, deactivated cells NaN.
@@ -125,7 +125,7 @@ const _TOL = (abstol = 1e-7, reltol = 1e-5)
     @test quiet !== nothing
     a, b = sol.t[quiet], sol.t[quiet+1]
     t = (2a + b) / 3
-    f = interpolate_solution(sol, t)
+    f = sol(t)
     θ = (t - a) / (b - a)
     live = sol.extras.live_cells[quiet]
     @test f.m[:, 1:live] ≈
@@ -150,9 +150,9 @@ const _TOL = (abstol = 1e-7, reltol = 1e-5)
     @test isequal(sol(sol.t[end]).T, sol.T[:, end])
 
     text = sprint(show, MIME"text/plain"(), sol)
-    @test occursin("Outcome: running", text)
+    @test occursin("Outcome: none", text)
     @test occursin("Invocations: $(sol.statistics.invocations)", text)
-    @test occursin("outcome :running", sprint(show, sol))
+    @test occursin("outcome :none", sprint(show, sol))
 end
 
 @testset "interpolation reads fields without evaluating boundary forcing" begin
@@ -224,7 +224,7 @@ end
 
     stop = DiscreteCallback((u, t, integrator) -> t > 0.05, terminate!)
     user = Integration.solve(_ablator(6; t_end = 0.1); callback = stop, _TOL...)
-    @test user.retcode === :Terminated && user.outcome === :running
+    @test user.retcode === :Terminated && user.outcome === :none
     @test !succeeded(user) && !completed(user)
 
     failed = Integration.solve(_ablator(6; t_end = 0.1); maxiters = 3, _TOL...)

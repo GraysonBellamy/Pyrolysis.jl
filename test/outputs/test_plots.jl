@@ -10,7 +10,7 @@ RecipesBase.is_key_supported(::Symbol) = true
 @testset "plots recipes on the solution" begin
     @test Base.get_extension(Pyrolysis, :PyrolysisPlotsExt) !== nothing
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 6),
+        mesh = uniform_mesh(0.01, 6),
         material = Material(;
             name = :inert,
             components = (SolidComponent(:s, ρ = 1000.0, c = 1000.0, k = 0.2),),

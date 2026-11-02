@@ -82,7 +82,7 @@ const CASES = [
 
 function build_macfp_bcs(q_inc::Real)
     # Top: incident radiant flux + grey-body re-radiation to ambient.
-    # `RadiativeFluxBC(flux=q_inc)` gives absorbed flux = ε_eff·q_inc using
+    # `RadiativeFluxBC(q_inc)` gives absorbed flux = ε_eff·q_inc using
     # the material's effective emissivity (Kirchhoff α=ε). Per-component ε
     # is set to the q-dependent values inside `build_material(θ, stage, q)`,
     # so absorption tracks the case's incident flux.
@@ -92,7 +92,7 @@ function build_macfp_bcs(q_inc::Real)
     # emission consistent. Without this term the problem has no thermal
     # equilibrium and the surface T runs away.
     # No convection (per MaCFP-4 idealized spec).
-    top_thermal = RadiativeFluxBC(flux = float(q_inc)) + RadiativeBC(T_inf = T_INITIAL_K)
+    top_thermal = RadiativeFluxBC(float(q_inc)) + RadiativeBC(T_inf = T_INITIAL_K)
     top_mass = AmbientGasBC(
         GasReservoir(P = 101325.0, T = T_INITIAL_K, mole_fractions = (AIR = 1.0,));
         film = MassTransferFilm(0.05*101325.0*0.02897/(8.31446261815324*T_INITIAL_K)),
@@ -152,7 +152,7 @@ function build_and_solve_macfp(
         end for j = 1:NC_WP
     ]
 
-    mesh = create_uniform_mesh(thickness_m, N_CELLS; cross_section = A_SAMPLE_M2)
+    mesh = uniform_mesh(thickness_m, N_CELLS; cross_section = A_SAMPLE_M2)
 
     problem = PyrolysisProblem(
         mesh = mesh,
@@ -192,23 +192,8 @@ const ASH_IDX = 7
 const GAS_IDXS = 9:13
 const VAPOR_IDX = 14
 
-# Integrate a per-cell concentration over the current cross section + cell
-# volume contribution to give a per-component total mass [kg].
-# We reconstruct cell volumes from the current thickness assuming uniform cells.
-function _per_component_mass(sol, idx_set, k::Int)
-    ξ = sol.ξ[:, :, k]   # [NC × n_cells]
-    n_cells = size(ξ, 2)
-    L = sol.extras.thickness_history[k]
-    A =
-        isempty(sol.extras.cross_section_area_history) ? A_SAMPLE_M2 :
-        sol.extras.cross_section_area_history[k]
-    V_cell = (L / n_cells) * A
-    s = 0.0
-    @inbounds for j = 1:n_cells, c in idx_set
-        s += ξ[c, j] * V_cell
-    end
-    return s
-end
+# The total mass [kg] of the components `idx_set` at saved time `k`.
+_per_component_mass(sol, idx_set, k::Int) = sum(sum(view(sol.m, c, :, k)) for c in idx_set)
 
 function write_case_csv(path::AbstractString, sol)
     n = length(sol.t)

@@ -451,14 +451,11 @@ function _thinning_slab(; law = χ -> 1 - 0.3χ, coordinates = Planar())
         lateral_shrinkage_law = law,
     )
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(0.01, 6, 1.2; coordinates),
+        mesh = stretched_mesh(0.01, 6, 1.2; coordinates),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(
-                    flux = t -> 3e4 * (1 + 0.5 * sin(t)),
-                    absorptivity = 0.9,
-                ),
+                top = RadiativeFluxBC(t -> 3e4 * (1 + 0.5 * sin(t)), absorptivity = 0.9),
                 bottom = AdiabaticBC(),
             ),
         ),

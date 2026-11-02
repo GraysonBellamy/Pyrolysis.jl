@@ -23,7 +23,7 @@ function _uniform(cells; n = 2.0, inert = 0.0)
         reactions = (Reaction(:burn, :a => :gas, A = 0.02, E = 0.0, h = 0.0, n = n),),
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L, cells),
+        mesh = uniform_mesh(L, cells),
         material = material,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),

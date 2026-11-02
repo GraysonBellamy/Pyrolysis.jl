@@ -1,13 +1,15 @@
 # ============================================================================
-# 1D generators
+# Lines
 # ============================================================================
 
 """
 	line_mesh(x; coordinates = Planar(), cross_section = <default>,
 	          bottom = :bottom, top = :top, fixed = false, lagrangian = Int[]) -> Mesh{1}
 
-A 1D mesh with nodes at the strictly increasing positions `x` (a coordinate in
-planar geometry, a non-negative radius in cylindrical and spherical geometry).
+A line with nodes at the strictly increasing positions `x` [m] (a coordinate in
+planar geometry, a non-negative radius in cylindrical and spherical geometry),
+the cells between them sized independently (to put nodes on the interfaces of a
+layered material, for one).
 
 Cell `i` lies between nodes `i` and `i + 1`; face `f` sits at node `f`. The
 face at `x[1]` is tagged `bottom`, the face at `x[end]` is tagged `top`, and
@@ -78,56 +80,46 @@ end
 # ============================================================================
 
 """
-	create_uniform_mesh(L, n_cells; cross_section = <default>, coordinates = Planar()) -> Mesh{1}
+	uniform_mesh(L, n_cells; options...) -> Mesh{1}
 
 A line of `n_cells` equal cells from `0` to `L` [m]: node `i` at `(i − 1) L/n_cells`.
 `z = 0` is the back (tag `:bottom`), `z = L` the exposed surface (tag `:top`);
 cell 1 lies at the back. In cylindrical and spherical coordinates the
 positions are radii, so the line runs from the axis or the centre to the
-surface at radius `L`. `cross_section` is the planar face area [m²], the axial
-length of a cylinder [m] or the solid angle of a sphere (defaults 1, 1 and
-4π).
+surface at radius `L`. The keywords are those of [`line_mesh`](@ref).
 
 # Example
 ```julia
-mesh = create_uniform_mesh(0.01, 100)   # 1 cm, 100 cells
+mesh = uniform_mesh(0.01, 100)   # 1 cm, 100 cells
 ```
 """
-function create_uniform_mesh(
-    L::Real,
-    n_cells::Integer;
-    coordinates::CoordinateSystem = Planar(),
-    cross_section::Real = default_cross_section(coordinates),
-)
+function uniform_mesh(L::Real, n_cells::Integer; options...)
     n_cells >= 1 || throw(ArgumentError("a mesh needs at least one cell"))
-    L = Float64(L)
-    Δz = L / n_cells
-    return line_mesh([(i - 1) * Δz for i = 1:(n_cells+1)]; coordinates, cross_section)
+    Δz = Float64(L) / n_cells
+    return line_mesh([(i - 1) * Δz for i = 1:(n_cells+1)]; options...)
 end
 
 """
-	create_stretched_mesh(L, n_cells, stretch; stretch_from = :top,
-	                      cross_section = <default>, coordinates = Planar()) -> Mesh{1}
+	stretched_mesh(L, n_cells, stretch; stretch_from = :top, options...) -> Mesh{1}
 
 A line of `n_cells` cells from `0` to `L` [m] whose sizes grow geometrically by
 the ratio `stretch ≥ 1` (1 is uniform) away from the boundary named by
 `stretch_from`: `:top`, the exposed surface at `z = L` (the default), or
-`:bottom`, the back at `z = 0`, where the finest cell then lies. Tags,
-coordinates and `cross_section` as [`create_uniform_mesh`](@ref).
+`:bottom`, the back at `z = 0`, where the finest cell then lies. The other
+keywords are those of [`line_mesh`](@ref).
 
 # Example
 ```julia
 # Fine cells at the exposed surface, coarser toward the back
-mesh = create_stretched_mesh(0.01, 50, 1.1)
+mesh = stretched_mesh(0.01, 50, 1.1)
 ```
 """
-function create_stretched_mesh(
+function stretched_mesh(
     L::Real,
     n_cells::Integer,
     stretch::Real;
     stretch_from::Symbol = :top,
-    coordinates::CoordinateSystem = Planar(),
-    cross_section::Real = default_cross_section(coordinates),
+    options...,
 )
     n_cells >= 1 || throw(ArgumentError("a mesh needs at least one cell"))
     stretch_from in (:top, :bottom) || throw(
@@ -158,27 +150,7 @@ function create_stretched_mesh(
     # The scaling and the reflection can leave the ends an ulp off.
     z[1] = 0.0
     z[end] = L
-    return line_mesh(z; coordinates, cross_section)
-end
-
-"""
-	create_mesh_from_nodes(z; cross_section = <default>, coordinates = Planar()) -> Mesh{1}
-
-A line with nodes at the strictly increasing positions `z` [m], from zero: the
-cells between them, sized independently (to put nodes on the interfaces of a
-layered material, for one). Tags, coordinates and `cross_section` as
-[`create_uniform_mesh`](@ref).
-"""
-function create_mesh_from_nodes(
-    z::AbstractVector{<:Real};
-    coordinates::CoordinateSystem = Planar(),
-    cross_section::Real = default_cross_section(coordinates),
-)
-    x = Float64.(z)
-    isempty(x) ||
-        first(x) == 0.0 ||
-        throw(ArgumentError("node positions must start at zero"))
-    return line_mesh(x; coordinates, cross_section)
+    return line_mesh(z; options...)
 end
 
 # ============================================================================

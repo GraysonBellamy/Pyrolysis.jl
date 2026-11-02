@@ -7,21 +7,21 @@ The PyrolysisProblem type.
 # ============================================================================
 
 """
-	PyrolysisProblem{M,Mat,BCS,FT,Fξ} <: AbstractPyrolysisProblem
+	PyrolysisProblem{M,Mat,BCS,FT,Fξ}
 
 Complete specification of a pyrolysis simulation problem.
 
 # Type Parameters
 - `M`: Mesh type
 - `Mat`: Material type
-- `BCS`: BoundaryConditionSet type (type-stable BC storage)
+- `BCS`: BoundaryConditionSet type
 - `FT`: Initial temperature function type
 - `Fξ`: Initial concentration functions type
 
 # Fields
 - `mesh::M`: The computational mesh
 - `material::Mat`: Material definition with components and reactions
-- `bc_set::BCS`: BoundaryConditionSet with all boundary conditions (type-stable)
+- `bc_set::BCS`: BoundaryConditionSet with all boundary conditions
 - `T_initial::FT`: Initial temperature function z -> T(z)
 - `ξ_initial::Vector{Fξ}`: Initial concentration functions [z -> ξⱼ(z)]
 - `tspan::Tuple{Float64,Float64}`: Simulation time span (t_start, t_end)
@@ -36,7 +36,7 @@ bc_set = BoundaryConditionSet(
 )
 
 problem = PyrolysisProblem(
-	mesh = create_uniform_mesh(0.01, 100),
+	mesh = uniform_mesh(0.01, 100),
 	material = pmma,
 	bc_set = bc_set,
 	T_initial = z -> 300.0,
@@ -45,7 +45,7 @@ problem = PyrolysisProblem(
 )
 ```
 """
-struct PyrolysisProblem{M,Mat,BCS,FT,Fξ} <: AbstractPyrolysisProblem
+struct PyrolysisProblem{M,Mat,BCS,FT,Fξ}
     mesh::M
     material::Mat
     bc_set::BCS
@@ -65,15 +65,14 @@ end
 					 T_initial=z->300.0, ξ_initial=nothing,
 					 tspan, dt_initial=1e-4, output_times=Float64[])
 
-Create a PyrolysisProblem with BoundaryConditionSet (preferred, type-stable).
-
-Radiative heating, convective coupling, and ambient temperatures are carried
-exclusively by `bc_set` (`RadiativeFluxBC`, `ConvectiveBC`, `RadiativeBC`).
+Create a PyrolysisProblem. Radiative heating, convective coupling and ambient
+temperatures are carried by `bc_set` (`RadiativeFluxBC`, `ConvectiveBC`,
+`RadiativeBC`).
 
 # Arguments
 - `mesh`: The computational mesh
 - `material`: Material definition
-- `bc_set`: BoundaryConditionSet with all boundary conditions (type-stable)
+- `bc_set`: BoundaryConditionSet with all boundary conditions
 - `T_initial=z->300.0`: Initial temperature function
 - `ξ_initial=nothing`: Initial concentration functions (defaults from material)
 - `tspan`: Simulation time span (required)
@@ -151,45 +150,13 @@ function PyrolysisProblem(;
     )
 end
 
-"""
-	PyrolysisProblem(mesh, material, bc_set::BoundaryConditionSet, tspan; kwargs...)
-
-Simplified constructor for common use cases with type-stable BoundaryConditionSet.
-
-# Example
-```julia
-bc_set = BoundaryConditionSet(
-	thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()),
-)
-problem = PyrolysisProblem(mesh, pmma, bc_set, (0.0, 100.0))
-```
-"""
-function PyrolysisProblem(
-    mesh,
-    material,
-    bc_set::BoundaryConditionSet,
-    tspan::Tuple;
-    kwargs...,
-)
-    PyrolysisProblem(;
-        mesh = mesh,
-        material = material,
-        bc_set = bc_set,
-        tspan = tspan,
-        kwargs...,
-    )
-end
-
 # ============================================================================
 # Display
 # ============================================================================
 
-# The number of cells of a problem's mesh.
-_n_cells(mesh::Meshes.Mesh) = Meshes.n_cells(mesh.topology)
-
 function Base.show(io::IO, prob::PyrolysisProblem)
     t_start, t_end = prob.tspan
-    n_cells = _n_cells(prob.mesh)
+    n_cells = Meshes.n_cells(prob.mesh.topology)
     NC = n_components(prob.material)
     print(
         io,
@@ -199,7 +166,7 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", prob::PyrolysisProblem)
     t_start, t_end = prob.tspan
-    n_cells = _n_cells(prob.mesh)
+    n_cells = Meshes.n_cells(prob.mesh.topology)
     NC = n_components(prob.material)
     NR = n_reactions(prob.material)
 

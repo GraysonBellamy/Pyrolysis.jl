@@ -16,7 +16,7 @@ where the solid velocity $\mathbf v_s$ satisfies the volume balance of every cel
 (the *balance rows*, §11.3) and the correction $\mathbf c$ is zero unless the mesh is
 asked to move relative to the solid: by the equidistribution correction that carries a
 vanishing layer to burnout in one event (§11.7), or by a prescribed mesh velocity for
-verification (§11.7.8). Wherever $\mathbf c \ne 0$ every inventory crosses the faces
+verification (§11.7.7). Wherever $\mathbf c \ne 0$ every inventory crosses the faces
 of the mesh at the relative velocity $-\mathbf c$ (the *relative fluxes*, §11.6). The
 per-cell component masses are the states, so mass is conserved exactly, and the
 mesh-frame concentration change that a shrinking cell produces (the dilation) follows
@@ -85,7 +85,7 @@ change volume, fixed by the volume balance of every cell with the back node pinn
 (§11.3). The **correction** $c = w - v_s$ is numerics: zero by default, so the mesh
 rides the skeleton and is Lagrangian for the condensed phase; nonzero only where the
 equidistribution correction is active in a layer that is about to vanish (§11.7) or
-where a verification run prescribes the mesh velocity (§11.7.8). The surface node
+where a verification run prescribes the mesh velocity (§11.7.7). The surface node
 always moves with the solid, so the mesh tracks the receding (or expanding) surface
 exactly.
 
@@ -408,7 +408,7 @@ line, and a line mesh pins its first node.
 
 **Consistent velocities.** The integrator starts from a state whose algebraic rows
 hold. `consistent_velocities!` sweeps (11.9) once from the pinned node: the
-corrections read positions and masses only, so one pass is exact. `setup` calls it for
+corrections read positions only, so one pass is exact. `setup` calls it for
 the initial state (through `consistent_state!`, which also sets the face intensities
 and the cross-section rows), and every deactivation event calls it again after its
 transfer, a dead cell's row node taking zero velocity (Chapter 14). A velocity row left
@@ -801,22 +801,21 @@ At an interior node $i$ of a layer of $n_{\text{layer}}$ cells, between cell $i-
 $$
 \boxed{\;
 c_i = a_i\,\frac{n_{\text{layer}}^2}{\tau_{\text{eq}}}\,
-\big(\tilde{\mathcal M}_i\,\Delta z_i - \tilde{\mathcal M}_{i-1}\,\Delta z_{i-1}\big)
+\big(\Delta z_i - \Delta z_{i-1}\big)
 \;}
 \tag{11.21}
 $$
 (`_correction!`), with $\Delta z_i = z_{i+1} - z_i$ the current cell thickness,
-$a_i$ the activation of §11.7.3, $\tilde{\mathcal M}$ the normalized monitor of
-§11.7.4 and $\tau_{\text{eq}}$ [s] the layer's equidistribution time (the keyword
-$\tau$, §11.7.6). A positive $c_i$ moves the node in $+z$ relative to the solid, into the
-outer cell: the correction moves each node into the thicker (or heavier) of its two
-cells, so $\tilde{\mathcal M}\Delta z$ relaxes toward a common value over the layer.
+$a_i$ the activation of §11.7.3 and $\tau_{\text{eq}}$ [s] the layer's equidistribution
+time (the keyword $\tau$, §11.7.5). A positive $c_i$ moves the node in $+z$ relative to the
+solid, into the outer cell: the correction moves each node into the thicker of its two
+cells, so $\Delta z$ itself relaxes toward a common value over the layer.
 
-With $a = 1$ and $\tilde{\mathcal M} = 1$, the correction's share of the thickness rates
+With $a = 1$, the correction's share of the thickness rates
 is $d\Delta z_i/dt|_c = c_{i+1} - c_i = (n_{\text{layer}}^2/\tau_{\text{eq}})
 (\Delta z_{i+1} - 2\Delta z_i + \Delta z_{i-1})$, a discrete diffusion of the
 thickness along the layer with zero flux at its bounding nodes ($c = 0$ there,
-§11.7.5). Its slowest non-uniform mode decays at
+§11.7.4). Its slowest non-uniform mode decays at
 $(n_{\text{layer}}^2/\tau_{\text{eq}})\cdot2\big(1 - \cos(\pi/n_{\text{layer}})\big)
 \approx \pi^2/\tau_{\text{eq}}$: the layer equalizes in about $\tau_{\text{eq}}/\pi^2$
 whatever its cell count, which is why the gain carries $n_{\text{layer}}^2$. A test
@@ -839,21 +838,11 @@ initial value before the logarithm, so the switch is one, with a finite derivati
 zero and negative thicknesses. A node's activation is the smooth "or" of its two
 cells', $a_i \leftarrow 1 - (1 - a_{i-1})(1 - a_i)$, so a node moves as soon as either
 neighbour has thinned. Where a layer that keeps part of its thickness by design is
-moved (`layers = :all`, §11.7.5), the thresholds must sit below that thinning: a char
+moved (`layers = :all`, §11.7.4), the thresholds must sit below that thinning: a char
 that keeps 20 % of its thickness would otherwise activate the correction, which is
 why they are keywords and not constants.
 
-### 11.7.4 The monitor
-
-The monitor is $\mathcal M = \alpha_M + \beta_M\,\rho_c/\rho_{\text{ref}}$, with
-`monitor = (α_M, β_M)`, $\rho_c$ a cell's condensed mass per volume and
-$\rho_{\text{ref}}$ the largest initial one over the mesh. It is divided by its mean
-over the layer's cells at the initial state, so $\alpha_M$ and $\beta_M$ set its
-shape and not the relaxation time. The default `(1.0, 0.0)` gives
-$\tilde{\mathcal M} = 1$: the layer's cells relax toward equal thickness. A mass term
-($\beta_M > 0$) keeps the nodes closer to Lagrangian where the composition varies.
-
-### 11.7.5 Layers and the nodes that do not move
+### 11.7.4 Layers and the nodes that do not move
 
 A layer is bounded by the pinned node, the mesh's **Lagrangian nodes** (the layer
 interfaces) and the end nodes. The correction is zero at each of them, at every node
@@ -878,7 +867,7 @@ left); it is zero for a component every consuming reaction gasifies and one for 
 inert component. `layers = :all` moves every layer, for decks that exercise the
 correction on layers that cannot vanish.
 
-### 11.7.6 The layer time
+### 11.7.5 The layer time
 
 The equidistribution time is one value for every layer when $\tau$ is a number. By
 default it is `ActivationTime()`: each layer's time is set once, when its first cell
@@ -917,7 +906,7 @@ policy's flag rule (Chapter 15). Every `integrate` call starts with every layer 
 before its first activation, so repeated integrations of one problem are
 bit-identical.
 
-### 11.7.7 Installation, keywords and outputs
+### 11.7.6 Installation, keywords and outputs
 
 `setup` installs `EquidistributionCorrection()` when no correction is given and three
 conditions hold: the mesh moves (`use_ale = true`), cells are deactivated
@@ -950,7 +939,7 @@ bcs = BoundaryConditionSet(
 )
 # 2 mm of PMMA (30 cells) on 2 mm of an inert board (30 cells).
 problem = PyrolysisProblem(
-    mesh = create_uniform_mesh(0.004, 60),
+    mesh = uniform_mesh(0.004, 60),
     material = material,
     bc_set = bcs,
     T_initial = z -> 300.0,
@@ -967,7 +956,6 @@ sol = solve(problem; use_ale = true, deactivation = true)
 corr = EquidistributionCorrection(
     τ = ActivationTime(λ = 1.8, fallback = 720.0),
     activation = (0.3, 0.1),
-    monitor = (1.0, 0.0),
     layers = :vanishing,
 )
 sol = solve(problem; use_ale = true, deactivation = true, correction = corr)
@@ -990,17 +978,16 @@ invocation. With `correction = NoCorrection()` the 30 cells leave in 30 invocati
 from $t \approx 58.7$ s to $96.8$ s, some from under live cells (Chapter 14), at 887
 accepted steps against the correction's 530.
 
-### 11.7.8 The prescribed mesh velocity (`w_override`)
+### 11.7.7 The prescribed mesh velocity (`PrescribedCorrection`)
 
-For verification by manufactured solutions the `w_override` keyword of `solve` (a
-function `w(z, t)`) prescribes the velocity of every node instead
-(`PrescribedCorrection`): every velocity row is $0 = w_i - w(z_i, t)$ and the correction
-is the node velocity itself, $\mathbf c = \mathbf w$, so the mesh moves over a solid at
-rest, $\mathbf v_s = 0$. Every inventory then crosses every face, the boundary faces
-included, at $-\mathbf w$ through the relative fluxes. The material must not react (a
-reacting solid would move), cells are not deactivated, no other correction may be
-given, and the keyword needs `use_ale = true`. V-MMS-02 and V-MMS-03 use it
-(§11.5.2).
+For verification by manufactured solutions `correction = PrescribedCorrection(w)`, a
+function `w(x, t)`, prescribes the velocity of every node: every velocity row is
+$0 = w_i - w(z_i, t)$ and the correction is the node velocity itself,
+$\mathbf c = \mathbf w$, so the mesh moves over a solid at rest, $\mathbf v_s = 0$.
+Every inventory then crosses every face, the boundary faces included, at $-\mathbf w$
+through the relative fluxes. The material must not react (a reacting solid would
+move), cells are not deactivated, and the correction needs `use_ale = true`. V-MMS-02
+and V-MMS-03 use it (§11.5.2).
 
 ---
 
@@ -1120,7 +1107,7 @@ The principal limitations and open issues are:
 
 5. **The correction is a numerical device with a verified envelope.** The
    equidistribution time is set from one estimate per layer, the activation
-   thresholds and the monitor are user parameters, and the relative fluxes it switches
+   thresholds are user parameters, and the relative fluxes it switches
    on add smooth numerical diffusion wherever $\mathbf c \ne 0$. The burnout path is
    verified on the decks listed in User Guide Chapter 10; other materials, thicker or
    charring layers and higher heating lie outside that envelope until checked by the

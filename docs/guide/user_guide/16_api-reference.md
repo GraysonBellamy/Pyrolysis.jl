@@ -29,7 +29,7 @@ The whole API assumes four conventions (Technical Reference §2 and §3):
 
 ## 16.1 What `using Pyrolysis` gives you, and what it does not
 
-The top-level `Pyrolysis` module exports a curated surface of 99 names. The
+The top-level `Pyrolysis` module exports a curated surface of 103 names. The
 package is organized in submodules, and most of their names are not
 re-exported at the top level. There are three ways to reach a name:
 
@@ -50,43 +50,44 @@ re-exported at the top level. There are three ways to reach a name:
    `Internal` are not part of the stable API and may move or change between
    minor releases (Chapter 11, §11.9).
 
-The 99 top-level exports, by group:
+The 103 top-level exports, by group:
 
 | Group | Exports | Section |
 |---|---|---|
 | Components and materials | `SolidComponent`, `LiquidComponent`, `GaseousComponent`, `Material`, `phase`, `molar_mass`, `is_gas`, `is_solid`, `is_liquid` | 16.2.1, 16.2.5 |
+| Gas transport | `LumpedTransfer`, `DustyGas`, `LumpedEndpoint`, `DustyEndpoint` | 16.2.5 |
 | Reactions | `Reaction`, `DepletionLimiter` | 16.2.3, 16.2.5 |
 | Mixing | `MixingRule`, `PARALLEL`, `SERIES`, `WEIGHTED`, `BRUGGEMAN`, `CARMAN_KOZENY`, `MixingSpec`, `MaterialMixing` | 16.2.4 |
 | Property functions | `ConstantProperty`, `LinearProperty`, `PolynomialProperty`, `SutherlandProperty`, `ArrheniusProperty`, `TableProperty`, `CallableProperty`, `StateDependentProperty` | 16.2.2 |
-| Radiation models | `RadiationModel`, `NO_RADIATION`, `SURFACE_ABSORPTION`, `BEER_LAMBERT` | 16.2.6 |
+| Radiation models | `RadiationModel`, `SURFACE_ABSORPTION`, `BEER_LAMBERT` | 16.2.6 |
 | Thermal conditions | `AdiabaticBC`, `HeatFluxBC`, `ConvectiveBC`, `RadiativeBC`, `RadiativeFluxBC`, `DirichletThermalBC`, `CombinedThermalBC` | 16.4.1 |
 | Mass conditions | `ImpermeableBC`, `MassFluxBC`, `AmbientGasBC`, `GasReservoir`, `MassTransferFilm` | 16.4.2 |
 | Pressure conditions | `NeumannPressureBC`, `ConvectivePressureBC` | 16.4.3 |
 | Condition set and pore air | `BoundaryConditionSet`, `background_gas_concentration` | 16.4.5, 16.4.6 |
 | Blowing models and gas data | `AbstractBlowingModel`, `NoBlowing`, `CouetteFilm`, `PropertyRatioFilm`, `PoolingFilm`, `FunctionBlowing`, `GasSpecies`, `NITROGEN`, `nasa7_heat_capacity`, `eucken_viscosity`, `fuller_diffusivity`, `BlowingFace`, `blowing_state`, `blowing_ratio`, `blowing_factor` | 16.4.7 |
-| Meshes | `create_uniform_mesh`, `create_stretched_mesh`, `create_mesh_from_nodes`, `Planar`, `Cylindrical`, `Spherical`, `MeshTopology`, `MeshGeometry` | 16.3 |
-| Problem and solve | `PyrolysisProblem`, `solve`, `setup`, `integrate`, `CoreProblem`, `parameter_sweep` | 16.5.1, 16.7, 16.9 |
-| Correction | `NoCorrection`, `EquidistributionCorrection`, `ActivationTime` | 16.11 |
+| Meshes | `uniform_mesh`, `stretched_mesh`, `line_mesh`, `box_mesh`, `cell_mesh`, `Planar`, `Cylindrical`, `Spherical`, `MeshTopology`, `MeshGeometry` | 16.3 |
+| Problem and solve | `PyrolysisProblem`, `validate_problem`, `solve`, `setup`, `integrate`, `PreparedProblem`, `parameter_sweep` | 16.5.1, 16.7, 16.9 |
+| Correction | `NoCorrection`, `EquidistributionCorrection`, `ActivationTime`, `PrescribedCorrection` | 16.11 |
 | Integrator and linear solver | `default_policy`, `rodas5p_policy`, `fbdf_policy`, `kencarp4_policy`, `StructuredKLU` | 16.8 |
-| Solution and accessors | `PyrolysisSolution`, `SolverStatistics`, `get_times`, `get_temperatures`, `get_concentrations`, `get_gas_generation_rate`, `n_timesteps`, `succeeded`, `completed`, `get_profile`, `get_cell_positions`, `interpolate_solution` | 16.5 |
-| Conservation | `ConservationRecorder`, `conservation_audit` | 16.12 |
+| Solution and accessors | `PyrolysisSolution`, `SolverStatistics`, `succeeded`, `completed`, `get_profile`, `interior_events`, `GasDiagnostics`, `get_gas_composition`, `get_boundary_exchange` | 16.5 |
+| Conservation | `ConservationRecorder`, `conservation_audit`, `gas_species_audit` | 16.12 |
 
 **Names that are not top-level exports.** The names below are often needed
 and live in submodules (all of them are also in `Pyrolysis.Internal`). Import
-them by name, for example `using Pyrolysis.Problem: validate_problem`.
+them by name, for example `using Pyrolysis.Problem: initial_fields`.
 
 | Names | Submodule |
 |---|---|
-| `validate_problem`, `is_valid_problem`, `initial_fields`, `step_profile`, `linear_profile`, `gaussian_profile`, `tanh_profile` | `Pyrolysis.Problem` |
-| `n_cells`, `n_nodes`, `n_faces`, `boundary_tags`, `boundary_faces`, `is_fixed`, `geometry!`, `line_mesh`, `box_mesh`, `cell_mesh` | `Pyrolysis.Meshes` |
+| `initial_fields`, `step_profile`, `linear_profile`, `gaussian_profile`, `tanh_profile` | `Pyrolysis.Problem` |
+| `n_cells`, `n_nodes`, `n_faces`, `boundary_tags`, `boundary_faces`, `is_fixed`, `geometry!` | `Pyrolysis.Meshes` |
 | `n_components`, `n_reactions`, `R_GAS`, `STEFAN_BOLTZMANN`, `T_REF`, `P_REF`, `T_PROPERTY_MIN`, `T_PROPERTY_MAX`, `RHO_CP_FLOOR`, `Phase` (`SOLID`, `LIQUID`, `GAS`) | `Pyrolysis.Materials` |
 | `SolutionExtras`, `ledger_rates`, `live_inventories` | `Pyrolysis.Outputs` |
 | `DeactivationEvent`, `CellDeactivation`, `replay_events!`, `top_live_cell`, `threshold_margin` | `Pyrolysis.Deactivation` |
-| `residual!`, `CoreDefinition`, `CoreWorkspace`, `NoSources`, `VolumetricSources` | `Pyrolysis.Assembly` |
+| `residual!`, `ResidualDefinition`, `ResidualWorkspace`, `NoSources`, `VolumetricSources` | `Pyrolysis.Assembly` |
 | `jac_prototype`, `jacobian!`, `jacobian_pattern`, `color_count`, `dense_jacobian`, `missing_entries`, `compare_entries` | `Pyrolysis.ColoredJacobian` |
 | `StateLayout`, `state_length`, `mass_index`, `energy_index`, `position_index`, `velocity_index`, `intensity_index`, `is_differential`, `mass_matrix` | `Pyrolysis.States` |
 | `IntegratorPolicy`, `DomainCheck`, `consistent_state!`, `default_linear_solver`, `DT_AFTER_EVENT`, `CORRECTION_BAND`, `MAX_CONSTRAINT_REJECTIONS`, `FAILURE_MEMORY_GROWTH`, `FAILURE_MEMORY_STEPS` | `Pyrolysis.Integration` |
-| `PrescribedCorrection`, `residues`, `vanishes`, `EQUIDISTRIBUTION_TIME`, `ACTIVATION_TIME_FACTOR` | `Pyrolysis.Closures` |
+| `residues`, `vanishes`, `EQUIDISTRIBUTION_TIME`, `ACTIVATION_TIME_FACTOR` | `Pyrolysis.Closures` |
 
 `to_property` is not exported by any submodule; call it as
 `Pyrolysis.Materials.to_property`.
@@ -112,7 +113,7 @@ each using only those before it. Everything a submodule exports is reachable as
 | `ColoredJacobian` | the sparsity pattern, the coloring, the colored Jacobian, the dense reference |
 | `Problem` | `PyrolysisProblem`, the initial fields and profile helpers, `validate_problem` |
 | `Outputs` | `PyrolysisSolution`, `SolutionExtras`, `SolverStatistics`, the accessors, the conservation ledger, recorder and audit |
-| `Integration` | `setup`, `integrate`, `solve`, `CoreProblem`, the integrator policies, `StructuredKLU`, the domain test, `parameter_sweep` |
+| `Integration` | `setup`, `integrate`, `solve`, `PreparedProblem`, the integrator policies, `StructuredKLU`, the domain test, `parameter_sweep` |
 
 ### 16.1.2 Extensions
 
@@ -128,7 +129,7 @@ plot(sol; kind = :heatmap)   # sol.T over time and cell index
 
 Any other `kind` raises an `ArgumentError` naming the three (Chapter 9, §9.6).
 Linear solvers need no extension: `LinearSolve` is a dependency, and any of its
-sparse factorizations is passed as the `linear_solver` keyword or to a policy
+sparse factorizations is passed to a policy
 constructor (§16.8). Sensitivities need none either: they are finite
 differences of whole solves (§16.10).
 
@@ -185,7 +186,7 @@ differentiates through them by forward-mode automatic differentiation
 | `ConstantProperty` | `ConstantProperty(value)` | `value` |
 | `LinearProperty` | `LinearProperty(a, b)` | `a + b·T` |
 | `PolynomialProperty` | `PolynomialProperty((c0, c1, …))` | `evalpoly(T, coeffs)`, lowest order first |
-| `ArrheniusProperty` | `ArrheniusProperty(A, E, T_ref = 298.15)` | `A·exp(−E/(R_g T))` (`T_ref` is stored, not used in the value) |
+| `ArrheniusProperty` | `ArrheniusProperty(A, E)` | `A·exp(−E/(R_g T))` |
 | `TableProperty` | `TableProperty((T1, …), (v1, …))` | linear interpolation; the end values are held outside the table |
 | `CallableProperty` | `CallableProperty(f)` | `f(T)` |
 | `SutherlandProperty` | `SutherlandProperty(μ_ref, T_ref, S)`; `SutherlandProperty()` is air (`1.716e-5` Pa·s at `273.15` K, `S = 110.4` K) | `μ_ref (T/T_ref)^1.5 (T_ref + S)/(T + S)` |
@@ -211,41 +212,41 @@ virgin = SolidComponent(:virgin, ρ = 530, c = cp_tab, k = 0.12)
 
 ### 16.2.3 Reactions
 
-`Reaction` is a single-reactant Arrhenius reaction with one or two products.
-The component references are indices or names; a name is resolved against the
-component names when the `Material` is built.
+`Reaction` is an Arrhenius reaction of one reactant, by construction, into any
+number of products. Having one reactant is a modelling limit: a multi-reactant
+reaction cannot be written. Components are indices on both sides of the pair or
+names on both sides; a reaction given by component names is resolved by
+`Material`.
 
 ```julia
-# one product
-Reaction(name, reactant::Int => product::Int;
-         A, E, h, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0, validate_mass = true)
-Reaction(name, reactant::Symbol => product::Symbol; A, E, h, n = 1.0, …)
-
-# two products
-Reaction(name, reactant::Int => (p1::Int, p2::Int);
-         A, E, h, yields, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
-         validate_mass = true, basis = NaN)
-Reaction(name, reactant::Symbol => (p1::Symbol, p2::Symbol); A, E, h, yields, n = 1.0, …)
+Reaction(name, reactant => products;
+         A, E, h, yields = (1.0,), n = 1.0, T_min = 0.0, T_max = Inf,
+         gate_width = 1.0, basis = nothing)
 ```
+
+`products` is one component or a tuple of any length, with one yield each.
 
 | Keyword | Meaning (symbol) | Units | Default |
 |---|---|---|---|
 | `A` | pre-exponential factor `A_i` | s⁻¹ | required |
 | `E` | activation energy `E_i` | J·mol⁻¹ | required |
 | `h` | heat of reaction, **`h > 0` endothermic**; number, `(a, b)` tuple (`a + b·T`) or property object | J per kg of reactant | required |
-| `yields` | mass yields `(y1, y2)` of the two products | – | required (two products) |
+| `yields` | mass yield of each product, summing to one | – | `(1.0,)` |
 | `n` | reaction order, `n ≥ 0`, on the conversion when not 1 | – | `1.0` |
-| `basis` | the reference as a fraction of the initial condensed mass, in `(0, 1]`, refused at `n = 1`; `NaN` for the lineage rules | – | `NaN` |
+| `basis` | the reference as a fraction of the initial condensed mass, in `(0, 1]`, refused at `n = 1`; `nothing` for the lineage rules | – | `nothing` |
 | `T_min`, `T_max` | smooth lower and upper temperature gates | K | `0.0`, `Inf` |
 | `gate_width` | width of the tanh gates, positive | K | `1.0` |
-| `validate_mass` | require the yields to sum to one | – | `true` |
 
 The reactant is consumed with mass stoichiometry one; the product yields must
-sum to one (the one-product form has yield one). Every yield must be
-non-negative and the order non-negative, enforced at construction whatever
-`validate_mass` says; `validate_mass = false` skips only the sum check. Use a
-`StateDependentProperty` for `h` when it depends on composition. Technical
-Reference §6 gives the rate law, the gates and the depletion limiter.
+sum to one. The constructor always checks `yields` against the product count, each
+yield and the order for non-negativity, and the sum, and raises an `ArgumentError`
+on a violation. Use a `StateDependentProperty` for `h` when it depends on
+composition. Technical Reference §6 gives the rate law, the gates and the depletion
+limiter.
+
+The fields are `name`, `reactant` (an `Int`), `order` (a `Float64`), `products` (a
+`(component, yield)` tuple per product), `A`, `E`, `heat`, `T_min`, `T_max`,
+`gate_width` and `basis` (`NaN` when none was given).
 
 ```julia
 # endothermic charring: virgin -> 0.2 char + 0.8 gas
@@ -284,8 +285,8 @@ MixingSpec(rule::MixingRule, β::Real = 0.5; length_scale::Real = NaN)
 
 `β` lies in `[0, 1]`. `CARMAN_KOZENY` requires a positive `length_scale`, the
 characteristic pore or particle size `ℓ` in metres, given as the keyword.
-`MaterialMixing` builds the `(k, λ, κ)` NamedTuple `Material` expects; each
-channel takes a `MixingSpec` or a bare `MixingRule` (then `β = 0.5`):
+`MaterialMixing` holds the mixing rules of a `Material`, in the fields `k`, `λ` and
+`κ`; each channel takes a `MixingSpec` or a bare `MixingRule` (then `β = 0.5`):
 
 ```julia
 MaterialMixing(; k = MixingSpec(WEIGHTED, 0.5),
@@ -319,7 +320,7 @@ Material(; name::Symbol,
 | `name` | material identifier | required |
 | `components` | tuple of components; the order defines the index `j` | required |
 | `reactions` | tuple of `Reaction`s (names resolved here) | `()` |
-| `mixing` | the `(k, λ, κ)` NamedTuple of `MaterialMixing` | `MaterialMixing()` |
+| `mixing` | the `MaterialMixing`, with fields `k`, `λ`, `κ` | `MaterialMixing()` |
 | `lateral_shrinkage_law` | `χ̄ ↦ A/A₀`, a function of the column-average conversion; `nothing` keeps the cross section fixed | `nothing` |
 | `depletion_limiter` | the limiter applied to every reaction rate of the material | `DepletionLimiter()` |
 | `gas_transport` | declared pore-gas model and endpoint domain | `LumpedTransfer()` for gas-bearing materials |
@@ -371,20 +372,17 @@ full rate at any concentration (Chapter 4, §4.10; Technical Reference §6).
 ### 16.2.6 The `RadiationModel` enum
 
 ```julia
-@enum RadiationModel NO_RADIATION SURFACE_ABSORPTION BEER_LAMBERT
+@enum RadiationModel SURFACE_ABSORPTION BEER_LAMBERT
 ```
 
 | Value | Behaviour |
 |---|---|
-| `NO_RADIATION` | no in-depth absorption; the absorbed incident flux `a·q` of a `RadiativeFluxBC` enters the surface energy balance |
-| `SURFACE_ABSORPTION` | the same treatment as `NO_RADIATION` (an opaque material); the component absorption coefficients are not read |
+| `SURFACE_ABSORPTION` | the default: the absorbed incident flux `a·q` of a `RadiativeFluxBC` enters the surface energy balance (an opaque material); the component absorption coefficients are not read |
 | `BEER_LAMBERT` | exponential in-depth absorption through the components' `α`; the face intensities join the state as algebraic rows; planar coordinates only |
 
 The model is chosen by `solve`'s `radiation_model` keyword (§16.7; Chapter 8,
-§8.8). `NO_RADIATION` and `SURFACE_ABSORPTION` give identical residuals; name
-`SURFACE_ABSORPTION` when the incident flux is the physics you mean. The
-re-radiation (`RadiativeBC`) and convection (`ConvectiveBC`) losses apply under
-every model.
+§8.8). The re-radiation (`RadiativeBC`) and convection (`ConvectiveBC`) losses
+apply under every model.
 
 ---
 
@@ -397,16 +395,21 @@ coordinate systems are top-level exports; the mesh's own functions are in
 ### 16.3.1 Mesh constructors
 
 ```julia
-create_uniform_mesh(L::Real, n_cells::Integer;
-                    coordinates = Planar(), cross_section = <default>)
+uniform_mesh(L::Real, n_cells::Integer; options...)
 
-create_stretched_mesh(L::Real, n_cells::Integer, stretch::Real;
-                      stretch_from = :top, coordinates = Planar(),
-                      cross_section = <default>)
+stretched_mesh(L::Real, n_cells::Integer, stretch::Real;
+               stretch_from = :top, options...)
 
-create_mesh_from_nodes(z::AbstractVector{<:Real};
-                       coordinates = Planar(), cross_section = <default>)
+line_mesh(x::AbstractVector{<:Real}; coordinates = Planar(), cross_section = <default>,
+          bottom = :bottom, top = :top, fixed = false, lagrangian = Int[])
+
+box_mesh(coordinates...; transform = identity, pinned = (:bottom,), fixed = false,
+         lagrangian = Int[])
+
+cell_mesh(positions, cells; tag, pinned = (:bottom,), fixed = false, lagrangian = Int[])
 ```
+
+The `options` of `uniform_mesh` and `stretched_mesh` are `line_mesh`'s keywords.
 
 | Argument or keyword | Meaning | Default |
 |---|---|---|
@@ -414,24 +417,27 @@ create_mesh_from_nodes(z::AbstractVector{<:Real};
 | `n_cells` | number of cells, at least one | required |
 | `stretch` | ratio of successive cell sizes away from the `stretch_from` boundary, `≥ 1` (1 is uniform; a smaller value is refused) | required |
 | `stretch_from` | `:top` (finest cell at the exposed surface) or `:bottom` (finest at the back) | `:top` |
-| `z` | node positions, starting at zero and strictly increasing [m] | required |
+| `x` | node positions, finite and strictly increasing [m], non-negative radii in cylindrical and spherical coordinates | required |
 | `coordinates` | `Planar()`, `Cylindrical()` or `Spherical()`; positions are radii in the last two | `Planar()` |
 | `cross_section` | the cross-section measure `A₀`: the face area of a planar column [m²], the axial length of a cylinder [m], the solid angle of a sphere | `1.0`, `1.0`, `4π` |
+| `bottom`, `top` | the tags of the first and last faces | `:bottom`, `:top` |
+| `fixed` | pin every node | `false` |
+| `lagrangian` | the nodes that always move with the solid | `Int[]` |
 
-Each constructor returns a `Mesh{1}` (type `Pyrolysis.Meshes.Mesh`) with two
+Each line constructor returns a `Mesh{1}` (type `Pyrolysis.Meshes.Mesh`) with two
 fields: `topology`, a `MeshTopology`, and `positions`, the node positions (one
-`SVector{1}` per node). Cell 1 lies at the back; the face at `z = 0` carries the
-tag `:bottom` and the face at `z = L` the tag `:top`; the back node is pinned.
+`SVector{1}` per node). Cell 1 lies at the back; the first face carries the
+tag `:bottom` and the last face the tag `:top`; the back node is pinned.
 A mesh holds no component count and no initial state: `setup` evaluates the
 problem's `T_initial` and `ξ_initial` at the cell centres (§16.4.6). `solve`
 never modifies the mesh, so one mesh can serve many problems.
 
 ```julia
-mesh    = create_uniform_mesh(0.01, 100)                            # 1 cm, 100 cells
-meshst  = create_stretched_mesh(0.02, 80, 1.03; stretch_from = :top)
-rod     = create_uniform_mesh(0.005, 40; coordinates = Cylindrical())  # radius 5 mm
-layered = create_mesh_from_nodes([0.0, 0.002, 0.004, 0.006, 0.007, 0.008])
-sample  = create_uniform_mesh(0.01, 50; cross_section = 0.01)        # a 100 cm² face
+mesh    = uniform_mesh(0.01, 100)                            # 1 cm, 100 cells
+meshst  = stretched_mesh(0.02, 80, 1.03; stretch_from = :top)
+rod     = uniform_mesh(0.005, 40; coordinates = Cylindrical())  # radius 5 mm
+layered = line_mesh([0.0, 0.002, 0.004, 0.006, 0.007, 0.008])
+sample  = uniform_mesh(0.01, 50; cross_section = 0.01)        # a 100 cm² face
 ```
 
 ### 16.3.2 Mesh types and accessors
@@ -460,8 +466,8 @@ geometry!(g, first.(mesh.positions), topo.cross_section, topo)
 g.cell_volume                         # V_i [m³]
 ```
 
-`Pyrolysis.Meshes` also builds meshes of quadrilaterals and hexahedra
-(`box_mesh`, `cell_mesh`). `setup` accepts them at the residual level, but a
+`box_mesh` and `cell_mesh` build meshes of quadrilaterals and hexahedra.
+`setup` accepts them at the residual level, but a
 full solve on them is not a supported user path, and gas transport, in-depth
 radiation, the variable cross section, the correction and deactivation are
 refused there (Chapter 6, §6.8). The component count of a material is
@@ -505,9 +511,9 @@ and `BoundaryConditionSet` are top-level exports.
 |---|---|---|
 | `AdiabaticBC` | `AdiabaticBC()` | `0` |
 | `HeatFluxBC` | `HeatFluxBC(flux)`, a number or `t -> q` | `flux` |
-| `ConvectiveBC` | `ConvectiveBC(; h, T_inf, blowing = NoBlowing(), validate = true)`, or `ConvectiveBC(h, T_inf)` | `R_b h (T_∞ − T_s)`, `R_b` the blowing model's ratio (one without outflow) |
-| `RadiativeBC` | `RadiativeBC(; ε = nothing, T_inf, F = 1.0, validate = true)` | `ε σ (F T_∞⁴ − T_s⁴)`, `F` the view factor to the surroundings (irradiation only); `ε = nothing` is the exposed cell's effective emissivity |
-| `RadiativeFluxBC` | `RadiativeFluxBC(flux; absorptivity = nothing, validate = true)`, or `RadiativeFluxBC(; flux, absorptivity = nothing, validate = true)` | `a q(t)`, incident external radiation; `absorptivity = nothing` is the exposed cell's effective absorptivity |
+| `ConvectiveBC` | `ConvectiveBC(; h, T_inf, blowing = NoBlowing())` | `R_b h (T_∞ − T_s)`, `R_b` the blowing model's ratio (one without outflow) |
+| `RadiativeBC` | `RadiativeBC(; ε = nothing, T_inf, F = 1.0)` | `ε σ (F T_∞⁴ − T_s⁴)`, `F` the view factor to the surroundings (irradiation only); `ε = nothing` is the exposed cell's effective emissivity |
+| `RadiativeFluxBC` | `RadiativeFluxBC(flux; absorptivity = nothing)` | `a q(t)`, incident external radiation; `absorptivity = nothing` is the exposed cell's effective absorptivity |
 | `DirichletThermalBC` | `DirichletThermalBC(T)`, a number or `t -> T` | holds `T_s = T` |
 | `CombinedThermalBC` | `bc1 + bc2 + …` | the sum of its members |
 
@@ -515,8 +521,8 @@ Notes:
 
 - `h`, `T_inf`, `F`, `flux` and `absorptivity` take a number or a function of
   `t`; `RadiativeBC`'s `ε` takes a number or a function of the surface
-  temperature. With `validate = true` a constant value is checked: `h ≥ 0`,
-  `T_inf > 0`, and `ε`, `F` and `absorptivity` in `[0, 1]`.
+  temperature. A constant value is always checked: `h ≥ 0`, `T_inf > 0`, and `ε`,
+  `F` and `absorptivity` in `[0, 1]`.
 - `blowing` is a blowing model (§16.4.7) that reduces `h` with the outward gas
   flux at the face.
 - The effective absorptivity is the composition-weighted mean of the
@@ -524,14 +530,13 @@ Notes:
   (Kirchhoff), so with no component absorptivity it equals the effective
   emissivity.
 - How a `RadiativeFluxBC` acts depends on `radiation_model`: under
-  `NO_RADIATION` and `SURFACE_ABSORPTION` the absorbed flux `a q` enters the
-  surface balance; under `BEER_LAMBERT` the condition contributes zero to the
-  surface balance and the absorbed flux enters the first live cell as the
-  intensity of its exposed face, through the `:top` faces only (a
-  `RadiativeFluxBC` on another tag is refused). In a `CombinedThermalBC` under
-  `BEER_LAMBERT` only the first `RadiativeFluxBC` member feeds the beam; a
-  second radiative member is dropped silently, a limitation to keep in mind
-  when combining two heaters.
+  `SURFACE_ABSORPTION` the absorbed flux `a q` enters the surface balance; under
+  `BEER_LAMBERT` the condition contributes zero to the surface balance and the
+  absorbed flux enters the first live cell as the intensity of its exposed face,
+  through the `:top` faces only (a `RadiativeFluxBC` on another tag is refused).
+  Under `BEER_LAMBERT` the `:top` condition holds at most one `RadiativeFluxBC`:
+  a second is refused with an `ArgumentError`, and sources sharing one absorptivity
+  are combined in a single flux function.
 - An adiabatic face, a `HeatFluxBC` alone, or a `DirichletThermalBC` alone, is
   applied in closed form. Any other condition sets the surface temperature `T_s` by a Newton
   solve of the surface energy balance `q_BC(T_s) = k_eff (T_s − T_cell)/d`
@@ -612,7 +617,7 @@ functions `z -> ξ_j`, one per component, or a single function used for every
 component. Without `ξ_initial` the first component, if it is a solid, starts at
 its density at 300 K and every other component at zero. `setup` evaluates the
 functions at the cell centres of the reference mesh, `Tᵢ = T_initial(zᵢ)` and
-`m_ij = ξ_j(zᵢ) Vᵢ` (`Pyrolysis.Problem.initial_fields(problem, mesh)` returns
+`m_ij = ξ_j(zᵢ) Vᵢ` (`initial_fields(problem)` returns
 both fields). The profile helpers of `Pyrolysis.Problem` build such functions:
 
 | Helper | Signature |
@@ -683,8 +688,6 @@ PyrolysisProblem(; mesh, material, bc_set::BoundaryConditionSet,
                    tspan::Tuple{Real,Real},
                    dt_initial::Real = 1e-4,
                    output_times::Vector{<:Real} = Float64[])
-
-PyrolysisProblem(mesh, material, bc_set, tspan; kwargs...)   # positional form
 ```
 
 | Keyword | Meaning | Default |
@@ -713,15 +716,11 @@ problem = PyrolysisProblem(
 )
 ```
 
-`validate_problem(problem; strict = false)` (`Pyrolysis.Problem`) checks the
-mesh positions, the material's components and reaction indices, the boundary
-tags and conditions, the time span, the number of initial-concentration
-functions and, under gas transport, the initial porosity; it collects
-every error and throws them in one message (an `ErrorException`), and it warns
-about invalid material or boundary data.
-`strict = true` adds the stoichiometry, an evaluation of the initial-condition
-functions and the cell volumes. `is_valid_problem(problem)` returns a `Bool`.
-`solve` runs `validate_problem` unless `validate = false` (Chapter 7, §7.9).
+`validate_problem(problem)` checks the mesh positions, the material's components
+and reaction indices, the boundary tags and conditions, the time span, the number
+of initial-concentration functions and, under gas transport, the initial porosity;
+it returns `true`, or collects every error and throws them in one message (an
+`ErrorException`). `solve` always runs it (Chapter 7, §7.9).
 
 ### 16.5.2 `PyrolysisSolution`
 
@@ -746,18 +745,18 @@ filled at every saved time.
 | `boundary_blowing_ratio` | `Dict{Symbol,Vector{Float64}}` | per tag, the area-weighted ratio `h/h₀` its convective condition applied (1 without outflow, without a blowing model, or on a face fixed in closed form) |
 | `extras` | `SolutionExtras` | the secondary series (§16.5.4) |
 | `events` | `Vector{DeactivationEvent}` | the deactivation events, in order (§16.5.4) |
-| `outcome` | `Symbol` | `:running` unless the deactivation or the thickness stop ended the solve: `:burned_out`, `:interior` or `:min_thickness` |
+| `outcome` | `Symbol` | `:none` unless the deactivation or the thickness stop ended the solve: `:burned_out`, `:interior` or `:min_thickness` |
 | `retcode` | `Symbol` | the integrator's return code (§16.7.1) |
 | `solve_time` | `Float64` | wall time of the solve [s] |
 | `statistics` | `SolverStatistics` | the solver's counters (§16.5.4) |
 | `raw_solution` | ODE solution | the integrator's solution: the raw states and the interpolant |
-| `definition` | `CoreDefinition` | the definition of the solve, through which `sol(t)` reconstructs the fields |
+| `definition` | `ResidualDefinition` | the definition of the solve, through which `sol(t)` reconstructs the fields |
 | `deactivation` | `CellDeactivation` or `nothing` | the deactivation state of the solve, whose tables `sol(t)` replays |
 
 `T`, `ξ` and `m` are cell-centred, cell 1 at the back (`z = 0`); `ξ[k, i, n]`
 is component `k` in cell `i` at saved time `n`. An event that leaves the state
 inadmissible or the node velocities inconsistent ends the solve with a warning,
-`retcode` `:Failure` and outcome `:running`.
+`retcode` `:Failure` and outcome `:none`.
 
 ```julia
 sol = solve(problem)
@@ -775,18 +774,15 @@ All top-level exports:
 
 | Function | Returns |
 |---|---|
-| `get_times(sol)` | `sol.t` |
-| `get_temperatures(sol)` | `sol.T` |
-| `get_concentrations(sol)` | `sol.ξ` |
-| `get_gas_generation_rate(sol)` | `sol.extras.gas_generation_rate`, the volumetric production of the live cells (not the mass-loss rate) |
-| `n_timesteps(sol)` | `length(sol.t)` |
 | `get_profile(sol, field, i)` | one field at saved time `sol.t[i]`: `:T`; `:ξ` (`NC × n_cells`) or `:ξj` / `:xij` for component `j`; `:m` (`NC × n_cells`) or `:mj`; `:z`, the node positions (on a fixed mesh the mesh's). Deactivated cells, and nodes beyond the outermost live one, are `NaN`; another symbol is an `ArgumentError` |
-| `get_cell_positions(sol; at = lastindex(sol.t))` | the cell centres at saved time `sol.t[at]` [m], `NaN` for a deactivated cell; the initial centres are `at = 1` when the first saved time is the start |
-| `sol(t)`, `interpolate_solution(sol, t)` | the NamedTuple `(; t, T, ξ, m, z, cell_centers)` at any `t` in the span, reconstructed from the integrator's interpolant through the state mapping, with the mask of the last event at or before `t` (`z` empty on a fixed mesh) |
+| `sol(t)` | the NamedTuple `(; t, T, ξ, m, z, cell_centers)` at any `t` in the span, reconstructed from the integrator's interpolant through the state mapping, with the mask of the last event at or before `t` (`z` empty on a fixed mesh) |
 | `interior_events(sol)` | the events of `sol` whose cell left from under spent cells; a void beneath a skin is never among them, since it ends the solve |
 | `succeeded(sol)` | `true` for `retcode` `:Success`, and for `:Terminated` with outcome `:burned_out` or `:min_thickness`; `false` for `:interior`, `:Failure`, and a termination by a callback of yours |
 | `completed(sol)` | `true` for `:Success` only, the end of the time span reached |
 | `conservation_audit(sol[, recorder])` | the mass and energy closures (§16.12) |
+| `get_gas_composition(sol; basis = :mole)` | the gas fractions in `sol.gas.species` order, by `:mole` or `:mass`, zero at vacuum |
+| `get_boundary_exchange(sol, tag)` | the assembled outward species and energy flux of a boundary, its inward heat flux, carried enthalpy, surface partial pressure, Darcy velocity and surface residuals, at each saved time |
+| `gas_species_audit(sol[, recorder])` | the species-resolved mass ledger [kg] |
 
 `sol(t)` refuses a `t` strictly between two saved states that a deactivation
 event separates (the interpolant there is not the trajectory), with an
@@ -859,19 +855,19 @@ match.
 | Choice | Selected by | Values | Default |
 |---|---|---|---|
 | Mesh motion | `use_ale` | fixed, moving (`w = v_s + c`) | fixed |
-| Radiation | `radiation_model` | `NO_RADIATION`, `SURFACE_ABSORPTION`, `BEER_LAMBERT` | `NO_RADIATION` |
+| Radiation | `radiation_model` | `SURFACE_ABSORPTION`, `BEER_LAMBERT` | `SURFACE_ABSORPTION` |
 | Gas transport | material model and complete mass conditions | `LumpedTransfer` or `DustyGas`; EOS for every gas-bearing material, including sealed gas | from the problem |
 | Cross section | the material's `lateral_shrinkage_law` | fixed, variable (needs `use_ale = true` and planar coordinates) | fixed |
 | Energy state | `energy_state` | `:temperature`, `:enthalpy` | `:temperature` |
 | Deactivation | `deactivation` | off, on | off |
-| Correction | `correction`, or by rule | `NoCorrection()`; `EquidistributionCorrection()` where the mesh moves, deactivation is on and some cell can vanish (its components, converted completely, leave less condensed mass than `threshold` of its initial condensed mass) | by rule |
+| Correction | `correction`, or by rule | `NoCorrection()`; `EquidistributionCorrection()` where the mesh moves, deactivation is on and some cell can vanish (its components, converted completely, leave less condensed mass than `threshold` of its initial condensed mass); `PrescribedCorrection(w)` | by rule |
 | Layer interfaces | `lagrangian`, or by rule | node ids moving with the solid; under the equidistribution correction the interior nodes between cells that start with different condensed components | by rule |
 
 The coordinate system and the cross-section measure are the mesh's.
 
 Choosing for common scenarios:
 
-- TGA-like or fixed slab: the defaults (a fixed mesh, `NO_RADIATION`).
+- TGA-like or fixed slab: the defaults (a fixed mesh, `SURFACE_ABSORPTION`).
 - Cone calorimeter with recession: `use_ale = true` with
   `radiation_model = SURFACE_ABSORPTION` (opaque) or `BEER_LAMBERT`
   (semi-transparent).
@@ -889,11 +885,11 @@ A combination that is not implemented is refused by `setup` with an
 `ArgumentError` before anything is integrated: a lateral shrinkage law without
 `use_ale` or on a non-planar mesh; `BEER_LAMBERT` on a non-planar mesh or with
 a `RadiativeFluxBC` on a tag other than `:top`; a correction without
-`use_ale`; a `w_override` without `use_ale`, with a reacting material, with
-deactivation or with a correction; an explicit `lagrangian` list that omits a
+`use_ale`; a `PrescribedCorrection` with a reacting material or with deactivation;
+an explicit `lagrangian` list that omits a
 layer interface under the equidistribution correction; with deactivation, a
 `band` outside `[threshold, 1)`; an `energy_state` other than `:temperature` or `:enthalpy`
-(Chapter 7, §7.9.1; Chapter 15, §15.2).
+(Chapter 15, §15.2).
 
 ---
 
@@ -903,9 +899,9 @@ layer interface under the equidistribution correction; with deactivation, a
 |---|---|---|---|
 | `energy_state` | `Symbol` | `:temperature` | The energy unknown of each cell: `:temperature` (the cell temperature) or `:enthalpy` (the sensible-enthalpy inventory) |
 | `abstol` | `Real` | `1e-8` | Absolute tolerance of the temperature rows [K]; the enthalpy rows take `threshold · m_s,i(0) · c_p,ref · abstol`, the other rows derive theirs from `reltol` and `threshold` |
-| `pressure_tolerance` | `1.0` | Absolute local pressure-error budget [Pa], with proposed-state pore/thermal/geometry sensitivities |
 | `reltol` | `Real` | `1e-6` | Relative tolerance of every row; also scales the mass, position, velocity, intensity and cross-section tolerances, the domain test's constraint allowance, and the widening of a located event's threshold |
 | `threshold` | `Real` or `nothing` | `nothing`, which is `1e-2`, or with `deactivation` at an order other than one `conversion_threshold/10` | `ε_m`, the deactivation threshold as a fraction of a cell's reference; also scales the mass and position tolerances, with or without `deactivation` |
+| `pressure_tolerance` | `Real` | `1.0` | Absolute local pressure-error budget [Pa], with proposed-state pore/thermal/geometry sensitivities |
 | `maxiters` | `Int` | `1_000_000` | Maximum number of integrator steps |
 | `dt` | `Real` | `problem.dt_initial` | First step [s]; the fixed step when `adaptive = false`; the time scale of the node-velocity tolerances |
 | `adaptive` | `Bool` | `true` | Adaptive step control; `false` takes fixed steps of `dt` without the domain test and ends with `:Failure` at the first inadmissible accepted state |
@@ -914,23 +910,18 @@ layer interface under the equidistribution correction; with deactivation, a
 | `saveat` | number or vector | `problem.output_times` | Saved times, a vector or a spacing [s]; the final state is always saved; `Float64[]` saves every accepted step |
 | `callback` | callback, recorder, tuple or `nothing` | `nothing` | An OrdinaryDiffEq callback or `CallbackSet` (each discrete callback a read-only observer), a `ConservationRecorder`, or a tuple of recorders and callbacks |
 | `progress` | `Bool` | `false` | Draw a progress bar, a read-only observer |
-| `validate` | `Bool` | `true` | Run `validate_problem(problem; strict = false)` before setting up |
 | `use_ale` | `Bool` | `false` | Move the mesh: the node positions and velocities join the state, `w = v_s + c` |
-| `w_override` | function or `nothing` | `nothing` | Prescribed node velocity `w(z, t)` [m/s] over a solid at rest (verification); needs `use_ale = true`, a non-reacting material, no deactivation and no correction |
 | `min_thickness` | `Real` | `1e-6` | On a moving mesh, end with `:Terminated` and outcome `:min_thickness` when the live thickness falls below it [m]; must be positive |
-| `radiation_model` | `RadiationModel` | `NO_RADIATION` | `NO_RADIATION`, `SURFACE_ABSORPTION` or `BEER_LAMBERT` (§16.2.6) |
-| `linear_solver` | factorization or `nothing` | `nothing`, which is `StructuredKLU()` | Linear solver of the default policy; ignored when `integrator_policy` is given |
-| `integrator_policy` | `IntegratorPolicy` or `nothing` | `nothing`, which is `default_policy(linear_solver)` | The integrator with its restart and observer-flag rules (§16.8) |
+| `radiation_model` | `RadiationModel` | `SURFACE_ABSORPTION` | `SURFACE_ABSORPTION` or `BEER_LAMBERT` (§16.2.6) |
+| `integrator_policy` | `IntegratorPolicy` | `default_policy()` | The integrator with its restart and observer-flag rules and its linear solver (§16.8) |
 | `sources` | sources object | `NoSources()` | External volumetric sources for verification: `Pyrolysis.Assembly.VolumetricSources(mass, energy)` |
 | `deactivation` | `Bool` | `false` | Deactivate cells whose condensed mass, or at an order other than one whose reactive inventory, falls below `threshold` of its reference (§16.11) |
 | `band` | `Real` or `nothing` | `nothing`, which is `max(threshold, 0.1)` when the equidistribution correction moves a layer and `threshold` otherwise | `ε_band` in `[threshold, 1)`: on a moving mesh, the contiguous cells below this fraction around a cell that crosses `ε_m` go with it |
-| `correction` | `Correction` or `nothing` | `nothing`, which is the rule of §16.6 | `NoCorrection()` or `EquidistributionCorrection(...)` (§16.11) |
+| `correction` | `Correction` or `nothing` | `nothing`, which is the rule of §16.6 | `NoCorrection()`, `EquidistributionCorrection(...)` or `PrescribedCorrection(w)` (§16.11) |
 | `lagrangian` | vector of node ids or `nothing` | `nothing`, which is the layer interfaces | Nodes that always move with the solid, beside the mesh's own |
-| `located_events` | `Bool` | `true` | Locate each deactivation inside the step at the first threshold crossing; the end-of-step test stays as a safety net |
 
-`Pyrolysis.Integration._SOLVE_KEYWORDS` is the authoritative list, and `solve`
-refuses any other keyword with `ArgumentError: solve(): unknown keyword` before
-doing any work. Chapter 8 explains each keyword in context.
+An unknown keyword is an ordinary Julia `MethodError`. Chapter 8 explains each
+keyword in context.
 
 ### 16.7.1 Behaviour, tolerances and outcomes
 
@@ -938,7 +929,7 @@ doing any work. Chapter 8 explains each keyword in context.
 solve(problem::PyrolysisProblem; kwargs...) -> PyrolysisSolution
 ```
 
-`solve` runs `validate_problem` (unless `validate = false`), then
+`solve` runs `validate_problem`, then
 `setup(problem; ...)` with the keywords of §16.7.2 (its `time_scale` set to
 `dt`), then `integrate(cp; ...)` with those of §16.7.3, and reconstructs the
 solution at the saved times. It never modifies `problem` or its mesh, so a
@@ -978,14 +969,14 @@ How a solve ends:
 
 | `retcode` | `outcome` | Meaning |
 |---|---|---|
-| `:Success` | `:running` | reached `tspan[2]` (cells may have been deactivated on the way) |
+| `:Success` | `:none` | reached `tspan[2]` (cells may have been deactivated on the way) |
 | `:Terminated` | `:burned_out` | the last live cell was deactivated |
 | `:Terminated` | `:min_thickness` | a moving mesh thinned below `min_thickness` |
 | `:Terminated` | `:interior` | a cell below the threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one; `solve` warns, naming the cell and the time |
-| `:Terminated` | `:running` | a callback of yours called `terminate!` |
-| `:Failure` | `:running` | the domain test gave up, a fixed step left the physical domain, or a deactivation event left the state inadmissible or the node velocities inconsistent; `solve` warns with the reason |
-| `:MaxIters` | `:running` | `maxiters` steps before the end |
-| `:DtLessThanMin` | `:running` | the step fell below `dtmin` |
+| `:Terminated` | `:none` | a callback of yours called `terminate!` |
+| `:Failure` | `:none` | the domain test gave up, a fixed step left the physical domain, or a deactivation event left the state inadmissible or the node velocities inconsistent; `solve` warns with the reason |
+| `:MaxIters` | `:none` | `maxiters` steps before the end |
+| `:DtLessThanMin` | `:none` | the step fell below `dtmin` |
 
 A solve that stops early ends on the last state it accepted, which is saved.
 `succeeded` and `completed` combine the two fields (§16.5.3). Chapter 15
@@ -1007,12 +998,12 @@ audit = conservation_audit(sol, recorder)
 ### 16.7.2 `setup` keywords
 
 ```julia
-setup(problem; kwargs...) -> CoreProblem
+setup(problem; kwargs...) -> PreparedProblem
 ```
 
 | `setup` keyword | Default | Meaning |
 |---|---|---|
-| `energy_state`, `reltol`, `abstol`, `threshold`, `pressure_tolerance`, `use_ale`, `radiation_model`, `w_override`, `correction`, `lagrangian`, `deactivation`, `band`, `sources` | as in §16.7 | as in §16.7 |
+| `energy_state`, `reltol`, `abstol`, `threshold`, `pressure_tolerance`, `use_ale`, `radiation_model`, `correction`, `lagrangian`, `deactivation`, `band`, `sources` | as in §16.7 | as in §16.7 |
 | `time_scale` | `problem.dt_initial` | time scale of the node-velocity tolerances [s]; `solve` passes its `dt` |
 | `closure` | `nothing` | the mesh closure of a mesh of two or three dimensions, `:potential` (its default) or `:balance`; a line moves by its balance rows and takes no other |
 | `slip` | `()` | `tag => k` pairs fixing velocity component `k` to zero on a tag (two or three dimensions) |
@@ -1022,7 +1013,7 @@ setup(problem; kwargs...) -> CoreProblem
 
 The last five apply to the meshes of two and three dimensions only, a residual
 level that is not a supported user path for full solves (§16.3.2); on a line
-`slip`, `tensor`, `history` and `deformation` are refused. `setup` returns a `CoreProblem` with the fields `problem`, `def`
+`slip`, `tensor`, `history` and `deformation` are refused. `setup` returns a `PreparedProblem` with the fields `problem`, `def`
 (the definition the residual reads: `layout`, `setup`, `kernels`, `closure`,
 `sources`), `ws` (its buffers), `u0` (the consistent initial state), `reltol`,
 `abstol` (the per-row vector), `jacobian` (the colored Jacobian cache), `T0`
@@ -1033,19 +1024,18 @@ Jacobian is the expensive part of `setup`.
 ### 16.7.3 `integrate` keywords
 
 ```julia
-integrate(cp::CoreProblem; kwargs...) -> PyrolysisSolution
+integrate(cp::PreparedProblem; kwargs...) -> PyrolysisSolution
 ```
 
 | `integrate` keyword | Default | Meaning |
 |---|---|---|
 | `u0` | `cp.u0` | initial state; its algebraic rows must be consistent (`Pyrolysis.Integration.consistent_state!(u, cp.def, cp.ws, t)`), and an inadmissible one is refused |
-| `maxiters`, `dt`, `adaptive`, `dtmin`, `dtmax`, `saveat`, `callback`, `min_thickness`, `linear_solver`, `integrator_policy`, `located_events`, `progress` | as in §16.7, with `dt = cp.problem.dt_initial` and `saveat = cp.problem.output_times` | as in §16.7 |
-| `max_constraint_rejections` | `50` | consecutive constraint rejections of the domain test before the solve ends with `:Failure` |
+| `maxiters`, `dt`, `adaptive`, `dtmin`, `dtmax`, `saveat`, `callback`, `min_thickness`, `integrator_policy`, `progress` | as in §16.7, with `dt = cp.problem.dt_initial` and `saveat = cp.problem.output_times` | as in §16.7 |
 | `started` | `time()` | the wall-clock time the reported `solve_time` counts from |
 
 Every call of `integrate` starts with every cell live, the layer times unset and
 the caloric inversion from the set-up temperatures, so repeated integrations
-of one `CoreProblem` are bit-identical (Chapter 11, §11.8).
+of one `PreparedProblem` are bit-identical (Chapter 11, §11.8).
 
 ```julia
 cp   = setup(problem; use_ale = true, radiation_model = SURFACE_ABSORPTION)
@@ -1069,7 +1059,8 @@ modifies the state (`:solver_chosen` keeps the integrator's proposal,
 integrator's initial-step estimate at the state the event left), and the
 **observer-flag** rule, what a read-only observer does with the integrator's
 derivative-discontinuity flag (`:keep` leaves it raised, `:clear` clears it).
-Each constructor takes the linear solver as its argument:
+Each constructor takes the linear solver `ls` as its argument, by default
+`default_linear_solver()`:
 
 | Constructor | Method | Restart | Observer flag |
 |---|---|---|---|
@@ -1110,13 +1101,11 @@ suite runs, and repeated solves under each of the three are bit-identical.
 ```julia
 using LinearSolve: UMFPACKFactorization
 
-solve(problem; linear_solver = UMFPACKFactorization())                      # default policy
-solve(problem; integrator_policy = rodas5p_policy(UMFPACKFactorization()))  # inside a policy
+solve(problem; integrator_policy = default_policy(UMFPACKFactorization()))
+solve(problem; integrator_policy = fbdf_policy(UMFPACKFactorization()))
 ```
 
-`linear_solver` configures the default policy only; with an explicit
-`integrator_policy` it is ignored, and the policy's own argument is the linear
-solver (Chapter 11, §11.4).
+The policy's argument is the linear solver (Chapter 11, §11.4).
 
 ### 16.8.3 The Jacobian
 
@@ -1217,7 +1206,8 @@ function p_inject(prob, θ)
     m = prob.material
     rxn = Reaction(:decomp, 1 => 2; A = exp(θ[1]), E = θ[2], h = 870e3)
     mat = Material(name = m.name, components = m.components,
-                   reactions = (rxn,), mixing = m.mixing)
+                   reactions = (rxn,), mixing = m.mixing,
+                   gas_viscosity = m.gas_viscosity, gas_transport = m.gas_transport)
     return PyrolysisProblem(mesh = prob.mesh, material = mat, bc_set = prob.bc_set,
                             ξ_initial = prob.ξ_initial, tspan = prob.tspan,
                             output_times = prob.output_times)
@@ -1250,25 +1240,25 @@ top-level exports; deactivation is switched by `solve` keywords.
 | `deactivation` | `false` | deactivate cells whose condensed mass falls below `threshold` of their initial condensed mass |
 | `threshold` | `1e-2`; `conversion_threshold/10` at an order other than one | `ε_m`; a cell that starts without condensed mass, or at such an order without reactive lineage, never deactivates |
 | `band` | `max(threshold, 0.1)` when the equidistribution correction moves a layer, else `threshold` | `ε_band` in `[threshold, 1)`, read on a moving mesh |
-| `located_events` | `true` | locate each event inside the step at the first crossing |
-| `correction` | the rule of §16.6 | `NoCorrection()` or `EquidistributionCorrection(...)` |
+| `correction` | the rule of §16.6 | `NoCorrection()`, `EquidistributionCorrection(...)` or `PrescribedCorrection(w)` |
 | `lagrangian` | the layer interfaces | node ids that always move with the solid |
 | `use_ale` | `false` | a moving mesh, which the correction requires |
 | `min_thickness` | `1e-6` m | the thickness stop of a moving mesh |
 
-How a deactivation proceeds: cells go from the exposed (`:top`) side only. On a
-moving mesh the run of live cells from the outermost one inward whose condensed
-mass is below `ε_band` goes, when it holds a cell below `ε_m`, in one merge into
-the live cell beneath it, which takes their inventories and volume; nothing is
-lost. On a fixed mesh the outermost live cell goes while it is below `ε_m`: the
-receiver keeps its volume and takes the condensed inventories, and the dead
-cell's gas is vented and recorded on the event. A dead cell's rows become
-identity rows, the boundary conditions move to the face of the outermost live
-cell, and the state length and the Jacobian's pattern never change. With
-`located_events` the event is located at the first time a live cell's condensed
-mass reaches its threshold and applied there, the threshold and the band
-widened by `reltol`; at the end of every step the cells below the threshold go
-in one event, the only events without location. The outcomes are those of
+How a deactivation proceeds (`deactivate!`, `Pyrolysis.Deactivation`): on a moving
+mesh the outermost cell below `ε_m` goes, with the contiguous live cells around it
+below `ε_band`, in one merge into the live cell beneath the run, or, for a run from
+the innermost cell under spent cells, into the live cell above it; the receiver
+takes their inventories and volume, nothing is lost, and the live cells above the
+run move down into its slots. On a fixed mesh only the outermost live cell can go,
+while it is below `ε_m`: the receiver keeps its volume and takes the condensed
+inventories, and the dead cell's gas is vented and recorded on the event. A dead
+cell's rows become identity rows, the boundary conditions move to the face of the
+outermost live cell, and the state length and the Jacobian's pattern never change.
+Each event is located at the first time a live cell's condensed mass reaches its
+threshold and applied there, the threshold and the band widened by `reltol`; at
+the end of every step the cells below the threshold go in one event, the safety
+net for a crossing the location does not see. The outcomes are those of
 §16.7.1. The supported envelope of these parameters is Chapter 10, §10.9; for a
 layer of mixed composition use `threshold = 3e-3`.
 
@@ -1278,9 +1268,11 @@ layer of mixed composition use `threshold = 3e-3`.
 NoCorrection()
 
 EquidistributionCorrection(; τ = ActivationTime(), activation = (0.3, 0.1),
-                             monitor = (1.0, 0.0), layers = :vanishing)
+                             layers = :vanishing)
 
 ActivationTime(; λ = 1.8, fallback = 720.0, floor = 1.0)
+
+PrescribedCorrection(w)
 ```
 
 | Name and keyword | Meaning | Default |
@@ -1288,11 +1280,11 @@ ActivationTime(; λ = 1.8, fallback = 720.0, floor = 1.0)
 | `NoCorrection()` | the mesh moves with the solid, `c = 0` | — |
 | `EquidistributionCorrection` `τ` | the layer's equidistribution time `τ_eq` [s]: an `ActivationTime` rule, or one positive number for every layer | `ActivationTime()` |
 | `activation` | `(r_hi, r_lo)`, `0 < r_lo < r_hi`: a cell's switch is zero while it keeps at least `r_hi` of its initial thickness and one at and below `r_lo` | `(0.3, 0.1)` |
-| `monitor` | `(α, β)`, `α > 0`, `β ≥ 0`: the monitor `α + β ρ/ρ_ref`, normalized over the layer | `(1.0, 0.0)` |
 | `layers` | `:vanishing` moves only the layers deactivation can remove; `:all` every layer | `:vanishing` |
 | `ActivationTime` `λ` | `λ_τ`: the layer's `τ_eq` is `λ_τ` times its thickness `L_layer` over its thinning rate, both taken at its first activation | `1.8` |
 | `fallback` | the time [s] a layer keeps while it thins too slowly to estimate (or thickens) | `720.0` |
 | `floor` | the thinning below which the estimate waits: `floor` times the initial thickness over the solve's horizon | `1.0` |
+| `PrescribedCorrection` `w` | the mesh velocity `w(x, t)` [m/s] over a solid at rest (verification); needs a non-reacting material and no deactivation | required |
 
 The correction requires `use_ale = true`. Under an equidistribution correction
 every layer interface (an interior node between cells that start with different
@@ -1398,21 +1390,16 @@ Technical Reference chapter.
 | `saveat` | `problem.output_times` |
 | `callback` | `nothing` |
 | `progress` | `false` |
-| `validate` | `true` |
 | `use_ale` | `false` |
-| `w_override` | `nothing` |
 | `min_thickness` | `1e-6` m |
-| `radiation_model` | `NO_RADIATION` |
-| `linear_solver` | `nothing`, which is `StructuredKLU()` |
-| `integrator_policy` | `nothing`, which is `default_policy(linear_solver)`, `Rodas5P` with the heuristic restart |
+| `radiation_model` | `SURFACE_ABSORPTION` |
+| `integrator_policy` | `default_policy()`: `Rodas5P` with the heuristic restart and `StructuredKLU()` |
 | `sources` | `NoSources()` |
 | `deactivation` | `false` |
 | `band` | `max(threshold, 0.1)` under a correction that moves a layer, else `threshold` |
 | `correction` | `EquidistributionCorrection()` where the mesh moves, deactivation is on and a cell can vanish; else `NoCorrection()` |
 | `lagrangian` | the layer interfaces under the equidistribution correction; else none |
-| `located_events` | `true` |
 | `setup`'s `time_scale` | `problem.dt_initial` |
-| `integrate`'s `max_constraint_rejections` | `50` |
 
 ### 16.13.2 Components, materials and reactions
 
@@ -1424,19 +1411,18 @@ Technical Reference chapter.
 | `absorptivity` (solid, liquid) | `nothing` (Kirchhoff, `a_j = ε_j(T)`) |
 | `ρ_intrinsic` | `= ρ` (no pure-phase pores) |
 | `validate_properties` | `true` |
-| `Reaction` `n`, `T_min`, `T_max`, `gate_width`, `validate_mass` | `1.0`, `0.0` K, `Inf`, `1.0` K, `true` |
+| `Reaction` `yields`, `n`, `T_min`, `T_max`, `gate_width`, `basis` | `(1.0,)`, `1.0`, `0.0` K, `Inf`, `1.0` K, `nothing` |
 | `MixingSpec` `β`, `length_scale` | `0.5`, `NaN` |
 | `MaterialMixing` `k`, `λ`, `κ` | `WEIGHTED`, `PARALLEL`, `WEIGHTED`, each `β = 0.5` |
 | `Material` `reactions`, `lateral_shrinkage_law` | `()`, `nothing` |
 | `Material` `depletion_limiter` | `DepletionLimiter()`: `threshold = 1.0` kg·m⁻³, `join = 1.0`, `base_scale = 1e-8` kg·m⁻³, `enabled = true` |
 | `Material` `gas_viscosity` | `SutherlandProperty()`: `μ_ref = 1.716e-5` Pa·s, `T_ref = 273.15` K, `S = 110.4` K |
-| `ArrheniusProperty` `T_ref` | `298.15` K |
 
 ### 16.13.3 Boundary conditions
 
 | Quantity | Default |
 |---|---|
-| `ConvectiveBC` `blowing`, `validate` | `NoBlowing()`, `true` |
+| `ConvectiveBC` `blowing` | `NoBlowing()` |
 | `RadiativeBC` `ε`, `F` | `nothing` (the effective emissivity), `1.0` |
 | `RadiativeFluxBC` `absorptivity` | `nothing` (the effective absorptivity, the effective emissivity unless a component sets `absorptivity`) |
 | `BoundaryConditionSet` `thermal` / `mass` | `(top = AdiabaticBC(), bottom = AdiabaticBC())` / `(top = ImpermeableBC(), bottom = ImpermeableBC())` |
@@ -1458,13 +1444,14 @@ Technical Reference chapter.
 | `PyrolysisProblem` `output_times` | `min(101, max(11, round((t_end − t_start)/dt_initial/100)))` evenly spaced times over `tspan` |
 | mesh `coordinates` | `Planar()` |
 | mesh `cross_section` | `1.0` (planar, m²), `1.0` (cylindrical, m), `4π` (spherical) |
-| `create_stretched_mesh` `stretch_from` | `:top` |
+| mesh `bottom`, `top`, `fixed`, `lagrangian` | `:bottom`, `:top`, `false`, `Int[]` |
+| `stretched_mesh` `stretch_from` | `:top` |
 
 ### 16.13.5 Correction, integrator and linear solver
 
 | Quantity | Default |
 |---|---|
-| `EquidistributionCorrection` `τ`, `activation`, `monitor`, `layers` | `ActivationTime()`, `(0.3, 0.1)`, `(1.0, 0.0)`, `:vanishing` |
+| `EquidistributionCorrection` `τ`, `activation`, `layers` | `ActivationTime()`, `(0.3, 0.1)`, `:vanishing` |
 | `ActivationTime` `λ`, `fallback`, `floor` | `1.8`, `720.0` s, `1.0` |
 | `CORRECTION_BAND` | `0.1` |
 | `rodas5p_policy` `restart` | `:heuristic` |
@@ -1506,13 +1493,13 @@ Technical Reference chapter.
 |---|---|
 | components, `Material`, `Reaction`, `DepletionLimiter`, property types, mixing rules, `RadiationModel` | top level (`using Pyrolysis`) |
 | condition types, `BoundaryConditionSet`, blowing models, `GasSpecies`, `background_gas_concentration` | top level |
-| `create_uniform_mesh`, `create_stretched_mesh`, `create_mesh_from_nodes`, `Planar`, `Cylindrical`, `Spherical` | top level |
-| `PyrolysisProblem`, `solve`, `setup`, `integrate`, `CoreProblem`, `parameter_sweep` | top level |
-| `PyrolysisSolution`, `SolverStatistics`, the accessors, `ConservationRecorder`, `conservation_audit` | top level |
-| `NoCorrection`, `EquidistributionCorrection`, `ActivationTime`, the policies, `StructuredKLU` | top level |
+| `uniform_mesh`, `stretched_mesh`, `line_mesh`, `box_mesh`, `cell_mesh`, `Planar`, `Cylindrical`, `Spherical` | top level |
+| `PyrolysisProblem`, `validate_problem`, `solve`, `setup`, `integrate`, `PreparedProblem`, `parameter_sweep` | top level |
+| `PyrolysisSolution`, `SolverStatistics`, the accessors, `ConservationRecorder`, `conservation_audit`, `gas_species_audit` | top level |
+| `NoCorrection`, `EquidistributionCorrection`, `ActivationTime`, `PrescribedCorrection`, the policies, `StructuredKLU` | top level |
 | `UMFPACKFactorization`, `KLUFactorization` | `LinearSolve` (`using LinearSolve: …`) |
-| `validate_problem`, `is_valid_problem`, `initial_fields`, the profile helpers | `Pyrolysis.Problem` |
-| `n_cells`, `n_nodes`, `n_faces`, `boundary_tags`, `boundary_faces`, `geometry!`, `box_mesh`, `cell_mesh` | `Pyrolysis.Meshes` |
+| `initial_fields`, the profile helpers | `Pyrolysis.Problem` |
+| `n_cells`, `n_nodes`, `n_faces`, `boundary_tags`, `boundary_faces`, `geometry!` | `Pyrolysis.Meshes` |
 | `n_components`, the physical constants, `T_PROPERTY_MIN`, `T_PROPERTY_MAX` | `Pyrolysis.Materials` |
 | `SolutionExtras`, `ledger_rates`, `live_inventories` | `Pyrolysis.Outputs` |
 | `DeactivationEvent`, `replay_events!`, `top_live_cell` | `Pyrolysis.Deactivation` |

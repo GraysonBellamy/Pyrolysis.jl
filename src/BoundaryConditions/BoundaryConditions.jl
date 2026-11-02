@@ -10,9 +10,10 @@ helper.
 It also holds the face-local, mesh-free evaluation of those conditions: the
 surface energy balance of a boundary face (`solve_boundary_temperature!`) with
 the flux and derivative of every thermal condition, the blowing models' effect
-on a convective face (`BlowingFace`, `blowing_state`), the mass-condition film
-complete reservoir/species closures, the heat-flux decomposition for diagnostics, and the
-`BoundaryState` that records a converged balance.
+on a convective face (`BlowingFace`, `blowing_state`), the mass film and the
+complete reservoir and species closures of the mass conditions, the heat-flux
+decomposition for diagnostics, and the `BoundaryState` that records a converged
+balance.
 
 Depends on `Materials` for the abstract BC supertypes (`AbstractThermalBC`,
 `AbstractMassBC`), the property-function
@@ -44,10 +45,7 @@ export NeumannPressureBC, ConvectivePressureBC
 export get_radiative_flux_bc
 
 # Type-stable boundary-condition container
-export BoundaryConditionSet, get_thermal_bc
-
-# Ambient-temperature evaluation (evaluate_param / evaluate_param_T live in Materials)
-
+export BoundaryConditionSet
 
 # Surface energy balance of a boundary face and its diagnostics
 export BoundaryState
@@ -57,8 +55,5 @@ export compute_boundary_heat_fluxes
 
 # Blowing models evaluated at a face
 export blowing_factor, BlowingFace, blowing_state, blowing_ratio
-
-# Mass-condition film fluxes
-
 
 end # module BoundaryConditions

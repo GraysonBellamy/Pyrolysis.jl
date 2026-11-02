@@ -16,7 +16,7 @@
 # nonzero; with `--record` the rows of the decks solved are replaced and an
 # unexpected return code still exits nonzero. `--only=ID,ID` solves the named
 # decks alone (`--list` prints the names). Including this file defines the
-# decks and solves nothing (`kinetics_timing.jl` does).
+# decks and solves nothing.
 #
 # Run from the repository root, once per form:
 #   PYROLYSIS_ENERGY_STATE=temperature julia --project=test --startup-file=no --threads=1 \

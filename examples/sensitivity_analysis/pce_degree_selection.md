@@ -209,7 +209,7 @@ Run the comparison script against the current data:
 
 ```bash
 cd /home/gbellamy/git/thermakin3
-julia --threads=auto --project=. examples/sensitivity_analysis/compare_degrees.jl
+julia --threads=auto --project=examples examples/sensitivity_analysis/compare_degrees.jl
 ```
 
 Requires that `examples/sensitivity_analysis/results/parameters.csv` and

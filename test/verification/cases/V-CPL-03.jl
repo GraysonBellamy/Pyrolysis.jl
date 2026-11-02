@@ -129,7 +129,7 @@ function _vcpl03_problem(perm; n_cells = 8, n_outputs = 3)
         depletion_limiter = DepletionLimiter(enabled = false),
         lateral_shrinkage_law = chi_law,
     )
-    mesh = create_uniform_mesh(L, n_cells)
+    mesh = uniform_mesh(L, n_cells)
     bc_set = BoundaryConditionSet(
         thermal = (top = DirichletThermalBC(T_iso), bottom = DirichletThermalBC(T_iso)),
     )

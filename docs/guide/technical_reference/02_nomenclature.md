@@ -47,9 +47,9 @@ Conventions:
   emissivities and the deactivation fractions are **$\varepsilon$** (LaTeX `\varepsilon`)
   and the numerical slope and regularization scales are **$\epsilon$** (LaTeX
   `\epsilon`), overload note E1.
-- Calligraphic letters denote sets ($\mathcal{D}$, $\mathcal{F}_{\text{live}}$), the correction's monitor
-  $\mathcal{M}$, the pooling conductance $\mathcal{G}$, the extended caloric relation $\mathcal{E}_i$, and
-  the smooth guards $\mathcal{P}$, $\mathcal{S}$.
+- Calligraphic letters denote sets ($\mathcal{D}$, $\mathcal{F}_{\text{live}}$), the pooling conductance
+  $\mathcal{G}$, the extended caloric relation $\mathcal{E}_i$, and the smooth guards $\mathcal{P}$,
+  $\mathcal{S}$.
 
 ---
 
@@ -103,7 +103,7 @@ Conventions:
 | $\dot H_{\text{in}}$ | Enthalpy rate of the live region, positive entering: $-F^E_f A_f$ over the live boundary faces plus the live cells' energy sources and formation terms (§16.5.1) | W |
 | $H_m$ | Summed sensible enthalpy a deactivation receiver takes, less what the event loses (§16.7) | J |
 | $H^{\text{lost}}_e$, $H^{\text{reg}}_e$ | Sensible enthalpy deactivation event *e* removes from the live region without passing it to the receiver (vented gas, the last cell's inventory) / caloric regularization the merged cells held that the receiver does not (§16.7) | J |
-| $h$ (kinetics), $h_r$ | Heat of reaction, per kg of first reactant | J·kg⁻¹ |
+| $h$ (kinetics), $h_r$ | Heat of reaction, per kg of reactant | J·kg⁻¹ |
 | $h_j(T)$ | Sensible enthalpy of component *j* on the $T_{\text{ref}}$ datum, $\int_{T_{\text{ref}}}^T c_{p,j} dT$ (overload H1) | J·kg⁻¹ |
 | $h_{\text{conv}}$ | Convective heat-transfer coefficient (bare $h$ inside §12.3.3); $h_{\text{eff}} = R_b h_{\text{conv}}$ the coefficient under blowing | W·m⁻²·K⁻¹ |
 | $h_m$ | External mass-transfer (film) coefficient | m·s⁻¹ |
@@ -123,13 +123,12 @@ Conventions:
 | $k_{\text{eff}}$, $k_f$ | Effective (mixture) / face-averaged thermal conductivity | W·m⁻¹·K⁻¹ |
 | $k_B$ | Boltzmann constant (reduced temperature $T^* = k_B T/\varepsilon$) | J·K⁻¹ |
 | $L$ | Domain thickness (total material length); also characteristic length in convection correlations | m |
-| $L_{\text{layer}}$, $\dot L_{\text{layer}}$ | Thickness of a layer of the equidistribution correction, from its inner bounding node to its outermost live node, and its rate of change (§11.7.6) | m; m·s⁻¹ |
+| $L_{\text{layer}}$, $\dot L_{\text{layer}}$ | Thickness of a layer of the equidistribution correction, from its inner bounding node to its outermost live node, and its rate of change (§11.7.5) | m; m·s⁻¹ |
 | $M$, $M_j$ | Molar mass (of component *j*) (overload M1) | kg·mol⁻¹ |
 | $M_{\text{face}}$, $M_{\infty}$ | Molar mass of the gas at the face (from the pooling film's mass fractions) / of the free stream (§12.3.3) | kg·mol⁻¹ |
 | $M$ (linear algebra) | The integrator's diagonal mass matrix: one on the differential rows, zero on the algebraic rows ($\mathsf{M}$ in §3 and §15) | – |
 | $M_{\text{ref}}$ | Reference molar mass in the Chapman–Enskog combining rules (= 0.029, air; §5.10) | kg·mol⁻¹ |
 | $M_{\text{dry}}$ | Total initial dry-solid mass in the column, $\sum_i m_{\text{dry},i}$ | kg |
-| $\mathcal{M}$, $\tilde{\mathcal{M}}_i$ | Monitor of the equidistribution correction, $\mathcal{M} = \alpha_M + \beta_M \rho_c/\rho_{\text{ref}}$ ($\rho_c$ a cell's condensed mass per volume, $\rho_{\text{ref}}$ the largest initial one), and its value in cell *i* over its layer's initial mean (§11.7.4; overload M1) | – |
 | $m_{j,i}$ | Mass of component *j* in cell *i* — **the integrated state** | kg |
 | $m_j$ | Total mass of component *j* in the domain, $\sum_i m_{j,i}$ | kg |
 | $m_{\text{live}}$ | Mass inventory of the live cells, $\sum_{i\ \text{live}} \sum_j m_{j,i}$ (§16.3.1) | kg |
@@ -164,7 +163,6 @@ Conventions:
 | $q'''$, $q_{\text{rad}}'''$, $q^{\text{rad}}_i$ | Volumetric radiation source (Beer–Lambert; $q^{\text{rad}}_i$ its average over cell *i*, §8.3.2) | W·m⁻³ |
 | $R_b$ | Blowing ratio $h_{\text{eff}}/h$ of a convective condition's blowing model, 1 at zero species fluxes (§12.3.3; the code's $\chi$, overload B1) | – |
 | $R_g$ ($R$, $R_{\text{gas}}$) | Universal gas constant (= 8.31446261815324) | J·mol⁻¹·K⁻¹ |
-| $R_{s,i}$ | Reference field *s* of cell *i*, a differential unknown where some order differs from one (§6.4) | kg |
 | $r$, $r_i$ | Reaction rate (per unit volume) of reaction *i* | kg·m⁻³·s⁻¹ |
 | $r_{\text{hi}}$, $r_{\text{lo}}$ | Activation bounds of the equidistribution correction, fractions of a cell's initial thickness (defaults 0.3, 0.1) | – |
 | $S$ | Sutherland constant (= 110.4 K, air) in the viscosity law | K |
@@ -224,7 +222,6 @@ Conventions:
 | $\alpha_j$ | Mass-basis absorption coefficient of component *j* | m²·kg⁻¹ |
 | $\alpha_{\text{conv}}$ | Conversion / extent variable (Gpyro V2 kinetics comparison) | – |
 | $\alpha_{\text{th},\infty}$ | Thermal diffusivity of the free stream (pooling film, §12.3.3; overload A5) | m²·s⁻¹ |
-| $\alpha_M$, $\beta_M$ | Monitor coefficients of the equidistribution correction, `monitor = (α_M, β_M)` (defaults 1, 0) | – |
 | $\beta$ | Weighting parameter of the WEIGHTED mixing rule, $k = \beta k_{\parallel} + (1-\beta)k_{\text{series}}$ | – |
 | $\gamma_{\text{RK}}$ | Stage coefficient of the integrator in $W = J - M/(\gamma_{\text{RK}} \Delta t)$ | – |
 | $\Gamma$ | Thermal property ratio $k/c_p$ of a gas (property-ratio and pooling films, §12.3.3; overload G1) | kg·m⁻¹·s⁻¹ |
@@ -350,7 +347,7 @@ Conventions:
 | $x^{\text{rel}}$ (on a defect) | Relative defect ($d_m^{\text{rel}}$, $d_H^{\text{rel}}$) |
 | $x^{c}$ | Cell-center (e.g. $z_i^c$) |
 | $\bar x$ (overbar) | Column / spatial average (e.g. $\bar{\chi}$, $\bar J_g$), a two-point face mean ($\bar T_f$), or Gpyro V2-style mixture average ($\bar{\rho}$); $\bar c_{p,\infty}$ the free-stream heat capacity averaged between $T_{\infty}$ and $T_s$ |
-| $\tilde x$ (tilde) | Normalized, clamped or guarded trial-state quantity (e.g. $\tilde{\mathcal{M}}$, $\tilde T_i$ the trial temperature, $\tilde V_i$ the floored volume); on a face temperature, $\tilde T_f$, the relative-flux reconstruction |
+| $\tilde x$ (tilde) | Normalized, clamped or guarded trial-state quantity (e.g. $\tilde T_i$ the trial temperature, $\tilde V_i$ the floored volume); on a face temperature, $\tilde T_f$, the relative-flux reconstruction |
 | $\dot x$ (overdot) | Time rate / flux (e.g. $\dot m$, $\dot M$, $\dot{\omega}$) |
 | $x'$, $x''$, $x'''$ | Per-length / per-area / per-volume (blowing-model fluxes $\dot m''$; FDS/Gpyro V2 comparison notation) |
 
@@ -453,9 +450,8 @@ below is authoritative; writers must use the disambiguating subscript/context.
   coefficient (m²·kg⁻¹). Conversion (Gpyro V2) is $\alpha_{\text{conv}}$; FDS $\kappa_s$ has the units of $\alpha_{\text{eff}}$, not $\alpha_j$; matching attenuation also requires the angular closure (§8.7.3).
   The absorptivity of a surface for incident radiation is **$a$** ($a_j$,
   $a_{\text{eff}}$, $a_s$), never $\alpha$; it equals $\varepsilon_{\text{eff}}$ under Kirchhoff's law unless a
-  component sets its own `surface_absorptivity`. The correction's monitor
-  coefficients are $\alpha_M$, $\beta_M$, always subscripted, and the free stream's
-  thermal diffusivity in the pooling film is $\alpha_{\text{th},\infty}$.
+  component sets its own `surface_absorptivity`. The free stream's thermal
+  diffusivity in the pooling film is $\alpha_{\text{th},\infty}$.
 
 - **λ — A6 [gas transfer vs. anything else].** $\lambda$ is reserved for the **gas
   transfer (diffusion) coefficient** (m²·s⁻¹). Do not use $\lambda$ for thermal
@@ -474,7 +470,7 @@ below is authoritative; writers must use the disambiguating subscript/context.
   explicit "intrinsic" qualifier; prefer $\rho_{i,j}$.
 
 - **h — H1 [heat of reaction; sign; sensible enthalpy].** $h$ (kinetics) and
-  $h_r$ = heat of reaction per kg of first reactant, with **h > 0 endothermic**
+  $h_r$ = heat of reaction per kg of reactant, with **h > 0 endothermic**
   internally; ThermaKin publishes $h > 0 = \text{exothermic}$ (Gpyro V2 and FDS do not). The conversion to the
   volumetric source carries the minus sign: $Q_{\text{rxn}} = -\sum h_r r_r$. With a
   *component* subscript, $h_j(T)$ is the component's **sensible enthalpy**
@@ -542,12 +538,11 @@ below is authoritative; writers must use the disambiguating subscript/context.
   mesh-correction and burnout chapters (§11, §14) is a layer's equidistribution
   time [s]. A time variable of integration is written $t$, never $\tau$.
 
-- **M — M1 [molar mass vs. mass matrix vs. history vs. monitor].** $M$, $M_j$
+- **M — M1 [molar mass vs. mass matrix vs. history].** $M$, $M_j$
   (and $M_{\text{face}}$, $M_{\infty}$) is molar mass; $M$ in the linear-algebra context of §15
   is the integrator's mass matrix (sans-serif $\mathsf{M}$ in §3 and §15). The second
   member of the conversion-history pair, which the code calls `M`, is written
-  $m_{\text{dry},i}$, its rate $\dot m_{\text{dry},i}$; the correction's monitor is the
-  calligraphic $\mathcal{M}$ ($\tilde{\mathcal{M}}_i$ normalized). The gas mobility $\kappa/\mu$ is written
+  $m_{\text{dry},i}$, its rate $\dot m_{\text{dry},i}$. The gas mobility $\kappa/\mu$ is written
   $\text{mob}_i$ ($\text{mob}_f$ at a face), never $m$, which is a mass.
 
 - **c — C1 [heat capacity vs. correction].** The specific heat capacity is

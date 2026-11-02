@@ -3,45 +3,6 @@
 # ============================================================================
 
 """
-	get_times(sol::PyrolysisSolution) -> Vector{Float64}
-
-The saved times [s].
-"""
-get_times(sol::PyrolysisSolution) = sol.t
-
-"""
-	get_temperatures(sol::PyrolysisSolution) -> Matrix{Float64}
-
-The cell temperatures at the saved times, `n_cells × n_times` [K], `NaN` in a
-deactivated cell.
-"""
-get_temperatures(sol::PyrolysisSolution) = sol.T
-
-"""
-	get_concentrations(sol::PyrolysisSolution) -> Array{Float64,3}
-
-The concentrations at the saved times, `NC × n_cells × n_times` [kg/m³],
-`NaN` in a deactivated cell.
-"""
-get_concentrations(sol::PyrolysisSolution) = sol.ξ
-
-"""
-	get_gas_generation_rate(sol::PyrolysisSolution) -> Vector{Float64}
-
-The gas the reactions of the live cells produce, per unit initial area of the
-`:top` faces, at the saved times [kg/(m²·s)]: a volumetric production, not
-the mass-loss rate through the surface (`sol.mass_loss_rate`).
-"""
-get_gas_generation_rate(sol::PyrolysisSolution) = sol.extras.gas_generation_rate
-
-"""
-	n_timesteps(sol::PyrolysisSolution) -> Int
-
-The number of saved times.
-"""
-n_timesteps(sol::PyrolysisSolution) = length(sol.t)
-
-"""
 	succeeded(sol::PyrolysisSolution) -> Bool
 
 Whether the solve finished: with return code `:Success`, or `:Terminated`
@@ -61,16 +22,6 @@ succeeded(sol::PyrolysisSolution) =
 Whether the solve reached the end of its time span: return code `:Success`.
 """
 completed(sol::PyrolysisSolution) = sol.retcode === :Success
-
-"""
-	get_cell_positions(sol::PyrolysisSolution; at = lastindex(sol.t)) -> Vector{Float64}
-
-The cell-centre positions at the saved time `sol.t[at]` [m]: `NaN` for a
-deactivated cell, and so for every cell beyond the outermost live node. The
-initial positions are `get_cell_positions(sol; at = 1)`.
-"""
-get_cell_positions(sol::PyrolysisSolution; at::Integer = lastindex(sol.t)) =
-    sol.cell_centers[:, at]
 
 """
 	get_profile(sol::PyrolysisSolution, field, i) -> Array
@@ -109,7 +60,6 @@ end
 
 """
 	(sol::PyrolysisSolution)(t) -> NamedTuple
-	interpolate_solution(sol::PyrolysisSolution, t) -> NamedTuple
 
 The fields at time `t`: `(; t, T, ξ, m, z, cell_centers)` as one saved time
 of the solution holds them, reconstructed from the integrator's interpolant
@@ -147,7 +97,7 @@ function (sol::PyrolysisSolution)(t::Real)
     topo = def.setup.topology
     cells === nothing || replay_events!(cells, layout, t)
     warm = [isfinite(x) ? x : T_REF for x in sol.T[:, k]]
-    ws = CoreWorkspace(def, warm)
+    ws = ResidualWorkspace(def, warm)
     ds, _ = buffers(ws, def, Float64)
     derive!(ds, u, layout, def.setup)
     n = n_cells(layout)
@@ -179,14 +129,6 @@ beneath a skin is never among them: it ends the solve with outcome `:interior`.
 """
 interior_events(sol::PyrolysisSolution) = filter(e -> e.interior, sol.events)
 
-"""
-	interpolate_solution(sol::PyrolysisSolution, t) -> NamedTuple
-
-The reconstructed fields at `t`, `sol(t)`: see [`PyrolysisSolution`](@ref)'s
-call method for the interpolation and its refusal across an event's step.
-"""
-interpolate_solution(sol::PyrolysisSolution, t::Real) = sol(t)
-
 function Base.show(io::IO, sol::PyrolysisSolution)
     print(
         io,
@@ -209,14 +151,6 @@ function Base.show(io::IO, ::MIME"text/plain", sol::PyrolysisSolution)
     print(io, "  Solve time: $(round(sol.solve_time, digits = 3)) s")
 end
 
-"""Saved pore fractions, cells × times; NaN in dead cells."""
-get_porosity(sol::PyrolysisSolution) = sol.gas.porosity
-"""Saved total gas pressure [Pa], cells × times."""
-get_pressure(sol::PyrolysisSolution) = sol.gas.pressure
-"""Saved partial pressures [Pa], gas species × cells × times; order `sol.gas.species`."""
-get_partial_pressures(sol::PyrolysisSolution) = sol.gas.partial_pressure
-"""Gas densities per pore volume [kg/m³ pore], gas species × cells × times."""
-get_intrinsic_gas_densities(sol::PyrolysisSolution) = sol.gas.intrinsic_density
 """Gas fractions in `sol.gas.species` order; basis is `:mole` or `:mass`, zero at vacuum."""
 function get_gas_composition(sol::PyrolysisSolution; basis = :mole)
     basis===:mole && return sol.gas.mole_fraction

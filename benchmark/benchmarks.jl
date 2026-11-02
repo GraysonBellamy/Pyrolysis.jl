@@ -94,11 +94,11 @@ function _column(material; darcy::Bool = false, t_final = 100.0)
             GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (pyrgas = 1.0,)),
         ) : AmbientGasBC(GasReservoir(P = 0.0, T = 300.0))
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, _N_CELLS),
+        mesh = uniform_mesh(0.01, _N_CELLS),
         material = material,
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(flux = 50e3) +
+                top = RadiativeFluxBC(50e3) +
                       RadiativeBC(T_inf = 300.0) +
                       ConvectiveBC(h = 10.0, T_inf = 300.0),
                 bottom = AdiabaticBC(),

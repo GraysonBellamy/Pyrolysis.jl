@@ -224,9 +224,9 @@ q_external = 0.9813 * 25e3   # incident cone flux [W/m²]: 25 kW/m², radially a
 h_conv     = 7.2             # convective coefficient [W/(m²·K)]
 
 top_thermal =
-    RadiativeFluxBC(flux = q_external, absorptivity = 0.96) +  # incident cone radiation in
-    RadiativeBC(ε = 0.96, T_inf = 330.0) +                     # re-radiation loss out
-    ConvectiveBC(h = h_conv, T_inf = 330.0)                    # convective loss out
+    RadiativeFluxBC(q_external, absorptivity = 0.96) +  # incident cone radiation in
+    RadiativeBC(ε = 0.96, T_inf = 330.0) +              # re-radiation loss out
+    ConvectiveBC(h = h_conv, T_inf = 330.0)             # convective loss out
 ```
 
 The nominal 25 kW/m² is scaled by 0.9813 for the radial non-uniformity of the
@@ -234,7 +234,7 @@ heater's flux over the sample, as the example does.
 
 What each piece does:
 
-- **`RadiativeFluxBC(flux, absorptivity)`** is the *incident* external radiation
+- **`RadiativeFluxBC(flux; absorptivity)`** is the *incident* external radiation
   from the cone heater. The absorbed flux is `flux × absorptivity`. If you pass
   `absorptivity = nothing` (the default), the material's effective surface
   absorptivity `a_eff = Σ_j v_j a_j` of the exposed cell is used instead, where
@@ -243,7 +243,7 @@ What each piece does:
   component sets one). Either way it tracks composition as the surface chars.
   Where this flux is deposited depends on the `radiation_model` you choose at
   solve time (see §2.6).
-- **`RadiativeBC(ε, T_inf, F)`** is the surface's own **re-radiation loss**,
+- **`RadiativeBC(; ε, T_inf, F)`** is the surface's own **re-radiation loss**,
   `q = ε·σ·(F·T_∞⁴ − T_s⁴)`. With `ε = nothing` it uses the effective
   emissivity; the view factor `F` to the surroundings defaults to `1.0` and
   scales only the irradiation they send, never the emission. Because `T_s`
@@ -256,7 +256,7 @@ What each piece does:
 > example above is correct: `RadiativeFluxBC(... absorptivity = 0.96)` for the
 > cone flux in, and `RadiativeBC(ε = 0.96, ...)` for re-radiation out.
 
-- **`ConvectiveBC(h, T_inf)`** is Newton cooling, `q = h·(T_∞ − T_s)` — also a
+- **`ConvectiveBC(; h, T_inf)`** is Newton cooling, `q = h·(T_∞ − T_s)` — also a
   loss once the surface is hot.
 
 The bottom face only loses heat:
@@ -273,9 +273,9 @@ Other thermal BCs available (full reference in UG 5 / Technical Reference §12):
 |---|---|---|
 | `AdiabaticBC()` | `0` | perfect insulation |
 | `HeatFluxBC(q)` | prescribed `q` or `q(t)` | `+` into domain; not subject to absorptivity |
-| `ConvectiveBC(h, T_inf)` | `h(T_∞ − T_s)` | `h`, `T_inf` may be functions of `t` |
-| `RadiativeBC(ε, T_inf, F)` | `ε·σ·(F·T_∞⁴ − T_s⁴)` | re-radiation; `F` scales the surroundings' irradiation only; `ε = nothing` ⇒ `ε_eff` |
-| `RadiativeFluxBC(flux, absorptivity)` | `a·flux`, `a` the absorptivity (model-dependent) | incident external radiation |
+| `ConvectiveBC(; h, T_inf)` | `h(T_∞ − T_s)` | `h`, `T_inf` may be functions of `t` |
+| `RadiativeBC(; ε, T_inf, F)` | `ε·σ·(F·T_∞⁴ − T_s⁴)` | re-radiation; `F` scales the surroundings' irradiation only; `ε = nothing` ⇒ `ε_eff` |
+| `RadiativeFluxBC(flux; absorptivity)` | `a·flux`, `a` the absorptivity (model-dependent) | incident external radiation |
 | `DirichletThermalBC(T)` | enforces `T_s = T` | fixed-temperature face |
 | `bc1 + bc2 + …` | sum | `CombinedThermalBC` |
 
@@ -328,8 +328,8 @@ bc_set = BoundaryConditionSet(
 ## 2.4 Step 3 — Create the mesh
 
 A 1D finite-volume mesh divides the sample thickness into `n_cells` cells.
-`create_uniform_mesh` is the workhorse; its signature is
-`create_uniform_mesh(L, n_cells; coordinates = Planar(), cross_section = 1.0)`,
+`uniform_mesh` is the workhorse; its signature is
+`uniform_mesh(L, n_cells; coordinates = Planar(), cross_section = 1.0)`,
 where `L` is the domain thickness in metres and `n_cells` is the cell count.
 
 ```julia
@@ -337,7 +337,7 @@ sample_thickness = 5.8e-3   # 5.8 mm
 n_cells          = 72       # → 0.08 mm per cell
 T_ambient        = 300.0    # initial / ambient temperature [K]
 
-mesh = create_uniform_mesh(sample_thickness, n_cells)
+mesh = uniform_mesh(sample_thickness, n_cells)
 ```
 
 The mesh holds geometry only: node positions, faces, cells, and the boundary
@@ -349,9 +349,9 @@ area), so leaving it at 1.0 is correct and conventional. See UG 6 for when to
 change it, and for cylindrical and spherical coordinates.
 
 To refine the mesh near the heated surface (where the reaction front is
-steepest), use `create_stretched_mesh(L, n_cells, stretch; stretch_from = :top)`
+steepest), use `stretched_mesh(L, n_cells, stretch; stretch_from = :top)`
 instead, with a `stretch` factor above 1.0, or place the nodes yourself with
-`create_mesh_from_nodes(z)`. That is optional; a uniform mesh is fine for a
+`line_mesh(z)`. That is optional; a uniform mesh is fine for a
 first run.
 
 > **Tip — resolution vs. cost.** 72 cells over 5.8 mm resolves the thermal
@@ -446,7 +446,7 @@ code, also with other parameter values (UG 15).
 | `abstol` / `reltol` | `1e-8` / `1e-6` | error tolerances: `abstol` is the temperature tolerance [K]; condensed mass rows use initial condensed mass and `threshold`; gas rows and proposed-state pressure errors use `pressure_tolerance` |
 | `dtmin` | `1e-12` | smallest step the integrator may take [s] |
 | `use_ale` | `false` | moves the mesh with the solid (surface recession); with `false` the condensed phase degrades at constant volume: the porosity rises and the geometry does not recede |
-| `radiation_model` | `NO_RADIATION` | `SURFACE_ABSORPTION` absorbs the cone flux at the surface |
+| `radiation_model` | `SURFACE_ABSORPTION` | absorbs the cone flux at the surface |
 | `min_thickness` | `1e-6` | on a moving mesh, ends the solve when the thickness falls below it [m] |
 | `deactivation` | `false` | deactivates a cell once its condensed mass falls below `threshold` (default `1e-2`) of its initial condensed mass |
 | `progress` | `false` | progress bar |
@@ -466,43 +466,35 @@ for an opaque solid like PMMA, surface absorption is the right, fast choice:
 
 | `radiation_model` | Behaviour | Use when |
 |---|---|---|
-| `NO_RADIATION` (default) | A `RadiativeFluxBC` is absorbed *at the surface*, in the surface energy balance | radiation handled purely as a surface flux |
-| `SURFACE_ABSORPTION` | The same: the absorbed flux enters the surface energy balance; component `α` is not read | opaque material (optical thickness ≫ 1) |
+| `SURFACE_ABSORPTION` (default) | A `RadiativeFluxBC` is absorbed *at the surface*, in the surface energy balance; component `α` is not read | opaque material (optical thickness ≫ 1) |
 | `BEER_LAMBERT` | In-depth exponential absorption using the component `α`; the `RadiativeFluxBC` contributes no boundary flux | semi-transparent material (polymers, foams) |
 
-Two important caveats:
-
-- `NO_RADIATION` and `SURFACE_ABSORPTION` give the same solve: both apply the
-  absorbed `RadiativeFluxBC` flux at the face, through the surface energy
-  balance. (The example script relies on the default; this tutorial names
-  `SURFACE_ABSORPTION` to make the choice visible.)
-- Under `BEER_LAMBERT` the *same* `RadiativeFluxBC` is instead absorbed in depth
-  (and returns zero as a boundary flux) — switching models changes where the
-  energy goes, by design. The face intensities become algebraic unknowns of the
-  state: the intensity entering the exposed face is `a·Φ`, with the condition's
-  explicit `absorptivity` or, without one, the exposed cell's effective surface
-  absorptivity (`= ε_eff` by Kirchhoff's law unless a component sets
-  `absorptivity`), and each cell absorbs what the beam loses across it at its
-  absorption coefficient. The surface temperature Newton solve still runs (it
-  balances conducted, convective, and re-radiated flux). The absorbed power is
-  reported in `solution.extras.volumetric_absorption` and the power leaving
-  through the back face in `solution.extras.radiation_transmitted`; with every
-  `α` zero the beam crosses the slab unabsorbed. `BEER_LAMBERT` needs planar
-  coordinates and at most one `RadiativeFluxBC` on the exposed boundary;
-  setup rejects multiple incident flux conditions. Sources sharing one
-  absorptivity can be combined in a single flux function. See Technical
-  Reference §8.
+Under `BEER_LAMBERT` the *same* `RadiativeFluxBC` is absorbed in depth
+(and returns zero as a boundary flux) — switching models changes where the
+energy goes, by design. The face intensities become algebraic unknowns of the
+state: the intensity entering the exposed face is `a·Φ`, with the condition's
+explicit `absorptivity` or, without one, the exposed cell's effective surface
+absorptivity (`= ε_eff` by Kirchhoff's law unless a component sets
+`absorptivity`), and each cell absorbs what the beam loses across it at its
+absorption coefficient. The surface temperature Newton solve still runs (it
+balances conducted, convective, and re-radiated flux). The absorbed power is
+reported in `solution.extras.volumetric_absorption` and the power leaving
+through the back face in `solution.extras.radiation_transmitted`; with every
+`α` zero the beam crosses the slab unabsorbed. `BEER_LAMBERT` needs planar
+coordinates and at most one `RadiativeFluxBC` on the exposed boundary;
+setup rejects multiple incident flux conditions. Sources sharing one
+absorptivity can be combined in a single flux function. See Technical
+Reference §8.
 
 ### 2.6.3 Other solve options worth knowing
 
 These are not needed for this run but round out the picture (full reference in
 UG 8):
 
-- **`integrator_policy`** (default `default_policy`, the `Rodas5P` Rosenbrock
-  method; `fbdf_policy` and `kencarp4_policy` are the alternatives) and
-  **`linear_solver`** (default `StructuredKLU()`, or LinearSolve's
-  `UMFPACKFactorization()`) — the time integrator and sparse linear solver
-  (UG 11).
+- **`integrator_policy`** (default `default_policy()`, the `Rodas5P` Rosenbrock
+  method; `fbdf_policy` and `kencarp4_policy` are the alternatives) — the time
+  integrator. Its argument is the sparse linear solver, by default
+  `StructuredKLU()`, or LinearSolve's `UMFPACKFactorization()` (UG 11).
 - **`energy_state`** (default `:temperature`) — `:enthalpy` integrates each
   cell's enthalpy inventory instead of its temperature.
 - **`threshold`** (default `1e-2`) — the deactivation threshold `ε_m`, a fraction
@@ -517,9 +509,8 @@ UG 8):
 - The effect of outgassing on convective exchange is a property of each
   `ConvectiveBC` (its `blowing` model, UG §5.2.3), not a solve option.
 
-> **Unknown keywords are rejected.** `solve` validates its keyword arguments and
-> throws an `ArgumentError` on anything it does not recognise, so a typo is
-> caught immediately rather than silently ignored.
+> **Unknown keywords are rejected.** An unknown keyword is an ordinary Julia
+> `MethodError`, so a typo is caught immediately rather than silently ignored.
 
 ---
 
@@ -539,7 +530,7 @@ UG 8):
 | `solution.surface_T` | `Vector{Float64}` | solved surface temperature per time [K] |
 | `solution.mass_loss_rate` | `Vector{Float64}` | mass leaving through every boundary face, per unit current area of the top face [kg/(m²·s)] |
 | `solution.retcode` | `Symbol` | integrator status (`:Success`, `:Terminated`, `:Failure`, …) |
-| `solution.outcome` | `Symbol` | `:running` unless burnout or the thickness stop ended the solve |
+| `solution.outcome` | `Symbol` | `:none` unless burnout or the thickness stop ended the solve |
 | `solution.events` | `Vector` | the deactivation events, in order |
 | `solution.statistics` | `SolverStatistics` | accepted and rejected steps, Jacobians, deactivation invocations, … |
 | `solution.solve_time` | `Float64` | wall-clock solve time [s] |
@@ -561,18 +552,18 @@ Always check how the solve ended first:
 
 ```julia
 println("retcode  = ", solution.retcode)     # Success: the solve reached t_final
-println("outcome  = ", solution.outcome)     # running: neither burnout nor min_thickness ended it
+println("outcome  = ", solution.outcome)     # none: neither burnout nor min_thickness ended it
 println("solve t  = ", round(solution.solve_time, digits = 2), " s")
 println("saved    = ", length(solution.t), " time points")
 ```
 
 This run reaches `t_final = 1600 s` with `retcode = :Success` and outcome
-`:running`: the sample has lost 92.7 % of its mass and 0.42 mm of it remain. The
+`:none`: the sample has lost 92.7 % of its mass and 0.42 mm of it remain. The
 combinations you can meet are:
 
 | `retcode` | `outcome` | Meaning | `succeeded` | `completed` |
 |---|---|---|---|---|
-| `:Success` | `:running` | reached the end of `tspan` | true | true |
+| `:Success` | `:none` | reached the end of `tspan` | true | true |
 | `:Terminated` | `:burned_out` | the last cell deactivated | true | false |
 | `:Terminated` | `:min_thickness` | the thickness fell below `min_thickness` | true | false |
 | `:Terminated` | `:interior` | a cell below the threshold lies inward of a live one on a fixed mesh, or beneath a skin on a moving one; the solve warns and ends | false | false |
@@ -653,26 +644,22 @@ solid, so read their positions at the same time:
 ```julia
 i = argmin(abs.(times .- 120.0))
 T_profile = solution.T[:, i]                       # [K], one value per cell
-z_cells   = get_cell_positions(solution; at = i)   # [m], the cell centres at that time
+z_cells   = solution.cell_centers[:, i]   # [m], the cell centres at that time
 ```
 
-`get_cell_positions(solution; at = i)` is the column `solution.cell_centers[:, i]`;
-a deactivated cell reads `NaN` in both arrays. The node positions are
+A deactivated cell reads `NaN` in both arrays. The node positions are
 `solution.z[:, i]` (`get_profile(solution, :z, i)`), and the current thickness
 is `solution.extras.thickness_history[i]`.
 
 ### 2.8.2 Convenience accessors
 
-The solution's accessors are exported with the package:
+The solution is read by field; a few accessors, exported with the package, do
+more than that:
 
 | Accessor | Returns |
 |---|---|
-| `get_times(sol)`, `n_timesteps(sol)` | `sol.t`, its length |
-| `get_temperatures(sol)`, `get_concentrations(sol)` | `sol.T`, `sol.ξ` |
-| `get_gas_generation_rate(sol)` | `sol.extras.gas_generation_rate` |
 | `get_profile(sol, field, i)` | the field `:T`, `:ξ`, `:ξj`, `:m`, `:mj` or `:z` at saved index `i` |
-| `get_cell_positions(sol; at = lastindex(sol.t))` | the cell centres at saved index `at` |
-| `sol(t)`, `interpolate_solution(sol, t)` | the fields `(; t, T, ξ, m, z, cell_centers)` at any `t` in the span |
+| `sol(t)` | the fields `(; t, T, ξ, m, z, cell_centers)` at any `t` in the span |
 | `interior_events(sol)` | the events whose cell left from under spent cells (§10.7) |
 
 ```julia
@@ -730,7 +717,7 @@ p3 = plot(xlabel = "z [mm] (0 = back face)", ylabel = "Temperature [K]",
           title = "Temperature profiles")
 for t_target in (30, 120, 300, 600, 1200)
     k = argmin(abs.(times .- t_target))
-    z_k  = get_cell_positions(solution; at = k)
+    z_k  = solution.cell_centers[:, k]
     live = .!isnan.(z_k)                             # deactivated cells read NaN
     count(live) > 1 || continue                      # skip if one live cell remains
     plot!(p3, z_k[live] .* 1000, solution.T[live, k];
@@ -790,7 +777,7 @@ h_conv     = 7.2
 T_ambient  = 300.0
 
 top_thermal =
-    RadiativeFluxBC(flux = q_external, absorptivity = 0.96) +
+    RadiativeFluxBC(q_external, absorptivity = 0.96) +
     RadiativeBC(ε = 0.96, T_inf = 330.0) +
     ConvectiveBC(h = h_conv, T_inf = 330.0)
 bottom_thermal =
@@ -810,7 +797,7 @@ bc_set = BoundaryConditionSet(
 # ---- Step 3: mesh -----------------------------------------------------------
 sample_thickness = 5.8e-3
 n_cells          = 72
-mesh = create_uniform_mesh(sample_thickness, n_cells)
+mesh = uniform_mesh(sample_thickness, n_cells)
 
 # ---- Step 4: problem --------------------------------------------------------
 t_final = 1600.0
@@ -859,7 +846,7 @@ plot(solution; kind = :mlr)
   switch the solver into lumped gas transport mode for pressure-treated wood or charring
   systems. (UG 7; Technical Reference §9.)
 - **Vary the cone flux.** Replace the scalar `q_external` with a function of
-  time, `RadiativeFluxBC(flux = t -> ramp(t), absorptivity = 0.96)`; the solver
+  time, `RadiativeFluxBC(t -> ramp(t), absorptivity = 0.96)`; the solver
   re-samples the flux at every right-hand-side evaluation.
 - **Run to burnout.** Extend `t_final` and read `solution.events`,
   `solution.extras.live_cells` and `solution.outcome`; UG 10 explains the

@@ -29,7 +29,7 @@ function _vrx08_problem(n_cells)
     )
     f(z) = 0.99 - (0.99 - f_top) * z / L0
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L0, n_cells),
+        mesh = uniform_mesh(L0, n_cells),
         material = material,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),

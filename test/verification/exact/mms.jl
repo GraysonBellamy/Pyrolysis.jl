@@ -42,7 +42,7 @@
 #
 # ## ALE
 # Masses are the states. Under REACTION-DRIVEN (induced) motion — the
-# `MMSMotion` companion, no `w_override` — the mesh is the solid and every
+# `MMSMotion` companion, no `PrescribedCorrection` — the mesh is the solid and every
 # inventory rides it (the gas flux J_g is relative to it), so a z-varying
 # manufactured field needs its source assembled in the material-following
 # frame (`w` keyword of the source functions):
@@ -52,7 +52,7 @@
 # where w·∂zξ* is the moving-point chain rule and ξ*θ* the growth of the cell
 # volume at the reaction-driven strain rate θ*, with w the prefix sum of θ*
 # on the manufactured fields (`mms_mesh_velocity`); the temperature source is
-# assembled in the same frame. Under PRESCRIBED motion (`w_override`) the
+# assembled in the same frame. Under PRESCRIBED motion (`PrescribedCorrection`) the
 # mesh moves over a solid at rest and every inventory, T's energy with it,
 # crosses the faces at the mesh-relative velocity, so every source is the
 # Eulerian one. Sources are evaluated at the cell centers.
@@ -163,7 +163,7 @@ function mms_rxn_source(material, j::Int, ξ::Tuple, T)
     for r = 1:NR
         rxn = material.reactions[r]
         rate = _mms_rate(material, r, ξ, T)
-        rxn.reactants[1][1] == j && (s -= rate)
+        rxn.reactant == j && (s -= rate)
         for (idx, ν) in rxn.products
             idx == j && (s += ν * rate)
         end
@@ -245,7 +245,7 @@ end
 # Induced (reaction-driven) mesh motion — V-MMS-04 companion machinery
 # ----------------------------------------------------------------------------
 #
-# Under REACTION-DRIVEN motion (no `w_override`) the mesh velocity is the
+# Under REACTION-DRIVEN motion (no `PrescribedCorrection`) the mesh velocity is the
 # prefix sum of the volumetric strain rate θ computed from the REACTION rates
 # (`Physics.volume_change_rate` on `dξ_rxn`). The manufactured counterparts
 # below mirror that chain exactly — same kinetics calls, same 1/ρ weighting —
@@ -377,11 +377,11 @@ Jacobian differentiates with the rest of the residual.
 
 Keywords:
 - `use_ale=false`: move the mesh.
-- `w_override=nothing`: prescribed mesh-velocity function `(z_node, t) -> w`
+- `correction = PrescribedCorrection(nothing`: prescribed mesh-velocity function `(z_node, t) -> w`)
   (ALE only), moving the mesh over a solid at rest; every source is then the
   Eulerian one.
 - `motion=nothing`: opt-in [`MMSMotion`](@ref) for REACTION-DRIVEN mesh
-  motion (ALE only, no `w_override`): every source — T and all species —
+  motion (ALE only, no `PrescribedCorrection`): every source — T and all species —
   switches to the material-following frame with `motion.w`.
 - `dt=nothing`: fixed step (sets `adaptive=false`) for temporal-order sweeps.
 - `saveat=nothing`: defaults to `problem.output_times` if non-empty, else the
@@ -391,7 +391,7 @@ function solve_mms(
     problem,
     fields::MMSFields;
     use_ale::Bool = false,
-    w_override = nothing,
+    correction = nothing,
     motion::Union{Nothing,MMSMotion} = nothing,
     abstol::Real = 1e-10,
     reltol::Real = 1e-8,
@@ -408,12 +408,12 @@ function solve_mms(
     else
         [problem.tspan[2]]
     end
-    (w_override !== nothing || motion !== nothing) &&
+    (correction !== nothing || motion !== nothing) &&
         !use_ale &&
-        error("w_override and motion require use_ale = true")
-    w_override !== nothing &&
+        error("a prescribed correction and motion require use_ale = true")
+    correction !== nothing &&
         motion !== nothing &&
-        error("w_override (prescribed motion) and motion (induced) are exclusive")
+        error("a prescribed correction and induced motion are exclusive")
     NC = n_components(material)
     w = motion === nothing ? nothing : motion.w
     mass = (z, t) -> ntuple(j -> mms_species_source(material, fields, j, z, t; w), Val(NC))
@@ -423,7 +423,7 @@ function solve_mms(
         problem;
         energy_state,
         use_ale,
-        w_override,
+        correction,
         abstol,
         reltol,
         saveat = save_times,

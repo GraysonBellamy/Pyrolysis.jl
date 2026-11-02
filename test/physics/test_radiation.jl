@@ -55,11 +55,11 @@ _radiation_composition(i) = (400.0 - 10.0 * i, 80.0 + 5.0 * i, 4.0)
 function _radiation_state(; n = 8)
     mat = _radiation_material()
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, n),
+        mesh = uniform_mesh(0.01, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(flux = 50e3) + RadiativeBC(T_inf = 300.0),
+                top = RadiativeFluxBC(50e3) + RadiativeBC(T_inf = 300.0),
                 bottom = AdiabaticBC(),
             ),
         ),

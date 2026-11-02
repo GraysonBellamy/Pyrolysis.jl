@@ -289,11 +289,11 @@ const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
     ρ_DF_initial = ρ_DF_oven_dry / (1 + moisture_content_db * ρ_DF_oven_dry / 1000.0)
     ρ_moisture_initial = moisture_content_db * ρ_DF_initial
 
-    mesh = create_uniform_mesh(sample_thickness, n_cells)
+    mesh = uniform_mesh(sample_thickness, n_cells)
 
     bc_set = BoundaryConditionSet(
         thermal = (
-            top = RadiativeFluxBC(flux = q_external) +
+            top = RadiativeFluxBC(q_external) +
                   RadiativeBC(T_inf = 300) +
                   ConvectiveBC(h = h_conv, T_inf = 300),
             bottom = AdiabaticBC(),

@@ -12,7 +12,7 @@ conduction or the boundary condition and with the enthalpy their mass fluxes
 carry, plus the live cells' reaction heat and formation terms `Σⱼ ωⱼ hⱼ`) and
 the mass outflow through those faces [kg/s].
 """
-function ledger_rates(def::CoreDefinition, c, ds)
+function ledger_rates(def::ResidualDefinition, c, ds)
     topo = def.setup.topology
     g = ds.geometry
     E = zero(eltype(c.F_energy))
@@ -45,7 +45,7 @@ form the extended energy of the cells' masses at their temperatures under the
 caloric extension `ext`, which equals their sensible enthalpy `Σⱼ mⱼ hⱼ(T)`
 away from empty cells and is what a deactivation event conserves.
 """
-function live_inventories(def::CoreDefinition, ext::CaloricExtension, ds, u)
+function live_inventories(def::ResidualDefinition, ext::CaloricExtension, ds, u)
     layout, laws = def.layout, def.setup.laws
     NC = n_components(layout)
     E, M = 0.0, 0.0
@@ -61,7 +61,7 @@ function live_inventories(def::CoreDefinition, ext::CaloricExtension, ds, u)
 end
 
 # The caloric extension of a solve's cells.
-_extension(def::CoreDefinition) = CaloricExtension(
+_extension(def::ResidualDefinition) = CaloricExtension(
     def.setup.laws,
     def.setup.reference.mass_scale,
     def.setup.reference.capacity_floor,

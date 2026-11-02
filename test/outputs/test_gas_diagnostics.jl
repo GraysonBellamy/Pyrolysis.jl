@@ -19,7 +19,7 @@ function exchange_problem()
         ),
     )
     PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 4),
+        mesh = uniform_mesh(0.01, 4),
         material = mat,
         T_initial = z->500.0,
         ξ_initial = [
@@ -55,12 +55,12 @@ end
     )
     @test completed(sol)
     @test sol.gas.species==[:product, :air]
-    @test get_porosity(sol)≈fill(0.5, size(sol.T))
-    p=get_partial_pressures(sol)
-    @test dropdims(sum(p; dims = 1); dims = 1)≈get_pressure(sol)
+    @test sol.gas.porosity≈fill(0.5, size(sol.T))
+    p=sol.gas.partial_pressure
+    @test dropdims(sum(p; dims = 1); dims = 1)≈sol.gas.pressure
     @test dropdims(sum(get_gas_composition(sol); dims = 1); dims = 1)≈ones(size(sol.T))
     for g = 1:2
-        @test p[g, :, :]≈get_intrinsic_gas_densities(sol)[g, :, :] .* R_GAS .* sol.T ./
+        @test p[g, :, :]≈sol.gas.intrinsic_density[g, :, :] .* R_GAS .* sol.T ./
                          (g==1 ? 0.044 : 0.029)
     end
     top=get_boundary_exchange(sol, :top)
@@ -112,7 +112,7 @@ function receding_gas_ledger()
     )
     T=z->T0+1e5*z
     p=PyrolysisProblem(
-        mesh = create_uniform_mesh(0.003, 6),
+        mesh = uniform_mesh(0.003, 6),
         material = mat,
         T_initial = T,
         ξ_initial = [
@@ -172,5 +172,5 @@ end
     end
     moving || @test audit.species.air.vented>0
     @test abs(conservation_audit(sol, rec).energy.relative)<2e-5
-    @test all(x->!isfinite(x) || x>2e-12, get_porosity(sol))
+    @test all(x->!isfinite(x) || x>2e-12, sol.gas.porosity)
 end

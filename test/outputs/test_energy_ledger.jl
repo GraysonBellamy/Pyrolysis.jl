@@ -67,7 +67,7 @@ function _column(n; darcy::Bool, stretched::Bool = false)
         darcy ?
         background_gas_concentration(mat, 3, (400.0, band(z), 0.0), T0(z); P = P0(z)) : 0.05
     return PyrolysisProblem(
-        mesh = stretched ? create_stretched_mesh(L, n, 1.2) : create_uniform_mesh(L, n),
+        mesh = stretched ? stretched_mesh(L, n, 1.2) : uniform_mesh(L, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (

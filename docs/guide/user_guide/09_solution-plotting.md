@@ -41,11 +41,11 @@ pmma = Material(
     reactions = (Reaction(:decomposition, 1 => 2, A = 8.5e12, E = 188e3, h = 870e3),),
 )
 problem = PyrolysisProblem(
-    mesh = create_uniform_mesh(2e-3, 20),
+    mesh = uniform_mesh(2e-3, 20),
     material = pmma,
     bc_set = BoundaryConditionSet(
         thermal = (
-            top = RadiativeFluxBC(flux = 50e3) + RadiativeBC(ε = 0.95, T_inf = 300.0) +
+            top = RadiativeFluxBC(50e3) + RadiativeBC(ε = 0.95, T_inf = 300.0) +
                   ConvectiveBC(h = 10.0, T_inf = 300.0),
             bottom = AdiabaticBC(),
         ),
@@ -113,12 +113,12 @@ components.
 | `boundary_blowing_ratio` | `Dict{Symbol,Vector{Float64}}` | per tag, `(n_t,)` | Area-weighted ratio `h/h₀` the tag's convective condition applied (1 without outflow or without a blowing model) |
 | `extras` | `SolutionExtras` | — | Secondary series (§9.3) |
 | `events` | `Vector{DeactivationEvent}` | — | The deactivation events, in order (§9.3) |
-| `outcome` | `Symbol` | — | `:running` unless the deactivation or the thickness stop ended the solve: `:burned_out`, `:interior` or `:min_thickness` |
+| `outcome` | `Symbol` | — | `:none` unless the deactivation or the thickness stop ended the solve: `:burned_out`, `:interior` or `:min_thickness` |
 | `retcode` | `Symbol` | — | The integrator's return code |
 | `solve_time` | `Float64` | — | Wall time of the solve [s] |
 | `statistics` | `SolverStatistics` | — | The solver's counters (§9.3) |
 | `raw_solution` | ODE solution | — | The integrator's solution: the raw states and the interpolant |
-| `definition` | `CoreDefinition` | — | The definition of the solve, through which `solution(t)` reconstructs the fields |
+| `definition` | `ResidualDefinition` | — | The definition of the solve, through which `solution(t)` reconstructs the fields |
 | `deactivation` | `CellDeactivation` or `nothing` | — | The deactivation state of the solve, whose tables `solution(t)` replays |
 
 A few points worth internalizing:
@@ -138,8 +138,8 @@ A few points worth internalizing:
   default for a planar mesh, so then they are also per unit area).
 
 - **`z` is empty on a fixed mesh.** Without `use_ale = true` no node moves and
-  `solution.z` is a `0×0` matrix; `solution.cell_centers` (or `get_cell_positions`,
-  §9.4) gives the cell centres on either mesh.
+  `solution.z` is a `0×0` matrix; `solution.cell_centers` gives the cell centres on
+  either mesh.
 
 - **Deactivated cells read `NaN`.** With `deactivation = true`, a deactivated cell reads
   `NaN` in `T`, `ξ` and `cell_centers` from the time it goes, and the nodes beyond the
@@ -163,8 +163,8 @@ mlr        = solution.mass_loss_rate    # Vector{Float64}
 xi_virgin  = solution.ξ[1, :, end]      # component 1 profile at the last saved time
 ```
 
-The accessor functions of §9.4 return the same arrays, or slices of them, and add the
-reconstruction between saved times.
+The accessor functions of §9.4 add the reconstruction between saved times and what a
+field alone does not say.
 
 ---
 
@@ -220,9 +220,9 @@ thickness = solution.extras.thickness_history      # m
 q_net     = solution.extras.surface_heat_flux_net  # W/m²
 ```
 
-`get_gas_generation_rate(solution)` returns `solution.extras.gas_generation_rate`. Mind
-its meaning: it is the *volumetric* production of the live cells, **not** the mass-loss
-rate through the surface. The mass leaving the sample is `solution.mass_loss_rate` (per
+Mind the meaning of `solution.extras.gas_generation_rate`: it is the *volumetric*
+production of the live cells, **not** the mass-loss rate through the surface. The mass
+leaving the sample is `solution.mass_loss_rate` (per
 current area) and `extras.MLR_gauge` (per initial area); §9.5 says which to use.
 
 ### The deactivation events
@@ -274,17 +274,14 @@ All accessors are exported by `using Pyrolysis`:
 
 | Function | Returns |
 |---|---|
-| `get_times(sol)` | `sol.t` |
-| `get_temperatures(sol)` | `sol.T` |
-| `get_concentrations(sol)` | `sol.ξ` |
-| `get_gas_generation_rate(sol)` | `sol.extras.gas_generation_rate` |
-| `n_timesteps(sol)` | `length(sol.t)` |
-| `get_cell_positions(sol; at = lastindex(sol.t))` | The cell centres at saved time `at` |
 | `get_profile(sol, field, i)` | One field at saved time `i` |
-| `sol(t)`, `interpolate_solution(sol, t)` | The fields reconstructed at any time `t` |
+| `sol(t)` | The fields reconstructed at any time `t` |
 | `interior_events(sol)` | The events whose cell left from under spent cells (§10.7) |
 | `succeeded(sol)`, `completed(sol)` | How the solve ended |
 | `conservation_audit(sol[, recorder])` | The mass and energy closures (§9.8) |
+| `get_gas_composition(sol; basis = :mole)` | The gas fractions in `sol.gas.species` order, by `:mole` or `:mass` |
+| `get_boundary_exchange(sol, tag)` | The assembled species and energy exchange of a boundary at each saved time |
+| `gas_species_audit(sol[, recorder])` | The species-resolved mass ledger |
 
 ### `get_profile(solution, field, i)`
 
@@ -305,30 +302,17 @@ z_nodes  = get_profile(solution, :z, 10)     # node positions [m]
 `i` is an index into `solution.t`, not a time in seconds. To find the index nearest a
 target time, use `argmin(abs.(solution.t .- t_target))`.
 
-### `get_cell_positions(solution; at)`
+### `solution(t)`
 
-Returns the cell-centre positions at the saved time `solution.t[at]` [m], `NaN` for a
-deactivated cell (and so for every cell beyond the outermost live node). The default is
-the last saved time; the initial positions are `get_cell_positions(solution; at = 1)`
-when the first saved time is the start of the time span. This is the depth axis for
-plotting a profile on either mesh, fixed or moving.
-
-```julia
-z_end   = get_cell_positions(solution)            # at the last saved time
-z_start = get_cell_positions(solution; at = 1)    # the initial cell centres
-```
-
-### `solution(t)` and `interpolate_solution(solution, t)`
-
-Both return the fields at an arbitrary time `t` within the solution's span, as one saved
+Returns the fields at an arbitrary time `t` within the solution's span, as one saved
 time of the solution holds them: a NamedTuple `(; t, T, ξ, m, z, cell_centers)`. They are
 reconstructed from the integrator's interpolant between the saved states, through the
 same state mapping the solver uses, with the deactivation mask of the last event at or
-before `t` applied; `z` is empty on a fixed mesh. At a saved time they return exactly the
+before `t` applied; `z` is empty on a fixed mesh. At a saved time it returns exactly the
 saved fields.
 
 ```julia
-f = solution(42.7)                     # == interpolate_solution(solution, 42.7)
+f = solution(42.7)
 f.T                                    # cell temperatures at t = 42.7 s [K]
 f.ξ[1, :]                              # component-1 concentrations [kg/m³]
 f.z                                    # node positions [m] (moving mesh)
@@ -466,7 +450,7 @@ Notes that follow from the recipe:
   `extras.MLR_gauge` yourself (§9.5).
 - `:heatmap` puts the **cell index** on the y axis, not the physical depth; deactivated
   cells (`NaN`) are left blank. For a depth axis in metres, plot profiles against
-  `get_cell_positions` (below).
+  `solution.cell_centers` (below).
 
 Because these are standard recipes, the usual `Plots.jl` attributes pass through:
 
@@ -479,7 +463,7 @@ savefig("mlr_comparison.png")
 ### Plotting depth profiles by hand
 
 There is no built-in recipe for "temperature versus depth at a fixed time", but it takes
-a few lines. `get_cell_positions(solution; at = i)` gives the cell centres at saved time
+a few lines. `solution.cell_centers[:, i]` gives the cell centres at saved time
 `i` on a fixed or a moving mesh, with `NaN` for deactivated cells, which `Plots` skips:
 
 ```julia
@@ -488,7 +472,7 @@ using Pyrolysis, Plots
 plt = plot(xguide = "z [mm]", yguide = "T [K]", title = "Temperature profiles")
 for t_target in (10.0, 30.0, 60.0)
     i = argmin(abs.(solution.t .- t_target))
-    z = get_cell_positions(solution; at = i)     # cell centres at that time [m]
+    z = solution.cell_centers[:, i]     # cell centres at that time [m]
     plot!(plt, z .* 1e3, solution.T[:, i]; label = "t = $(solution.t[i]) s")
 end
 plt
@@ -526,7 +510,7 @@ A depth profile at a fixed time uses the cell centres of that time:
 using Pyrolysis, Plots
 
 i = argmin(abs.(solution.t .- 30.0))         # nearest saved time to 30 s
-z = get_cell_positions(solution; at = i)     # cell centres at this time [m]
+z = solution.cell_centers[:, i]     # cell centres at this time [m]
 T = solution.T[:, i]
 live = isfinite.(T)                          # drop deactivated cells
 plot(z[live] .* 1e3, T[live];
@@ -718,7 +702,7 @@ solution.boundary_T[:bottom][i] # back-face temperature [K]
 solution.mass_loss_rate[i]      # MLR per current area (every boundary face) [kg/(m²·s)]
 solution.events                 # deactivation events
 solution.retcode                # :Success / :Terminated / :Failure / ...
-solution.outcome                # :running / :burned_out / :interior / :min_thickness
+solution.outcome                # :none / :burned_out / :interior / :min_thickness
 solution.statistics             # accepted, rejected, jacobians, ..., invocations
 solution.solve_time             # wall-clock [s]
 
@@ -734,8 +718,7 @@ solution.extras.surface_heat_flux_net     # net surface flux [W/m²]
 
 # Accessors (exported by `using Pyrolysis`):
 get_profile(solution, :T, i)              # field at one time index (:T, :ξ, :ξj, :m, :mj, :z)
-get_cell_positions(solution; at = i)      # cell centres at time index i [m] (default: last)
-solution(t)                               # fields at continuous t (== interpolate_solution(solution, t))
+solution(t)                               # fields at continuous t
 succeeded(solution), completed(solution)  # finished / reached tspan[2]
 conservation_audit(solution, recorder)    # mass and energy closures
 

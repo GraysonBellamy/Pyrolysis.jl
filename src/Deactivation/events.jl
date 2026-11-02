@@ -1,39 +1,6 @@
 # ============================================================================
-# Deactivation policies and events
+# Deactivation events
 # ============================================================================
-
-"""
-	DeactivationPolicy
-
-How a deactivated cell's inventories and volume leave the live mesh.
-"""
-abstract type DeactivationPolicy end
-
-"""
-	ConservativeTransfer <: DeactivationPolicy
-
-The dead cells' inventories (masses, sensible enthalpy, history pair) go to
-the live cell beside them, the receiver, whose temperature follows from the
-summed sensible enthalpy of all of them; the energy state is set from it. The
-caloric extension's regularization, which only a cell far below the
-heat-capacity floor carries, is not transferred: what the cells held of it
-beyond the receiver's after the merge is written to the event. The receiver is
-the live cell inward of the dead run, or, for a run from the innermost cell
-under live cells, the live cell outward of it. On a moving mesh the receiver
-also absorbs the dead cells' volume, and the merge never destroys pore space:
-the merged volume is the larger of the summed volumes and the merged skeletal
-volume plus the summed pre-merge pore volumes, the difference written to the
-event as created volume. Inward, the receiver's far face moves out to enclose
-the merged volume, where every node of the dead cells then coincides (the
-moving-boundary collapse); outward, the merged volume is what lies between the
-innermost node and the receiver's far face. In both the created volume moves
-that face and every live node beyond it, each live cell keeping its volume. On
-a fixed mesh the receiver keeps its volume and takes the condensed inventories
-only: its pores could hold the dead cell's gas only at a higher pressure, so
-that gas is vented, its masses and sensible enthalpy written to the event as
-lost.
-"""
-struct ConservativeTransfer <: DeactivationPolicy end
 
 """
 	DeactivationEvent
@@ -75,15 +42,15 @@ struct DeactivationEvent
 end
 
 """
-	CellDeactivation{P,NC,E}
+	CellDeactivation{NC,E}
 
-The deactivation state of a solve: the policy, the threshold `ε_m`, the
+The deactivation state of a solve: the threshold `ε_m`, the
 near-threshold band `ε_band` (a fraction of a cell's reference, read on a
 moving mesh only, see [`deactivate!`](@ref)), the cells' initial condensed
 masses (`reference`; a receiver keeps its own, so a merged cell deactivates
 once its whole merged inventory is below `ε_m` of what it started with), the
 condensed component flags, the caloric extension merged temperatures are
-found with, the events so far, the outcome: `:running`; `:burned_out` once the last live cell
+found with, the events so far, the outcome: `:none`; `:burned_out` once the last live cell
 went; `:interior` when a cell below the threshold lies inward of a live one on
 a fixed mesh, whose geometry stays with its slots, or beneath a skin on a moving
 one; the [`SlotTables`](@ref) of the solve; and, at a reaction order other than one,
@@ -91,8 +58,7 @@ what the threshold reads there ([`below_threshold`](@ref)): the components
 `reactants`, one per reaction with a condensed reactant, the cells' `reactive`
 reference, and `lineage`, the reaction kernel's references by slot.
 """
-struct CellDeactivation{P<:DeactivationPolicy,NC,E<:CaloricExtension{NC}}
-    policy::P
+struct CellDeactivation{NC,E<:CaloricExtension{NC}}
     threshold::Float64
     band::Float64
     reference::Vector{Float64}
@@ -107,7 +73,7 @@ struct CellDeactivation{P<:DeactivationPolicy,NC,E<:CaloricExtension{NC}}
 end
 
 """
-	CellDeactivation(policy, threshold, band, reference, solid, caloric;
+	CellDeactivation(threshold, band, reference, solid, caloric;
 	                 origin = collect(eachindex(reference)), reactants = Int[],
 	                 reactive = Float64[], lineage = zeros(0, 0))
 
@@ -116,7 +82,6 @@ masses; `threshold ≤ band < 1`. `origin` is the array of the
 [`SlotTables`](@ref), with no table registered yet.
 """
 function CellDeactivation(
-    policy::DeactivationPolicy,
     threshold::Real,
     band::Real,
     reference::Vector{Float64},
@@ -131,14 +96,13 @@ function CellDeactivation(
         ArgumentError("the band must lie in [threshold, 1) = [$threshold, 1), got $band"),
     )
     return CellDeactivation(
-        policy,
         Float64(threshold),
         Float64(band),
         reference,
         solid,
         caloric,
         DeactivationEvent[],
-        Ref(:running),
+        Ref(:none),
         SlotTables(origin),
         reactants,
         reactive,
@@ -155,7 +119,7 @@ no events: the state a solve starts from.
 function reset_cells!(d::CellDeactivation, layout::StateLayout)
     fill!(layout.mask, true)
     empty!(d.events)
-    d.outcome[] = :running
+    d.outcome[] = :none
     arrange_slots!(d.tables, layout, 1:n_cells(layout), Tuple{Int,Int,Float64}[])
     return d
 end
@@ -166,11 +130,11 @@ end
 The condensed (solid and liquid) mass of cell `i` in the state `u` [kg].
 """
 @inline function condensed_mass(
-    d::CellDeactivation{P,NC},
+    d::CellDeactivation{NC},
     layout::StateLayout{NC},
     u::AbstractVector,
     i::Int,
-) where {P,NC}
+) where {NC}
     m = zero(eltype(u))
     @inbounds for j = 1:NC
         d.solid[j] && (m += u[mass_index(layout, i, j)])
@@ -341,7 +305,7 @@ end
 
 Deactivate, in one pass, the cells below the threshold. On a moving mesh the
 outermost cell below `ε_m` goes, with the contiguous live cells around it below
-`ε_band` of their reference, in one merge ([`ConservativeTransfer`](@ref)) into
+`ε_band` of their reference, in one merge into
 the live cell beneath the run, or, for a run from the innermost cell under live
 cells, into the live cell above it; a run of the whole column leaves the
 innermost cell, holding the run's inventories, as the survivor. A run with live
@@ -362,6 +326,27 @@ passes the solve's relative tolerance, so that the crossing cell, which holds
 exactly its threshold there, goes, and with it the cells within the tolerance of
 their thresholds, whose crossing the solve does not resolve from the located one.
 
+The dead cells' inventories (masses, sensible enthalpy, history pair) go to
+the live cell beside them, the receiver, whose temperature follows from the
+summed sensible enthalpy of all of them; the energy state is set from it. The
+caloric extension's regularization, which only a cell far below the
+heat-capacity floor carries, is not transferred: what the cells held of it
+beyond the receiver's after the merge is written to the event. The receiver is
+the live cell inward of the dead run, or, for a run from the innermost cell
+under live cells, the live cell outward of it. On a moving mesh the receiver
+also absorbs the dead cells' volume, and the merge never destroys pore space:
+the merged volume is the larger of the summed volumes and the merged skeletal
+volume plus the summed pre-merge pore volumes, the difference written to the
+event as created volume. Inward, the receiver's far face moves out to enclose
+the merged volume, where every node of the dead cells then coincides (the
+moving-boundary collapse); outward, the merged volume is what lies between the
+innermost node and the receiver's far face. In both the created volume moves
+that face and every live node beyond it, each live cell keeping its volume. On
+a fixed mesh the receiver keeps its volume and takes the condensed inventories
+only: its pores could hold the dead cell's gas only at a higher pressure, so
+that gas is vented, its masses and sensible enthalpy written to the event as
+lost.
+
 Returns `:transferred`, `:burned_out` when the last live cell went, or `:interior`
 when a cell below the threshold remains inward of a live one on a fixed mesh or
 beneath a skin on a moving one.
@@ -369,7 +354,7 @@ beneath a skin on a moving one.
 function deactivate!(
     u::AbstractVector,
     d::CellDeactivation,
-    def::CoreDefinition,
+    def::ResidualDefinition,
     t::Real;
     slack::Float64 = 0.0,
 )
@@ -390,7 +375,7 @@ function deactivate!(
         end
         lo == 1 && hi == top && (lo = 2)
         r = lo == 1 ? hi + 1 : lo - 1
-        _merge!(u, d, d.policy, def, r, lo:hi, Float64(t), invocation)
+        _merge!(u, d, def, r, lo:hi, Float64(t), invocation)
         if hi < top
             _compact!(u, d, def, lo, hi, top)
         else
@@ -464,14 +449,13 @@ end
 # lies beneath them, outward when it lies above them.
 function _merge!(
     u,
-    d::CellDeactivation{P,NC},
-    ::ConservativeTransfer,
-    def::CoreDefinition,
+    d::CellDeactivation{NC},
+    def::ResidualDefinition,
     r::Int,
     dead::UnitRange{Int},
     t::Float64,
     invocation::Int,
-) where {P,NC}
+) where {NC}
     layout, setup = def.layout, def.setup
     laws, topo, material = setup.laws, setup.topology, setup.material
     energy = energy_state(layout)
@@ -614,12 +598,12 @@ end
 # receiver when it is the cell that moves into the innermost slot.
 function _compact!(
     u,
-    d::CellDeactivation{P,NC},
-    def::CoreDefinition,
+    d::CellDeactivation{NC},
+    def::ResidualDefinition,
     lo::Int,
     hi::Int,
     top::Int,
-) where {P,NC}
+) where {NC}
     layout = def.layout
     energy = energy_state(layout)
     tables = d.tables
@@ -680,12 +664,12 @@ end
 # the event as lost.
 function _lose!(
     u,
-    d::CellDeactivation{P,NC},
-    def::CoreDefinition,
+    d::CellDeactivation{NC},
+    def::ResidualDefinition,
     i::Int,
     t::Float64,
     invocation::Int,
-) where {P,NC}
+) where {NC}
     layout, setup = def.layout, def.setup
     laws = setup.laws
     energy = energy_state(layout)

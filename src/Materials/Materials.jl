@@ -6,7 +6,7 @@ Foundational types, constants, and abstractions for the Pyrolysis.jl package.
 Holds the foundational layer — the abstract
 type hierarchy, physical constants, temperature-dependent property functions,
 the component/material/reaction type system, and the radiation-model enum
-(`RadiationModel`, kept here for trait dispatch). The concrete boundary-condition
+(`RadiationModel`). The concrete boundary-condition
 types live in the `BoundaryConditions` module, which depends on this one for the
 abstract BC supertypes and property functions.
 
@@ -17,7 +17,7 @@ This module provides:
 - Reaction type definitions
 - The abstract boundary-condition supertypes (concretes live in
   `BoundaryConditions`)
-- The `RadiationModel` enum + predicates (trait dispatch)
+- The `RadiationModel` enum
 """
 module Materials
 
@@ -30,16 +30,10 @@ abstract type AbstractPropertyFunction end
 
 # Material system
 abstract type AbstractComponent end
-abstract type AbstractReaction end
-abstract type AbstractMaterial end
 
 # Boundary conditions
-abstract type AbstractBoundaryCondition end
-abstract type AbstractThermalBC <: AbstractBoundaryCondition end
-abstract type AbstractMassBC <: AbstractBoundaryCondition end
-
-# Problem
-abstract type AbstractPyrolysisProblem end
+abstract type AbstractThermalBC end
+abstract type AbstractMassBC end
 
 # ============================================================================
 # Include all subfiles (AFTER abstract types are defined)
@@ -63,9 +57,8 @@ export R_GAS, STEFAN_BOLTZMANN, T_REF, P_REF, RHO_CP_FLOOR, T_PROPERTY_MIN, T_PR
 
 # Abstract types
 export AbstractPropertyFunction
-export AbstractComponent, AbstractReaction, AbstractMaterial
-export AbstractBoundaryCondition, AbstractThermalBC, AbstractMassBC
-export AbstractPyrolysisProblem
+export AbstractComponent
+export AbstractThermalBC, AbstractMassBC
 
 # Property functions
 export ConstantProperty, LinearProperty, PolynomialProperty
@@ -80,7 +73,7 @@ export identically_zero  # Structural zero test of a property law
 export Phase, SOLID, LIQUID, GAS
 export SolidComponent, GaseousComponent, LiquidComponent
 export phase, molar_mass, is_gas, is_solid, is_liquid  # Type-dispatch accessors
-export get_permeability, has_permeability  # Permeability accessors for components
+export get_permeability  # Permeability accessor for components
 export participates_in_transport  # Gas-transport matrix membership
 export get_intrinsic_density  # Skeletal density accessor
 export get_emissivity, get_absorptivity, surface_absorptivity  # Radiative surface accessors
@@ -92,8 +85,7 @@ export GasSpecies, NITROGEN, nasa7_heat_capacity, eucken_viscosity, fuller_diffu
 export gas_property_temperature
 
 # Reactions
-export Reaction
-export AbstractDepletionLimiter, DepletionLimiter
+export Reaction, DepletionLimiter
 
 # Materials
 export Material, MixingRule, PARALLEL, SERIES, WEIGHTED, BRUGGEMAN, CARMAN_KOZENY
@@ -107,7 +99,7 @@ export gas_component_indices
 export LumpedTransfer, DustyGas, LumpedEndpoint, DustyEndpoint, has_gas
 export smooth_clamp, trial_temperature, positive_part, smooth_floor
 
-# Radiation model enum + predicates (trait dispatch; kept in the foundation)
-export RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT
+# Radiation model enum
+export RadiationModel, SURFACE_ABSORPTION, BEER_LAMBERT
 
 end # module Materials

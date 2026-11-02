@@ -51,7 +51,7 @@ function _verification_case_vgt06()
             ),
         )
         PyrolysisProblem(
-            mesh = create_uniform_mesh(0.01, n),
+            mesh = uniform_mesh(0.01, n),
             material = mat,
             T_initial = reference.temperature,
             ξ_initial = [
@@ -99,10 +99,10 @@ function _verification_case_vgt06()
             QoIResult(
                 name = "exponential thermal field",
                 value = maximum(
-                    abs.(sol.T[:, end] .- reference.temperature.(get_cell_positions(sol))),
+                    abs.(sol.T[:, end] .- reference.temperature.(sol.cell_centers[:, end])),
                 ),
                 error = maximum(
-                    abs.(sol.T[:, end] .- reference.temperature.(get_cell_positions(sol))),
+                    abs.(sol.T[:, end] .- reference.temperature.(sol.cell_centers[:, end])),
                 ),
                 tol = 0.2,
             ),
@@ -140,7 +140,7 @@ function _verification_case_vgt06()
                     series = [
                         CurveSeries(
                             label = "finite volume",
-                            x = get_cell_positions(sol),
+                            x = sol.cell_centers[:, end],
                             y = sol.T[:, end],
                             exact = reference.temperature,
                         ),
@@ -154,8 +154,8 @@ function _verification_case_vgt06()
                     series = [
                         CurveSeries(
                             label = "finite volume",
-                            x = get_cell_positions(sol),
-                            y = get_pressure(sol)[:, end],
+                            x = sol.cell_centers[:, end],
+                            y = sol.gas.pressure[:, end],
                             exact = reference.pressure,
                         ),
                     ],

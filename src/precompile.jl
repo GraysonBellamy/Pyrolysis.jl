@@ -102,7 +102,7 @@ end
 # The cone boundary conditions with an explicit vacuum reservoir.
 function _workload_bcs(q)
     thermal = (
-        top = RadiativeFluxBC(flux = q) +
+        top = RadiativeFluxBC(q) +
               RadiativeBC(T_inf = 300.0) +
               ConvectiveBC(h = 10.0, T_inf = 300.0),
         bottom = AdiabaticBC(),
@@ -116,7 +116,7 @@ end
 
 function _workload_problem(material; L, q, t_end)
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L, _WORKLOAD_CELLS),
+        mesh = uniform_mesh(L, _WORKLOAD_CELLS),
         material = material,
         bc_set = _workload_bcs(q),
         tspan = (0.0, t_end),
@@ -165,7 +165,7 @@ function _workload_dusty(energy)
         0.5*1.2e5*0.3*0.044/(Materials.R_GAS*500.0),
     )
     p=PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 4),
+        mesh = uniform_mesh(0.01, 4),
         material = mat,
         bc_set = bcs,
         T_initial = z->500.0,

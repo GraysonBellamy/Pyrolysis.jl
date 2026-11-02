@@ -103,7 +103,7 @@ end
 # `ξ0`, saved every `save_every` seconds.
 function _vbo_deck(mesh, material, ξ0; flux = 50e3, t_end = 500.0, save_every = 0.5)
     top =
-        RadiativeFluxBC(; flux, absorptivity = 0.96) +
+        RadiativeFluxBC(flux; absorptivity = 0.96) +
         RadiativeBC(ε = 0.96, T_inf = VBO_T_INF) +
         ConvectiveBC(h = 8.2, T_inf = VBO_T_INF)
     bottom = RadiativeBC(ε = 1.0, T_inf = VBO_T_INF)
@@ -148,11 +148,11 @@ function _vbo_problem(
         dz = l_pmma / n_pmma
         n_kw = round(Int, VBO_L_KW / dz)
         n = n_pmma + n_kw
-        mesh = create_uniform_mesh(n * dz, n)
+        mesh = uniform_mesh(n * dz, n)
         z_if = n_kw * dz
     else
         nodes, n_kw = _vbo_nodes(n_pmma, l_pmma, grading)
-        mesh = create_mesh_from_nodes(nodes)
+        mesh = line_mesh(nodes)
         z_if = nodes[n_kw+1]
     end
     ξ0 =
@@ -317,13 +317,11 @@ end
 # accepted state and reads the live cells' temperatures and the surface
 # balances, and the mass ledger. `instrument(cp)` returns a further callback
 # of the set-up problem for an instrumented measurement (`nothing` for none);
-# `min_thickness` and, when given, `located_events` go to the integration,
-# the rest to the setup.
+# `min_thickness` goes to the integration, the rest to the setup.
 function _vbo_recorded_solve(
     problem,
     rec::_VBORecord;
     min_thickness = 1e-6,
-    located_events = nothing,
     instrument = cp -> nothing,
     kwargs...,
 )
@@ -357,8 +355,7 @@ function _vbo_recorded_solve(
     extra = instrument(cp)
     recorder = CallbackSet(reader, _vbo_recorder(observe!, rec))
     callback = extra === nothing ? recorder : CallbackSet(recorder, extra)
-    located = located_events === nothing ? (;) : (; located_events)
-    sol = Pyrolysis.Integration.integrate(cp; callback, min_thickness, located...)
+    sol = Pyrolysis.Integration.integrate(cp; callback, min_thickness)
     A0 = def.setup.reference.cross_section
     vented = sum((sum(e.lost_mass) for e in sol.events); init = 0.0)
     drop = (m_first - m_last) / A0

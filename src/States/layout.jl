@@ -5,9 +5,7 @@
 """
 	EnergyState
 
-Which energy variable the integrator carries per cell. The state mapping
-([`derive!`](@ref)) and the row assembly are the only code that knows which
-one is in use.
+Which energy variable the integrator carries per cell.
 """
 abstract type EnergyState end
 

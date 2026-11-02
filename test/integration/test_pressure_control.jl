@@ -21,7 +21,7 @@ function pressure_fixture(; cells = 3)
     gas=GaseousComponent(:air; M = 0.029, c = 1000.0, k = 0.03)
     mat=Material(name = :sealed_heating, components = (solid, gas))
     PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, cells),
+        mesh = uniform_mesh(0.01, cells),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(1e4), bottom = AdiabaticBC()),
@@ -106,7 +106,7 @@ function compressing_pores()
         depletion_limiter = DepletionLimiter(enabled = false),
     )
     problem=PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 3),
+        mesh = uniform_mesh(0.01, 3),
         material = mat,
         bc_set = BoundaryConditionSet(),
         T_initial = z->T,
@@ -140,7 +140,7 @@ end
             abstol = 1e-12,
         )
         @test completed(tight)
-        @test maximum(abs.(get_pressure(tight)[1, :] ./ exact.(tight.t) .- 1))<1e-7
+        @test maximum(abs.(tight.gas.pressure[1, :] ./ exact.(tight.t) .- 1))<1e-7
         for ptol in (0.1, 0.01)
             sol=solve(
                 problem;
@@ -152,10 +152,10 @@ end
             @test completed(sol)
             @test sol.statistics.pressure_error_evaluations>0
             @test maximum(abs.(sol.T .- 600.0))<1e-6
-            @test get_porosity(sol)[1, end]<0.1
+            @test sol.gas.porosity[1, end]<0.1
             # Local budgets do not bound accumulated global error. This
             # explicit comparison qualifies the controller on this trajectory.
-            @test maximum(abs.(get_pressure(sol) .- get_pressure(tight)))<20ptol
+            @test maximum(abs.(sol.gas.pressure .- tight.gas.pressure))<20ptol
         end
     end
 end

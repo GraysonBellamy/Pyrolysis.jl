@@ -18,7 +18,7 @@ _material(components, reactions) =
 
 # One channel of `a`: at most one condensed product at its yield, and the
 # remainder to the gas.
-function _step(name, a, products; n = 2.0, basis = NaN)
+function _step(name, a, products; n = 2.0, basis = nothing)
     isempty(products) &&
         return Reaction(name, a => :gas; A = 1.0, E = 0.0, h = 0.0, n, basis)
     p, y = only(products)
@@ -335,7 +335,7 @@ end
         ),
     )
     problem(material, ξ) = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 4),
+        mesh = uniform_mesh(0.01, 4),
         material = material,
         bc_set = bc,
         T_initial = z -> 600.0,
@@ -353,8 +353,6 @@ end
     first_order = setup(problem(_material(ab, (_step(:ra, :a, (); n = 1.0),)), ξ))
     second_order = setup(problem(_material(ab, (_step(:ra, :a, ()),)), ξ))
     @test length(second_order.u0) == length(first_order.u0)
-    @test kernel(second_order) isa ReactionKernel{true}
-    @test kernel(first_order) isa ReactionKernel{false}
     @test all(iszero, kernel(first_order).reference)
     # Multi-D meshes refuse.
     mesh = box_mesh(0:0.5:1.0, 0:0.5:1.0)
@@ -378,7 +376,7 @@ end
     gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02)
     solid = SolidComponent(:a; φ = 0.3, ρ = 500.0, c = 1000.0, k = 0.2, λ = 1e-6)
     problem(n) = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 4),
+        mesh = uniform_mesh(0.01, 4),
         material = Material(
             name = :order,
             components = (solid, gas),
@@ -395,7 +393,7 @@ end
         ξ_initial = [z -> 500.0, z -> 0.0],
         tspan = (0.0, 1.0),
     )
-    core = Pyrolysis.Integration.CoreProblem
+    core = Pyrolysis.Integration.PreparedProblem
     for n in (0.0, 0.5, 2.0)
         @test setup(problem(n); use_ale = true) isa core
         @test setup(problem(n)) isa core

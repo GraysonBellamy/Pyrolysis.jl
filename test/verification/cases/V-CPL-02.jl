@@ -63,7 +63,7 @@ function _vcpl02_common(;
         rxn =
             Reaction(:ablate, 1 => 2; A = A, E = E, h = ΔH, T_min = 400.0, gate_width = 1.0)
         mat = Material(name = :VCPL02, components = (solid, gas), reactions = (rxn,))
-        mesh = create_uniform_mesh(L, n_cells)
+        mesh = uniform_mesh(L, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(q), bottom = AdiabaticBC()),
             mass = (

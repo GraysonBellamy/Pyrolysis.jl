@@ -21,7 +21,7 @@ temperature peak (the peak sits at the front face at t → 0⁺ and migrates
 toward the insulated back as t → ∞), which only the coupled problem shows.
 
 Configuration pitfalls encoded below:
-- `RadiativeFluxBC(flux = q₀, absorptivity = 1.0)`: the EXPLICIT
+- `RadiativeFluxBC(q₀, absorptivity = 1.0)`: the EXPLICIT
   absorptivity bypasses the Kirchhoff ε_eff rescaling at volumetric
   injection, so exactly q₀ enters the Beer–Lambert sweep.
 - Under BEER_LAMBERT the incident flux contributes zero to the surface

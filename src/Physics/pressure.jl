@@ -51,7 +51,7 @@ Bulk concentration [kg/m³] of gas component `species` whose partial pressure
 equals `P` in the pore space of composition `ξ` at temperature `T` — the
 single-species inverse of [`ideal_gas_pressure`](@ref):
 
-	ξⱼ = P · Mⱼ · φ / (R · T),  φ = max(1 − skeletal_volume_fraction(ξ, T), 0)
+	ξⱼ = P · Mⱼ · φ / (R · T),  φ = 1 − skeletal_volume_fraction(ξ, T)
 
 Use this to initialize a background air component at ambient pressure in
 gas-bearing problems: a pore space initialized to vacuum
@@ -61,8 +61,8 @@ gas being resisted by ~1 atm of pore air.
 
 `species` is a component index or name. The pore fraction is evaluated from
 the condensed entries of `ξ` (gas entries carry no matrix volume), so passing
-a solids-only initial composition is exact; a skeleton that fills the cell
-leaves no pore space and no gas. Partial pressures of coexisting gas species
+a solids-only initial composition is exact; a skeleton that leaves no pore
+space is refused. Partial pressures of coexisting gas species
 add — this function pressurizes `species` alone to `P`.
 
 # Example

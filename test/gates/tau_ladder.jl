@@ -127,7 +127,7 @@ function restricted_problem(n, s; t_end = 500.0)
     z_if = n_kw * dz
     bc_set = BoundaryConditionSet(
         thermal = (
-            top = RadiativeFluxBC(; flux = s * 50e3, absorptivity = 0.96) +
+            top = RadiativeFluxBC(s * 50e3, absorptivity = 0.96) +
                   ConvectiveBC(h = s * 30.0, T_inf = VBO_T_INF),
             bottom = AdiabaticBC(),
         ),
@@ -138,7 +138,7 @@ function restricted_problem(n, s; t_end = 500.0)
     )
     te = t_end / s
     return PyrolysisProblem(;
-        mesh = create_uniform_mesh((n + n_kw) * dz, n + n_kw),
+        mesh = uniform_mesh((n + n_kw) * dz, n + n_kw),
         material,
         bc_set,
         T_initial = z -> VBO_T0,
@@ -182,7 +182,7 @@ function long_layer_problem(n; t_end = 300.0)
         reactions = (Reaction(:pyrolysis, 1 => 2, A = 1e10, E = 150e3, h = 300e3),),
     )
     thermal = (
-        top = RadiativeFluxBC(flux = 50e3) +
+        top = RadiativeFluxBC(50e3) +
               RadiativeBC(T_inf = 300.0) +
               ConvectiveBC(h = 10.0, T_inf = 300.0),
         bottom = AdiabaticBC(),
@@ -194,7 +194,7 @@ function long_layer_problem(n; t_end = 300.0)
         bottom = ImpermeableBC(),
     )
     return PyrolysisProblem(;
-        mesh = create_uniform_mesh(0.01, n),
+        mesh = uniform_mesh(0.01, n),
         material,
         bc_set = BoundaryConditionSet(; thermal, mass),
         tspan = (0.0, t_end),

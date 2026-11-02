@@ -84,7 +84,7 @@ live cell (the exposed surface, $z=L(t)$), with cross-sectional area $A(t)$. On
 a moving mesh the end nodes and the outermost live node move with the solid
 (the mesh correction vanishes there, §11), so $\partial\Omega$ is a material
 boundary of the condensed phase; on a fixed mesh it is fixed between events.
-(A prescribed mesh velocity, the verification hook `w_override`, moves the
+(A prescribed mesh velocity, the verification hook `PrescribedCorrection`, moves the
 mesh over a solid at rest instead; the faces' relative fluxes then carry
 inventory across $\partial\Omega$, and the ledger counts them with the other
 boundary fluxes.)
@@ -685,7 +685,7 @@ material = Material(
     reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
 )
 problem = PyrolysisProblem(
-    mesh = create_uniform_mesh(3e-3, 12),
+    mesh = uniform_mesh(3e-3, 12),
     material = material,
     bc_set = BoundaryConditionSet(
         thermal = (top = HeatFluxBC(2.8e6), bottom = AdiabaticBC()),

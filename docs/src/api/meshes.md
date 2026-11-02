@@ -14,9 +14,11 @@ properties of the mesh. See the User Guide's
 ## Constructors
 
 ```@docs
-create_uniform_mesh
-create_stretched_mesh
-create_mesh_from_nodes
+uniform_mesh
+stretched_mesh
+line_mesh
+box_mesh
+cell_mesh
 ```
 
 ## Coordinate systems
@@ -34,6 +36,4 @@ MeshTopology
 MeshGeometry
 Meshes.Mesh
 Meshes.geometry!
-Meshes.box_mesh
-Meshes.cell_mesh
 ```

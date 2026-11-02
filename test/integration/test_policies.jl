@@ -50,9 +50,9 @@ function _slab(n; κ = 0.0, radiating = false)
         ),
         depletion_limiter = DepletionLimiter(threshold = 1.0),
     )
-    top = radiating ? RadiativeFluxBC(flux = 3e4) : HeatFluxBC(3e4)
+    top = radiating ? RadiativeFluxBC(3e4) : HeatFluxBC(3e4)
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(0.01, n, 1.15),
+        mesh = stretched_mesh(0.01, n, 1.15),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = top, bottom = DirichletThermalBC(500.0)),
@@ -182,7 +182,7 @@ end
 function _cooling_slab()
     solid = SolidComponent(:solid; ρ = 1000.0, c = 1000.0, k = 1.0)
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(0.001, 1),
+        mesh = uniform_mesh(0.001, 1),
         material = Material(name = :cooling, components = (solid,), reactions = ()),
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(-5e5), bottom = AdiabaticBC()),
@@ -327,7 +327,7 @@ function _uniform_slab(n)
         depletion_limiter = DepletionLimiter(enabled = false),
     )
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(0.02, n, 1.1),
+        mesh = stretched_mesh(0.02, n, 1.1),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(400.0), bottom = DirichletThermalBC(400.0)),
@@ -393,7 +393,7 @@ function _plain_deck()
         reactions = (Reaction(:cure, 1 => 2, A = 1e12, E = 1.6e5, h = 300e3),),
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(5e-3, 8),
+        mesh = uniform_mesh(5e-3, 8),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
@@ -449,11 +449,11 @@ function _rich_deck()
         ),
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 8),
+        mesh = uniform_mesh(0.01, 8),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(flux = 50e3) +
+                top = RadiativeFluxBC(50e3) +
                       RadiativeBC(T_inf = 300.0) +
                       ConvectiveBC(h = 10.0, T_inf = 300.0),
                 bottom = RadiativeBC(ε = 0.9, T_inf = 300.0),
@@ -548,7 +548,7 @@ end
             Integration.solve(
                 problem;
                 use_ale = true,
-                linear_solver,
+                integrator_policy = default_policy(linear_solver),
                 saveat = Float64[],
                 abstol = 1e-8,
                 reltol = 1e-6,
@@ -575,7 +575,7 @@ end
                 problem;
                 use_ale = ale,
                 radiation_model = BEER_LAMBERT,
-                linear_solver,
+                integrator_policy = default_policy(linear_solver),
                 saveat = Float64[],
                 abstol = 1e-8,
                 reltol = 1e-6,
@@ -612,7 +612,7 @@ function _ablating(n)
         reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(3e-3, n),
+        mesh = uniform_mesh(3e-3, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(2.8e6), bottom = AdiabaticBC()),
@@ -717,7 +717,7 @@ _klu(cacheval::Integration.StructuredKLUCache) = cacheval.inner.cacheval
         sol = Integration.solve(
             problem;
             use_ale = ale,
-            linear_solver,
+            integrator_policy = default_policy(linear_solver),
             callback = probe,
             # Adaptive step times can differ by roundoff across factorizations.
             # Compare the trajectories at common physical times.
@@ -727,7 +727,7 @@ _klu(cacheval::Integration.StructuredKLUCache) = cacheval.inner.cacheval
         )
         return sol, length(unique(factorizations)), last[]
     end
-    structured, n_structured, c = factored(nothing)
+    structured, n_structured, c = factored(default_linear_solver())
     plain, _, c_plain = factored(KLUFactorization())
     umfpack, _, c_umfpack = factored(UMFPACKFactorization())
     @test structured.retcode === :Success

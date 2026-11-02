@@ -19,7 +19,7 @@ function _cross_section_problem(; lateral::Bool, tspan = (0.0, 0.02))
         lateral_shrinkage_law = lateral ? (χ -> 1.0 - 0.2 * χ) : nothing,
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 5),
+        mesh = uniform_mesh(0.01, 5),
         material = material,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(1e4), bottom = AdiabaticBC()),
@@ -91,7 +91,6 @@ end
         for f in (
             () -> Pyrolysis.Integration.setup(problem; use_ale = false),
             () -> Pyrolysis.Integration.solve(problem),
-            () -> Pyrolysis.Integration.solve(problem; validate = false),
         )
             msg = message(f)
             @test occursin("lateral_shrinkage_law", msg)
@@ -104,7 +103,7 @@ end
 
     @testset "a variable-cross-section solve records a finite area history" begin
         problem = _cross_section_problem(lateral = true)
-        sol = Pyrolysis.Integration.solve(problem; use_ale = true, validate = false)
+        sol = Pyrolysis.Integration.solve(problem; use_ale = true)
         @test sol.retcode == :Success
         @test all(isfinite, sol.extras.cross_section_area_history)
     end

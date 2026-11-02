@@ -7,69 +7,30 @@ Problem validation utilities.
 # ============================================================================
 
 """
-	validate_problem(problem::PyrolysisProblem; strict::Bool=false)
+	validate_problem(problem::PyrolysisProblem) -> true
 
-Validate a PyrolysisProblem for consistency and correctness.
+Validate a PyrolysisProblem for consistency, as `solve` does first. Throws
+an error listing every check that failed:
 
-# Arguments
-- `problem`: The problem to validate
-- `strict=false`: If true, perform additional expensive checks
-
-# Checks Performed
-1. Mesh is properly initialized
-2. Material is valid
+1. The mesh's node positions are finite and match its nodes
+2. Every reaction names components the material has
 3. Boundary conditions are defined for all boundaries
-4. Initial conditions are physically reasonable
-5. Time span is valid
-6. Component count consistency
-7. All gas-bearing problems start with physical pore volume and complete boundary data
+4. The time span and the first step are valid
+5. There is one initial concentration per component
+6. Gas-bearing problems start with physical pore volume and complete boundary data
 
 Setup additionally checks the pore-volume uncertainty margin and matrix support.
-
-# Returns
-`true` if all checks pass, throws an error with details otherwise.
-
-# Example
-```julia
-problem = PyrolysisProblem(...)
-validate_problem(problem)  # Throws if invalid
-```
 """
-function validate_problem(problem::PyrolysisProblem; strict::Bool = false)
+function validate_problem(problem::PyrolysisProblem)
     errors = String[]
-
-    # Validate mesh
-    mesh_errors = validate_mesh(problem.mesh)
-    append!(errors, mesh_errors)
-
-    # Validate material
-    mat_errors = validate_material_for_problem(problem.material)
-    append!(errors, mat_errors)
-
-    # Validate boundary conditions
-    bc_errors = validate_boundary_conditions(problem)
-    append!(errors, bc_errors)
-
-    # Validate time span
-    tspan_errors = validate_tspan(problem.tspan, problem.dt_initial)
-    append!(errors, tspan_errors)
-
-    # Validate initial conditions match component count
-    ic_errors = validate_initial_condition_funcs(problem)
-    append!(errors, ic_errors)
-
+    append!(errors, validate_mesh(problem.mesh))
+    append!(errors, validate_material_for_problem(problem.material))
+    append!(errors, validate_boundary_conditions(problem))
+    append!(errors, validate_tspan(problem.tspan, problem.dt_initial))
+    append!(errors, validate_initial_condition_funcs(problem))
     # Pore reconstruction depends on valid geometry and initial fields.
-    # Check every gas-bearing material once those prerequisites are valid.
     isempty(errors) && append!(errors, validate_initial_pore_state(problem))
 
-
-    # Additional strict checks
-    if strict && isempty(errors)
-        strict_errors = validate_strict(problem)
-        append!(errors, strict_errors)
-    end
-
-    # Report errors
     if !isempty(errors)
         error_msg = "Problem validation failed with $(length(errors)) error(s):\n"
         for (i, err) in enumerate(errors)
@@ -77,7 +38,6 @@ function validate_problem(problem::PyrolysisProblem; strict::Bool = false)
         end
         error(error_msg)
     end
-
     return true
 end
 
@@ -90,7 +50,7 @@ end
 
 Validate mesh structure.
 """
-function validate_mesh(mesh::Meshes.Mesh)
+function validate_mesh(mesh)
     errors = String[]
     topo = mesh.topology
     if length(mesh.positions) != Meshes.n_nodes(topo)
@@ -121,17 +81,11 @@ function validate_material_for_problem(material)
 
     # Check reactions reference valid components
     for (i, rxn) in enumerate(material.reactions)
-        length(rxn.reactants) == 1 || push!(
+        idx = rxn.reactant
+        (idx < 1 || idx > NC) && push!(
             errors,
-            "Reaction $i ($(rxn.name)) requires exactly one reactant; " *
-            "additional reactant mass stoichiometries are not supported",
+            "Reaction $i ($(rxn.name)): reactant index $idx out of range [1, $NC]",
         )
-        for (idx, _order) in rxn.reactants
-            (idx < 1 || idx > NC) && push!(
-                errors,
-                "Reaction $i ($(rxn.name)): reactant index $idx out of range [1, $NC]",
-            )
-        end
         for (idx, _ν) in rxn.products
             (idx < 1 || idx > NC) && push!(
                 errors,
@@ -166,7 +120,7 @@ end
 
 # The mesh's boundary tags: `:top` (the exposed surface) and `:bottom` among
 # them, and a thermal condition for each.
-function _validate_boundaries!(errors, mesh::Meshes.Mesh, bc_set)
+function _validate_boundaries!(errors, mesh, bc_set)
     tags = Meshes.boundary_tags(mesh.topology)
     missing = setdiff([:top, :bottom], tags)
     isempty(missing) || push!(
@@ -258,72 +212,4 @@ function validate_initial_pore_state(problem)
         )
     end
     return errors
-end
-
-"""
-	validate_strict(problem) -> Vector{String}
-
-Perform additional expensive validation checks.
-"""
-function validate_strict(problem)
-    errors = String[]
-
-    mesh = problem.mesh
-    material = problem.material
-
-    # Check reaction stoichiometry mass balance
-    for (i, rxn) in enumerate(material.reactions)
-        if !verify_stoichiometry(rxn; tol = 1e-10)
-            err = mass_balance_error(rxn)
-            push!(
-                errors,
-                isfinite(err) ?
-                "Reaction $i ($(rxn.name)) violates mass balance: |residual|=$err" :
-                "Reaction $i ($(rxn.name)) has unverifiable mass stoichiometry",
-            )
-        end
-    end
-
-    # Test initial condition functions are callable at the first cell centre
-    x_test = first(cell_centers(mesh))
-    try
-        problem.T_initial(x_test)
-    catch e
-        push!(errors, "T_initial function failed at $x_test: $e")
-    end
-
-    for (j, ξ_func) in enumerate(problem.ξ_initial)
-        try
-            ξ_func(x_test)
-        catch e
-            push!(errors, "ξ_initial[$j] function failed at $x_test: $e")
-        end
-    end
-
-    # Check cell volumes are positive
-    for (i, vol) in enumerate(cell_volumes(mesh))
-        if vol <= 0
-            push!(errors, "Cell $i has non-positive volume: $vol")
-        end
-    end
-
-    return errors
-end
-
-# ============================================================================
-# Quick Validation Helpers
-# ============================================================================
-
-"""
-	is_valid_problem(problem::PyrolysisProblem) -> Bool
-
-Quick check if a problem is valid (doesn't throw).
-"""
-function is_valid_problem(problem::PyrolysisProblem)
-    try
-        validate_problem(problem; strict = false)
-        return true
-    catch
-        return false
-    end
 end

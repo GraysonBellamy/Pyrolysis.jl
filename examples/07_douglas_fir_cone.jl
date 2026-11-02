@@ -505,7 +505,7 @@ moisture_content_db = 0.06  # 6% moisture content on dry basis
 
 # The initial temperature and concentrations (DF + moisture + pore air, rest
 # zero) come from the problem's T_initial and ξ_initial below.
-mesh = create_uniform_mesh(
+mesh = uniform_mesh(
     sample_thickness,      # domain length [m]
     n_cells,               # number of cells
 )
@@ -514,7 +514,9 @@ println("Mesh created:")
 println("  - Thickness: $(sample_thickness*1000) mm")
 println("  - Number of cells: $n_cells")
 println("  - Cell size: $(sample_thickness/n_cells*1000) mm")
-println("  - Initial dry wood: $(round(ρ_DF_initial, digits=1)) kg/m³ (oven-dry density $ρ_DF_oven_dry kg/m³)")
+println(
+    "  - Initial dry wood: $(round(ρ_DF_initial, digits=1)) kg/m³ (oven-dry density $ρ_DF_oven_dry kg/m³)",
+)
 println(
     "  - Initial moisture: $(round(ρ_moisture_initial, digits=1)) kg/m³ ($(round(moisture_content_db*100, digits=1))% dry basis)",
 )
@@ -538,16 +540,16 @@ println(
 # ============================================================================
 
 # Top surface (:top): exposed surface
-# - External radiant heat flux with Beer-Lambert in-depth absorption
+# - External radiant heat flux, absorbed at the surface
 # - Re-radiation losses (surface radiates to surroundings)
 # - Convective losses (natural + forced convection)
-# Note: RadiativeFluxBC and RadiativeBC now use the effective emissivity from material
-# properties by default (ε = nothing). This automatically tracks the surface emissivity
+# Note: RadiativeFluxBC and RadiativeBC use the effective emissivity from material
+# properties by default (ε = nothing), which tracks the surface emissivity
 # as the material decomposes (e.g., virgin wood → char transition). To override with
 # a fixed value, pass ε = 0.9 or absorptivity = 0.9 explicitly.
 # Note: radiation_model=SURFACE_ABSORPTION controls surface vs in-depth absorption
 top_thermal_bc =
-    RadiativeFluxBC(flux = q_external) +                      # Cone heater (uses material ε)
+    RadiativeFluxBC(q_external) +                      # Cone heater (uses material ε)
     RadiativeBC(T_inf = 300) +                                # Re-radiation losses (uses material ε)
     ConvectiveBC(h = h_conv, T_inf = 300)                     # Convective losses
 
@@ -561,8 +563,6 @@ top_mass_bc = AmbientGasBC(
 )
 
 # Bottom surface (:bottom): back face
-# bottom_thermal_bc = RadiativeBC(T_inf = 300) +                                # Re-radiation losses (uses material ε)
-# 					ConvectiveBC(h = h_conv, T_inf = 300)                     # Convective losses
 bottom_thermal_bc = AdiabaticBC()    # Adiabatic (no heat loss through substrate)
 bottom_mass_bc = ImpermeableBC()   # Impermeable (no gas escape through substrate)
 
@@ -660,9 +660,6 @@ solution = solve(
     min_thickness = 0.5e-3,                # Stop when sample is < 0.5 mm
 )
 
-println("Solve() returned at $(time())!")
-flush(stdout)
-
 println("\nSolution completed!")
 println("  - Return code: $(solution.retcode)")
 println("  - Solve time: $(round(solution.solve_time, digits=2)) s")
@@ -731,7 +728,7 @@ println("  - Final conductivity: $(round(k_eff_front[end], digits=4)) W/(m·K)")
 # Compute Component-Specific Gas Generation Rates (Post-Processing)
 # ============================================================================
 #
-# The solution now provides:
+# The solution provides:
 # - solution.extras.surface_mass_flux: Total mass leaving at surface (computed during solve)
 # - solution.extras.gas_generation_rate: Total volumetric gas production (computed during solve)
 #
@@ -965,7 +962,7 @@ for t in profile_times
             continue
         end
         # Cell centres of the moving mesh at this time
-        z_coords = get_cell_positions(solution; at = idx) .* 1000
+        z_coords = solution.cell_centers[:, idx] .* 1000
         plot!(
             z_coords,
             T_profile,
@@ -1047,7 +1044,7 @@ println("Component evolution saved to: douglas_fir_component_evolution.png")
 # Compute Additional Diagnostics (Beyond Solver-Computed Quantities)
 # ============================================================================
 #
-# The solver now provides these quantities computed during the solve:
+# The solver provides these quantities computed during the solve:
 # - solution.extras.surface_mass_flux: Total MLR (already extracted as `mlr`)
 # - solution.extras.surface_heat_flux_absorbed: Absorbed radiation (already `q_absorbed`)
 # - solution.extras.surface_heat_flux_reradiation: Re-radiation loss (already `q_reradiation`)
@@ -1187,7 +1184,7 @@ for i = 1:n_times
         # === Temperature at Specific Depths ===
         # Depth measured from surface (z=L): the cell whose centre is nearest
         # to z = 0.75 L (25% depth), 0.50 L (midplane) and 0.25 L (75% depth)
-        centres = get_cell_positions(solution; at = i)
+        centres = solution.cell_centers[:, i]
         nearest(z) = argmin(abs.(replace(centres, NaN => Inf) .- z))
         idx_25pct = nearest(0.75 * thickness_values[i])
         idx_50pct = nearest(0.50 * thickness_values[i])
@@ -1463,7 +1460,6 @@ println("Comprehensive CSV output saved to: $(results_csv)")
 println(
     "  - Total columns: 59 (6 basic + 3 temps + 7 solids + 6 mass + 12 gas + 5 props + 6 heat + 3 energy + 7 rxn + 6 gen)",
 )
-println("  - Note: mlr and heat flux components now from solver (more accurate)")
 
 # ============================================================================
 # Spatial Data Output (for comparison with ThermaKin)
@@ -1537,7 +1533,7 @@ open(spatial_csv, "w") do io
         n_cells_i = length(T_profile)
 
         nodes = get_profile(solution, :z, idx)
-        centers = get_cell_positions(solution; at = idx)
+        centers = solution.cell_centers[:, idx]
         live_front = maximum(filter(isfinite, nodes))
 
         for cell_idx = 1:n_cells_i

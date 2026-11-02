@@ -2,7 +2,7 @@ using Test
 using Logging
 using ForwardDiff
 using Pyrolysis
-using Pyrolysis.Materials: BEER_LAMBERT, SURFACE_ABSORPTION, NO_RADIATION
+using Pyrolysis.Materials: BEER_LAMBERT, SURFACE_ABSORPTION
 using Pyrolysis.Materials: STEFAN_BOLTZMANN, T_PROPERTY_MAX, R_GAS
 using Pyrolysis.Physics: TransportFailure
 using Pyrolysis.BoundaryConditions: BoundaryState, solve_boundary_temperature!
@@ -30,7 +30,7 @@ function _bc_material(; α::Real = 0.0)
 end
 
 _bc_problem(bc; n = 6, tspan = (0.0, 1.0), α = 0.0, kwargs...) = PyrolysisProblem(;
-    mesh = create_uniform_mesh(0.01, n),
+    mesh = uniform_mesh(0.01, n),
     material = _bc_material(; α),
     bc_set = bc,
     tspan = tspan,
@@ -40,7 +40,7 @@ _bc_problem(bc; n = 6, tspan = (0.0, 1.0), α = 0.0, kwargs...) = PyrolysisProbl
 @testset "the residual carries no surface-balance state between evaluations" begin
     bc = BoundaryConditionSet(
         thermal = (
-            top = RadiativeFluxBC(flux = 50e3) +
+            top = RadiativeFluxBC(50e3) +
                   RadiativeBC(T_inf = 300.0) +
                   ConvectiveBC(h = 10.0, T_inf = 300.0),
             bottom = AdiabaticBC(),
@@ -100,7 +100,7 @@ end
     end
     # An incident flux the hottest admissible surface cannot reradiate: the
     # balance has no root in the property bracket.
-    hot = RadiativeFluxBC(flux = 1e7) + RadiativeBC(T_inf = 300.0)
+    hot = RadiativeFluxBC(1e7) + RadiativeBC(T_inf = 300.0)
     q_max = 0.9 * 1e7 - 0.9 * STEFAN_BOLTZMANN * (T_PROPERTY_MAX^4 - 300.0^4)
     r = @test_logs min_level = Logging.Warn face(hot, 2500.0)
     @test r.T_s ≈ 2500 + q_max * d / k rtol = 1e-10
@@ -226,7 +226,7 @@ end
 
 @testset "in-depth radiation enters through the top faces only" begin
     bc = BoundaryConditionSet(
-        thermal = (top = HeatFluxBC(0.0), bottom = RadiativeFluxBC(flux = 10e3)),
+        thermal = (top = HeatFluxBC(0.0), bottom = RadiativeFluxBC(10e3)),
     )
     problem = _bc_problem(bc; α = 200.0)
     @test_throws ArgumentError setup(problem; radiation_model = BEER_LAMBERT)
@@ -237,11 +237,11 @@ end
 @testset "surface absorption is the surface balance of the incident flux" begin
     bc = BoundaryConditionSet(
         thermal = (
-            top = RadiativeFluxBC(flux = 30e3) + ConvectiveBC(h = 10.0, T_inf = 300.0),
+            top = RadiativeFluxBC(30e3) + ConvectiveBC(h = 10.0, T_inf = 300.0),
             bottom = AdiabaticBC(),
         ),
     )
-    a = setup(_bc_problem(bc); radiation_model = NO_RADIATION)
+    a = setup(_bc_problem(bc); radiation_model = SURFACE_ABSORPTION)
     b = setup(_bc_problem(bc); radiation_model = SURFACE_ABSORPTION)
     du_a, du_b = zeros(length(a.u0)), zeros(length(b.u0))
     residual!(du_a, a.u0, a.def, 0.0, a.ws)
@@ -251,7 +251,7 @@ end
     # absorbed in depth instead: the same total energy rate when nothing is
     # transmitted and nothing else depends on the surface temperature.
     alone = BoundaryConditionSet(
-        thermal = (top = RadiativeFluxBC(flux = 30e3), bottom = AdiabaticBC()),
+        thermal = (top = RadiativeFluxBC(30e3), bottom = AdiabaticBC()),
     )
     c = setup(_bc_problem(alone; α = 1e3); radiation_model = BEER_LAMBERT)
     s = setup(_bc_problem(alone; α = 1e3); radiation_model = SURFACE_ABSORPTION)
@@ -267,13 +267,13 @@ end
 @testset "a time-varying incident flux is sampled at every evaluation" begin
     bc_of(flux) = BoundaryConditionSet(
         thermal = (
-            top = RadiativeFluxBC(flux = flux) + ConvectiveBC(h = 10.0, T_inf = 300.0),
+            top = RadiativeFluxBC(flux) + ConvectiveBC(h = 10.0, T_inf = 300.0),
             bottom = AdiabaticBC(),
         ),
     )
     q0 = 30e3
     prob(flux) = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.005, 8),
+        mesh = uniform_mesh(0.005, 8),
         material = _bc_material(α = 500.0),
         bc_set = bc_of(flux),
         tspan = (0.0, 1.0),
@@ -314,7 +314,7 @@ end
             ),
         )
         problem = PyrolysisProblem(
-            mesh = create_uniform_mesh(0.005, 8),
+            mesh = uniform_mesh(0.005, 8),
             material = mat,
             bc_set = bc,
             T_initial = z -> 600.0,

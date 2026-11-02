@@ -192,10 +192,19 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
                 @test dq ≈ -4 * ε * σ * T_s^3 rtol=1e-12
             end
             # A smaller view factor removes irradiation, so the surface is colder.
-            T_full = _solve_bt(T_cell, k_eff, Δz_half, RadiativeBC(ε = ε, T_inf = T_inf), 0.0, ε).T_surface
-            T_part = _solve_bt(T_cell, k_eff, Δz_half, RadiativeBC(ε = ε, T_inf = T_inf, F = 0.4), 0.0, ε).T_surface
+            T_full =
+                _solve_bt(T_cell, k_eff, Δz_half, RadiativeBC(ε = ε, T_inf = T_inf), 0.0, ε).T_surface
+            T_part = _solve_bt(
+                T_cell,
+                k_eff,
+                Δz_half,
+                RadiativeBC(ε = ε, T_inf = T_inf, F = 0.4),
+                0.0,
+                ε,
+            ).T_surface
             @test T_part < T_full
-            @test T_full - T_part ≈ 0.6 * ε * σ * T_inf^4 / (k_eff / Δz_half + 4 * ε * σ * T_full^3) rtol=5e-2
+            @test T_full - T_part ≈
+                  0.6 * ε * σ * T_inf^4 / (k_eff / Δz_half + 4 * ε * σ * T_full^3) rtol=5e-2
         end
 
         @testset "Combined BC (flux + radiative + convective)" begin
@@ -371,11 +380,11 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
         @testset "Weak conduction: $(name), k/Δz = $(kd) W/(m²·K)" for (name, bc) in (
                 (
                     "50 kW/m² absorbed and re-radiated",
-                    RadiativeFluxBC(flux = 5e4) + RadiativeBC(T_inf = 300.0),
+                    RadiativeFluxBC(5e4) + RadiativeBC(T_inf = 300.0),
                 ),
                 (
                     "1 MW/m² absorbed and re-radiated",
-                    RadiativeFluxBC(flux = 1e6) + RadiativeBC(T_inf = 300.0),
+                    RadiativeFluxBC(1e6) + RadiativeBC(T_inf = 300.0),
                 ),
                 (
                     "radiative and convective cooling",
@@ -427,11 +436,11 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
         @testset "A radiatively heated poor conductor solves" begin
             s = SolidComponent(:s, ρ = 100.0, c = 1000.0, k = 1e-5, ε = 0.9)
             problem = PyrolysisProblem(
-                mesh = create_uniform_mesh(1.0, 4),
+                mesh = uniform_mesh(1.0, 4),
                 material = Material(name = :poor, components = (s,), reactions = ()),
                 bc_set = BoundaryConditionSet(
                     thermal = (
-                        top = RadiativeFluxBC(flux = 5e4) + RadiativeBC(T_inf = 300.0),
+                        top = RadiativeFluxBC(5e4) + RadiativeBC(T_inf = 300.0),
                         bottom = AdiabaticBC(),
                     ),
                 ),
@@ -454,7 +463,7 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
     # ========================================================================
     @testset "RadiativeFluxBC with Radiation Models" begin
         # RadiativeFluxBC applies its absorbed flux at the face under the
-        # surface models (NO_RADIATION, SURFACE_ABSORPTION) and none under
+        # surface models (SURFACE_ABSORPTION) and none under
         # BEER_LAMBERT, whose in-depth radiation kernel absorbs it in the
         # cells.
 
@@ -465,19 +474,9 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
 
         bc = RadiativeFluxBC(I_incident)
 
-        @testset "NO_RADIATION: flux applied at boundary" begin
-            # With NO_RADIATION, RadiativeFluxBC flux is treated as boundary heat flux
-            # The absorbed flux is I_incident * ε_eff (Kirchhoff's law: α = ε)
-            q, dq = evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff, NO_RADIATION)
-
-            @test q ≈ I_incident * ε_eff  # Absorbed flux = incident × absorptivity
-            @test dq ≈ 0.0                # Flux doesn't depend on T_s
-        end
-
         @testset "SURFACE_ABSORPTION: flux applied at boundary" begin
-            # With SURFACE_ABSORPTION, radiation is absorbed at the boundary surface.
-            # This ensures T_surface is physically correct (hotter than T_cell when net heating).
-            # Same behavior as NO_RADIATION for boundary temperature purposes.
+            # With SURFACE_ABSORPTION, RadiativeFluxBC flux is treated as boundary heat flux
+            # The absorbed flux is I_incident * ε_eff (Kirchhoff's law: α = ε)
             q, dq = evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff, SURFACE_ABSORPTION)
 
             @test q ≈ I_incident * ε_eff  # Absorbed flux = incident × absorptivity
@@ -497,22 +496,18 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
             # When absorptivity is explicitly specified in RadiativeFluxBC,
             # it overrides the effective emissivity
             α_explicit = 0.7
-            bc_with_α = RadiativeFluxBC(flux = I_incident, absorptivity = α_explicit)
+            bc_with_α = RadiativeFluxBC(I_incident, absorptivity = α_explicit)
 
-            # NO_RADIATION uses explicit absorptivity
-            q, dq = evaluate_bc_flux_and_derivative(bc_with_α, T_s, t, ε_eff, NO_RADIATION)
-            @test q ≈ I_incident * α_explicit  # Uses explicit α, not ε_eff
-            @test dq ≈ 0.0
-
-            # SURFACE_ABSORPTION also uses explicit absorptivity (same as NO_RADIATION)
-            q_surf, _ = evaluate_bc_flux_and_derivative(
+            # SURFACE_ABSORPTION uses explicit absorptivity
+            q, dq = evaluate_bc_flux_and_derivative(
                 bc_with_α,
                 T_s,
                 t,
                 ε_eff,
                 SURFACE_ABSORPTION,
             )
-            @test q_surf ≈ I_incident * α_explicit
+            @test q ≈ I_incident * α_explicit  # Uses explicit α, not ε_eff
+            @test dq ≈ 0.0
 
             # The volumetric model returns zero
             q_bl, _ =
@@ -530,21 +525,7 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
                 RadiativeFluxBC(I_incident) + ConvectiveBC(h = h_conv, T_inf = T_inf)
             face = _bc_face(T_s)
 
-            # For NO_RADIATION: both components contribute
-            q_no_rad, dq_no_rad = evaluate_bc_flux_and_derivative(
-                bc_combined,
-                T_s,
-                t,
-                ε_eff,
-                NO_RADIATION,
-                face,
-            )
-            q_rad_expected = I_incident * ε_eff
-            q_conv_expected = h_conv * (T_inf - T_s)
-            @test q_no_rad ≈ q_rad_expected + q_conv_expected
-            @test dq_no_rad ≈ -h_conv  # Only convective contributes to derivative
-
-            # For SURFACE_ABSORPTION: both components also contribute (same as NO_RADIATION)
+            # For SURFACE_ABSORPTION: both components contribute
             q_surf, dq_surf = evaluate_bc_flux_and_derivative(
                 bc_combined,
                 T_s,
@@ -553,8 +534,10 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
                 SURFACE_ABSORPTION,
                 face,
             )
+            q_rad_expected = I_incident * ε_eff
+            q_conv_expected = h_conv * (T_inf - T_s)
             @test q_surf ≈ q_rad_expected + q_conv_expected
-            @test dq_surf ≈ -h_conv
+            @test dq_surf ≈ -h_conv  # Only convective contributes to derivative
 
             # For BEER_LAMBERT: only convective contributes (radiation handled volumetrically)
             q_bl, dq_bl = evaluate_bc_flux_and_derivative(
@@ -578,7 +561,7 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
                 T_s,
                 t,
                 ε_eff,
-                NO_RADIATION;
+                SURFACE_ABSORPTION;
                 a_eff = a_eff,
             )
             @test q ≈ I_incident * a_eff
@@ -588,13 +571,13 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
             @test q_default ≈ I_incident * ε_eff
 
             # An explicit BC absorptivity ignores a_eff.
-            bc_α = RadiativeFluxBC(flux = I_incident, absorptivity = 0.5)
+            bc_α = RadiativeFluxBC(I_incident, absorptivity = 0.5)
             q_α, _ = evaluate_bc_flux_and_derivative(
                 bc_α,
                 T_s,
                 t,
                 ε_eff,
-                NO_RADIATION;
+                SURFACE_ABSORPTION;
                 a_eff = a_eff,
             )
             @test q_α ≈ 0.5 * I_incident
@@ -606,7 +589,7 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
                 T_s,
                 t,
                 ε_eff,
-                NO_RADIATION;
+                SURFACE_ABSORPTION;
                 a_eff = a_eff,
             )
             @test q_emit ≈ ε_eff * STEFAN_BOLTZMANN * (300.0^4 - T_s^4)
@@ -623,7 +606,7 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
                 T_s,
                 t,
                 ε_eff,
-                NO_RADIATION,
+                SURFACE_ABSORPTION,
                 Pyrolysis.BoundaryConditions.BlowingFace((0.0, 0.0), T_s, mat_face);
                 a_eff = a_eff,
             )
@@ -666,7 +649,7 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
                 T_s,
                 0.0,
                 0.9,
-                NO_RADIATION,
+                SURFACE_ABSORPTION,
                 _bc_face(T_s),
             )
 
@@ -707,7 +690,7 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
             mat = Material(name = :TestSolid, components = (solid,), reactions = ())
             times = output_times === nothing ? (;) : (; output_times)
             return PyrolysisProblem(;
-                mesh = create_uniform_mesh(0.005, 20),
+                mesh = uniform_mesh(0.005, 20),
                 material = mat,
                 bc_set = BoundaryConditionSet(
                     thermal = (top = top, bottom = AdiabaticBC()),
@@ -780,7 +763,7 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
 end  # main testset
 
 # Per-component surface absorptivity through the surface Newton solve. A single
-# `RadiativeFluxBC(flux = q)` with `absorptivity = nothing` absorbs a_eff·q and
+# `RadiativeFluxBC(q)` with `absorptivity = nothing` absorbs a_eff·q and
 # emits at ε_eff. When every component's absorptivity lies on one line with its
 # emissivity, a_j = a + b·ε_j, the mixture is a_eff = a + b·ε_eff and the single
 # BC is interchangeable with the two-piece split `RadiativeFluxBC(b·q)`
@@ -826,12 +809,12 @@ end  # main testset
     T_inf, h = 300.0, 10.0
     J0 = ntuple(_ -> 0.0, Val(3))
     single =
-        RadiativeFluxBC(flux = q_inc) +
+        RadiativeFluxBC(q_inc) +
         RadiativeBC(T_inf = T_inf) +
         ConvectiveBC(h = h, T_inf = T_inf)
     split =
-        RadiativeFluxBC(flux = b_line * q_inc) +
-        RadiativeFluxBC(flux = a_line * q_inc, absorptivity = 1.0) +
+        RadiativeFluxBC(b_line * q_inc) +
+        RadiativeFluxBC(a_line * q_inc, absorptivity = 1.0) +
         RadiativeBC(T_inf = T_inf) +
         ConvectiveBC(h = h, T_inf = T_inf)
 
@@ -944,17 +927,16 @@ end
 # for a combined and a standalone condition under every radiation model.
 @testset "net is the applied face flux, per BC and per model" begin
     combined =
-        RadiativeFluxBC(flux = 50e3) +
+        RadiativeFluxBC(50e3) +
         RadiativeBC(T_inf = 300.0) +
         ConvectiveBC(h = 10.0, T_inf = 300.0)
-    standalone = RadiativeFluxBC(flux = 50e3)
+    standalone = RadiativeFluxBC(50e3)
     ε_eff = 0.9
     T_s = 700.0
     t = 0.0
     face = _bc_face(T_s)
 
-    for bc in (combined, standalone),
-        model in (NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT)
+    for bc in (combined, standalone), model in (SURFACE_ABSORPTION, BEER_LAMBERT)
 
         hf = compute_boundary_heat_fluxes(bc, T_s, t, ε_eff, model, face)
         q_applied, _ = evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff, model, face)

@@ -32,7 +32,7 @@ pmma = Material(
 )
 
 # Create mesh and solve
-mesh = create_uniform_mesh(0.01, 100)  # 1 cm, 100 cells
+mesh = uniform_mesh(0.01, 100)  # 1 cm, 100 cells
 bcs = BoundaryConditionSet(
 	thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()),
 	mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
@@ -105,24 +105,15 @@ include("Integration/Integration.jl")
 # users (`using Pyrolysis.Internal`). Must load after every other submodule.
 include("Internal.jl")
 
-using .Meshes: create_uniform_mesh, create_stretched_mesh, create_mesh_from_nodes
+using .Meshes: uniform_mesh, stretched_mesh, line_mesh, box_mesh, cell_mesh
 using .Meshes: Planar, Cylindrical, Spherical, MeshTopology, MeshGeometry
 using .Closures: NoCorrection, EquidistributionCorrection, ActivationTime
+using .Closures: PrescribedCorrection
 using .Outputs: PyrolysisSolution, SolverStatistics
-using .Outputs:
-    GasDiagnostics,
-    get_porosity,
-    get_pressure,
-    get_partial_pressures,
-    get_intrinsic_gas_densities,
-    get_gas_composition,
-    get_boundary_exchange,
-    gas_species_audit
-using .Outputs: get_times, get_temperatures, get_concentrations, get_gas_generation_rate
-using .Outputs: n_timesteps, succeeded, completed
-using .Outputs: get_profile, get_cell_positions, interpolate_solution, interior_events
+using .Outputs: GasDiagnostics, get_gas_composition, get_boundary_exchange
+using .Outputs: gas_species_audit, succeeded, completed, get_profile, interior_events
 using .Outputs: ConservationRecorder, conservation_audit
-using .Integration: solve, setup, integrate, CoreProblem, parameter_sweep
+using .Integration: solve, setup, integrate, PreparedProblem, parameter_sweep
 using .Integration: default_policy, rodas5p_policy, fbdf_policy, kencarp4_policy
 using .Integration: StructuredKLU
 
@@ -165,35 +156,27 @@ export BoundaryConditionSet
 export background_gas_concentration
 
 # Radiation models
-export RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT
+export RadiationModel, SURFACE_ABSORPTION, BEER_LAMBERT
 
 # The mesh
-export create_uniform_mesh, create_stretched_mesh, create_mesh_from_nodes
+export uniform_mesh, stretched_mesh, line_mesh, box_mesh, cell_mesh
 export Planar, Cylindrical, Spherical
 export MeshTopology, MeshGeometry
 
 # Problem & solve
 export PyrolysisProblem, PyrolysisSolution, SolverStatistics
-export solve, setup, integrate, CoreProblem
+export validate_problem
+export solve, setup, integrate, PreparedProblem
 export parameter_sweep
 
 # The mesh correction and the integrator
-export NoCorrection, EquidistributionCorrection, ActivationTime
+export NoCorrection, EquidistributionCorrection, ActivationTime, PrescribedCorrection
 export default_policy, rodas5p_policy, fbdf_policy, kencarp4_policy
 export StructuredKLU
 
 # The solution's accessors and the conservation audit
-export GasDiagnostics,
-    get_porosity,
-    get_pressure,
-    get_partial_pressures,
-    get_intrinsic_gas_densities,
-    get_gas_composition,
-    get_boundary_exchange,
-    gas_species_audit
-export get_times, get_temperatures, get_concentrations, get_gas_generation_rate
-export n_timesteps, succeeded, completed
-export get_profile, get_cell_positions, interpolate_solution, interior_events
+export GasDiagnostics, get_gas_composition, get_boundary_exchange, gas_species_audit
+export succeeded, completed, get_profile, interior_events
 export ConservationRecorder, conservation_audit
 
 # ============================================================================

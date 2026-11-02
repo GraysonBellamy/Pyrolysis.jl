@@ -7,8 +7,8 @@ read.
 The integrator carries per-cell component masses, an energy state (the cell
 temperature, or the enthalpy inventory behind the same two functions), and on
 a moving mesh the node positions and velocities, with the face intensities and
-cross-section scalars where the physics needs them. [`derive!`](@ref) is the
-only reader of the raw state: it maps the masses and node positions to
+cross-section scalars where the physics needs them. [`derive!`](@ref) maps the
+masses and node positions to
 volumes and concentrations, the energy state to temperatures, and evaluates
 the cell properties, every trial-state quantity through a smooth guard.
 """
@@ -20,7 +20,7 @@ using ForwardDiff
 using ..Materials
 using ..Materials:
     ConstantProperty, LinearProperty, PolynomialProperty, TableProperty, T_REF
-using ..Properties: effective_conductivity, mixture_emissivity, mixture_absorptivity
+using ..Properties: effective_conductivity, mixture_emissivity, mixture_absorptivity, primal
 using ..Properties: effective_gas_transfer, effective_permeability, skeletal_volume_fraction
 using ..Properties: MU_FLOOR, effective_absorption
 using ..Physics: ideal_gas_pressure

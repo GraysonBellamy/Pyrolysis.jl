@@ -66,8 +66,7 @@ function _wood()
 end
 
 _column(mat; top, stretch = nothing) = PyrolysisProblem(
-    mesh = stretch === nothing ? create_uniform_mesh(0.01, 8) :
-           create_stretched_mesh(0.01, 8, stretch),
+    mesh = stretch === nothing ? uniform_mesh(0.01, 8) : stretched_mesh(0.01, 8, stretch),
     material = mat,
     bc_set = BoundaryConditionSet(thermal = (top = top, bottom = AdiabaticBC())),
     tspan = (0.0, 100.0),
@@ -76,17 +75,14 @@ _column(mat; top, stretch = nothing) = PyrolysisProblem(
 const _configurations = (
     fixed = (problem = () -> _column(_pmma(); top = HeatFluxBC(50e3)), options = (;)),
     moving_beer_lambert_darcy = (
-        problem = () -> _column(_wood(); top = RadiativeFluxBC(flux = 50e3)),
+        problem = () -> _column(_wood(); top = RadiativeFluxBC(50e3)),
         options = (use_ale = true, radiation_model = BEER_LAMBERT),
     ),
     equidistribution = (
         problem = () -> _column(_pmma(); top = HeatFluxBC(50e3), stretch = 1.01),
         options = (
             use_ale = true,
-            correction = EquidistributionCorrection(
-                activation = (2.0, 0.5),
-                monitor = (1.0, 1.0),
-            ),
+            correction = EquidistributionCorrection(activation = (2.0, 0.5)),
         ),
     ),
 )

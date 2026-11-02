@@ -10,19 +10,12 @@ stoichiometry, Arrhenius parameters, and heat of reaction.
 # ============================================================================
 
 """
-	AbstractDepletionLimiter
-
-How a reaction rate vanishes as a reactant depletes. Each `Material` carries
-one, a [`DepletionLimiter`](@ref) by default.
-"""
-abstract type AbstractDepletionLimiter end
-
-"""
 	DepletionLimiter(; threshold = 1.0, join = 1.0, base_scale = 1e-8, enabled = true,
 	                 conversion_threshold = 1e-3, conversion_base = 1e-8)
 
-The depletion limiter: each reactant's rate factor is exactly zero at and below
-zero concentration and C¹ through it, for every reaction order, so an absent
+How a reaction rate vanishes as its reactant depletes; each `Material` carries
+one. The reactant's rate factor is exactly zero at and below zero concentration
+and C¹ through it, for every reaction order, so an absent
 or negative trial concentration is never consumed and every rate has a finite
 derivative at any real state.
 
@@ -64,7 +57,7 @@ Material(name = ..., components = ..., reactions = ...,
          depletion_limiter = DepletionLimiter(threshold = 0.1))
 ```
 """
-struct DepletionLimiter <: AbstractDepletionLimiter
+struct DepletionLimiter
     threshold::Float64
     join::Float64
     base_scale::Float64
@@ -120,10 +113,10 @@ DepletionLimiter(;
 # ============================================================================
 
 """
-	Reaction{NRin, NRout, Ph<:AbstractPropertyFunction} <: AbstractReaction
+	Reaction{NP,Ph<:AbstractPropertyFunction}
 
-A single decomposition reaction with Arrhenius kinetics, n-ary in both
-reactants and products.
+A single decomposition reaction with Arrhenius kinetics: one reactant and `NP`
+products.
 
 The reaction rate is computed as:
 ```
@@ -132,102 +125,54 @@ r = A * exp(-E/RT) * ξ_ref * x^n * H(T - T_min) * H(T_max - T),   x = ξ/ξ_ref
 with `ξ` the reactant's concentration and `ξ_ref` the concentration of its
 lineage inventory, the condensed mass its lineage started with at the material
 point (first order: `ξ_ref` cancels and `r = k ξ`). `A` is in s⁻¹ for every
-order. Per unit reaction extent, the first reactant is consumed with mass
-stoichiometry **1.0**; products are produced with their per-product `stoich`
-from the `products` tuple.
+order. Per unit reaction extent the reactant is consumed with mass
+stoichiometry **1.0** and each product is produced with its yield, so mass
+conservation requires `Σ yields == 1`.
 
-Reaction orders must be `n ≥ 0` (enforced at construction; a negative order
-makes the rate singular at reactant depletion). At runtime each reactant also
-contributes the material's depletion factor to the rate, and the hard
-temperature gates `H(·)` are realized as smooth tanh ramps of width
-`gate_width` [K] (`0.5·(1 + tanh((T − T_min)/gate_width))` and mirrored) — see
+Reaction orders must be `n ≥ 0` (a negative order makes the rate singular at
+reactant depletion). At runtime the reactant also contributes the material's
+depletion factor to the rate, and the hard temperature gates `H(·)` are realized
+as smooth tanh ramps of width `gate_width` [K]
+(`0.5·(1 + tanh((T − T_min)/gate_width))` and mirrored) — see
 `Pyrolysis.Physics.reaction_rate` and [`DepletionLimiter`](@ref). Smaller
 widths approach the hard step at the cost of Jacobian stiffness near the gate.
 
 # Type Parameters
-- `NRin`:  Number of reactants
-- `NRout`: Number of products
-- `Ph`:    Heat-of-reaction property type
+- `NP`: Number of products
+- `Ph`: Heat-of-reaction property type
 
 # Fields
 - `name::Symbol`: Reaction identifier
-- `reactants::NTuple{NRin, Tuple{Int, Float64}}`: `(component_idx, reaction_order)` per reactant.
-- `products::NTuple{NRout, Tuple{Int, Float64}}`: `(component_idx, mass_stoich)` per product.
+- `reactant::Int`: The reactant's component index
+- `order::Float64`: The reaction order
+- `products::NTuple{NP, Tuple{Int, Float64}}`: `(component_idx, yield)` per product
 - `A::Float64`: Pre-exponential factor [s⁻¹]
 - `E::Float64`: Activation energy [J/mol]
-- `heat::Ph`: Heat of reaction [J/kg of reactant₁]
+- `heat::Ph`: Heat of reaction [J/kg of reactant]
 - `T_min::Float64`: Minimum temperature for reaction [K]
 - `T_max::Float64`: Maximum temperature for reaction [K]
-- `gate_width::Float64`: Width of the smooth tanh temperature gates [K] (> 0, default 1.0)
+- `gate_width::Float64`: Width of the smooth tanh temperature gates [K]
 - `basis::Float64`: The reference as a fraction of the material point's initial
   condensed mass, on the cells the reactant's lineage can reach, in place of
   the lineage rules; `NaN` for the lineage rules. Only for orders other than one.
-
-# Mass-balance convention
-
-For multi-reactant reactions (NRin > 1), additional reactant mass stoichiometries
-would be required; the current shape supports the single-reactant case used
-throughout the existing models (`NRin == 1`, mass consumed = 1·r). Multi-reactant
-support can extend the per-reactant tuple to 3-ary `(idx, order, mass_stoich)`
-without changing this struct's outer shape.
-
-For single-reactant reactions, mass conservation requires `Σ stoich(products) == 1.0`.
 
 # Heat of Reaction Convention
 - `h > 0`: Endothermic (absorbs heat, cools material)
 - `h < 0`: Exothermic (releases heat, heats material)
 """
-struct Reaction{NRin,NRout,Ph<:AbstractPropertyFunction} <: AbstractReaction
+struct Reaction{NP,Ph<:AbstractPropertyFunction}
     name::Symbol
-    reactants::NTuple{NRin,Tuple{Int,Float64}}    # (component_idx, reaction_order)
-    products::NTuple{NRout,Tuple{Int,Float64}}    # (component_idx, mass_stoich)
+    reactant::Int
+    order::Float64
+    products::NTuple{NP,Tuple{Int,Float64}}
     A::Float64
     E::Float64
     heat::Ph
     T_min::Float64
     T_max::Float64
-    gate_width::Float64                           # tanh temperature-gate width [K]
-    basis::Float64                                # reference fraction; NaN = lineage
-
-    function Reaction(
-        name::Symbol,
-        reactants::NTuple{NRin,Tuple{Int,Float64}},
-        products::NTuple{NRout,Tuple{Int,Float64}},
-        A::Real,
-        E::Real,
-        heat::Ph,
-        T_min::Real,
-        T_max::Real;
-        gate_width::Real = 1.0,
-        validate_mass::Bool = true,
-        basis::Real = NaN,
-    ) where {NRin,NRout,Ph<:AbstractPropertyFunction}
-        for (_, order) in reactants
-            _validate_reaction_order(order, name)
-        end
-        for (_, y) in products
-            _validate_yield(y, name)
-        end
-        if validate_mass && NRin == 1
-            _validate_stoichiometry(products, name)
-        end
-        _validate_gate_width(gate_width, name)
-        _validate_basis(basis, all(r -> r[2] == 1, reactants), name)
-        new{NRin,NRout,Ph}(
-            name,
-            reactants,
-            products,
-            A,
-            E,
-            heat,
-            T_min,
-            T_max,
-            gate_width,
-            basis,
-        )
-    end
+    gate_width::Float64
+    basis::Float64
 end
-
 
 # ============================================================================
 # Validation Helpers
@@ -272,13 +217,13 @@ function _validate_gate_width(w::Real, name::Symbol)
 end
 
 """
-	_validate_basis(basis::Real, first_order::Bool, name::Symbol)
+	_validate_basis(basis, first_order::Bool, name::Symbol)
 
 Reject a `basis` outside `(0, 1]` or on a first-order reaction, whose reference
-cancels. `NaN` asks for the lineage rules and passes.
+cancels. `nothing` asks for the lineage rules and passes.
 """
-function _validate_basis(basis::Real, first_order::Bool, name::Symbol)
-    isnan(basis) && return nothing
+function _validate_basis(basis, first_order::Bool, name::Symbol)
+    basis === nothing && return nothing
     (isfinite(basis) && 0 < basis <= 1) || throw(
         ArgumentError(
             "Reaction :$name has basis = $basis; a basis is a fraction of the " *
@@ -316,401 +261,129 @@ end
 """
 	_validate_stoichiometry(products, name::Symbol)
 
-Validate that the product mass stoichiometries conserve mass for a
-single-reactant reaction: per unit reaction extent the reactant contributes
-mass 1.0, so mass conservation requires `Σ ν(products) == 1.0`.
-
-Tolerance: 1e-10 (relative).
-
-Called from the inner `Reaction` constructor for every `NRin == 1` reaction
-unless `validate_mass=false` is passed (not recommended).
+Validate that the yields conserve mass: per unit reaction extent the reactant
+contributes mass 1.0, so `Σ yields == 1` to a relative tolerance of 1e-10.
 """
-function _validate_stoichiometry(
-    products::NTuple{NRout,Tuple{Int,Float64}},
-    name::Symbol,
-) where {NRout}
-    product_mass = 0.0
-    for (_, ν) in products
-        product_mass += ν
-    end
-
-    # Reactant mass is 1.0 by the single-reactant convention.
-    tol = max(1e-10 * (1.0 + product_mass), 1e-14)
-
-    if !isapprox(1.0, product_mass; atol = tol)
-        error("""
-           Reaction mass balance violated for reaction :$name
-             Reactant mass: 1.0 (single-reactant convention)
-             Product mass:  Σν = $product_mass
-             Difference: $(1.0 - product_mass)
-
-           Set `validate_mass=false` to disable this check (not recommended).
-           """)
-    end
-
+function _validate_stoichiometry(products::NTuple{NP,Tuple{Int,Float64}}, name) where {NP}
+    product_mass = sum(last, products; init = 0.0)
+    isapprox(1.0, product_mass; atol = max(1e-10 * (1.0 + product_mass), 1e-14)) || throw(
+        ArgumentError(
+            "Reaction :$name violates the mass balance: the yields sum to " *
+            "$product_mass, not 1",
+        ),
+    )
     return nothing
 end
 
 # ============================================================================
-# Convenience Constructors
+# Constructors
 # ============================================================================
 
 """
-	Reaction(name, reactant => product; A, E, h, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true, basis=NaN)
+	Reaction(name, reactant => products; A, E, h, yields = (1.0,), n = 1.0,
+	         T_min = 0.0, T_max = Inf, gate_width = 1.0, basis = nothing)
 
-Create a simple single-reactant, single-product reaction.
+A reaction of `reactant` into one product or a tuple of them, each named by its
+index in the material's components or, on both sides of the pair, by its
+component name, which [`Material`](@ref) resolves.
 
 # Arguments
 - `name::Symbol`: Reaction identifier
-- `reactant => product`: Pair of component indices
+- `reactant => products`: Component indices or names
 - `A`: Pre-exponential factor [s⁻¹]
 - `E`: Activation energy [J/mol]
-- `h`: Heat of reaction [J/kg] (number or property function)
+- `h`: Heat of reaction [J/kg] (number or property function), positive endothermic
+- `yields`: Mass yield of each product, summing to one
 - `n=1.0`: Reaction order
 - `T_min=0.0`: Minimum temperature [K]
 - `T_max=Inf`: Maximum temperature [K]
 - `gate_width=1.0`: Width of the smooth tanh temperature gates [K] (> 0)
-- `validate_mass=true`: If true, enforce mass balance in stoichiometry
-- `basis=NaN`: The reference as a fraction of the initial condensed mass (`n ≠ 1`)
+- `basis=nothing`: The reference as a fraction of the initial condensed mass (`n ≠ 1`)
 
 # Example
-```julia
-rxn = Reaction(:decomp, 1 => 2, A=8.5e12, E=188e3, h=870e3)  # positive h = endothermic
-```
-"""
-function Reaction(
-    name::Symbol,
-    pair::Pair{Int,Int};
-    A::Real,
-    E::Real,
-    h,
-    n::Real = 1.0,
-    T_min::Real = 0.0,
-    T_max::Real = Inf,
-    gate_width::Real = 1.0,
-    validate_mass::Bool = true,
-    basis::Real = NaN,
-)
-    reactant, product = pair
-    reactants = ((reactant, Float64(n)),)
-    products = ((product, 1.0),)
-
-    Reaction(
-        name,
-        reactants,
-        products,
-        Float64(A),
-        Float64(E),
-        to_property(h),
-        Float64(T_min),
-        Float64(T_max);
-        gate_width = Float64(gate_width),
-        validate_mass = validate_mass,
-        basis = Float64(basis),
-    )
-end
-
-"""
-	Reaction(name, reactant => (product1, product2); A, E, h, yields, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true, basis=NaN)
-
-Create a reaction with two products.
-
-# Arguments
-- `name::Symbol`: Reaction identifier
-- `reactant => (product1, product2)`: Reactant and product indices
-- `A`: Pre-exponential factor [s⁻¹]
-- `E`: Activation energy [J/mol]
-- `h`: Heat of reaction [J/kg]
-- `yields`: Tuple (y₁, y₂) of mass yields for each product
-- `n=1.0`: Reaction order
-- `T_min=0.0`: Minimum temperature [K]
-- `T_max=Inf`: Maximum temperature [K]
-- `gate_width=1.0`: Width of the smooth tanh temperature gates [K] (> 0)
-- `validate_mass=true`: If true, enforce mass balance in stoichiometry
-- `basis=NaN`: The reference as a fraction of the initial condensed mass (`n ≠ 1`)
-
-# Example
-```julia
-# Charring reaction: virgin -> 0.2 char + 0.8 gas (endothermic)
-rxn = Reaction(:charring, 1 => (2, 3), A=1e15, E=200e3, h=500e3, yields=(0.2, 0.8))
-```
-"""
-function Reaction(
-    name::Symbol,
-    pair::Pair{Int,Tuple{Int,Int}};
-    A::Real,
-    E::Real,
-    h,
-    yields::Tuple{Real,Real},
-    n::Real = 1.0,
-    T_min::Real = 0.0,
-    T_max::Real = Inf,
-    gate_width::Real = 1.0,
-    validate_mass::Bool = true,
-    basis::Real = NaN,
-)
-    reactant = pair.first
-    product1, product2 = pair.second
-    y1, y2 = Float64(yields[1]), Float64(yields[2])
-    reactants = ((reactant, Float64(n)),)
-    products = ((product1, y1), (product2, y2))
-
-    Reaction(
-        name,
-        reactants,
-        products,
-        Float64(A),
-        Float64(E),
-        to_property(h),
-        Float64(T_min),
-        Float64(T_max);
-        gate_width = Float64(gate_width),
-        validate_mass = validate_mass,
-        basis = Float64(basis),
-    )
-end
-
-# ============================================================================
-# Symbolic-name PendingReaction (resolved by Material constructor)
-# ============================================================================
-
-"""
-	PendingReaction{R, P, Ph}
-
-A reaction whose reactants/products are still expressed as component **symbols**
-rather than integer indices. Produced by the symbolic constructors:
-
-```julia
-Reaction(:decomp, :virgin => :MMA;       A=…, E=…, h=…)
-Reaction(:char,   :virgin => (:char, :gas); A=…, E=…, h=…, yields=(0.2, 0.8))
-```
-
-`PendingReaction`s are resolved into `Reaction`s by `Material(...)` once the
-components tuple (and therefore the `name → index` map) is known. Users do not
-construct `PendingReaction` directly; they call `Reaction(...)` with symbol
-pairs.
-
-Type parameters:
-- `R`: reactant payload (`Symbol` or `Tuple{Vararg{Symbol}}`)
-- `P`: product payload (`Symbol` or `Tuple{Vararg{Symbol}}`)
-- `Ph`: heat-of-reaction property type
-"""
-struct PendingReaction{R,P,Ph<:AbstractPropertyFunction} <: AbstractReaction
-    name::Symbol
-    reactant::R
-    product::P
-    A::Float64
-    E::Float64
-    heat::Ph
-    n::Float64
-    yields::Union{Nothing,Tuple{Float64,Float64}}
-    T_min::Float64
-    T_max::Float64
-    gate_width::Float64
-    validate_mass::Bool
-    basis::Float64
-end
-
-"""
-	Reaction(name::Symbol, reactant::Symbol => product::Symbol; A, E, h, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true, basis=NaN)
-
-Symbolic single-reactant, single-product reaction constructor. Returns a
-`PendingReaction` that is resolved to a numeric `Reaction` inside the
-`Material(...)` constructor against the supplied components tuple.
-
 ```julia
 Reaction(:decomposition, :virgin => :MMA, A = 8.5e12, E = 188e3, h = 870e3)
+Reaction(:charring, :virgin => (:char, :gas), A = 1e15, E = 200e3, h = 500e3,
+         yields = (0.2, 0.8))
 ```
 """
 function Reaction(
     name::Symbol,
-    pair::Pair{Symbol,Symbol};
+    pair::Pair{Int};
     A::Real,
     E::Real,
     h,
+    yields::Tuple{Vararg{Real}} = (1.0,),
     n::Real = 1.0,
     T_min::Real = 0.0,
     T_max::Real = Inf,
     gate_width::Real = 1.0,
-    validate_mass::Bool = true,
-    basis::Real = NaN,
+    basis::Union{Nothing,Real} = nothing,
 )
+    products = _products(pair.second)
+    length(products) == length(yields) || throw(
+        ArgumentError(
+            "Reaction :$name has $(length(products)) products and $(length(yields)) yields",
+        ),
+    )
     _validate_reaction_order(n, name)
+    foreach(y -> _validate_yield(y, name), yields)
+    stoichiometry = map((p, y) -> (Int(p), Float64(y)), products, yields)
+    _validate_stoichiometry(stoichiometry, name)
     _validate_gate_width(gate_width, name)
     _validate_basis(basis, n == 1, name)
-    PendingReaction(
+    return Reaction(
         name,
         pair.first,
-        pair.second,
+        Float64(n),
+        stoichiometry,
         Float64(A),
         Float64(E),
         to_property(h),
-        Float64(n),
-        nothing,
         Float64(T_min),
         Float64(T_max),
         Float64(gate_width),
-        validate_mass,
-        Float64(basis),
+        basis === nothing ? NaN : Float64(basis),
     )
 end
 
-"""
-	Reaction(name::Symbol, reactant::Symbol => (product1::Symbol, product2::Symbol);
-			 A, E, h, yields, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true, basis=NaN)
+_products(products::Tuple) = products
+_products(product) = (product,)
 
-Symbolic two-product reaction constructor. Returns a `PendingReaction` resolved
-inside `Material(...)`.
-
-```julia
-Reaction(:charring, :virgin => (:char, :gas),
-	A = 1e15, E = 200e3, h = 500e3, yields = (0.2, 0.8))
-```
-"""
-function Reaction(
-    name::Symbol,
-    pair::Pair{Symbol,Tuple{Symbol,Symbol}};
-    A::Real,
-    E::Real,
-    h,
-    yields::Tuple{Real,Real},
-    n::Real = 1.0,
-    T_min::Real = 0.0,
-    T_max::Real = Inf,
-    gate_width::Real = 1.0,
-    validate_mass::Bool = true,
-    basis::Real = NaN,
-)
-    _validate_reaction_order(n, name)
-    _validate_gate_width(gate_width, name)
-    _validate_basis(basis, n == 1, name)
-    yields_f64 = (Float64(yields[1]), Float64(yields[2]))
-    PendingReaction(
-        name,
-        pair.first,
-        pair.second,
-        Float64(A),
-        Float64(E),
-        to_property(h),
-        Float64(n),
-        yields_f64,
-        Float64(T_min),
-        Float64(T_max),
-        Float64(gate_width),
-        validate_mass,
-        Float64(basis),
-    )
+# A reaction whose reactant and products are still component names, as
+# `Reaction` received it; `Material` resolves it against its components.
+struct PendingReaction{P<:Tuple,K<:NamedTuple}
+    name::Symbol
+    reactant::Symbol
+    products::P
+    options::K
 end
 
-"""
-	resolve_reaction(rxn::AbstractReaction, name_to_index::Dict{Symbol,Int}) -> Reaction
+function Reaction(name::Symbol, pair::Pair{Symbol}; options...)
+    products = _products(pair.second)
+    # The options are checked here, before the components are known.
+    Reaction(name, 1 => ntuple(identity, length(products)); options...)
+    return PendingReaction(name, pair.first, products, NamedTuple(options))
+end
 
-Resolve any `PendingReaction` (with `Symbol` payloads) to a numeric `Reaction`
-by looking the symbols up in `name_to_index`. A concrete `Reaction` passes
-through unchanged.
-
-Used by `Material(...)` after the components tuple is fixed; not part of the
-user-facing API.
-"""
-@inline resolve_reaction(rxn::Reaction, ::Dict{Symbol,Int}) = rxn
-
-function resolve_reaction(
-    rxn::PendingReaction{Symbol,Symbol},
-    name_to_index::Dict{Symbol,Int},
-)
-    r_idx = _lookup_component(name_to_index, rxn.reactant, rxn.name)
-    p_idx = _lookup_component(name_to_index, rxn.product, rxn.name)
+# The reaction with its component names replaced by their places in `names`.
+resolve_reaction(rxn::Reaction, names) = rxn
+function resolve_reaction(rxn::PendingReaction, names)
+    index(component) = _component_place(names, component, rxn.name)
     return Reaction(
         rxn.name,
-        r_idx => p_idx;
-        A = rxn.A,
-        E = rxn.E,
-        h = rxn.heat,
-        n = rxn.n,
-        T_min = rxn.T_min,
-        T_max = rxn.T_max,
-        gate_width = rxn.gate_width,
-        validate_mass = rxn.validate_mass,
-        basis = rxn.basis,
+        index(rxn.reactant) => map(index, rxn.products);
+        rxn.options...,
     )
 end
 
-function resolve_reaction(
-    rxn::PendingReaction{Symbol,Tuple{Symbol,Symbol}},
-    name_to_index::Dict{Symbol,Int},
-)
-    r_idx = _lookup_component(name_to_index, rxn.reactant, rxn.name)
-    p1_idx = _lookup_component(name_to_index, rxn.product[1], rxn.name)
-    p2_idx = _lookup_component(name_to_index, rxn.product[2], rxn.name)
-    yields =
-        rxn.yields === nothing ?
-        throw(ArgumentError("Reaction :$(rxn.name) with two products requires `yields`")) :
-        rxn.yields
-    return Reaction(
-        rxn.name,
-        r_idx => (p1_idx, p2_idx);
-        A = rxn.A,
-        E = rxn.E,
-        h = rxn.heat,
-        n = rxn.n,
-        yields = yields,
-        T_min = rxn.T_min,
-        T_max = rxn.T_max,
-        gate_width = rxn.gate_width,
-        validate_mass = rxn.validate_mass,
-        basis = rxn.basis,
+function _component_place(names, component::Symbol, reaction::Symbol)
+    j = findfirst(==(component), names)
+    j === nothing && throw(
+        ArgumentError(
+            "Reaction :$reaction references unknown component :$component; " *
+            "not found in the material's components tuple",
+        ),
     )
-end
-
-@inline function _lookup_component(
-    name_to_index::Dict{Symbol,Int},
-    sym::Symbol,
-    rxn_name::Symbol,
-)
-    idx = get(name_to_index, sym, 0)
-    idx == 0 && error("Reaction :$rxn_name references unknown component :$sym; \
-                        not found in the material's components tuple")
-    return idx
-end
-
-# ============================================================================
-# Stoichiometry Helpers
-# ============================================================================
-
-"""
-	mass_balance_error(rxn::Reaction)
-
-Compute the mass balance error for a reaction (should be ≈ 0).
-
-Convention: per unit reaction extent, the first reactant contributes mass 1.0;
-all products contribute their per-product mass stoich. Multi-reactant reactions
-are not supported in this 1.5D shape; if `NRin > 1` this returns NaN.
-"""
-function mass_balance_error(rxn::Reaction{NRin}) where {NRin}
-    NRin == 1 || return NaN
-    reactant_mass = 1.0
-    product_mass = 0.0
-    @inbounds for (_, ν) in rxn.products
-        product_mass += ν
-    end
-    return abs(reactant_mass - product_mass)
-end
-
-"""
-	verify_stoichiometry(rxn::Reaction; tol=1e-10)
-
-Verify that reaction stoichiometry satisfies mass balance. Return `false`
-with a warning if the mass balance cannot be verified, including reactions
-without exactly one reactant.
-"""
-function verify_stoichiometry(rxn::Reaction; tol::Real = 1e-10)
-    err = mass_balance_error(rxn)
-    if !isfinite(err)
-        @warn "Reaction $(rxn.name) has unverifiable mass balance; exactly one reactant and finite product mass stoichiometries are required"
-        return false
-    elseif err > tol
-        @warn "Reaction $(rxn.name) has mass balance error: $err"
-        return false
-    end
-    return true
+    return j
 end

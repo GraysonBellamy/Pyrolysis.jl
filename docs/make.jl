@@ -81,7 +81,7 @@ function keyword_check()
         m = match(r"^\|\s*`([A-Za-z_][A-Za-z0-9_]*)`\s*\|", l)
         m === nothing || push!(documented, Symbol(m[1]))
     end
-    accepted = collect(Pyrolysis.Integration._SOLVE_KEYWORDS)
+    accepted = Base.kwarg_decl(which(solve, (PyrolysisProblem,)))
     missing_ = setdiff(accepted, documented)
     extra = setdiff(documented, accepted)
     isempty(missing_) && isempty(extra) && allunique(documented) ||

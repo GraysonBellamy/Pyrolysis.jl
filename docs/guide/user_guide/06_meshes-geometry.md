@@ -33,7 +33,8 @@ formulation, Technical Reference §11.
 A line mesh consists of:
 
 - **Nodes**, the points that bound the cells. A mesh of `n` cells has `n + 1` nodes at
-  strictly increasing positions; node 1 sits at `z = 0`, node `n + 1` at `z = L`.
+  strictly increasing positions; node 1 sits at the back, node `n + 1` at the exposed
+  surface.
 - **Cells**, the finite-volume control volumes. Cell `i` lies between nodes `i` and `i + 1`,
   and its centre is the midpoint of the two. The solver carries, per cell, the mass of every
   component and an energy state (the temperature by default); the concentrations
@@ -75,29 +76,29 @@ See Technical Reference §13 for the cell, face and node layout and the operator
 
 **Figure 9. Constructor comparison (actual coordinates).** Each mesh spans 7 mm with twelve cells. The stretched meshes use `stretch = 1.2` with opposite refined ends. The layered node list gives eight substrate cells over 6 mm and four coating cells over 1 mm, with a node exactly on the material interface. These modest cell counts make the geometry readable; they are not a resolution recommendation. The Julia generator saves the constructor coordinates as CSV.
 
-Three mesh constructors are exported at the top level (`using Pyrolysis` makes them
-available):
+Three mesh constructors build a line (`using Pyrolysis` makes them available):
 
 | Function | Purpose |
 |---|---|
-| `create_uniform_mesh(L, n_cells; ...)` | Equal cell sizes `Δz = L / n_cells`. |
-| `create_stretched_mesh(L, n_cells, stretch; ...)` | Geometrically graded cells, finest at one end. |
-| `create_mesh_from_nodes(z; ...)` | Nodes at positions you give, from zero. |
+| `uniform_mesh(L, n_cells; options...)` | Equal cell sizes `Δz = L / n_cells`. |
+| `stretched_mesh(L, n_cells, stretch; stretch_from = :top, options...)` | Geometrically graded cells, finest at one end. |
+| `line_mesh(x; ...)` | Nodes at any strictly increasing positions you give. |
 
-All three return a `Mesh{1}` with the tags `:bottom` (at `z = 0`) and `:top` (at the last
-node), node 1 pinned and no Lagrangian nodes, and all three take the same two keywords:
+All three return a `Mesh{1}` with the tags `:bottom` (at the first node) and `:top` (at the
+last node) and node 1 pinned. The `options` of the first two are `line_mesh`'s keywords:
 
 | Keyword | Default | Meaning |
 |---|---|---|
 | `coordinates` | `Planar()` | The coordinate system: `Planar()`, `Cylindrical()` or `Spherical()` (§6.4.1). |
 | `cross_section` | `1.0`, `1.0`, `4π` | The cross-section measure `A₀`: the face area of a planar column [m²], the axial length of a cylinder [m], the solid angle of a sphere [sr] (§6.4.2). Must be finite and positive. |
+| `bottom`, `top` | `:bottom`, `:top` | The tags of the first and last faces. A solve needs `:top` and `:bottom` (§7.9). |
+| `fixed` | `false` | Pin every node, so that the geometry never changes. |
+| `lagrangian` | `Int[]` | The nodes that always move with the solid. |
 
 ### 6.2.1 Uniform meshes
 
 ```julia
-create_uniform_mesh(L::Real, n_cells::Integer;
-                    coordinates = Planar(),
-                    cross_section = <default for the coordinates>) -> Mesh{1}
+uniform_mesh(L::Real, n_cells::Integer; options...) -> Mesh{1}
 ```
 
 Positional arguments:
@@ -110,7 +111,7 @@ A 1 cm slab with 100 cells:
 ```julia
 using Pyrolysis
 
-mesh = create_uniform_mesh(0.01, 100)    # L = 1 cm, 100 cells
+mesh = uniform_mesh(0.01, 100)    # L = 1 cm, 100 cells
 ```
 
 A typical cone-calorimeter sample, 5.8 mm with 72 cells (0.08 mm per cell):
@@ -119,7 +120,7 @@ A typical cone-calorimeter sample, 5.8 mm with 72 cells (0.08 mm per cell):
 sample_thickness = 5.8e-3      # [m]
 n_cells          = 72
 
-mesh = create_uniform_mesh(sample_thickness, n_cells)
+mesh = uniform_mesh(sample_thickness, n_cells)
 ```
 
 The node positions are `z_i = (i − 1)·Δz` with `Δz = L / n_cells`, so cell `i` occupies
@@ -135,10 +136,8 @@ small cells there and large cells deep in the cold substrate, giving the same ac
 fewer cells.
 
 ```julia
-create_stretched_mesh(L::Real, n_cells::Integer, stretch::Real;
-                      stretch_from::Symbol = :top,
-                      coordinates = Planar(),
-                      cross_section = <default for the coordinates>) -> Mesh{1}
+stretched_mesh(L::Real, n_cells::Integer, stretch::Real;
+               stretch_from::Symbol = :top, options...) -> Mesh{1}
 ```
 
 The arguments beyond the uniform case:
@@ -160,10 +159,10 @@ coarser toward the back:
 
 ```julia
 # 50 cells over 1 cm, the finest (about 8.6 µm) at the exposed surface
-mesh = create_stretched_mesh(0.01, 50, 1.1)
+mesh = stretched_mesh(0.01, 50, 1.1)
 
 # the same grading with the finest cell at the back face
-mesh_back = create_stretched_mesh(0.01, 50, 1.1; stretch_from = :bottom)
+mesh_back = stretched_mesh(0.01, 50, 1.1; stretch_from = :bottom)
 ```
 
 A modest ratio (`1.05` to `1.15`) is usually enough. Strong grading produces large
@@ -180,20 +179,22 @@ cells it is about a hundredth of the uniform cell.
 ### 6.2.3 Meshes from a list of nodes
 
 ```julia
-create_mesh_from_nodes(z::AbstractVector{<:Real};
-                       coordinates = Planar(),
-                       cross_section = <default for the coordinates>) -> Mesh{1}
+line_mesh(x::AbstractVector{<:Real};
+          coordinates = Planar(),
+          cross_section = <default for the coordinates>,
+          bottom = :bottom, top = :top, fixed = false, lagrangian = Int[]) -> Mesh{1}
 ```
 
-builds a line with nodes at the positions `z` [m], which must start at zero, be finite and
-increase strictly (at least two nodes); the cells lie between consecutive nodes and are
-sized independently. Use it to put a node on every interface of a layered sample, or to
-refine one region by hand. A 6 mm substrate under a 1 mm coating, with a node on the
-interface at 6 mm:
+builds a line with nodes at the positions `x` [m], which must be finite and increase
+strictly (at least two nodes; non-negative radii in cylindrical and spherical coordinates);
+the cells lie between consecutive nodes and are sized independently. Use it to put a node
+on every interface of a layered sample, to refine one region by hand, or to start from an
+inner radius (a hollow cylinder, for instance). A 6 mm substrate under a 1 mm coating, with
+a node on the interface at 6 mm:
 
 ```julia
 z = [range(0.0, 6e-3; length = 25); range(6e-3, 7e-3; length = 11)[2:end]]
-mesh = create_mesh_from_nodes(z)        # 24 substrate cells, 10 coating cells
+mesh = line_mesh(z)        # 24 substrate cells, 10 coating cells
 ```
 
 The initial conditions then give each layer its composition; for a material whose first
@@ -201,12 +202,6 @@ component is the substrate and whose second is the coating,
 `ξ_initial = [z -> z < 6e-3 ? 2000.0 : 0.0, z -> z < 6e-3 ? 0.0 : 900.0]`. Since they are
 evaluated at the cell centres, a node on the interface keeps every cell within one layer. When the burnout correction moves a layered mesh, the interface nodes are held to the
 solid (§6.7.2).
-
-The constructors of this section are built on `Pyrolysis.Meshes.line_mesh(x; coordinates,
-cross_section, bottom = :bottom, top = :top, fixed = false, lagrangian = Int[])`, which
-accepts any strictly increasing positions (a hollow cylinder from an inner radius, for
-instance) and lets you name the boundary tags, pin every node (`fixed`) or declare Lagrangian
-nodes. A solve needs the tags `:top` and `:bottom` (§7.9).
 
 ---
 
@@ -257,7 +252,7 @@ bcs = BoundaryConditionSet(
 
 for n in (25, 50, 100, 200)
     problem = PyrolysisProblem(
-        mesh      = create_uniform_mesh(0.01, n),
+        mesh      = uniform_mesh(0.01, n),
         material  = pmma,
         bc_set    = bcs,
         tspan     = (0.0, 200.0),
@@ -291,13 +286,13 @@ the constructor. It decides how face areas and cell volumes follow from the node
 | `Spherical()` | radius `r` | `A r²` | `A (r₊³ − r₋³)/3` | solid angle [sr] | `4π` |
 
 In cylindrical and spherical coordinates the positions are radii: a mesh from
-`create_uniform_mesh(L, n; coordinates = Cylindrical())` runs from the axis (the `:bottom`
+`uniform_mesh(L, n; coordinates = Cylindrical())` runs from the axis (the `:bottom`
 tag, a face of zero area) to the exposed surface at radius `L` (`:top`), so the cylinder or
 sphere is heated from outside and recedes toward its axis or centre.
 
 ```julia
-rod  = create_uniform_mesh(0.01, 40; coordinates = Cylindrical(), cross_section = 0.1)
-ball = create_uniform_mesh(0.01, 40; coordinates = Spherical())   # the whole sphere, 4π
+rod  = uniform_mesh(0.01, 40; coordinates = Cylindrical(), cross_section = 0.1)
+ball = uniform_mesh(0.01, 40; coordinates = Spherical())   # the whole sphere, 4π
 ```
 
 Conduction, reactions, gas transport, surface absorption and the moving mesh are
@@ -326,7 +321,7 @@ when you want those in the units of a physical sample:
 
 ```julia
 # A 100 cm² sample face; the per-area results are unchanged
-mesh = create_uniform_mesh(0.01, 100; cross_section = 1e-2)
+mesh = uniform_mesh(0.01, 100; cross_section = 1e-2)
 ```
 
 In cylindrical and spherical coordinates the measure is not a gauge in the same sense: the
@@ -381,7 +376,7 @@ them by name from `Pyrolysis.Meshes`, or bring in every submodule's exports with
 using Pyrolysis
 using Pyrolysis.Meshes: n_cells, n_nodes, n_faces, boundary_tags, boundary_faces
 
-mesh = create_uniform_mesh(0.01, 100)
+mesh = uniform_mesh(0.01, 100)
 topo = mesh.topology
 n_cells(topo), n_nodes(topo), n_faces(topo)    # (100, 101, 101)
 boundary_tags(topo)                            # [:bottom, :top]
@@ -551,7 +546,7 @@ A moving-mesh solution records the geometry at every saved time:
 | `sol.z` | Node positions, `n_nodes × n_times` [m]; `NaN` beyond the outermost live node. `0 × 0` on a fixed mesh. |
 | `get_profile(sol, :z, k)` | The node positions at saved time `k`; on a fixed mesh the mesh's positions. |
 | `sol.cell_centers` | Cell centres, `n_cells × n_times` [m]; `NaN` in a deactivated cell. |
-| `get_cell_positions(sol; at = k)` | The cell centres at saved time `k` (default the last); `at = 1` gives the initial centres. |
+| `sol.cell_centers[:, k]` | The cell centres at saved time `k` (default the last); `at = 1` gives the initial centres. |
 | `sol.correction_velocity` | The node corrections `c = w − v_s`, `n_nodes × n_times` [m/s]; zero without a correction, `0 × 0` on a fixed mesh. |
 | `sol.extras.thickness_history` | The distance from the first node to the outermost live one [m]. |
 | `sol.extras.min_cell_thickness` | The thickness of the thinnest live cell [m]. |
@@ -559,14 +554,14 @@ A moving-mesh solution records the geometry at every saved time:
 ```julia
 sol = solve(problem; use_ale = true)
 z_end  = sol.z[:, end]                    # node positions at the last saved time [m]
-x_end  = get_cell_positions(sol)          # cell centres there, for a T(z) profile
-x_0    = get_cell_positions(sol; at = 1)  # the initial centres
+x_end  = sol.cell_centers[:, end]          # cell centres there, for a T(z) profile
+x_0    = sol.cell_centers[:, 1]  # the initial centres
 L_t    = sol.extras.thickness_history     # the sample thickness over time [m]
 fields = sol(50.0)                        # the fields at t = 50 s, positions included
 fields.z[end]                             # the surface position at 50 s [m]
 ```
 
-Plot a temperature profile against `get_cell_positions(sol; at = k)` with `sol.T[:, k]`, so
+Plot a temperature profile against `sol.cell_centers[:, k]` with `sol.T[:, k]`, so
 the depth axis spans the thickness the sample had at that time. Chapter 9 describes the
 solution object and its interpolation.
 
@@ -574,7 +569,7 @@ solution object and its interpolation.
 
 ## 6.8 Meshes of more than one dimension
 
-`Pyrolysis.Meshes` also builds planar meshes of quadrilaterals and hexahedra:
+Two constructors build planar meshes of quadrilaterals and hexahedra:
 `box_mesh(xs, ys[, zs]; transform, pinned = (:bottom,), fixed, lagrangian)` on the tensor
 product of strictly increasing node coordinates, each node optionally moved by
 `transform(x::SVector) -> SVector`, with the sides tagged `:left`/`:right` along x,
@@ -584,7 +579,8 @@ cell's corner nodes, the faces found by matching node sets. They return a `Mesh{
 `Mesh{3}` whose metrics `geometry!` computes exactly for the multilinear cells.
 
 ```julia
-using Pyrolysis.Meshes: box_mesh, boundary_tags
+using Pyrolysis
+using Pyrolysis.Meshes: boundary_tags
 
 slab = box_mesh(range(0.0, 0.02; length = 5), range(0.0, 0.01; length = 4))
 boundary_tags(slab.topology)        # [:bottom, :left, :right, :top]
@@ -604,9 +600,9 @@ from §6.2. Technical Reference §13 describes the multi-dimensional geometry an
 
 ## 6.9 Summary and cross-references
 
-- Build meshes with `create_uniform_mesh(L, n_cells; ...)`,
-  `create_stretched_mesh(L, n_cells, stretch; stretch_from = :top, ...)` or
-  `create_mesh_from_nodes(z; ...)`. Each returns a `Mesh{1}`: a topology and the reference
+- Build meshes with `uniform_mesh(L, n_cells; ...)`,
+  `stretched_mesh(L, n_cells, stretch; stretch_from = :top, ...)` or
+  `line_mesh(x; ...)`. Each returns a `Mesh{1}`: a topology and the reference
   node positions, with no component count and no initial state.
 - `z = 0` is the back face (`:bottom`, node 1, pinned), `z = L` the exposed surface
   (`:top`); cells number from the back to the surface.
@@ -624,7 +620,8 @@ from §6.2. Technical Reference §13 describes the multi-dimensional geometry an
   velocity. Read it through the layout's index functions (Chapter 11).
 - `use_ale = false` (default) keeps every node pinned; `use_ale = true` moves the nodes with
   `w = v_s + c`, the correction installed by `setup` for burnout (§7.3.3, Chapter 10).
-- Meshes of quadrilaterals and hexahedra exist at the residual level only.
+- Meshes of quadrilaterals and hexahedra (`box_mesh`, `cell_mesh`) exist at the residual
+  level only.
 
 For the finite-volume discretization built on the mesh, see Technical Reference §13; for the
 moving mesh and the geometric conservation law, Technical Reference §11; for how the mesh

@@ -7,7 +7,7 @@
 
 The residual as `f!(du, u, t)`, the form the differentiation backend calls.
 """
-struct ResidualFunction{D<:CoreDefinition,W<:CoreWorkspace}
+struct ResidualFunction{D<:ResidualDefinition,W<:ResidualWorkspace}
     def::D
     ws::W
 end
@@ -37,7 +37,7 @@ struct LateralRows{X}
     du::Vector{Float64}
 end
 
-function LateralRows(def::CoreDefinition, pattern::SparseMatrixCSC{Bool,Int})
+function LateralRows(def::ResidualDefinition, pattern::SparseMatrixCSC{Bool,Int})
     layout = def.layout
     rows = (area_index(layout), lateral_rate_index(layout))
     slots = (Tuple{Int,Int}[], Tuple{Int,Int}[])
@@ -93,7 +93,7 @@ _color_count(colored::SparseMatrixCSC{Bool,Int}) =
 
 The number of colors of the residual's Jacobian outside its dense rows.
 """
-color_count(def::CoreDefinition) =
+color_count(def::ResidualDefinition) =
     _color_count(_colored_pattern(jacobian_pattern(def), dense_rows(def.layout)))
 
 """
@@ -130,8 +130,8 @@ struct ColoredJacobianCache{F,B,P,D}
 end
 
 function ColoredJacobianCache(
-    def::CoreDefinition,
-    ws::CoreWorkspace,
+    def::ResidualDefinition,
+    ws::ResidualWorkspace,
     u::AbstractVector,
     t::Real,
 )
@@ -240,7 +240,7 @@ function _jacobian!(J, cj::ColoredJacobianCache, dense::LateralRows, u, t)
 end
 
 # Write the two dense rows from the column sums of the history rows.
-function _lateral_rows!(J, Jc, d::LateralRows, def::CoreDefinition, ws, u, t)
+function _lateral_rows!(J, Jc, d::LateralRows, def::ResidualDefinition, ws, u, t)
     layout = def.layout
     residual!(d.du, u, def, t, ws)
     ΣG, ΣM, ΣĠ, ΣṀ = 0.0, 0.0, 0.0, 0.0

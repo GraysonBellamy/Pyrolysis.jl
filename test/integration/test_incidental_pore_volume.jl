@@ -16,7 +16,7 @@ function incidental_pore_problem(φ)
         depletion_limiter = DepletionLimiter(enabled = false),
     )
     PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 3),
+        mesh = uniform_mesh(0.01, 3),
         material = mat,
         T_initial = z->500.0,
         ξ_initial = [z->500.0, z->0.0, z->φ*1e5*0.03/(R_GAS*500.0)],
@@ -42,7 +42,7 @@ end
             dtmin = 1e-15,
         )
         @test completed(sol)
-        @test all(get_porosity(sol) .> 0)
+        @test all(sol.gas.porosity .> 0)
         @test sum(sol.m[1, :, end])≈5exp(-1.5) rtol=1e-7
         @test sol.m[3, :, end]≈sol.m[3, :, 1] rtol=1e-10
         sol

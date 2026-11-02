@@ -251,9 +251,9 @@ admitted and adds nothing to $C_g$.
 The effective thermal conductivity is computed from the condensed
 volume fractions $v_j^{\text{solid}}$ (§5.1.2) and the per-component conductivities
 $k_j(T)$ under one of four mixing rules selected by `material.mixing.k.rule`:
-`effective_conductivity(ξ, T, material; skip_absent)` builds
+`effective_conductivity(ξ, T, material)` builds
 `v = mixing_volume_fractions(…)` (those weights, with the void blend of
-§5.1.2) then dispatches to `_conductivity_from_v` (`effective_properties.jl`).
+§5.1.2) then applies the rule (`effective_properties.jl`).
 The default rule is `WEIGHTED` with $\beta = 0.5$ (`materials.jl`). A condensed component's
 $k_j$ is the conductivity of that component as a porous bulk, pore gas included, so the
 conductivity of a `GaseousComponent` is not added to it: it enters $k_{\mathrm{eff}}$ only through
@@ -280,7 +280,7 @@ limit, in the first millimetre of a polymer before ignition, the radiative
 transport is not local and no conductivity represents it (§8).
 
 The state mapping evaluates `k_i = effective_conductivity(ξ⁺_i, T_trial,i,
-material; skip_absent = Val(true))` and keeps it twice: smoothly floored at
+material)` and keeps it twice: smoothly floored at
 `CONDUCTIVITY_FLOOR = 1e-6` W·m⁻¹·K⁻¹ ($k$, `src/States/derived.jl`), far below
 any material's conductivity, and unfloored (`k_physical`). A line reads the
 floored value: a trial state with no mass left has no conductivity, and the
@@ -288,7 +288,7 @@ surface-temperature solve of its boundary faces divides by the cell
 conductivity (§12). A mesh of more dimensions reads the unfloored value as the
 factor of the complete tensor $k_i\mathbf A_i$: a floor on the factor alone would
 make the fluxes depend on how a conductivity is split between $k_i$ and
-$\mathbf A_i$, and its insulating limit is the operator's own (§7.1.3). With `skip_absent = Val(true)` the parallel, series and weighted rules
+$\mathbf A_i$, and its insulating limit is the operator's own (§7.1.3). The parallel, series and weighted rules
 do not evaluate the conductivity law of a component whose volume fraction is
 exactly zero (its partials included, under automatic differentiation); the
 result is the same for every finite conductivity.
@@ -321,7 +321,7 @@ bounds); a macroscopically isotropic one lies inside the narrower Hashin–Shtri
 bounds.
 
 > **Implementation note.** Both sums are produced in one pass by the generated
-> `_conductivity_sums(v, T, comps, Val(NC), Val(skip_absent))`
+> `_conductivity_sums(v, T, comps, Val(NC))`
 > (`effective_properties.jl`). The series accumulation is guarded:
 > `inv_k_series += v[i]/k` is taken only when `v[i] > 1e-20 && k > 1e-20`, so a
 > phase with zero volume or (pathologically) zero conductivity does not blow up
@@ -431,10 +431,9 @@ the implementation:
 > **Implementation note.** The component conductivities are gathered into a tuple
 > by the generated `_conductivity_tuple(T, comps, Val(NC))`
 > (`effective_properties.jl`), so the Bruggeman path is allocation-free.
-> The dispatch in `_conductivity_from_v` checks `mixing == BRUGGEMAN` first and
-> only otherwise computes the parallel/series sums
-> (`effective_properties.jl`); the Bruggeman path evaluates every component's
-> conductivity, so `skip_absent` does not apply to it.
+> `effective_conductivity` checks `mixing == BRUGGEMAN` first and only otherwise
+> computes the parallel/series sums (`effective_properties.jl`); the Bruggeman
+> path evaluates every component's conductivity, an absent one's included.
 
 ---
 
@@ -550,7 +549,7 @@ absorbed heater flux from the temperature-dependent emission: an emissivity that
 falls with temperature (integrating-sphere data for virgin wood, for instance)
 does not drag the absorbed cone flux down with it. $a_{\text{eff}}$ is consumed
 by a `RadiativeFluxBC` with `absorptivity = nothing`: in the surface balance of
-its face under `NO_RADIATION` and `SURFACE_ABSORPTION` (§5.8.2), and under
+its face under `SURFACE_ABSORPTION` (§5.8.2), and under
 `BEER_LAMBERT` as the fraction of the incident flux that enters the first live
 cell, the absorptivity of that cell (`incident_intensity`,
 `src/Kernels/radiation.jl`; §8.3). Surface emission always uses

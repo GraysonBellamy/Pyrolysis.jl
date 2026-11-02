@@ -8,7 +8,7 @@ using Pyrolysis.Integration: gas_can_move
 include(joinpath(@__DIR__, "../verification/casedefs.jl"))
 
 function audit_initial(io, label, p)
-    T, ξ=initial_fields(p, p.mesh)
+    T, ξ=initial_fields(p)
     m=p.material
     gas=any(is_gas, m.components)
     φ=[1-skeletal_volume_fraction(Tuple(ξ[:, i]), T[i], m) for i in eachindex(T)]

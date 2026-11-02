@@ -149,7 +149,7 @@ The pair is *extensive*: it belongs to the solid of a cell, and wherever that so
   \qquad
   F_{m_{\mathrm{dry}},f} = F_{\mathrm{solid},f}\,\Big(\frac{m_{\mathrm{dry}}}{m_s}\Big)_f,
   $$
-  with $m_s$ a cell's solid mass smoothly floored at its mass scale (`RelativeFluxKernel`, `src/Kernels/relative_flux.jl`; §11.6.4). The face values are second-order van Albada reconstructions; unlike the concentrations they are not inventories and carry no positivity bound. The correction vanishes at the end nodes (§11.7.5), so the boundary faces carry no pair and the interior fluxes telescope: the column sums are unchanged.
+  with $m_s$ a cell's solid mass smoothly floored at its mass scale (`RelativeFluxKernel`, `src/Kernels/relative_flux.jl`; §11.6.4). The face values are second-order van Albada reconstructions; unlike the concentrations they are not inventories and carry no positivity bound. The correction vanishes at the end nodes (§11.7.4), so the boundary faces carry no pair and the interior fluxes telescope: the column sums are unchanged.
 - **Deactivation.** When a cell deactivates, its pair is added to the receiver's and zeroed (§14.3.3). The column sums $\sum_i G_i$ and $\sum_i m_{\mathrm{dry},i}$ over the live cells, hence $\bar\chi$ and the area, are unchanged by the event.
 
 ---
@@ -195,7 +195,7 @@ $$
 
 which holds exactly at the consistent start and to the integrator's tolerance at every accepted state (§10.6.3).
 
-> **Implementation note.** The law is the material's `lateral_shrinkage_law` (`Material(...; lateral_shrinkage_law = nothing)`, `src/Materials/materials.jl`), a `Function` of one argument or `nothing`, which means a constant cross section and no cross-section rows at all. $A_0$ is the cross-section measure of the mesh (the `cross_section` keyword of `create_uniform_mesh` and its siblings, 1 m² by default on a planar line). `setup` builds `LateralShrinkage(material, A₀, M₀)` (`src/Closures/lateral.jl`) with $M_0=M_{\mathrm{dry}}(0)$, which refuses with an `ArgumentError`:
+> **Implementation note.** The law is the material's `lateral_shrinkage_law` (`Material(...; lateral_shrinkage_law = nothing)`, `src/Materials/materials.jl`), a `Function` of one argument or `nothing`, which means a constant cross section and no cross-section rows at all. $A_0$ is the cross-section measure of the mesh (the `cross_section` keyword of `uniform_mesh` and its siblings, 1 m² by default on a planar line). `setup` builds `LateralShrinkage(material, A₀, M₀)` (`src/Closures/lateral.jl`) with $M_0=M_{\mathrm{dry}}(0)$, which refuses with an `ArgumentError`:
 >
 > - a law that is not positive and finite at every one of 201 equally spaced points of $[-10^{-3},\,1+10^{-3}]$, the clamp band of $\bar\chi_c$;
 > - a law with $|\mathrm{law}(0)-1|>10^{-12}$;
@@ -230,7 +230,7 @@ shrink = Material(
     lateral_shrinkage_law = χ -> 1.0 - 0.2χ,
 )
 problem = PyrolysisProblem(
-    mesh = create_uniform_mesh(0.01, 10),
+    mesh = uniform_mesh(0.01, 10),
     material = shrink,
     bc_set = BoundaryConditionSet(
         thermal = (top = HeatFluxBC(3e4), bottom = AdiabaticBC()),
@@ -569,7 +569,7 @@ The following limitations are documented in the source and should guide use and 
 
 4. **$\bar\chi$ weighting choice.** The column average (10.7) is mass-weighted by *initial* dry-solid mass. Strongly non-uniform decomposition (e.g. a thin, fully-charred surface over an intact interior) is reduced to a single scalar $\bar\chi$, so the lateral law cannot represent depth-dependent cross-section change. A different weighting (or a depth-resolved area) would be required for that regime.
 
-5. **Single-reactant kinetics.** Volume change inherits the single-reactant restriction of the kinetics (§6.5, §6.10): a reaction with more than one reactant is refused by problem validation and by source evaluation (`_apply_reaction_source!`, `src/Physics/kinetics.jl`), so $\theta$ and the history pair are built from single-reactant sources only. Bimolecular or multi-reactant stoichiometry (e.g. char oxidation consuming both char and O₂) would require extending the source-term machinery before $\theta$ and $G_i$ could account for it.
+5. **Single-reactant kinetics.** Volume change inherits the single-reactant restriction of the kinetics (§6.5, §6.10): a `Reaction` has one reactant, so $\theta$ and the history pair are built from single-reactant sources only. Bimolecular or multi-reactant stoichiometry (e.g. char oxidation consuming both char and O₂) would require extending the source-term machinery before $\theta$ and $G_i$ could account for it.
 
 6. **Interaction with deactivation.** A deactivated cell's history pair goes to the receiver (§10.3.4, §14.3.3), which keeps $\bar\chi$ and $A$ continuous across the event; the conversion is a column quantity, so how the pair of a burned-out surface cell is attributed among the live cells does not matter to the area. The last live cell, lost with no receiver, takes its pair with it.
 
@@ -577,4 +577,4 @@ The following limitations are documented in the source and should guide use and 
 
 8. **One lateral strain for the whole column.** The axial (node-motion) and lateral (cross-section) channels are rows of one DAE, solved together, but the lateral channel is a single column-global $\theta_A$ subtracted from every cell's $\theta_i$. A cross-section that varies with depth, or lateral motion that differs between layers, would need a multi-dimensional model; the variable cross section is a line's (planar coordinates, one-dimensional mesh).
 
-9. **The mesh follows the solid unless corrected.** The volume-change pipeline of this chapter defines the *solid* velocity $v_s$ through the balance rows; the mesh velocity is $w=v_s+c$, and it differs from the solid velocity only under the equidistribution correction (installed for burnout) or a prescribed mesh velocity for verification, with every inventory and the history pair then crossing the faces at the relative velocity $-c$ (§11.6, §11.7). A prescribed mesh velocity moves the mesh over a solid at rest, so its material must not react (§11.7.8).
+9. **The mesh follows the solid unless corrected.** The volume-change pipeline of this chapter defines the *solid* velocity $v_s$ through the balance rows; the mesh velocity is $w=v_s+c$, and it differs from the solid velocity only under the equidistribution correction (installed for burnout) or a prescribed mesh velocity for verification, with every inventory and the history pair then crossing the faces at the relative velocity $-c$ (§11.6, §11.7). A prescribed mesh velocity moves the mesh over a solid at rest, so its material must not react (§11.7.7).

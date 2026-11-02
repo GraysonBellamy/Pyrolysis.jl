@@ -1351,7 +1351,7 @@ weakdeps = ["ForwardDiff"]
     PureKLUForwardDiffExt = "ForwardDiff"
 
 [[deps.Pyrolysis]]
-deps = ["ADTypes", "DifferentiationInterface", "Distributed", "ForwardDiff", "FunctionWrappers", "LinearAlgebra", "LinearSolve", "OrdinaryDiffEq", "OrdinaryDiffEqBDF", "OrdinaryDiffEqSDIRK", "PrecompileTools", "Printf", "ProgressMeter", "SciMLBase", "SparseArrays", "SparseMatrixColorings", "StaticArrays"]
+deps = ["ADTypes", "DifferentiationInterface", "Distributed", "ForwardDiff", "FunctionWrappers", "LinearAlgebra", "LinearSolve", "OrdinaryDiffEq", "OrdinaryDiffEqBDF", "OrdinaryDiffEqSDIRK", "PrecompileTools", "ProgressMeter", "SciMLBase", "SparseArrays", "SparseMatrixColorings", "StaticArrays"]
 path = "../.."
 uuid = "910b54fb-7370-4696-a92c-2242b531a32e"
 version = "0.1.0"

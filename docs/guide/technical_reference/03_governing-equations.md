@@ -225,7 +225,7 @@ cell's total mass changes only by its face fluxes; the column's changes only by 
 fluxes through its boundary faces (and, when cells are deactivated on a fixed mesh, by
 the gas a dead cell vents, which the event records; §14.4). This build-time invariant
 is enforced by the `Reaction` constructor (`_validate_stoichiometry`, relative
-tolerance $10^{-10}$); `mass_balance_error` and `verify_stoichiometry` report it (§6).
+tolerance $10^{-10}$; §6).
 
 ### 3.2.3 Phase-resolved mass: solids/liquids are immobile, only gases transport
 
@@ -293,7 +293,7 @@ absent.
 > `RelativeFluxKernel` (`src/Kernels/relative_flux.jl`). The reaction sources
 > $\omega_{j,i}V_i$ are added by `ReactionKernel` (`src/Kernels/reactions.jl`) from
 > `species_source_terms!` in `src/Physics/kinetics.jl`; the per-reaction application
-> enforces the single-reactant mass-balance convention in `_apply_reaction_source!`
+> applies the single-reactant mass-balance convention in `_apply_reaction_source!`
 > (same file). The row assembly `assemble_rows!` (`src/Assembly/residual.jl`) scatters
 > every face flux as $-F_{j,f}A_f$ into its owner and $+F_{j,f}A_f$ into its neighbour
 > and writes the mass rows.
@@ -481,16 +481,16 @@ distance-weighted harmonic-mean conductivity (resistance-in-series), reducing to
 ordinary harmonic mean on a uniform mesh; the full derivation is in §7.
 
 **Radiation.** $Q_{\mathrm{rad}}$ is the volumetric radiation absorption and is
-entirely model-dependent. For `NO_RADIATION` and `SURFACE_ABSORPTION` it is zero —
+entirely model-dependent. For `SURFACE_ABSORPTION` it is zero —
 the absorbed flux $a\,q_{\mathrm{inc}}$ of a `RadiativeFluxBC` enters through the
 *surface energy balance* (boundary Newton solve, §12.3.5), not as a volumetric
-deposit, and the two models give identical residuals. For `BEER_LAMBERT` it follows
+deposit. For `BEER_LAMBERT` it follows
 the in-depth attenuation $q''' = \alpha I(z)$ with
 $I(z) = I_{\mathrm{inc}}\exp(-\int\alpha\,dz')$: the face intensities are algebraic
 unknowns, each satisfying $0 = I_{\mathrm{down}} - I_{\mathrm{up}}\,e^{-\alpha_i\Delta z_i}$
 across its cell (and $0 = I_e - a\,q_{\mathrm{inc}}$ at the exposed face), and cell $i$
 absorbs $I_{\mathrm{up}}A_{\mathrm{up}} - I_{\mathrm{down}}A_{\mathrm{down}}$, the exact
-cell integral of $\alpha I$. The three models, their mutual exclusivity, and their
+cell integral of $\alpha I$. The two models, their mutual exclusivity, and their
 numerics are the subject of §8.
 
 **Reaction heat.** With the internal sign convention $h_r>0$ endothermic,
@@ -501,7 +501,7 @@ $$
 
 so an exothermic reaction ($h_r<0$, $r_r>0$) gives $Q_{\mathrm{rxn}}>0$ (heats the
 cell) and an endothermic reaction ($h_r>0$) gives $Q_{\mathrm{rxn}}<0$ (cools it). The
-units check: $h_r$ [J·kg⁻¹ of first reactant] $\times$ $r_r$ [kg·m⁻³·s⁻¹] gives
+units check: $h_r$ [J·kg⁻¹ of reactant] $\times$ $r_r$ [kg·m⁻³·s⁻¹] gives
 W·m⁻³. The implementing loop literally accumulates `Q -= heats[i] * rates[i]`. The heat
 of reaction $h_r$ may itself be temperature- or state-dependent (e.g. a
 moisture-sorption heat $h(T,\xi)$ via `StateDependentProperty`); the rate law $r_r$ is
@@ -950,8 +950,8 @@ regimes. The most important, with the section that quantifies or discusses each:
   Péclet number above 2) the face becomes upwind and first order, with no limiter beyond it; `GasDiagnostics` reports the cell Péclet number and the added
   conductivity of every interior face (§9.11).
 - **Single reactant per reaction.** Multi-reactant (bimolecular) kinetics, supported by
-  ThermaKin, is not implemented; the per-reactant tuple would need extending to carry a
-  mass stoichiometry (§6). There is also no temperature-dependent $A$ or pressure
+  ThermaKin, is not implemented: a `Reaction` holds one reactant, one order and an
+  implicit unit mass stoichiometry (§6). There is also no temperature-dependent $A$ or pressure
   dependence, and no distributed-activation-energy tooling.
 - **Scalar lateral shrinkage.** Radial deformation is captured only through the single
   scalar $A(t)=A_0\,\mathrm{law}(\bar\chi)$ (§3.6.4); there is no resolved transverse

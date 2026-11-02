@@ -53,11 +53,11 @@ function _restricted(s; n_top = 8, n_bottom = 4, t_end = 200.0)
         range(L_bottom, L_bottom + L_top, length = n_top + 1)[2:end],
     )
     return PyrolysisProblem(
-        mesh = create_mesh_from_nodes(z),
+        mesh = line_mesh(z),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(flux = s * 5e4, absorptivity = 0.95) +
+                top = RadiativeFluxBC(s * 5e4, absorptivity = 0.95) +
                       ConvectiveBC(h = s * 10.0, T_inf = 300.0),
                 bottom = AdiabaticBC(),
             ),
@@ -127,11 +127,11 @@ function _two_vanishing(; n_fast = 6, n_slow = 6, n_sub = 4, t_end = 400.0)
         range(z2, z3, length = n_fast + 1)[2:end],
     )
     return PyrolysisProblem(
-        mesh = create_mesh_from_nodes(z),
+        mesh = line_mesh(z),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(flux = 5e4, absorptivity = 0.95) +
+                top = RadiativeFluxBC(5e4, absorptivity = 0.95) +
                       RadiativeBC(T_inf = 300.0),
                 bottom = AdiabaticBC(),
             ),
@@ -388,7 +388,6 @@ end
         correction = EquidistributionCorrection(
             τ = ActivationTime(),
             activation = (1.5, 0.5),
-            monitor = (1.0, 1.0),
         ),
     )
     corr = cp.def.closure.correction

@@ -45,9 +45,9 @@ struct _BoundRecorder
     species_inventories::_SpeciesWrapper
 end
 
-function _BoundRecorder(rec::ConservationRecorder, cp::CoreProblem, crossings)
+function _BoundRecorder(rec::ConservationRecorder, cp::PreparedProblem, crossings)
     def = cp.def
-    ws = CoreWorkspace(def, cp.T0)
+    ws = ResidualWorkspace(def, cp.T0)
     ext = _extension(def)
     du = zeros(length(cp.u0))
     rates = _PairWrapper((u, t) -> begin

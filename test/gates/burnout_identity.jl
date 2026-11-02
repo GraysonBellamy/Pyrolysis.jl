@@ -86,7 +86,7 @@ function char_layer_problem(n_cells; t_end = 240.0)
     gas = GaseousComponent(:gas, M = 0.05, c = 1000.0, k = 0.02)
     rxn = Reaction(:gasify, 2 => 3; A = 9.3e3, E = 8.0e4, h = 0.0)
     mat = Material(name = :VCPL06, components = (matrixc, fuel, gas), reactions = (rxn,))
-    mesh = create_uniform_mesh(L, n_cells)
+    mesh = uniform_mesh(L, n_cells)
     bc_set = BoundaryConditionSet(
         thermal = (
             top = ConvectiveBC(h = 1000.0, T_inf = 900.0),
@@ -162,7 +162,7 @@ function douglas_fir_problem()
     return Core.eval(
         m,
         :(PyrolysisProblem(
-            mesh = create_uniform_mesh(sample_thickness, n_cells),
+            mesh = uniform_mesh(sample_thickness, n_cells),
             material = douglas_fir,
             bc_set = bc_set,
             T_initial = T_initial_func,

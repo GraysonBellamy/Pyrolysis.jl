@@ -3,7 +3,7 @@
 # ============================================================================
 
 """
-	PotentialClosure{C} <: Closure
+	PotentialClosure <: Closure
 
 The node velocities of a moving mesh of any dimension from one multiplier `φᵢ`
 per cell: the velocity of minimum discrete `L²` norm, `Σ_n W_n |w_n|²`, that
@@ -22,31 +22,27 @@ algebraic row of its multiplier. Both rows are local; the global system
 consistent initial state ([`consistent_multipliers`](@ref)), never inside
 the residual. The weight is the lumped volume: two unit squares side by side
 under a uniform expansion with their lateral motion suppressed move
-uniformly, where the unweighted form (`W = 1`) gives the shared node twice
-the velocity of the others.
+uniformly.
 
 A node component is free unless its node is pinned or it is the fixed
 component of a slip wall (`free`, `D` flags per node). `corners[n]` lists
 the `(cell, corner)` pairs of node `n` and `sweeps[n]` the `(cell, face, q,
 σ)` terms of its sweep vectors; a dead cell contributes to neither.
 """
-struct PotentialClosure{C<:Correction} <: Closure
+struct PotentialClosure <: Closure
     free::BitVector
     corners::Vector{Vector{Tuple{Int,Int}}}
     sweeps::Vector{Vector{NTuple{4,Int}}}
-    weighted::Bool
-    correction::C
 end
 
 """
-	PotentialClosure(topology; slip = (), weighted = true)
+	PotentialClosure(topology; slip = ())
 
 The potential closure of a mesh: the pinned nodes at rest, and on the faces
 of each `tag => k` pair of `slip` the velocity component `k` zero (a wall the
-mesh slides along, on an axis-aligned face). `weighted = false` takes `W = 1`,
-the unweighted form, for comparison only.
+mesh slides along, on an axis-aligned face).
 """
-function PotentialClosure(topo::MeshTopology{D}; slip = (), weighted::Bool = true) where {D}
+function PotentialClosure(topo::MeshTopology{D}; slip = ()) where {D}
     is_fixed(topo) && throw(ArgumentError("a fixed mesh has no node velocities to close"))
     nn = n_nodes(topo)
     free = trues(D * nn)
@@ -72,13 +68,12 @@ function PotentialClosure(topo::MeshTopology{D}; slip = (), weighted::Bool = tru
             end
         end
     end
-    return PotentialClosure(free, corners, sweeps, weighted, NoCorrection())
+    return PotentialClosure(free, corners, sweeps)
 end
 
 # The lumped volume of node `nd` over the live cells.
 @inline function _node_weight(cl::PotentialClosure, g::MeshGeometry, active, nd::Int)
     W = zero(eltype(g.cell_volume))
-    cl.weighted || return one(W)
     @inbounds for (i, a) in cl.corners[nd]
         active[i] && (W += g.cell_node_volume[a, i])
     end

@@ -5,7 +5,7 @@ Parses ThermaKin output (PTW_Cone_output.txt) and Julia results (ptw_results_50k
 and generates comparison plots for key quantities of interest.
 
 Usage:
-  julia --project=. examples/ptw_comparison.jl
+  julia --project=examples examples/ptw_comparison.jl
 """
 
 using Plots
@@ -204,7 +204,7 @@ end
 # ============================================================================
 
 # File paths
-tk_file = joinpath(@__DIR__, "..", "docs", "PTW_Cone_output.txt")
+tk_file = joinpath(@__DIR__, "thermakin", "PTW_Cone_output.txt")
 julia_file = joinpath(@__DIR__, "..", "ptw_results_50kWm2.csv")
 
 println("Parsing ThermaKin output...")

@@ -41,7 +41,7 @@ function _wood()
 end
 
 _top() =
-    RadiativeFluxBC(flux = 5e4) +
+    RadiativeFluxBC(5e4) +
     RadiativeBC(T_inf = 300.0) +
     ConvectiveBC(h = 10.0, T_inf = 300.0)
 _T(z) = 600.0 + 2e4 * z
@@ -52,7 +52,7 @@ _ξ = (z -> 450.0 - 1e4 * z, z -> 15.0 + 1e3 * z, z -> 0.5)
 # faces adiabatic (and, the gas not moving, impermeable).
 function _columns(n; energy)
     line = PyrolysisProblem(
-        mesh = create_stretched_mesh(0.01, n, 1.1),
+        mesh = stretched_mesh(0.01, n, 1.1),
         material = _wood(),
         bc_set = BoundaryConditionSet(thermal = (top = _top(), bottom = AdiabaticBC())),
         T_initial = _T,

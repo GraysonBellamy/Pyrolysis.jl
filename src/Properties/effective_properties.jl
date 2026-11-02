@@ -113,8 +113,7 @@ converted to these units.)
 
 # Default Parameters
 For pyrolysis gases, if σ and ε_k are not provided, uses:
-- σ estimated from Tc-based correlation or default to 4 Å
-- ε_k estimated as 0.77 × Tc or default to 300 K
+- σ and ε_k estimated from the molar mass
 - Background gas is air (σ_air = 3.617 Å, ε_k_air = 97 K, M_air = 0.029 kg/mol)
 
 # Examples
@@ -152,16 +151,14 @@ D_CH4 = chapman_enskog_diffusivity(500.0, 0.016, σ=3.758, ε_k=148.6)
     σ_species = if σ !== nothing
         σ
     else
-        # Rough estimate: σ ≈ 1.18 × (Vc)^(1/3) where Vc ~ M/ρ_c
-        # For organic gases, σ typically 3-6 Å, estimate from M
+        # For organic gases, σ is typically 3-6 Å.
         3.5 + 0.5 * log10(max(M / 0.016, 1.0))  # Å, anchored to CH4 ≈ 3.8 Å
     end
 
     ε_k_species = if ε_k !== nothing
         ε_k
     else
-        # Rough estimate: ε/k ≈ 0.77 × Tc
-        # For organics, ε/k typically 100-600 K
+        # For organics, ε/k is typically 100-600 K.
         150.0 + 100.0 * (M / 0.044)  # K, scaled roughly to molecular weight
     end
 
@@ -210,16 +207,10 @@ end
 # Conductivity helpers
 # ============================================================================
 
-# With `skip_absent`, a component whose volume fraction is exactly zero (a
-# dual number's partials included) adds an exact zero to both sums for every
-# finite conductivity, so its law is not evaluated.
-@generated function _conductivity_sums(
-    v,
-    T,
-    comps::Tuple,
-    ::Val{NC},
-    ::Val{skip_absent},
-) where {NC,skip_absent}
+# A component whose volume fraction is exactly zero (a dual number's partials
+# included) adds an exact zero to both sums for every finite conductivity, so
+# its law is not evaluated.
+@generated function _conductivity_sums(v, T, comps::Tuple, ::Val{NC}) where {NC}
     expr = quote
         W = _prop_type(v, T)
         k_parallel = zero(W)
@@ -233,7 +224,7 @@ end
                 inv_k_series += v[$i] / k
             end
         end
-        push!(expr.args, skip_absent ? :(iszero(v[$i]) || $term) : term)
+        push!(expr.args, :(iszero(v[$i]) || $term))
     end
     push!(expr.args, :(return k_parallel, inv_k_series))
     return expr
@@ -402,35 +393,17 @@ Uses the mixing rule specified in the material:
 
 Note: Uses `mixing_volume_fractions` — the condensed (matrix) volume
 fractions ξⱼ/ρⱼ of the solid and liquid components; gases carry no weight.
-This matches a ThermaKin limiting case: "when γ = 0, gaseous components do not
-contribute to the thermal conductivity" (ThermaKin2Ds Reference, Equations
-8-10). For a fully depleted cell (no matrix volume left) it falls back to the
+For a fully depleted cell (no matrix volume left) it falls back to the
 actual phase occupancy so k_eff degrades to the gas-mixture conductivity
-instead of 0.
-
-With `skip_absent = Val(true)` the parallel, series and weighted rules do not
-evaluate the conductivity of a component whose volume fraction is exactly
-zero; the result is the same for every finite conductivity.
+instead of 0. The parallel, series and weighted rules do not evaluate the
+conductivity of a component whose volume fraction is exactly zero.
 """
 @inline function effective_conductivity(
     ξ::NTuple{NC,<:Real},
     T::Real,
-    material;
-    skip_absent::Val = Val(false),
+    material::Material{NC},
 ) where {NC}
     v = mixing_volume_fractions(ξ, T, material)
-    return _conductivity_from_v(v, T, material; skip_absent)
-end
-
-# The effective conductivity from precomputed mixing volume fractions. The
-# tuple type is loose: AD-derived volume fractions can be a mixed-type tuple
-# (some Float64 zeros, others Dual).
-@inline function _conductivity_from_v(
-    v::Tuple,
-    T::Real,
-    material::Material{NC};
-    skip_absent::Val = Val(false),
-) where {NC}
     W = _prop_type(v, T)
     mixing = material.mixing.k.rule
     if mixing == BRUGGEMAN
@@ -438,8 +411,7 @@ end
         return convert(W, bruggeman_effective_property(v, k_tuple))
     end
 
-    k_parallel, inv_k_series =
-        _conductivity_sums(v, T, material.components, Val(NC), skip_absent)
+    k_parallel, inv_k_series = _conductivity_sums(v, T, material.components, Val(NC))
     k_series = inv_k_series > 1e-20 ? convert(W, 1.0 / inv_k_series) : zero(W)
 
     if mixing == PARALLEL

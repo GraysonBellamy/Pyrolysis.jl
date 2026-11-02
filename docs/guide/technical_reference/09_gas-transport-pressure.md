@@ -783,8 +783,8 @@ melts.
 
 The diagnostics follow the same sequence as the model: stored pore state,
 exchange at the boundary, then the integrated species balance.
-`get_porosity`, `get_pressure`, `get_partial_pressures`,
-`get_intrinsic_gas_densities` and `get_gas_composition` read the saved pore
+`sol.gas.porosity`, `sol.gas.pressure`, `sol.gas.partial_pressure`,
+`sol.gas.intrinsic_density` and `get_gas_composition` read the saved pore
 states. Gas arrays follow the species ordering in `sol.gas.species`.
 
 `get_boundary_exchange(sol, tag)` returns current-area averaged outward

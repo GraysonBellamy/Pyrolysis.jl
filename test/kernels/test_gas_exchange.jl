@@ -28,7 +28,7 @@ function gas_problem(;
     mat=Material(name = :gas_exchange, components = (solid, a, b), gas_transport = model)
     ξ=(500.0, 0.5*P*x[1]*0.028/(R_GAS*T), 0.5*P*x[2]*0.044/(R_GAS*T))
     PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, cells),
+        mesh = uniform_mesh(0.01, cells),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = thermal, bottom = AdiabaticBC()),
@@ -192,7 +192,7 @@ end
     PR=1e5
     d=L/4
     p=PyrolysisProblem(
-        mesh = create_uniform_mesh(L, 2),
+        mesh = uniform_mesh(L, 2),
         material = mat,
         T_initial = z->T,
         ξ_initial = [

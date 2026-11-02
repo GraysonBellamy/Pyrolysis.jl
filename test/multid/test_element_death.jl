@@ -53,7 +53,7 @@ _inside(x) = SVector(x[1] + 0.001sin(π * x[1] / 0.03) * sin(2π * x[2] / 0.03),
 # convection.
 _bc_set() = BoundaryConditionSet(
     thermal = (
-        top = RadiativeFluxBC(flux = 5e4) +
+        top = RadiativeFluxBC(5e4) +
               RadiativeBC(T_inf = 300.0) +
               ConvectiveBC(h = 10.0, T_inf = 300.0),
         bottom = AdiabaticBC(),

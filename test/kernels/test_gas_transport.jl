@@ -60,7 +60,7 @@ function _gas_slab(n; model = LumpedTransfer(), darcy::Bool, thermal, mass)
     )
     L = 0.01
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(L, n, 1.15),
+        mesh = stretched_mesh(L, n, 1.15),
         material = mat,
         bc_set = BoundaryConditionSet(thermal = thermal, mass = mass),
         T_initial = z -> 500.0 + 3e4 * z,
@@ -183,7 +183,7 @@ function _trace_column(model)
         gas_transport = model,
     )
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.002, 2),
+        mesh = uniform_mesh(0.002, 2),
         material = material,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -237,7 +237,7 @@ function _sealed_column()
     )
     gas = GaseousComponent(:gas, M = 0.044, c = 1000.0, k = 0.025)
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L, 20),
+        mesh = uniform_mesh(L, 20),
         material = Material(
             name = :sealed_column,
             components = (solid, gas),
@@ -296,7 +296,7 @@ function _sealed_pair(λ)
     solid = SolidComponent(:solid; ρ = 600.0, c = 1000.0, k = 0.1, φ = 0.4, λ = λ)
     gas = GaseousComponent(:gas; M = 0.032, c = 1000.0, k = 0.03)
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(1.0, 2),
+        mesh = uniform_mesh(1.0, 2),
         material = Material(name = :sealed_pair, components = (solid, gas), reactions = ()),
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -393,7 +393,7 @@ function _gas_problem(
         z ->
             background_gas_concentration(material, 1 + g, ξ0, T[cell(z)]; P = p[cell(z)][g])
     return PyrolysisProblem(
-        mesh = create_mesh_from_nodes(collect(nodes)),
+        mesh = line_mesh(collect(nodes)),
         material = material,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -913,7 +913,7 @@ end
             saveat = 0.01,
         )
         @test sol.retcode === :Success
-        pressure = get_pressure(sol)
+        pressure = sol.gas.pressure
         @test maximum(pressure[:, end]) - minimum(pressure[:, end]) <
               0.1 * (maximum(pressure[:, 1]) - minimum(pressure[:, 1]))
         @test maximum(sol.T) <= 600 + 1e-4

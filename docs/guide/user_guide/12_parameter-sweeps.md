@@ -52,7 +52,7 @@ Key facts that follow directly from this implementation:
 | Return value | A `Vector`, one entry per grid point, in `collect(grid)` order. Each entry is whatever `extract` returns (the full `PyrolysisSolution` by default). |
 | Base problem | Never mutated. Each grid point gets its own problem from `modify`; it may share the base problem's mesh, which a solve never changes. |
 | Grid materialization | `collect(grid)` runs first, so lazy iterators (e.g. `Iterators.product`) are realized into a concrete collection before dispatch. |
-| `solve_kwargs` | Forwarded verbatim to each `solve()`. This is where `abstol`, `reltol`, `use_ale`, `radiation_model`, `deactivation`, `min_thickness`, `dtmin`, etc. go (Chapter 8 lists every `solve` keyword). An unknown keyword is refused by `solve` with an `ArgumentError` at the first point. |
+| `solve_kwargs` | Forwarded verbatim to each `solve()`. This is where `abstol`, `reltol`, `use_ale`, `radiation_model`, `deactivation`, `min_thickness`, `dtmin`, etc. go (Chapter 8 lists every `solve` keyword). An unknown keyword is a Julia `MethodError` at the first point. |
 | `progress` | Not set by the harness: `solve`'s default (`progress = false`) applies, and `progress = true` in `solve_kwargs` draws one bar per point. |
 | Failures | Not retried. A `solve` that throws propagates out of `map`/`pmap`; a solve that ends without throwing (for example with return code `:Failure`) is passed to `extract` like any other (§12.7). |
 
@@ -129,8 +129,8 @@ struct's fields. The relevant fields:
   `tspan`, `dt_initial`, `output_times`.
 - `Material`: `name`, `components` (a tuple), `reactions` (a tuple), `mixing`,
   `lateral_shrinkage_law`, `depletion_limiter`, `gas_viscosity`, `gas_transport`.
-- `Reaction`: `name`, `reactants`, `products`, `A`, `E`, `heat`, `T_min`,
-  `T_max`, `gate_width`.
+- `Reaction`: `name`, `reactant`, `order`, `products`, `A`, `E`, `heat`, `T_min`,
+  `T_max`, `gate_width`, `basis`.
 
 The constructors you rebuild with are the standard keyword constructors (Chapters
 3–5):
@@ -138,12 +138,12 @@ The constructors you rebuild with are the standard keyword constructors (Chapter
 - `PyrolysisProblem(; mesh, material, bc_set, T_initial, ξ_initial, tspan,
   dt_initial, output_times)`.
 - `Material(; name, components, reactions, mixing, lateral_shrinkage_law,
-  depletion_limiter, gas_viscosity)`. Pass every field you do not change
-  explicitly: a field left out takes its default (for example the air viscosity
-  curve `SutherlandProperty()` for `gas_viscosity`), not the base material's value.
-- `Reaction(name, reactant => product; A, E, h, n, T_min, T_max, gate_width)` and
-  `Reaction(name, reactant => (p1, p2); A, E, h, yields, n, T_min, T_max,
-  gate_width)`.
+  depletion_limiter, gas_viscosity, gas_transport)`. Pass every field you do not
+  change explicitly: a field left out takes its default (for example the air
+  viscosity curve `SutherlandProperty()` for `gas_viscosity`), not the base
+  material's value.
+- `Reaction(name, reactant => products; A, E, h, yields, n, T_min, T_max,
+  gate_width, basis)`.
 
 Reusing `prob.mesh` in every point is safe, on a moving mesh included: `solve`
 works on its own copy of the mesh, so each point starts from the base geometry.
@@ -156,8 +156,8 @@ the cell centres of whatever mesh the problem carries.
 The cleanest pattern: rebuild the single reaction you are sweeping, splice it back
 into a reactions tuple, rebuild the material, and rebuild the problem. The
 example below assumes the swept reaction is the first one and reuses everything
-else from the base material. Note the `Reaction` fields: `reactants` is a tuple of
-`(component_idx, order)` pairs and `products` a tuple of
+else from the base material. Note the `Reaction` fields: `reactant` is the component
+index, `order` the reaction order and `products` a tuple of
 `(component_idx, mass_stoich)` pairs (Chapter 4):
 
 ```julia
@@ -166,16 +166,14 @@ function modify_AE(prob, point)
     old_rxn = mat.reactions[1]               # the reaction we are sweeping
 
     # Rebuild reaction 1 with the swept A, E; reuse its other parameters.
-    reactant_idx = old_rxn.reactants[1][1]   # (component_idx, order)
-    order        = old_rxn.reactants[1][2]
-    product_idx  = old_rxn.products[1][1]    # (component_idx, mass_stoich)
+    product_idx = old_rxn.products[1][1]     # (component_idx, mass_stoich)
     new_rxn = Reaction(
         old_rxn.name,
-        reactant_idx => product_idx;
+        old_rxn.reactant => product_idx;
         A          = point.A,                # swept pre-exponential [s⁻¹]
         E          = point.E,                # swept activation energy [J/mol]
         h          = old_rxn.heat,           # reuse the heat-of-reaction property
-        n          = order,
+        n          = old_rxn.order,
         T_min      = old_rxn.T_min,
         T_max      = old_rxn.T_max,
         gate_width = old_rxn.gate_width,
@@ -213,12 +211,14 @@ A few notes:
 - `old_rxn.heat` is already a property function (an `AbstractPropertyFunction`),
   so passing it straight back as `h` is fine: the `Reaction` constructor accepts
   either a number or a property function and runs `to_property` on it.
-- If the reaction has **two products**, use the two-product `Reaction`
-  constructor and pass the yields you read back from the old reaction:
-  `reactant_idx => (old_rxn.products[1][1], old_rxn.products[2][1])` with
-  `yields = (old_rxn.products[1][2], old_rxn.products[2][2])`.
-- Mass balance is re-validated when the reaction is reconstructed
-  (`validate_mass = true` by default), so a malformed point fails fast.
+- If the reaction has **several products**, pass them all with the yields you
+  read back from the old reaction:
+  `old_rxn.reactant => map(first, old_rxn.products)` with
+  `yields = map(last, old_rxn.products)`.
+- `old_rxn.basis` reads `NaN` when the reaction has none, which the constructor
+  refuses; pass a `basis` on only when it is finite.
+- Mass balance is re-validated when the reaction is reconstructed, so a malformed
+  point fails fast.
 
 ### 12.3.2 Sweeping the heat of reaction (h)
 
@@ -231,10 +231,10 @@ function modify_h(prob, point)
     old = mat.reactions[1]
     new_rxn = Reaction(
         old.name,
-        old.reactants[1][1] => old.products[1][1];
+        old.reactant => old.products[1][1];
         A = old.A, E = old.E,
         h = point.h,                         # [J/kg], h > 0 endothermic
-        n = old.reactants[1][2],
+        n = old.order,
         T_min = old.T_min, T_max = old.T_max, gate_width = old.gate_width,
     )
     new_mat = Material(
@@ -267,7 +267,7 @@ thermal condition and both mass conditions unchanged:
 function modify_flux(prob, q_incident)            # point is a scalar flux [W/m²]
     bcs = prob.bc_set
     new_top_thermal =
-        RadiativeFluxBC(flux = q_incident, absorptivity = 0.96) +
+        RadiativeFluxBC(q_incident, absorptivity = 0.96) +
         RadiativeBC(ε = 0.96, T_inf = 330.0) +
         ConvectiveBC(h = 7.2, T_inf = 330.0)
 
@@ -288,9 +288,9 @@ end
 The `+` operator on thermal conditions builds a `CombinedThermalBC` (Chapter 5).
 Each grid point therefore gets its own combined condition with the swept incident
 flux while re-radiation and convection stay fixed. The incident flux of a
-`RadiativeFluxBC` enters the surface balance under `NO_RADIATION` and
-`SURFACE_ABSORPTION` and is absorbed in depth under `BEER_LAMBERT`; pass the
-`radiation_model` you want in `solve_kwargs` (Chapter 8, Technical Reference §8).
+`RadiativeFluxBC` enters the surface balance under `SURFACE_ABSORPTION` and is
+absorbed in depth under `BEER_LAMBERT`; pass the `radiation_model` you want in
+`solve_kwargs` (Chapter 8, Technical Reference §8).
 
 > **Caveat: keep `modify` self-contained for parallel runs.** When you run with
 > workers (§12.5) the closure body executes on a remote process. Anything it
@@ -315,7 +315,7 @@ The default is `identity` (the full solution). For real sweeps, return a small
 | `sol.surface_T` | Surface temperature of the `:top` faces at each saved time [K] |
 | `sol.mass_loss_rate` | Mass leaving through every boundary face, per unit *current* area of the `:top` faces [kg/(m²·s)] |
 | `sol.retcode` | Integrator return code (`:Success`, `:Terminated`, `:Failure`, …) |
-| `sol.outcome` | `:running` unless deactivation or the thickness stop ended the solve (`:burned_out`, `:interior`, `:min_thickness`) |
+| `sol.outcome` | `:none` unless deactivation or the thickness stop ended the solve (`:burned_out`, `:interior`, `:min_thickness`) |
 | `sol.statistics` | Solver counters (`accepted`, `rejected`, `domain_rejections`, `invocations`, …) |
 | `sol.solve_time` | Wall-clock solve time [s] |
 | `sol.extras.total_mass` | Summed component masses per unit initial `:top` area [kg/m²] |
@@ -386,9 +386,9 @@ addprocs(4)                       # start 4 worker processes
 @everywhere function modify_AE(prob, point)
     mat = prob.material
     old = mat.reactions[1]
-    new_rxn = Reaction(old.name, old.reactants[1][1] => old.products[1][1];
+    new_rxn = Reaction(old.name, old.reactant => old.products[1][1];
                        A = point.A, E = point.E, h = old.heat,
-                       n = old.reactants[1][2], T_min = old.T_min, T_max = old.T_max,
+                       n = old.order, T_min = old.T_min, T_max = old.T_max,
                        gate_width = old.gate_width)
     new_mat = Material(name = mat.name, components = mat.components,
                        reactions = (new_rxn, Base.tail(mat.reactions)...),
@@ -459,7 +459,7 @@ const L_SAMPLE = 5.8e-3   # the thickness of the base problem's mesh [m]
 
 function modify_cells(prob, n_cells)
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L_SAMPLE, n_cells),
+        mesh = uniform_mesh(L_SAMPLE, n_cells),
         material = prob.material, bc_set = prob.bc_set,
         T_initial = prob.T_initial, ξ_initial = prob.ξ_initial,
         tspan = prob.tspan, dt_initial = prob.dt_initial,
@@ -491,7 +491,7 @@ end
 ```
 
 (use `pmap` with `@everywhere` definitions for a parallel version). Settings that
-`integrate` takes (`integrator_policy`, `linear_solver`, `dtmax`, `saveat`, …)
+`integrate` takes (`integrator_policy`, `dtmax`, `saveat`, …)
 can be swept on one set-up problem: `cp = setup(problem; …)` once, then
 `integrate(cp; integrator_policy = …)` per setting. Every `integrate` call starts
 from the set-up initial state with every cell live, so repeated integrations of
@@ -625,11 +625,11 @@ pmma = Material(
 )
 
 # --- Mesh, boundary conditions and base problem ---
-mesh = create_uniform_mesh(5.8e-3, 72)
+mesh = uniform_mesh(5.8e-3, 72)
 
 base_bc = BoundaryConditionSet(
     thermal = (
-        top = RadiativeFluxBC(flux = 25e3, absorptivity = 0.96) +
+        top = RadiativeFluxBC(25e3, absorptivity = 0.96) +
               RadiativeBC(ε = 0.96, T_inf = 330.0) +
               ConvectiveBC(h = 7.2, T_inf = 330.0),
         bottom = RadiativeBC(ε = 0.95, T_inf = 307.0) +
@@ -653,7 +653,7 @@ problem = PyrolysisProblem(
 function modify_flux(prob, q_incident)
     bcs = prob.bc_set
     new_top =
-        RadiativeFluxBC(flux = q_incident, absorptivity = 0.96) +
+        RadiativeFluxBC(q_incident, absorptivity = 0.96) +
         RadiativeBC(ε = 0.96, T_inf = 330.0) +
         ConvectiveBC(h = 7.2, T_inf = 330.0)
     new_bc_set = BoundaryConditionSet(
@@ -716,7 +716,7 @@ threshold (1 % of their initial condensed mass by default) are deactivated into
 the live cell beneath (Chapter 10). This PMMA leaves a 0.2 % char residue, so at
 the higher fluxes the layer deactivates down to one cell, which holds the residue
 of the whole layer, and the solve runs to the end of its time span
-(`:Success`, outcome `:running`); `live_cells` and `final_thickness` show it.
+(`:Success`, outcome `:none`); `live_cells` and `final_thickness` show it.
 
 On a variable cross section and a moving mesh, use `sol.extras.MLR_gauge` rather
 than `sol.mass_loss_rate` when comparing across grid points: `mass_loss_rate` is
@@ -730,16 +730,16 @@ Reference §10).
 
 A 2-D kinetics grid maps how peak surface temperature and the timing of peak gas
 release respond to the Arrhenius pair `(A_1, E_1)`. The PMMA reaction of §12.9 has
-two products, so its `modify` uses the two-product constructor:
+two products, so its `modify` passes both with their yields:
 
 ```julia
 function modify_AE2(prob, point)
     mat = prob.material
     old = mat.reactions[1]
     (p1, y1), (p2, y2) = old.products
-    new_rxn = Reaction(old.name, old.reactants[1][1] => (p1, p2);
+    new_rxn = Reaction(old.name, old.reactant => (p1, p2);
                        A = point.A, E = point.E, h = old.heat, yields = (y1, y2),
-                       n = old.reactants[1][2], T_min = old.T_min, T_max = old.T_max,
+                       n = old.order, T_min = old.T_min, T_max = old.T_max,
                        gate_width = old.gate_width)
     new_mat = Material(name = mat.name, components = mat.components,
                        reactions = (new_rxn, Base.tail(mat.reactions)...),

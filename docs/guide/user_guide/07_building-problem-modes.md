@@ -5,7 +5,7 @@ material with components, reactions and properties (Chapters 3–4), and a
 `BoundaryConditionSet` (Chapter 5). This chapter shows how to assemble them into a
 `PyrolysisProblem` and how the *physics* the solver integrates is selected. Pyrolysis.jl is
 a generalized model with optional physics: one problem can be solved on a fixed or a moving
-mesh, with one of three radiation models, with no gas transport, lumped transport or
+mesh, with either radiation model, with no gas transport, lumped transport or
 pressure-driven gas transport, with a fixed or a variable cross section, and with the
 temperature or the enthalpy inventory as the energy state. Some of these choices are `solve`
 keywords; the others follow from the material and the boundary conditions. `setup`, which
@@ -23,11 +23,11 @@ the time span. It is the only thing you pass to `solve`.
 
 ### 7.1.1 Constructor
 
-The keyword constructor is:
+The constructor takes keywords only:
 
 ```julia
 PyrolysisProblem(;
-    mesh,                       # a Mesh{1} from create_uniform_mesh and its siblings
+    mesh,                       # a Mesh{1} from uniform_mesh and its siblings
     material,                   # Material with components and reactions
     bc_set::BoundaryConditionSet,
     T_initial = z -> 300.0,     # initial temperature, z -> T [K]
@@ -38,9 +38,8 @@ PyrolysisProblem(;
 )
 ```
 
-The positional form `PyrolysisProblem(mesh, material, bc_set, tspan; kwargs...)` takes the
-same keywords. A complete, minimal example (one solid that decomposes into a gas, a constant
-heat flux on the exposed surface, an adiabatic and impermeable back):
+A complete, minimal example (one solid that decomposes into a gas, a constant heat flux on
+the exposed surface, an adiabatic and impermeable back):
 
 ```julia
 using Pyrolysis
@@ -59,7 +58,7 @@ pmma = Material(
                 reactions  = (decomp,))
 
 # --- Mesh: 1 cm thick, 100 cells ---
-mesh = create_uniform_mesh(0.01, 100)
+mesh = uniform_mesh(0.01, 100)
 
 # --- Boundary conditions ---
 bc_set = BoundaryConditionSet(
@@ -90,7 +89,7 @@ the illustrative porous solid (§7.5).
 
 `T_initial` and `ξ_initial` are functions of the position. `setup` evaluates them at the
 centre `x_i` of every cell of the mesh, at its reference positions: `T0[i] = T_initial(x_i)`
-and `ξ0[j, i] = ξ_initial[j](x_i)` (`Pyrolysis.Problem.initial_fields(problem, mesh)` returns
+and `ξ0[j, i] = ξ_initial[j](x_i)` (`initial_fields(problem)` returns
 both). The initial state then holds the masses `m_{i,j} = ξ0[j, i]·V_i` and the energy state
 from `T0[i]`.
 
@@ -160,14 +159,14 @@ it ends on; the `saveat` keyword of `solve` overrides them (Chapter 8).
 ## 7.2 What `setup` decides
 
 `solve(problem; kwargs...)` validates the problem, calls `setup(problem; ...)` to build the
-problem the integrator runs (a `CoreProblem`), and integrates it (Chapter 8). `setup` reads
+problem the integrator runs (a `PreparedProblem`), and integrates it (Chapter 8). `setup` reads
 every modelling choice once and builds the state layout and the residual's kernels to match;
 nothing is dispatched on during the integration. The choices:
 
 | Choice | Selected by | Values | Default |
 |---|---|---|---|
 | Mesh motion | `use_ale` keyword | fixed (`false`), moving (`true`) | fixed |
-| Radiation | `radiation_model` keyword | `NO_RADIATION`, `SURFACE_ABSORPTION`, `BEER_LAMBERT` | `NO_RADIATION` |
+| Radiation | `radiation_model` keyword | `SURFACE_ABSORPTION`, `BEER_LAMBERT` | `SURFACE_ABSORPTION` |
 | Gas transport | material model and complete mass conditions | `LumpedTransfer` or `DustyGas`; EOS for every gas-bearing material, including sealed gas | from the problem |
 | Cross section | the material's `lateral_shrinkage_law` | fixed, variable | fixed |
 | Energy state | `energy_state` keyword | `:temperature`, `:enthalpy` | `:temperature` |
@@ -179,7 +178,7 @@ the problem (gas transport, cross section), and deactivation and the correction 
 both: you turn deactivation on, and `setup` installs the correction where the mesh moves and a
 layer can burn out (§7.3.3). The coordinate system and the cross-section measure are the
 mesh's (§6.4). A combination the implementation does not support is refused with an
-`ArgumentError` before anything is integrated (§7.9.1). §7.8 shows how the choices shape the
+`ArgumentError` before anything is integrated (§15.2.3). §7.8 shows how the choices shape the
 state and the residual, and how to inspect what `setup` built.
 
 ---
@@ -248,6 +247,7 @@ correction and refuses one (§4.14).
 |---|---|
 | `correction = NoCorrection()` | Keeps the mesh with the solid whatever `setup` would install. |
 | `correction = EquidistributionCorrection(; ...)` | Configures the correction (Chapter 10); needs `use_ale = true`; refused at a reaction order other than one. |
+| `correction = PrescribedCorrection(w)` | Prescribes the mesh velocity `w(x, t)` over a solid at rest, for verification (§8.7); needs `use_ale = true`, a non-reacting material and no deactivation. |
 | `lagrangian = [nodes...]` | Nodes that always move with the solid. Under the equidistribution correction every interior node between cells that start with different condensed components must be among them, and by default they are exactly those nodes. |
 | `band` | The near-threshold band of a moving mesh, in `[threshold, 1)`. |
 
@@ -257,15 +257,14 @@ correction and refuses one (§4.14).
 
 ![Matching slabs with surface deposition and Beer–Lambert face intensities, absorbed cell power, transmitted radiation and intensity decreasing with inward depth.](../../assets/figures/07_radiation.svg)
 
-**Figure 7. Where applied radiation is absorbed (schematic).** `NO_RADIATION` and `SURFACE_ABSORPTION` both apply `RadiativeFluxBC` at the surface; the former does **not** disable that boundary condition. Beer–Lambert introduces face-intensity unknowns and deposits the entering-minus-leaving radiant power in each cell. The exponential inset illustrates uniform optical thickness $\alpha L=2$; its depth coordinate $L-z$ increases inward, opposite to the common $+z$ direction. Radiation remaining at the back face is transmitted rather than absorbed.
+**Figure 7. Where applied radiation is absorbed (schematic).** `SURFACE_ABSORPTION` applies `RadiativeFluxBC` at the surface. Beer–Lambert introduces face-intensity unknowns and deposits the entering-minus-leaving radiant power in each cell. The exponential inset illustrates uniform optical thickness $\alpha L=2$; its depth coordinate $L-z$ increases inward, opposite to the common $+z$ direction. Radiation remaining at the back face is transmitted rather than absorbed.
 
 Where the incident radiation is absorbed is selected by the `radiation_model` keyword, which
 takes a `RadiationModel` value:
 
 | Value | Meaning | Unknowns added |
 |---|---|---|
-| `NO_RADIATION` (default) | No volumetric absorption. A `RadiativeFluxBC` is absorbed at the exposed surface. | none |
-| `SURFACE_ABSORPTION` | The incident flux is absorbed at the exposed surface, through the surface energy balance (opaque material). Component `α` values are not read. | none |
+| `SURFACE_ABSORPTION` (default) | The incident flux of a `RadiativeFluxBC` is absorbed at the exposed surface, through the surface energy balance (opaque material). Component `α` values are not read. | none |
 | `BEER_LAMBERT` | In-depth exponential absorption, `I(z) = I_e exp(−∫ α_eff dz)`, with `α_eff = Σ_j ξ_j α_j` from the components' mass absorption coefficients `α` [m²/kg]. | one intensity per face, algebraic |
 
 ```julia
@@ -286,9 +285,6 @@ flux is deposited:
   the exposed face, raising `T_s`; `a` is the condition's own `absorptivity` when it gives
   one, otherwise the exposed cell's effective absorptivity (Kirchhoff's law, the emissivity,
   unless a component sets its own `absorptivity`). Nothing is deposited in depth.
-- With `NO_RADIATION`, the same: a `RadiativeFluxBC` is absorbed at the surface exactly as
-  under `SURFACE_ABSORPTION`, and no volumetric source exists. The two values describe the
-  same model; name the one that says what you mean.
 - With `BEER_LAMBERT`, the exposed face's intensity is `I_e = a·q_inc(t)` and every other
   face's intensity is the one above it attenuated across the cell, `exp(−α_eff Δz)`; each
   cell absorbs the difference between the intensity entering and leaving it, the exact cell
@@ -311,9 +307,8 @@ evaluation, so a ramped or stepped cone flux is tracked exactly.
 - `SURFACE_ABSORPTION` ignores the components' `α`, without a warning.
 
 Choose the model by the optical thickness `τ = α_eff·L`: `SURFACE_ABSORPTION` for opaque
-chars (`τ ≫ 1`), `BEER_LAMBERT` for semi-transparent polymers and foams, and `NO_RADIATION`
-for transparent samples or when the heating is purely conductive or convective. See
-Technical Reference §8 for the models.
+chars (`τ ≫ 1`), `BEER_LAMBERT` for semi-transparent polymers and foams. See Technical
+Reference §8 for the models.
 
 ---
 
@@ -331,12 +326,12 @@ air = GaseousComponent(:air;M=.02897,c=1006.,k=.026)
 material = Material(name=:PorousSlab,components=(matrix,air))
 ξ_air = background_gas_concentration(material,:air,(500.,0.),300.)
 reservoir = GasReservoir(P=101325.,T=300.,mole_fractions=(air=1.,))
-problem = PyrolysisProblem(mesh=create_uniform_mesh(.01,10),material=material,
+problem = PyrolysisProblem(mesh=uniform_mesh(.01,10),material=material,
     bc_set=BoundaryConditionSet(thermal=(top=HeatFluxBC(1000.),bottom=AdiabaticBC()),
         mass=(top=AmbientGasBC(reservoir),bottom=ImpermeableBC())),
     T_initial=z->300.,ξ_initial=[z->500.,z->ξ_air],tspan=(0.,.1))
 sol = solve(problem;pressure_tolerance=.1,reltol=1e-7)
-pressure = get_pressure(sol)
+pressure = sol.gas.pressure
 exchange = get_boundary_exchange(sol,:top)
 ```
 
@@ -571,8 +566,8 @@ length(cp.u0)                               # 502 for the problem of §7.1.1
 ```
 
 `setup` takes the keywords of `solve` that shape the problem (`energy_state`, `reltol`,
-`abstol`, `threshold`, `use_ale`, `radiation_model`, `deactivation`, `band`, `correction`,
-`lagrangian`, `w_override`, `sources`); `integrate(cp; ...)` then runs it with the
+`abstol`, `threshold`, `pressure_tolerance`, `use_ale`, `radiation_model`, `deactivation`,
+`band`, `correction`, `lagrangian`, `sources`); `integrate(cp; ...)` then runs it with the
 integrator's keywords. Chapter 11 covers this custom-loop path, and Technical Reference §13
 and §15 the assembly and the integration.
 
@@ -581,10 +576,11 @@ and §15 the assembly and the integration.
 ## 7.9 Validating a problem
 
 ```julia
-using Pyrolysis.Problem: validate_problem, is_valid_problem
 validate_problem(problem)
-is_valid_problem(problem)
 ```
+
+`solve` runs this first; it returns `true`, or throws an error listing every check
+that failed.
 
 Validation checks geometry, reaction indices, boundary tags, initial fields
 and the time span. Gas-bearing initial states must have positive physical
@@ -598,7 +594,7 @@ Participating condensed components require explicit lumped `λ`, and
 transport support changes must have a valid constitutive path. A matrix
 endpoint declares its remaining skeletal-occupancy domain. Step acceptance
 and post-event checks enforce pore and endpoint admissibility as the state
-evolves; `validate=false` does not disable these physical checks.
+evolves.
 
 ---
 
@@ -609,7 +605,7 @@ material, not from a `solve` keyword.
 
 | Scenario | `use_ale` | `radiation_model` | gas transport (auto) | cross section (auto) | `deactivation` |
 |---|---|---|---|---|---|
-| TGA-like thin sample, no recession | `false` | `NO_RADIATION` | lumped | fixed | `false` |
+| TGA-like thin sample, no recession | `false` | `SURFACE_ABSORPTION` | lumped | fixed | `false` |
 | Cone calorimeter, opaque charring solid | `true` | `SURFACE_ABSORPTION` | lumped or dusty-gas transport | fixed or variable | `false` |
 | Cone calorimeter, semi-transparent polymer to burnout | `true` | `BEER_LAMBERT` (set `α`) | lumped | fixed | `true` |
 | Intumescent coating (swelling) | `true` | `SURFACE_ABSORPTION` | lumped gas transport (`κ > 0`) | variable (swelling law) | `false` |
@@ -617,7 +613,7 @@ material, not from a `solve` keyword.
 
 ### 7.10.1 Worked example: TGA-like, minimal mode
 
-A thin sample whose two faces follow a furnace program of 10 K/min, with no radiation and
+A thin sample whose two faces follow a furnace program of 10 K/min, with no incident flux and
 diffusion-only gas escape through the top, on a fixed mesh:
 
 ```julia
@@ -630,7 +626,7 @@ pmma   = Material(
     gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
     name = :PMMA, components = (virgin, gas), reactions = (decomp,))
 
-mesh = create_uniform_mesh(1e-4, 10)                  # 0.1 mm, 10 cells
+mesh = uniform_mesh(1e-4, 10)                  # 0.1 mm, 10 cells
 
 heating = t -> 300.0 + t / 6                          # 10 K/min
 bc_set = BoundaryConditionSet(
@@ -641,7 +637,7 @@ bc_set = BoundaryConditionSet(
 problem = PyrolysisProblem(mesh = mesh, material = pmma, bc_set = bc_set,
                            tspan = (0.0, 2400.0))
 
-sol = solve(problem)        # fixed mesh, NO_RADIATION, lumped, fixed cross section
+sol = solve(problem)        # fixed mesh, SURFACE_ABSORPTION, lumped, fixed cross section
 
 # Mass-loss fraction against the furnace temperature
 loss = 1 .- sol.extras.total_mass ./ sol.extras.total_mass[1]
@@ -675,12 +671,12 @@ wood = Material(name = :CharringWood,
 # Pore air at 1 atm in the virgin solid
 ξ_air = background_gas_concentration(wood, :air, (500.0, 0.0, 0.0, 0.0), 300.0)
 
-mesh = create_uniform_mesh(0.02, 80)                  # 2 cm, 80 cells
+mesh = uniform_mesh(0.02, 80)                  # 2 cm, 80 cells
 
 # Top: incident cone flux (absorbed at the surface), re-radiation, convection.
 # Mass: diffusive escape and atmospheric pressure (drives the Darcy outflow).
 bc_set = BoundaryConditionSet(
-    thermal = (top = RadiativeFluxBC(flux = 50e3, absorptivity = 0.9) +
+    thermal = (top = RadiativeFluxBC(50e3, absorptivity = 0.9) +
                      RadiativeBC(ε = 0.9, T_inf = 300.0) +
                      ConvectiveBC(h = 10.0, T_inf = 300.0),
                bottom = AdiabaticBC()),
@@ -712,7 +708,7 @@ than the deactivation threshold, so a burnout solve of it would get no correctio
   evaluated at the cell centres by `setup`, must give one function per component.
 - The active physics is a set of choices that `setup` reads once:
   - *mesh motion* (`use_ale`, default `false`), *radiation* (`radiation_model`, default
-    `NO_RADIATION`) and the *energy state* (`energy_state`, default `:temperature`) are
+    `SURFACE_ABSORPTION`) and the *energy state* (`energy_state`, default `:temperature`) are
     chosen at solve time;
   - *gas transport* (none, lumped or dusty-gas transport) and the *cross section* (fixed or
     variable) follow from the material: its gas components and transfer coefficients, the
@@ -727,8 +723,8 @@ than the deactivation threshold, so a burnout solve of it would get no correctio
   carries its specified incoming enthalpy. Thermal-film heat is converted to the
   same reservoir control surface before assembly (§5.4), accounting for incoming
   energy once.
-- `validate_problem` (run by `solve` unless `validate = false`) catches structural errors,
-  and `setup` refuses unsupported combinations, before integration.
+- `validate_problem`, which `solve` always runs, catches structural errors, and `setup`
+  refuses unsupported combinations, before integration.
 
 The next chapter, "Running the Solver", covers the rest of the `solve` keyword surface: the
 integrator policies and linear solvers, tolerances and step limits, deactivation, callbacks

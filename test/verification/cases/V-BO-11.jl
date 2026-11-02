@@ -39,7 +39,7 @@ function _vbo11_problem(N)
     return Core.eval(
         m,
         :(PyrolysisProblem(
-            mesh = create_uniform_mesh(5.8e-3, $N),
+            mesh = uniform_mesh(5.8e-3, $N),
             material = problem.material,
             bc_set = problem.bc_set,
             T_initial = problem.T_initial,

@@ -5,8 +5,6 @@ struct TransportFailure <: Exception
 end
 Base.showerror(io::IO, e::TransportFailure) =
     print(io, "gas transport ", e.reason, ": ", e.detail)
-@inline primal(x) = x
-@inline primal(x::ForwardDiff.Dual) = primal(ForwardDiff.value(x))
 
 """
     molar_wall_flux(K,t,p,g)

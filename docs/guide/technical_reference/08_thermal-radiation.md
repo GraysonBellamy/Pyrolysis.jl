@@ -2,9 +2,9 @@
 
 This chapter derives and documents the thermal-radiation models implemented in
 Pyrolysis.jl and the way each couples into the energy equation. The solver offers
-three mutually exclusive treatments of the incident radiation — `NO_RADIATION`,
-`SURFACE_ABSORPTION` and `BEER_LAMBERT` — each with its own state, Jacobian
-structure and physical regime of validity. We give the continuous radiative
+two mutually exclusive treatments of the incident radiation — `SURFACE_ABSORPTION`
+and `BEER_LAMBERT` — each with its own state, Jacobian structure and physical
+regime of validity. We give the continuous radiative
 transfer equation (RTE) and its reduction to the Beer–Lambert law, the exact
 cell-averaged discretization, the face intensities that carry the beam as
 algebraic unknowns of the state, and the banded Jacobian those unknowns give.
@@ -31,17 +31,16 @@ Stefan–Boltzmann constant is $\sigma = 5.670374419\times10^{-8}\ \mathrm{W\,m^
 
 ![Matching slabs with surface deposition and Beer–Lambert face intensities, absorbed cell power, transmitted radiation and intensity decreasing with inward depth.](../../assets/figures/07_radiation.svg)
 
-**Figure 7. Where applied radiation is absorbed (schematic).** `NO_RADIATION` and `SURFACE_ABSORPTION` both apply `RadiativeFluxBC` at the surface; the former does **not** disable that boundary condition. Beer–Lambert introduces face-intensity unknowns and deposits the entering-minus-leaving radiant power in each cell. The exponential inset illustrates uniform optical thickness $\alpha L=2$; its depth coordinate $L-z$ increases inward, opposite to the common $+z$ direction. Radiation remaining at the back face is transmitted rather than absorbed.
+**Figure 7. Where applied radiation is absorbed (schematic).** `SURFACE_ABSORPTION` applies `RadiativeFluxBC` at the surface. Beer–Lambert introduces face-intensity unknowns and deposits the entering-minus-leaving radiant power in each cell. The exponential inset illustrates uniform optical thickness $\alpha L=2$; its depth coordinate $L-z$ increases inward, opposite to the common $+z$ direction. Radiation remaining at the back face is transmitted rather than absorbed.
 
-### 8.1.1 The three models
+### 8.1.1 The two models
 
 The radiation treatment is selected at `solve` (or `setup`) time by one
-enumeration value passed as `radiation_model`; the default is `NO_RADIATION`. The
+enumeration value passed as `radiation_model`; the default is `SURFACE_ABSORPTION`. The
 enum is defined in `src/Materials/radiation_types.jl`:
 
 ```julia
 @enum RadiationModel begin
-    NO_RADIATION = 0
     SURFACE_ABSORPTION = 1
     BEER_LAMBERT = 2
 end
@@ -51,19 +50,15 @@ The models are **mutually exclusive** — exactly one is active for the whole do
 in a given run — and they differ in where the incident external radiation of a
 `RadiativeFluxBC` is deposited:
 
-1. **`NO_RADIATION`** and **`SURFACE_ABSORPTION`.** The incident radiation is
+1. **`SURFACE_ABSORPTION`.** The incident radiation is
    absorbed at the exposed face. It is **not** a volumetric source: the absorbed
    flux $a\,q_{\text{inc}}(t)$ enters the energy balance as a boundary heat flux
-   through the surface energy balance and its Newton solve for $T_s$ (§8.2, §12.2).
-   Component absorption coefficients $\alpha_j$ are not read. The two names select
-   **the same residual**: the `RadiativeFluxBC` dispatch treats them identically
-   (`evaluate_bc_flux_and_derivative`, `src/BoundaryConditions/surface_balance.jl`),
-   and the kernel tests assert identical residuals for the two
-   (`test/kernels/test_boundary_conditions.jl`). `NO_RADIATION` names the intent
-   of a run in which radiation does not matter (no `RadiativeFluxBC`, or a
-   transparent sample, $\tau \ll 0.1$); `SURFACE_ABSORPTION` names the intent of
-   an opaque solid whose first cell is optically thick, $\tau_n\gg 1$. Surface
-   re-radiation (`RadiativeBC`) acts at the face under every model.
+   through the surface energy balance and its Newton solve for $T_s$ (§8.2, §12.2)
+   (`evaluate_bc_flux_and_derivative`, `src/BoundaryConditions/surface_balance.jl`).
+   Component absorption coefficients $\alpha_j$ are not read. It is the model of
+   an opaque solid whose first cell is optically thick, $\tau_n\gg 1$, and with no
+   `RadiativeFluxBC` it absorbs nothing. Surface re-radiation (`RadiativeBC`) acts
+   at the face under both models.
 
 2. **`BEER_LAMBERT`.** In-depth exponential absorption following the Beer–Lambert
    law, $I(z)=I_e\exp\!\big(-\int_z^L\alpha_{\text{eff}}\,\mathrm{d}z'\big)$, with
@@ -71,7 +66,7 @@ in a given run — and they differ in where the incident external radiation of a
    absorption length $1/\alpha_{\text{eff}}$. The intensity of every face is an
    **algebraic unknown** of the state (§8.3.3); each of its rows reads one cell and
    that cell's two faces, so the Jacobian stays banded (§8.6). Appropriate for
-   semi-transparent polymers and foams ($0.1\lesssim\tau\lesssim 10$).
+   semi-transparent polymers and foams ($\tau\lesssim 10$).
 
 There is no spherical-harmonics (diffusion) or two-flux model of the radiation
 in depth; §8.8 states what one would take.
@@ -84,10 +79,10 @@ The model-dependent decisions are made where they arise, all of them by `setup`
 - **The state.** Under `BEER_LAMBERT` the layout carries the intensity of every
   face as an algebraic unknown (`StateLayout(...; intensities = true)`): on a line
   of $n$ cells, $n+1$ rows, one in the node block of each face's node
-  (`intensity_index(layout, f)`, §15.1). The other two models add nothing.
+  (`intensity_index(layout, f)`, §15.1). `SURFACE_ABSORPTION` adds nothing.
 - **The kernels.** `BEER_LAMBERT` adds a `BeerLambertKernel`
   (`src/Kernels/radiation.jl`) after the gas-transport kernel and before
-  conduction; the other two add none. The thermal boundary kernel reads the model
+  conduction; `SURFACE_ABSORPTION` adds none. The thermal boundary kernel reads the model
   for the `RadiativeFluxBC` dispatch (§8.4).
 - **The tolerances and the domain test.** The intensity rows take the absolute
   tolerance $\mathrm{reltol}\cdot S_I$, with $S_I$ the largest incident intensity
@@ -103,8 +98,7 @@ absorbed in depth, everything transmitted, §8.3.3) both run without a warning.
 
 | Model | Extra state | Kernel | Jacobian pattern |
 |---|---|---|---|
-| `NO_RADIATION` | — | — | banded (cell blocks and their neighbours) |
-| `SURFACE_ABSORPTION` | — | — | the same |
+| `SURFACE_ABSORPTION` | — | — | banded (cell blocks and their neighbours) |
 | `BEER_LAMBERT` | $n+1$ face intensities (algebraic) | `BeerLambertKernel` | banded; each intensity row reads three intensities and the two cells beside its face (§8.6) |
 
 ---
@@ -113,7 +107,7 @@ absorbed in depth, everything transmitted, §8.3.3) both run without a warning.
 
 ### 8.2.1 Surface absorption is a boundary flux, not a volumetric source
 
-Under `NO_RADIATION` and `SURFACE_ABSORPTION` no kernel deposits radiation in
+Under `SURFACE_ABSORPTION` no kernel deposits radiation in
 the cells. The incident radiation is folded into the surface energy balance of
 the face carrying the `RadiativeFluxBC` (`evaluate_bc_flux_and_derivative`,
 `src/BoundaryConditions/surface_balance.jl`):
@@ -121,12 +115,12 @@ the face carrying the `RadiativeFluxBC` (`evaluate_bc_flux_and_derivative`,
 $$
 q_{\text{BC}}(T_s) = a\,q_{\text{inc}}(t),\qquad
 \frac{\mathrm{d}q_{\text{BC}}}{\mathrm{d}T_s}=0,
-\qquad\text{for }\texttt{NO\_RADIATION}\text{ and }\texttt{SURFACE\_ABSORPTION},
+\qquad\text{for }\texttt{SURFACE\_ABSORPTION},
 $$
 
 where $q_{\text{inc}}(t)$ [W·m⁻²] is the condition's incident flux and $a$ the
 surface absorptivity. With no explicit `absorptivity` on the condition, $a$ is the
-effective surface absorptivity of the boundary cell (§5.8.2, §5.8.2),
+effective surface absorptivity of the boundary cell (§5.8.2),
 
 $$
 a_{\text{eff}}=\sum_j v_j\,a_j ,
@@ -161,7 +155,7 @@ penetrates beyond cell $n$. It adds no unknowns and no Jacobian entries beyond t
 boundary cell's own, and it is the recommended choice for charring solids and fast
 cone-calorimeter analysis.
 
-Every radiation model treats the material's own emission as a surface process at $T_s$
+Both radiation models treat the material's own emission as a surface process at $T_s$
 (§8.4). That holds while the mean free path of that emission, $1/\kappa_R(T)$ with
 $\kappa_R$ the Rosseland mean of the absorption spectrum over the material's own emission
 band, is short against the thermal-gradient scale; the in-depth transport it carries is a
@@ -406,7 +400,7 @@ tag must have exactly one face, and a mesh of more than one dimension is refused
 A second `RadiativeFluxBC` member of the `:top` condition is **dropped
 silently**: only the first feeds the beam, and every member contributes zero to
 the surface balance. With the slab of §8.3.5 and a top condition
-`RadiativeFluxBC(flux = 50e3) + RadiativeFluxBC(flux = 20e3) + RadiativeBC(T_inf = 300.0)`,
+`RadiativeFluxBC(50e3) + RadiativeFluxBC(20e3) + RadiativeBC(T_inf = 300.0)`,
 the incident intensity is $0.9\times 50 = 45\ \mathrm{kW\,m^{-2}}$ under
 `BEER_LAMBERT`, while `SURFACE_ABSORPTION` absorbs $0.9\times 70 = 63\ \mathrm{kW\,m^{-2}}$
 at the face (run in the documentation scratch environment). Combine the sources
@@ -443,10 +437,10 @@ using Pyrolysis
 slab = SolidComponent(:slab, ρ = 1000.0, c = 1500.0, k = 0.2, ε = 0.9, α = 0.1)
 material = Material(name = :slab, components = (slab,), reactions = ())
 problem = PyrolysisProblem(
-    mesh = create_uniform_mesh(0.01, 10),
+    mesh = uniform_mesh(0.01, 10),
     material = material,
     bc_set = BoundaryConditionSet(
-        thermal = (top = RadiativeFluxBC(flux = 50e3), bottom = AdiabaticBC()),
+        thermal = (top = RadiativeFluxBC(50e3), bottom = AdiabaticBC()),
     ),
     ξ_initial = [z -> 1000.0],
     tspan = (0.0, 1.0),
@@ -489,10 +483,10 @@ C_i\,\frac{\mathrm{d}T_i}{\mathrm{d}t} = E_i - \sum_j h_j(T_i)\,\dot M_{j,i}
 $$
 
 with $C_i$ the heat-capacity sum of the cell (§5.4) and $\dot M_{j,i}$ the
-face-flux part of its mass rate. The three models populate $Q_{\text{rad}}$ — or
+face-flux part of its mass rate. The two models populate $Q_{\text{rad}}$ — or
 bypass it for the surface route — as follows.
 
-- **`NO_RADIATION` and `SURFACE_ABSORPTION`.** $Q_{\text{rad}}=0$: no kernel adds a
+- **`SURFACE_ABSORPTION`.** $Q_{\text{rad}}=0$: no kernel adds a
   radiative source. A `RadiativeFluxBC` enters the surface energy balance of its
   face as $q_{\text{BC}}=a\,q_{\text{inc}}$ (§8.2); the balance solves for $T_s$,
   and the flux conducted from the face into the boundary cell, $k(T_s-T_n)/d$,
@@ -513,10 +507,10 @@ bypass it for the surface route — as follows.
 
 **The radiation-model dispatch of `RadiativeFluxBC` is the linchpin.** It keeps
 the incident energy single-counted across the models: deposited at the face for
-`NO_RADIATION` and `SURFACE_ABSORPTION`, in the cells (and therefore zero at the
+`SURFACE_ABSORPTION`, in the cells (and therefore zero at the
 face) for `BEER_LAMBERT`.
 
-| Condition | `NO_RADIATION`, `SURFACE_ABSORPTION` | `BEER_LAMBERT` |
+| Condition | `SURFACE_ABSORPTION` | `BEER_LAMBERT` |
 |---|---|---|
 | `RadiativeFluxBC` at `:top` | $a\,q_{\text{inc}}$ in the surface balance | zero in the surface balance; the first member feeds the beam |
 | `RadiativeFluxBC` at another tag | $a\,q_{\text{inc}}$ in that face's balance | refused by `setup` |
@@ -525,13 +519,13 @@ face) for `BEER_LAMBERT`.
 
 The same dispatch threads through `CombinedThermalBC`, so a cone-calorimeter
 condition such as
-`RadiativeFluxBC(flux = 50e3) + RadiativeBC(T_inf = 300.0) + ConvectiveBC(h = 10.0, T_inf = 300.0)`
-behaves correctly under every model: under `BEER_LAMBERT` its radiative-flux
+`RadiativeFluxBC(50e3) + RadiativeBC(T_inf = 300.0) + ConvectiveBC(h = 10.0, T_inf = 300.0)`
+behaves correctly under both models: under `BEER_LAMBERT` its radiative-flux
 member contributes exactly zero at the face and feeds the beam, while the
 re-radiative and convective members act at the face. The diagnostics follow the
 same split: `sol.extras.surface_heat_flux_absorbed` is the flux absorbed at the
 face (zero under `BEER_LAMBERT`), and `sol.extras.volumetric_absorption` the flux
-absorbed in depth (zero under the other two models).
+absorbed in depth (zero under `SURFACE_ABSORPTION`).
 
 ---
 
@@ -544,8 +538,7 @@ the layer, $\tau=\alpha_{\text{eff}}L=\int_0^L\alpha_{\text{eff}}\,\mathrm{d}z$
 | $\tau=\alpha_{\text{eff}} L$ | regime | recommendation |
 |---|---|---|
 | $\tau>10$ | optically thick | surface absorption is adequate |
-| $0.1<\tau<10$ | semi-transparent | `BEER_LAMBERT` |
-| $\tau<0.1$ | transparent | `NO_RADIATION` |
+| $\tau<10$ | semi-transparent | `BEER_LAMBERT` |
 
 The per-cell optical thickness $\tau_i=\alpha_i\Delta z_i$ is a resolution
 measure, not a validity criterion: the exact cell average of §8.3.2 is correct at

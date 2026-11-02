@@ -48,7 +48,7 @@ function _vcpl05_problem(L; n_cells, β = 0.5)
         reactions = (rxn,),
         depletion_limiter = DepletionLimiter(enabled = false),
     )
-    mesh = create_uniform_mesh(L, n_cells)
+    mesh = uniform_mesh(L, n_cells)
     ramp = t -> P.T0 + P.β * t
     bc_set = BoundaryConditionSet(
         thermal = (top = DirichletThermalBC(ramp), bottom = DirichletThermalBC(ramp)),

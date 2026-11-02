@@ -41,13 +41,9 @@ function validate_transport_support(material, ξ0; moving_support = false)
                 again=false
                 for rxn in material.reactions
                     rxn.A==0 && continue
-                    (
-                        material.depletion_limiter.enabled &&
-                        !all(pair->first(pair) in available, rxn.reactants)
-                    ) && continue
-                    for pair in rxn.reactants
-                        push!(changed, first(pair))
-                    end
+                    (material.depletion_limiter.enabled && !(rxn.reactant in available)) &&
+                        continue
+                    push!(changed, rxn.reactant)
                     for (j, yield) in rxn.products
                         yield>0 || continue
                         push!(changed, j)

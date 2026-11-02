@@ -34,7 +34,7 @@ function _vbo12_problem(N; n, y, ρ_c, k_c, φ_c = 0.3)
         ),
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(VBO12_L, N),
+        mesh = uniform_mesh(VBO12_L, N),
         material = material,
         bc_set = BoundaryConditionSet(
             thermal = (

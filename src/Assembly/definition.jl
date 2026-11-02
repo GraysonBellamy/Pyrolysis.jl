@@ -29,7 +29,7 @@ struct VolumetricSources{FM,FE}
 end
 
 """
-	CoreDefinition
+	ResidualDefinition
 
 The immutable definition the residual is a pure function of, together with
 the state vector, the time and the workspace: the state layout, the state
@@ -37,7 +37,7 @@ setup (topology, material, reference data, caloric extension), the kernels
 in assembler order, the mesh closure (`nothing` on a fixed mesh), and the
 external sources.
 """
-struct CoreDefinition{L<:StateLayout,S<:StateSetup,K<:Tuple,Cl,Src}
+struct ResidualDefinition{L<:StateLayout,S<:StateSetup,K<:Tuple,Cl,Src}
     layout::L
     setup::S
     kernels::K
@@ -46,29 +46,29 @@ struct CoreDefinition{L<:StateLayout,S<:StateSetup,K<:Tuple,Cl,Src}
 end
 
 """
-	CoreWorkspace
+	ResidualWorkspace
 
 The mutable buffers of one residual evaluation: the derived state and the
 kernel contributions with `Float64` elements, and their twins for every
 dual-number element type automatic differentiation evaluates the residual at,
 built on first use.
 """
-struct CoreWorkspace{DS<:DerivedState,C<:Contributions}
+struct ResidualWorkspace{DS<:DerivedState,C<:Contributions}
     derived::DS
     contributions::C
     dual::IdDict{DataType,Any}
     T_warm::Vector{Float64}
 end
 
-@inline _n_reactions(def::CoreDefinition) = n_reactions(def.setup.material)
+@inline _n_reactions(def::ResidualDefinition) = n_reactions(def.setup.material)
 
 """
-	CoreWorkspace(def, T0) -> CoreWorkspace
+	ResidualWorkspace(def, T0) -> ResidualWorkspace
 
 Buffers for `def`, the inventory inversion warm-started at the cell
 temperatures `T0`.
 """
-function CoreWorkspace(def::CoreDefinition, T0::AbstractVector{<:Real})
+function ResidualWorkspace(def::ResidualDefinition, T0::AbstractVector{<:Real})
     layout = def.layout
     T_warm = Float64.(T0)
     ds = DerivedState{Float64}(layout, def.setup, T_warm)
@@ -80,14 +80,14 @@ function CoreWorkspace(def::CoreDefinition, T0::AbstractVector{<:Real})
         n_nodes(layout),
         dimension(layout),
     )
-    return CoreWorkspace(ds, c, IdDict{DataType,Any}(), T_warm)
+    return ResidualWorkspace(ds, c, IdDict{DataType,Any}(), T_warm)
 end
 
 # The concrete type of the buffers with element type `T`: the table is untyped
 # and the contributions take their component count at run time, so both
 # branches of `buffers` assert it.
 _buffer_type(
-    ::CoreDefinition{<:StateLayout{NC},<:StateSetup{<:MeshTopology{D}}},
+    ::ResidualDefinition{<:StateLayout{NC},<:StateSetup{<:MeshTopology{D}}},
     ::Type{T},
 ) where {NC,D,T} = Tuple{DerivedState{NC,T,MeshGeometry{D,T}},Contributions{NC,T}}
 
@@ -96,9 +96,9 @@ _buffer_type(
 
 The derived state and contributions with element type `T`.
 """
-@inline buffers(ws::CoreWorkspace, def::CoreDefinition, ::Type{Float64}) =
+@inline buffers(ws::ResidualWorkspace, def::ResidualDefinition, ::Type{Float64}) =
     (ws.derived, ws.contributions)
-function buffers(ws::CoreWorkspace, def::CoreDefinition, ::Type{T}) where {T}
+function buffers(ws::ResidualWorkspace, def::ResidualDefinition, ::Type{T}) where {T}
     b = get(ws.dual, T, nothing)
     b === nothing || return b::_buffer_type(def, T)
     layout = def.layout

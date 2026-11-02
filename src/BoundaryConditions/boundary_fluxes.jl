@@ -8,7 +8,7 @@ This module provides flux evaluation functions for all boundary condition types:
 
 using ..Materials: STEFAN_BOLTZMANN
 using ..Materials: evaluate_param, evaluate_param_T
-using ..Materials: RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT
+using ..Materials: RadiationModel, SURFACE_ABSORPTION, BEER_LAMBERT
 
 # ============================================================================
 # Boundary Flux Decomposition for Diagnostics
@@ -37,8 +37,7 @@ Convention: `net` is the **applied** face flux — per component it matches
 enters the domain *volumetrically*,
 not through the face, so a `RadiativeFluxBC` contributes zero `absorbed` and
 zero `net` here; the volumetric deposit is reported separately as
-`extras.volumetric_absorption`. Under `NO_RADIATION` / `SURFACE_ABSORPTION`
-the absorbed α·q_ext is applied at the face and included in `net`. For
+`extras.volumetric_absorption`. Under `SURFACE_ABSORPTION` the absorbed α·q_ext is applied at the face and included in `net`. For
 combined BCs the components *and* `net` are summed over children — `net` is
 never recomputed from the components.
 """
@@ -63,7 +62,7 @@ function compute_boundary_heat_fluxes(
             net = 0.0,
         )
     else
-        # NO_RADIATION / SURFACE_ABSORPTION: α·q_ext is applied at the face by
+        # SURFACE_ABSORPTION: α·q_ext is applied at the face by
         # the surface energy balance (evaluate_bc_flux_and_derivative).
         flux = bc.flux isa Function ? bc.flux(t) : Float64(bc.flux)
         α = if bc.absorptivity === nothing
@@ -149,25 +148,6 @@ function compute_boundary_heat_fluxes(
         convection = 0.0,
         prescribed = 0.0,
         net = 0.0,
-    )
-end
-
-function compute_boundary_heat_fluxes(
-    bc::AbstractThermalBC,
-    T_surface::Float64,
-    t::Float64,
-    ε_eff::Float64,
-    ::RadiationModel;
-    a_eff::Float64 = ε_eff,
-)
-    # Fallback for other BC types
-    q_total, _ = evaluate_bc_flux_and_derivative(bc, T_surface, t, ε_eff)
-    return (
-        absorbed = 0.0,
-        reradiation = 0.0,
-        convection = 0.0,
-        prescribed = q_total,
-        net = q_total,
     )
 end
 

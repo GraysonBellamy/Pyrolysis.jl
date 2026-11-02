@@ -34,7 +34,7 @@ push!(
         function build(n_cells)
             solid = SolidComponent(:solid, ρ = ρ, c = c, k = k, ε = ε)
             mat = Material(name = :VRX04a, components = (solid,), reactions = ())
-            mesh = create_uniform_mesh(L, n_cells)
+            mesh = uniform_mesh(L, n_cells)
             bc_set = BoundaryConditionSet(
                 thermal = (top = RadiativeBC(ε = ε, T_inf = T∞), bottom = AdiabaticBC()),
             )
@@ -134,7 +134,7 @@ push!(
         function build(n_cells)
             solid = SolidComponent(:solid, ρ = ρ, c = c, k = k, ε = ε)
             mat = Material(name = :VRX04b, components = (solid,), reactions = ())
-            mesh = create_uniform_mesh(L, n_cells)
+            mesh = uniform_mesh(L, n_cells)
             bc_set = BoundaryConditionSet(
                 thermal = (
                     top = HeatFluxBC(q_abs) +

@@ -340,9 +340,9 @@ prescribed motion), V-MMS-03 (order under prescribed motion) and V-MMS-04 (order
 under reaction-driven motion).
 
 Mesh motion enters in two ways. Under **prescribed motion**, `solve_mms` passes the
-mesh velocity to `solve` through its `w_override` keyword: the mesh moves over a
+mesh velocity to `solve` as `correction = PrescribedCorrection(w)`: the mesh moves over a
 solid at rest and every inventory crosses the faces at the mesh-relative velocity
-(the relative fluxes of §11.6 with the prescribed correction, §11.7.8), so the
+(the relative fluxes of §11.6 with the prescribed correction, §11.7.7), so the
 manufactured sources are the fixed-frame ones. Under **reaction-driven motion**
 (`MMSMotion`, V-MMS-04) the mesh is the solid and every inventory rides it, so each
 source is assembled in the material-following frame,
@@ -421,7 +421,7 @@ integrator precision for ratios 10:1 and 100:1; with the interface off a face
 (V-HC-04c) the numerics match the network of the face-quantized interface to
 $10^{-11}$, and the whole error against the true interface is that quantization
 (§13.12). V-HC-04d places a mesh face at the same prescribed 10.2 mm interface
-using `create_mesh_from_nodes`; the prescribed and represented geometries then
+using `line_mesh`; the prescribed and represented geometries then
 coincide. Both c and d report the two error measures separately and use the
 same physical native-solver comparisons. V-HC-05 measures the discretization error of a $k(T)$ slab against
 the Kirchhoff-transform solution, with a convergence check.
@@ -559,8 +559,8 @@ correction, and since the masses are the states a uniform field with no sources 
 no transport fluxes stays uniform.
 
 V-MMS-02 asserts exactly that: a spatially uniform state with no reactions and
-zero-flux boundaries, on a mesh compressed to 70 % of its thickness through solve's
-`w_override` keyword with the uniform-stretch velocity $w^*(z,t)=(\dot s/s)\,z$, must
+zero-flux boundaries, on a mesh compressed to 70 % of its thickness through a
+`PrescribedCorrection` with the uniform-stretch velocity $w^*(z,t)=(\dot s/s)\,z$, must
 stay uniform. The temperature drift is pinned at $10^{-10}$ K (observed exactly zero
 at 20 cells) and the relative concentration drift at $10^{-12}$ (observed zero for the
 solid and $1.5\times10^{-16}$ for the gas): the relative flux of the constant field must
@@ -708,7 +708,7 @@ gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02,)
 rxn = Reaction(:decomp, 1 => (2, 3); A = 1e13, E = 1.88e5, h = 8.7e5, yields = (0.2, 0.8))
 material = Material(name = :slab, components = (virgin, char, gas), reactions = (rxn,))
 problem = PyrolysisProblem(
-    mesh = create_uniform_mesh(5e-3, 20),
+    mesh = uniform_mesh(5e-3, 20),
     material = material,
     bc_set = BoundaryConditionSet(
         thermal = (
@@ -921,7 +921,7 @@ $-p$; a slope near $-2$ confirms second-order convergence, a shallower slope fla
 first-order contribution (the Darcy advection, a surface-absorbed flux resolved by the
 boundary half-cell).
 
-Stretched and graded meshes (`create_stretched_mesh`, `create_mesh_from_nodes`, §13.9)
+Stretched and graded meshes (`stretched_mesh`, `line_mesh`, §13.9)
 put the resolution where the steep thermal and reaction fronts live. V-CPL-01 runs the
 Stefan problem on a mesh stretched toward the cold wall (about 14 μm at the wall), the
 energy-row test runs on stretched meshes (§18.4.3), the relative fluxes converge above
@@ -1012,9 +1012,7 @@ gas-generation rate; the gas-phase flame is not modelled. `examples/06_cone_calo
 re-radiation and convection on the top face, a convective mass condition, back-face
 re-radiation and convection with an impermeable back, single-step Arrhenius
 kinetics, temperature-dependent properties, a moving mesh with deactivation) is the
-reference workflow; its variant `06_cone_calorimeter_surface_absorption.jl` names
-`radiation_model = SURFACE_ABSORPTION` explicitly, which gives the same residual as
-the default `NO_RADIATION` for an incident flux absorbed at the face (§8.2).
+reference workflow.
 
 The validation QoIs are the peak MLR and its timing, the residual (char) mass
 fraction, a time-to-ignition surrogate (a surface-temperature or gas-generation
@@ -1185,7 +1183,7 @@ insensitive to both within their physically negligible range.
   system, together with the near-threshold band (`band`, default $\max(\varepsilon_m,0.1)$
   where the equidistribution correction moves a layer, otherwise $\varepsilon_m$) that
   takes the cells close to the threshold in the same event. The events are located
-  inside the step (`located_events = true`).
+  inside the step.
 
 A sensitivity check varies each threshold by a factor of a few to ten and confirms that
 the QoIs (peak MLR, char yield, burnout time) move by less than their tolerance. A

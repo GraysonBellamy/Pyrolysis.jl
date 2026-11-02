@@ -47,16 +47,16 @@ function cone(N)
         reactions = (
             Reaction(
                 r.name,
-                ((r.reactants[1][1], 0.0),),
+                r.reactant,
+                0.0,
                 r.products,
                 r.A,
                 r.E,
                 r.heat,
                 r.T_min,
-                r.T_max;
-                gate_width = r.gate_width,
-                validate_mass = false,
-                basis = r.basis,
+                r.T_max,
+                r.gate_width,
+                r.basis,
             ),
         ),
         mixing = p.material.mixing,
@@ -66,7 +66,7 @@ function cone(N)
         gas_transport = p.material.gas_transport,
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(5.8e-3, N),
+        mesh = uniform_mesh(5.8e-3, N),
         material = material,
         bc_set = p.bc_set,
         T_initial = p.T_initial,

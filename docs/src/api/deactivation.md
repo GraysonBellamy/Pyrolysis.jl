@@ -19,7 +19,6 @@ Deactivation.below_threshold
 Deactivation.VOID_SKIN
 Deactivation.reactive_mass
 Deactivation.threshold_margin
-Deactivation.ConservativeTransfer
 Deactivation.SlotTables
 Deactivation.permute_slots!
 Deactivation.reset_cells!

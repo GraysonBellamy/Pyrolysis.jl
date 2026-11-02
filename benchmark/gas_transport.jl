@@ -44,7 +44,7 @@ function transport_benchmark_problem(::Val{N}, dusty) where {N}
         ntuple(j->z->0.5*(1.2e5+1e5z)*(0.02+0.003j)/(N*R_GAS*(500.0 + 1e4z)), Val(N))...,
     )
     PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 8),
+        mesh = uniform_mesh(0.01, 8),
         material = mat,
         T_initial = z->500.0 + 1e4z,
         ξ_initial = collect(fields),
@@ -96,7 +96,7 @@ function benchmark_transport(N, dusty, io)
     seconds=median(timing).time/1e9
     sol=run()
     completed(sol) || error("timed solve did not complete")
-    p_error=maximum(abs.(get_pressure(sol) .- get_pressure(tight)))
+    p_error=maximum(abs.(sol.gas.pressure .- tight.gas.pressure))
     T_error=maximum(abs.(sol.T .- tight.T))
     x_error=maximum(abs.(get_gas_composition(sol) .- get_gas_composition(tight)))
     p_error<1.0 && T_error<1e-4 && x_error<1e-6 ||

@@ -76,7 +76,7 @@ end
         ξ_air = background_gas_concentration(mat, :AIR, ξ_condensed, T0)
         n = 8
         problem = PyrolysisProblem(
-            mesh = create_uniform_mesh(0.01, n),
+            mesh = uniform_mesh(0.01, n),
             material = mat,
             bc_set = BoundaryConditionSet(
                 thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -95,7 +95,7 @@ end
             ξ_initial = [z -> 500.0, z -> 0.0, z -> 0.0, z -> ξ_air],
             tspan = (0.0, 1.0),
         )
-        T, ξ = Pyrolysis.Problem.initial_fields(problem, problem.mesh)
+        T, ξ = Pyrolysis.Problem.initial_fields(problem)
         z = Pyrolysis.Problem.cell_centers(problem.mesh)
         P = [
             let ξ_i = Tuple(ξ[:, i]), T_i = T[i]

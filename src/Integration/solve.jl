@@ -2,46 +2,18 @@
 # Solve
 # ============================================================================
 
-const _SOLVE_KEYWORDS = (
-    :energy_state,
-    :abstol,
-    :reltol,
-    :pressure_tolerance,
-    :threshold,
-    :maxiters,
-    :dt,
-    :adaptive,
-    :dtmin,
-    :dtmax,
-    :saveat,
-    :callback,
-    :progress,
-    :validate,
-    :use_ale,
-    :w_override,
-    :min_thickness,
-    :radiation_model,
-    :linear_solver,
-    :integrator_policy,
-    :sources,
-    :deactivation,
-    :band,
-    :correction,
-    :lagrangian,
-    :located_events,
-)
-
 """
 	solve(problem::PyrolysisProblem; energy_state = :temperature, abstol = 1e-8,
-	      reltol = 1e-6, threshold = nothing, maxiters = 1_000_000,
-	      dt = problem.dt_initial, adaptive = true, dtmin = 1e-12, dtmax = Inf,
-	      saveat = problem.output_times, callback = nothing, validate = true,
-	      linear_solver = nothing, integrator_policy = nothing,
-	      sources = NoSources(), deactivation = false, band = nothing,
-	      correction = nothing, lagrangian = nothing,
-	      located_events = true, progress = false) -> PyrolysisSolution
+	      reltol = 1e-6, threshold = nothing, pressure_tolerance = 1.0,
+	      maxiters = 1_000_000, dt = problem.dt_initial, adaptive = true,
+	      dtmin = 1e-12, dtmax = Inf, saveat = problem.output_times,
+	      callback = nothing, progress = false, use_ale = false,
+	      min_thickness = 1e-6, radiation_model = SURFACE_ABSORPTION,
+	      integrator_policy = default_policy(), sources = NoSources(),
+	      deactivation = false, band = nothing, correction = nothing,
+	      lagrangian = nothing) -> PyrolysisSolution
 
-Solve `problem`.
+Solve `problem`: [`validate_problem`](@ref), [`setup`](@ref), [`integrate`](@ref).
 
 The integrator is handed the mass-matrix system with the colored Jacobian, the
 per-row absolute tolerances (`abstol` is the temperature tolerance [K]; the mass
@@ -50,9 +22,8 @@ and enthalpy rows take theirs from the cell's initial condensed mass and
 and [`DomainCheck`](@ref) as its
 domain test (admissibility, porosity and the constraint residuals of the
 algebraic rows, on the proposals its error test accepts). `dt` is the first
-step, and with `adaptive = false` the fixed step. `integrator_policy`
-defaults to [`default_policy`](@ref) with `linear_solver`
-([`default_linear_solver`](@ref) unless given). A per-step
+step, and with `adaptive = false` the fixed step. `integrator_policy` holds the
+method and its linear solver ([`rodas5p_policy`](@ref) and its siblings). A per-step
 observer records the largest constraint residual of the accepted states, ends
 the solve with `ReturnCode.Failure` when the domain test gave up, caps the step
 after a nonlinear failure of a Newton-based policy
@@ -64,19 +35,18 @@ continuous callback's event raises the flag as any event does. `callback` may
 also be a [`ConservationRecorder`](@ref), or a tuple of recorders and
 callbacks. `progress` draws a progress bar, a read-only observer as well.
 
-`use_ale`, `w_override`, `correction`, `lagrangian`, `deactivation` and
+`use_ale`, `correction`, `lagrangian`, `deactivation` and
 `band` are those of [`setup`](@ref). On a moving mesh the solve ends with return code
 `:Terminated` and outcome `:min_thickness` when the thickness falls below
 `min_thickness` [m] (default 1e-6). With `deactivation`, cells are deactivated in events
-([`deactivate!`](@ref)): with `located_events` an event is located inside the
+([`deactivate!`](@ref)): an event is located inside the
 step at the first time a live cell reaches its threshold (the first root of
 [`threshold_margin`](@ref)) and applied at the interpolated state
 there, the threshold and the band widened by `reltol` (`deactivate!`'s
 `slack`): the cells that go are the runs the widened tests take, which hold the
 crossing cell; at the end of every step the cells below the
-threshold go in one event, the only events without `located_events` and with
-it the safety net for a crossing the location does not see. The
-solve ends with `:Terminated` when the last cell goes or when a cell below the
+threshold go in one event, the safety net for a crossing the location does not
+see. The solve ends with `:Terminated` when the last cell goes or when a cell below the
 threshold lies inward of a live one on a fixed mesh or beneath a skin on a moving
 one (outcome `:interior`, with a warning naming the cell), and with `:Failure` when an event leaves
 the state inadmissible (a merge's receiver held to its own mass tolerances,
@@ -84,15 +54,8 @@ as the domain test holds every later proposal) or no consistent node
 velocities. The state a solve
 ends on is always saved, whether or not `saveat` names its time.
 """
-function solve(problem::PyrolysisProblem{<:Mesh}; kwargs...)
-    for k in keys(kwargs)
-        k in _SOLVE_KEYWORDS || throw(ArgumentError("solve(): unknown keyword `$k`"))
-    end
-    return _solve(problem; kwargs...)
-end
-
-function _solve(
-    problem::PyrolysisProblem{<:Mesh};
+function solve(
+    problem::PyrolysisProblem;
     energy_state::Symbol = :temperature,
     abstol::Real = 1e-8,
     reltol::Real = 1e-6,
@@ -106,21 +69,17 @@ function _solve(
     saveat = problem.output_times,
     callback = nothing,
     progress::Bool = false,
-    validate::Bool = true,
     use_ale::Bool = false,
-    w_override = nothing,
     min_thickness::Real = 1e-6,
-    radiation_model = NO_RADIATION,
-    linear_solver = nothing,
-    integrator_policy = nothing,
+    radiation_model::RadiationModel = SURFACE_ABSORPTION,
+    integrator_policy::IntegratorPolicy = default_policy(),
     sources = NoSources(),
     deactivation::Bool = false,
     band::Union{Nothing,Real} = nothing,
     correction::Union{Nothing,Correction} = nothing,
     lagrangian::Union{Nothing,AbstractVector{<:Integer}} = nothing,
-    located_events::Bool = true,
 )
-    validate && validate_problem(problem; strict = false)
+    validate_problem(problem)
     started = time()
     cp = setup(
         problem;
@@ -131,7 +90,6 @@ function _solve(
         pressure_tolerance,
         use_ale,
         radiation_model,
-        w_override,
         time_scale = dt,
         sources,
         deactivation,
@@ -149,29 +107,23 @@ function _solve(
         saveat,
         callback,
         min_thickness,
-        linear_solver,
         integrator_policy,
-        located_events,
         progress,
         started,
     )
 end
 
 """
-	integrate(cp::CoreProblem; u0 = cp.u0, maxiters = 1_000_000,
+	integrate(cp::PreparedProblem; u0 = cp.u0, maxiters = 1_000_000,
 	          dt = cp.problem.dt_initial, adaptive = true, dtmin = 1e-12,
 	          dtmax = Inf, saveat = cp.problem.output_times, callback = nothing,
-	          min_thickness = 1e-6, linear_solver = nothing,
-	          integrator_policy = nothing, located_events = true, progress = false,
-	          max_constraint_rejections = MAX_CONSTRAINT_REJECTIONS,
-	          started = time()) -> PyrolysisSolution
+	          min_thickness = 1e-6, integrator_policy = default_policy(),
+	          progress = false, started = time()) -> PyrolysisSolution
 
 Integrate a set-up problem from the state `u0`, whose algebraic rows must be
 consistent ([`consistent_state!`](@ref)), with the tolerances it was set up
-with. The keywords are those of [`solve`](@ref); `max_constraint_rejections`
-bounds the domain test's run of consecutive constraint rejections
-([`DomainCheck`](@ref)), and `started` is the time the reported solve time
-counts from. An [`inadmissible`](@ref) `u0` is refused; a fixed-step solve,
+with. The keywords are those of [`solve`](@ref); `started` is the time the
+reported solve time counts from. An [`inadmissible`](@ref) `u0` is refused; a fixed-step solve,
 which the domain test never sees, ends with `ReturnCode.Failure` at the
 first accepted state that is inadmissible. A solve that fails ends on the
 last state it accepted. Every call starts with every cell live and, in the inventory
@@ -179,7 +131,7 @@ form, the caloric inversion from the set-up temperatures, so repeated
 integrations of one problem are bit-identical.
 """
 function integrate(
-    cp::CoreProblem;
+    cp::PreparedProblem;
     u0::AbstractVector = cp.u0,
     maxiters::Int = 1_000_000,
     dt::Real = cp.problem.dt_initial,
@@ -189,11 +141,8 @@ function integrate(
     saveat = cp.problem.output_times,
     callback = nothing,
     min_thickness::Real = 1e-6,
-    linear_solver = nothing,
-    integrator_policy = nothing,
-    located_events::Bool = true,
+    integrator_policy::IntegratorPolicy = default_policy(),
     progress::Bool = false,
-    max_constraint_rejections::Int = MAX_CONSTRAINT_REJECTIONS,
     started::Float64 = time(),
 )
     min_thickness > 0 ||
@@ -211,11 +160,7 @@ function integrate(
     corr = _layer_correction(def)
     corr === nothing || reset_layer_times!(corr)
     copyto!(ws.T_warm, cp.T0)
-    policy =
-        integrator_policy === nothing ?
-        default_policy(
-            linear_solver === nothing ? default_linear_solver() : linear_solver,
-        ) : integrator_policy
+    policy = integrator_policy
 
     rhs! = let def = def, ws = ws
         (du, u, p, t) -> residual!(du, u, def, t, ws)
@@ -242,7 +187,7 @@ function integrate(
 
     # The domain test and every callback reach the problem through
     # fixed-signature wrappers, so the integrator's type does not depend on it.
-    check = DomainCheck(cp; max_consecutive = max_constraint_rejections)
+    check = DomainCheck(cp)
     out_of_domain = _DomainWrapper(check)
     monitor = check.monitor
     cap = NewtonCap()
@@ -263,13 +208,12 @@ function integrate(
         integrator -> _observe!(integrator, monitor, cap, policy, violation);
         save_positions = (false, false),
     )
-    outcome = Ref(:running)
+    outcome = Ref(:none)
     thin = _thickness_termination(layout, Float64(min_thickness), outcome)
-    events = _deactivation_callback(cp, check, policy, located_events)
+    events = _deactivation_callback(cp, check, policy)
     layer_times = _layer_time_callback(cp, policy)
     recs, callback = _split_recorders(callback)
-    bound =
-        [_BoundRecorder(r, cp, _crossings(cp, located_events, min_thickness)) for r in recs]
+    bound = [_BoundRecorder(r, cp, _crossings(cp, min_thickness)) for r in recs]
     # The last accepted state, after every callback of its step; then the
     # conservation recorders' commits.
     accepted = AcceptedState(copy(ode.u0), Float64(cp.problem.tspan[1]))
@@ -343,7 +287,7 @@ function integrate(
         stats,
         raw;
         deactivation = cells,
-        outcome = monitor.outcome === :running ? outcome[] : monitor.outcome,
+        outcome = monitor.outcome === :none ? outcome[] : monitor.outcome,
     )
 end
 
@@ -388,15 +332,13 @@ function _record!(integrator, accepted::AcceptedState, policy, bound)
 end
 
 # The conditions of the events that can end a step before its end: the
-# located deactivation's threshold margin, the layer times' activation margin
-# and the thickness stop's margin.
-function _crossings(cp::CoreProblem, located::Bool, min_thickness::Real)
+# deactivation's threshold margin, the layer times' activation margin and the
+# thickness stop's margin.
+function _crossings(cp::PreparedProblem, min_thickness::Real)
     layout = cp.def.layout
     cells = cp.deactivation
     out = _ScalarWrapper[]
-    cells !== nothing &&
-        located &&
-        push!(out, _ScalarWrapper(u -> threshold_margin(cells, layout, u)))
+    cells === nothing || push!(out, _ScalarWrapper(u -> threshold_margin(cells, layout, u)))
     corr = _layer_correction(cp.def)
     if corr !== nothing
         reference = cp.def.setup.reference
@@ -530,11 +472,11 @@ function _top_live_node(layout::StateLayout)
     return 1
 end
 
-# The deactivation event: at the end of every step on which a live cell fell
-# below the threshold, or, when `located`, at the first root of the smallest
-# threshold margin inside the step (the end-of-step event then the safety
-# net), one pass of `deactivate!` (at a root with the threshold widened by the
-# relative tolerance, the mass rows' error scale there), then the consistent
+# The deactivation event: at the first root of the smallest threshold margin
+# inside the step, or at the end of a step on which a live cell fell below the
+# threshold (the safety net), one pass of `deactivate!` (at a root with the
+# threshold widened by the relative tolerance, the mass rows' error scale
+# there), then the consistent
 # sweep of the algebraic rows, the admissibility of the result (a merge's
 # receiver against its own mass tolerances, those the domain test applies to
 # the proposals after the event), and the policy's restart step. A
@@ -544,7 +486,7 @@ end
 # a correction that would have recovered by the step's end goes there; only
 # the end-of-step net, which sees the step's end alone, misses a dip and
 # recovery inside one step.
-function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy, located::Bool)
+function _deactivation_callback(cp::PreparedProblem, check::DomainCheck, policy)
     cells = cp.deactivation
     cells === nothing && return ()
     def, ws = cp.def, cp.ws
@@ -607,7 +549,6 @@ function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy, loc
         integrator -> affect!(integrator, 0.0);
         save_positions = (false, false),
     )
-    located || return (safety_net,)
     margin = FunctionWrapper{Float64,Tuple{_StateVector}}(
         u -> threshold_margin(cells, layout, u),
     )
@@ -626,7 +567,7 @@ end
 
 # The bound correction of a definition whose layers' equidistribution times
 # are set during the solve ([`ActivationTime`](@ref)); `nothing` otherwise.
-function _layer_correction(def::CoreDefinition)
+function _layer_correction(def::ResidualDefinition)
     closure = def.closure
     closure isa BalanceRowClosure || return nothing
     corr = closure.correction
@@ -637,14 +578,14 @@ end
 # smallest activation margin of the layers still waiting for their
 # equidistribution time, each such layer that has crossed takes its time
 # ([`estimate_layer_times!`](@ref), the margin widened by the relative
-# tolerance as the located deactivation's threshold is). Without such a layer
+# tolerance as the deactivation's threshold is). Without such a layer
 # the margin is infinite and the event never fires; the callback's types are
 # the same either way, so the integrator's type does not depend on the
 # correction. The state is not modified and the layer's correction is zero up
 # to its activation, so the event changes the right-hand side only where the
 # activation has just begun; the integrator re-evaluates its derivative there
 # and the policy's flag rule applies as for an observer.
-function _layer_time_callback(cp::CoreProblem, policy)
+function _layer_time_callback(cp::PreparedProblem, policy)
     layout = cp.def.layout
     is_moving(layout) || return ()
     corr = _layer_correction(cp.def)

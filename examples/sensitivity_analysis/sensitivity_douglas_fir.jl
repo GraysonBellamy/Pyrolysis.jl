@@ -579,7 +579,9 @@ end
         # of the standard DSC multi-point calibration.
         hos = StateDependentProperty(
             (T, ξ) -> begin
-                MC = 100.0 * ξ[SA_MOISTURE_IDX] / max(sum(ξ[j] for j in SA_SOLID_IDX), 1e-12)
+                MC =
+                    100.0 * ξ[SA_MOISTURE_IDX] /
+                    max(sum(ξ[j] for j in SA_SOLID_IDX), 1e-12)
                 return (hos_a + hos_b * exp(-hos_c * MC)) * 1e3
             end,
         )
@@ -763,11 +765,11 @@ end
         ρ_DF_initial = ρ_DF_oven_dry / (1 + moisture_content_db * ρ_DF_oven_dry / 1000.0)
         ρ_moisture_initial = moisture_content_db * ρ_DF_initial
 
-        mesh = create_uniform_mesh(sample_thickness, n_cells)
+        mesh = uniform_mesh(sample_thickness, n_cells)
 
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(flux = q_external) +
+                top = RadiativeFluxBC(q_external) +
                       RadiativeBC(T_inf = 300) +
                       ConvectiveBC(h = h_conv, T_inf = 300),
                 bottom = AdiabaticBC(),

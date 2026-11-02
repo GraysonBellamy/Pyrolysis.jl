@@ -4,7 +4,7 @@
 Face-based mesh description and the mesh constructors.
 
 Faces carry their nodes, their two cells and a boundary tag; cells
-carry a volume, their faces and their nodes; nodes carry positions, which are
+carry their faces and their nodes; nodes carry positions, which are
 the geometric state. Every metric is computed from the node positions by
 [`geometry!`](@ref), the only writer of a [`MeshGeometry`](@ref), so the metric
 element type follows the positions and automatic differentiation passes through
@@ -31,7 +31,7 @@ export geometric_dimension, face_area, shell_volume, outer_position
 export Face, Cell, MeshTopology, Mesh
 export n_cells, n_faces, n_nodes, boundary_faces, boundary_tags, is_fixed, live_face
 export line_mesh, cell_mesh, box_mesh
-export create_uniform_mesh, create_stretched_mesh, create_mesh_from_nodes
+export uniform_mesh, stretched_mesh
 export MeshGeometry, geometry!, cell_distance, center_to_face_distance
 export cell_volume_quadrature
 

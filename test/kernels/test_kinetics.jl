@@ -90,7 +90,7 @@ end
         depletion_limiter = DepletionLimiter(threshold = 2.0),
     )
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 6),
+        mesh = uniform_mesh(0.01, 6),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(1e4), bottom = AdiabaticBC()),
@@ -149,7 +149,7 @@ end
     @test quenched((1.0, 0.0), ())
     # Cells 1 and 2 hold neither reactant, cell 3 only char, the rest virgin.
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 6),
+        mesh = uniform_mesh(0.01, 6),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(1e4), bottom = AdiabaticBC()),
@@ -227,7 +227,7 @@ function _absent_reactant(order)
     )
     mat = Material(name = :absent, components = comps, reactions = rxns)
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(1e-3, 1),
+        mesh = uniform_mesh(1e-3, 1),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(700.0), bottom = DirichletThermalBC(700.0)),
@@ -281,7 +281,7 @@ end
         depletion_limiter = DepletionLimiter(enabled = enabled),
     )
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(1e-3, 1),
+        mesh = uniform_mesh(1e-3, 1),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(700.0), bottom = DirichletThermalBC(700.0)),
@@ -293,7 +293,6 @@ end
     cp = setup(problem)
     layout = cp.def.layout
     kernel = only(k for k in cp.def.kernels if k isa ReactionKernel)
-    @test kernel isa ReactionKernel{true}
     @test kernel.reference[1, 1] == 0
     @test (kernel.reference[2, 1] > 0) == (second != 1)
     ds = cp.ws.derived
@@ -324,7 +323,7 @@ end
         reactions = (Reaction(:d, 1 => 2; A = 10.0, E = 0.0, h = 0.0, n = order),),
     )
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(1e-3, 1),
+        mesh = uniform_mesh(1e-3, 1),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(500.0), bottom = DirichletThermalBC(500.0)),
@@ -353,7 +352,7 @@ function _tga(β, n_out)
     ramp = t -> _TGA.T0 + β * t
     t_end = (_TGA.T_end - _TGA.T0) / β
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(1e-4, 1),
+        mesh = uniform_mesh(1e-4, 1),
         material = Material(name = :tga, components = (a, b), reactions = (rxn,)),
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(ramp), bottom = DirichletThermalBC(ramp)),

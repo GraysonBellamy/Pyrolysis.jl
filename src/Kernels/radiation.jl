@@ -20,8 +20,7 @@ The rows, one per face:
 
 The cell absorbs `I_up A_up − I_down A_down`, the exact cell average of the
 attenuated beam; the flux leaving the last face is transmitted. Each row
-reads one cell and its two faces, so the Jacobian stays banded where the
-eliminated recurrence would couple every cell to every cell above it.
+reads one cell and its two faces, so the Jacobian stays banded.
 
 After cells are deactivated, the beam enters the first
 live cell of `order` through its upstream face ([`exposed_face`](@ref)); the

@@ -30,7 +30,7 @@ function _vbo10_problem(N, n; dt_out = 0.5)
         reactions = (Reaction(:burn, :a => :gas; A = 1e10, E = 1.5e5, h = 3e5, n),),
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(VBO10_L, N),
+        mesh = uniform_mesh(VBO10_L, N),
         material = material,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(VBO10_FLUX), bottom = AdiabaticBC()),

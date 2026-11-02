@@ -100,15 +100,15 @@ end
 # ============================================================================
 
 """
-	initial_fields(problem, mesh::Meshes.Mesh) -> (T0, ξ0)
+	initial_fields(problem) -> (T0, ξ0)
 
 The problem's initial temperature [K] and concentrations [kg/m³] at the cell
-centres of `mesh` (its reference positions): `T0[i] = T_initial(xᵢ)` and
+centres of its mesh (the reference positions): `T0[i] = T_initial(xᵢ)` and
 `ξ0[j, i] = ξ_initial[j](xᵢ)`. On a line `xᵢ` is the scalar midpoint of the
 cell; on more dimensions the centroid, an `SVector`.
 """
-function initial_fields(problem::PyrolysisProblem, mesh::Meshes.Mesh)
-    points = cell_centers(mesh)
+function initial_fields(problem::PyrolysisProblem)
+    points = cell_centers(problem.mesh)
     NC = length(problem.ξ_initial)
     T0 = [Float64(problem.T_initial(x)) for x in points]
     ξ0 = [Float64(problem.ξ_initial[j](x)) for j = 1:NC, x in points]

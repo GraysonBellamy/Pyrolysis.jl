@@ -5,7 +5,7 @@
 using Test
 using Pyrolysis
 using Pyrolysis.Materials: R_GAS
-using Pyrolysis.Meshes: create_uniform_mesh
+using Pyrolysis.Meshes: uniform_mesh
 using Pyrolysis.States: mass_index
 using Pyrolysis.Assembly: buffers, residual!
 using Pyrolysis.Integration: setup
@@ -65,7 +65,7 @@ function snapshot(case, n; darcy, coefficient = D, energy = :temperature)
             (1200.0 * (1 - θ), 400.0 * θ, f.φ * f.ρ * f.Y, f.φ * f.ρ * (1 - f.Y))
         end
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(L, n),
+        mesh = uniform_mesh(L, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -201,7 +201,7 @@ end
     )
     φ=z->z<0.005 ? 0.4 : 0.8
     p=PyrolysisProblem(
-        mesh = create_stretched_mesh(0.01, 6, 1.2),
+        mesh = stretched_mesh(0.01, 6, 1.2),
         material = mat,
         T_initial = z->500.0,
         ξ_initial = [
@@ -225,8 +225,8 @@ end
         pressure_tolerance = 0.0001,
     )
     @test completed(sol)
-    @test maximum(abs.(get_partial_pressures(sol)[1, :, :] .- 7e4))<1e-7
-    @test maximum(abs.(get_partial_pressures(sol)[2, :, :] .- 3e4))<1e-7
+    @test maximum(abs.(sol.gas.partial_pressure[1, :, :] .- 7e4))<1e-7
+    @test maximum(abs.(sol.gas.partial_pressure[2, :, :] .- 3e4))<1e-7
     @test maximum(abs.(sol.T .- 500.0))<1e-9
     @test sol.m[:, :, end]≈sol.m[:, :, 1] rtol=1e-13
 end

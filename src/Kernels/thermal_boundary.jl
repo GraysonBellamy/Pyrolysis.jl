@@ -14,7 +14,7 @@ struct BoundaryPatch{BC}
 end
 
 """
-	ThermalBoundaryKernel{P<:Tuple,R,L} <: Kernel
+	ThermalBoundaryKernel{P<:Tuple,R,L,A,X,B} <: Kernel
 
 The energy flux through every boundary face, one [`BoundaryPatch`](@ref) per
 boundary tag, written along the outward face normal, and the face temperature.
@@ -63,7 +63,7 @@ struct ThermalBoundaryKernel{P<:Tuple,R,L,A,X,B} <: Kernel
 end
 
 """
-	ThermalBoundaryKernel(topology, geometry, bc_set; radiation_model = NO_RADIATION,
+	ThermalBoundaryKernel(topology, geometry, bc_set; radiation_model = SURFACE_ABSORPTION,
 	                      laws = nothing, tensor = nothing, exposed = :top)
 
 One patch per boundary tag of the mesh, holding the thermal condition the
@@ -77,7 +77,7 @@ function ThermalBoundaryKernel(
     topo::MeshTopology{D},
     g::MeshGeometry,
     bc_set::BoundaryConditionSet;
-    radiation_model::RadiationModel = NO_RADIATION,
+    radiation_model::RadiationModel = SURFACE_ABSORPTION,
     laws::Union{Nothing,CaloricLaws} = nothing,
     tensor = nothing,
     exposed::Symbol = :top,
@@ -148,7 +148,7 @@ function _exposed!(c, bc, kernel, ds, topo, material, t)
         (nb == 0 || ds.active[o] == ds.active[nb]) && continue
         q, T_s = boundary_energy_flux(bc, f, kernel, c, ds, topo, material, t)
         σ = ds.active[o] ? 1 : -1
-        c.F_energy[f] += σ * q + _carried_enthalpy(kernel.laws, c, f, T_s)
+        c.F_energy[f] += σ * q
         c.T_face[f] = T_s
     end
     return nothing
@@ -162,27 +162,11 @@ end
         f = live_face(topo, ds.active, f0)
         f == 0 && continue
         q, T_s = boundary_energy_flux(p.bc, f, kernel, c, ds, topo, material, t)
-        c.F_energy[f] += q + _carried_enthalpy(kernel.laws, c, f, T_s)
+        c.F_energy[f] += q
         c.boundary_heat[f] = -q
         c.T_face[f] = T_s
     end
     return _patches!(c, Base.tail(patches), kernel, ds, topo, material, t)
-end
-
-# Sensible enthalpy carried by the outward mass fluxes of face `f` at `T_s`.
-@inline _carried_enthalpy(::Nothing, c, f, T_s) = zero(T_s)
-@inline function _carried_enthalpy(
-    laws::CaloricLaws,
-    c::Contributions{NC},
-    f,
-    T_s,
-) where {NC}
-    h = component_enthalpies(laws, T_s)
-    q = zero(promote_type(eltype(c.F_mass), typeof(T_s)))
-    @inbounds for j = 1:NC
-        q += c.F_mass[j, f] * h[j]
-    end
-    return q
 end
 
 # The boundary cell of face `f`, its live side, and its smoothly floored

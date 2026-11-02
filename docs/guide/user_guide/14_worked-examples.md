@@ -52,8 +52,7 @@ A roadmap of what each example demonstrates:
 
 | Example file | Physics highlighted | Modes | §14 |
 |---|---|---|---|
-| `06_cone_calorimeter.jl` | PMMA cone, single-step kinetics, incident flux at the surface (`NO_RADIATION`) | ALE, deactivation | 14.1 |
-| `06_cone_calorimeter_surface_absorption.jl` | PMMA cone, surface-only radiation | ALE, SURFACE_ABSORPTION, deactivation | 14.1 |
+| `06_cone_calorimeter.jl` | PMMA cone, single-step kinetics, incident flux at the surface (`SURFACE_ABSORPTION`) | ALE, deactivation | 14.1 |
 | `07_douglas_fir_cone.jl` | Wood, multi-step kinetics, lumped gas transport, moisture | ALE, SURFACE_ABSORPTION, LumpedTransfer | 14.2 |
 | `convergence_douglas_fir.jl` | Grid-convergence study | as 07 at 50 kW/m², swept over `n_cells` | 14.3 |
 | `08_pressure_treated_wood_cone.jl` | Treated wood + moisture, lumped gas transport | ALE, SURFACE_ABSORPTION, LumpedTransfer | 14.4 |
@@ -77,16 +76,14 @@ air inventory follows the pore EOS at 300 K.
 
 The top receives radiation, reradiates, and exchanges with a 330 K heat and
 mass film. Incoming air carries that reservoir enthalpy. The bottom is
-insulated and impermeable. The solve uses ALE, in-depth absorption and
-surface deactivation. `06_cone_calorimeter_surface_absorption.jl` uses the
-surface-absorption radiation choice with the same explicit gas closure.
+insulated and impermeable. The solve uses ALE, surface absorption and
+surface deactivation.
 
 ```bash
 PYROLYSIS_SMOKE=1 julia --project=examples examples/06_cone_calorimeter.jl
-PYROLYSIS_SMOKE=1 julia --project=examples examples/06_cone_calorimeter_surface_absorption.jl
 ```
 
-Inspect `get_pressure`, `get_porosity` and `get_boundary_exchange` alongside
+Inspect `sol.gas.pressure`, `sol.gas.porosity` and `get_boundary_exchange` alongside
 temperatures, mass loss and thickness. Mesh, nominal porosity and pressure
 error budget must be varied jointly when assessing dense-polymer results.
 
@@ -134,7 +131,7 @@ do not share mutable state:
 ```julia
 @everywhere function build_and_solve(n_cells::Int)
     # ... build material (13 components, 6 reactions) and BCs ...
-    mesh = create_uniform_mesh(12.0e-3, n_cells)
+    mesh = uniform_mesh(12.0e-3, n_cells)
     ξ_DF = 530.0 / (1 + 0.06 * 530.0 / 1000.0)   # wood and 6 % bound water fill the cell (§3.2.2)
     ξ_initial_funcs = [z -> ξ_DF, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0,
                        z -> 0.06 * ξ_DF,                          # 6 % moisture, dry basis
@@ -355,7 +352,7 @@ The driver is built from three pieces (the heavy lifting is in
    problem from a parameter vector `θ` and a scenario (flux level, BCs,
    thickness, cross section), then `solve`s it. This is the only place the
    package API appears; the rest is optimization plumbing. The mesh is
-   `create_uniform_mesh(L, n_cells; cross_section = A_0)` with the sample's
+   `uniform_mesh(L, n_cells; cross_section = A_0)` with the sample's
    pre-test area, and the solve keywords are
 
    ```julia
@@ -540,7 +537,8 @@ grid = [(A = a, E = e) for a in (1e12, 1e13), e in (1.5e5, 2.0e5)]
     m = prob.material
     new_rxn = Reaction(:decomp, 1 => 2; A = p.A, E = p.E, h = 200e3)
     new_mat = Material(; name = m.name, components = m.components,
-                       reactions = (new_rxn,), mixing = m.mixing)
+                       reactions = (new_rxn,), mixing = m.mixing,
+                       gas_viscosity = m.gas_viscosity, gas_transport = m.gas_transport)
     return PyrolysisProblem(mesh = prob.mesh, material = new_mat, bc_set = prob.bc_set,
                             T_initial = prob.T_initial, ξ_initial = prob.ξ_initial,
                             tspan = prob.tspan, output_times = prob.output_times)
@@ -593,7 +591,7 @@ const VIRGIN_CP_DISPATCH = Dict{Symbol,Function}(:baseline => baseline_virgin_cp
                                                 :harada   => harada_virgin_cp,
                                                 :dupont   => dupont_virgin_cp)
 # build_and_solve(spec) looks up the function by key, wraps it in CallableProperty,
-# builds the material on create_uniform_mesh(12.0e-3, 240), and solves with the
+# builds the material on uniform_mesh(12.0e-3, 240), and solves with the
 # standard ALE + SURFACE_ABSORPTION stack.
 ```
 
@@ -660,11 +658,10 @@ Reading the examples together, a few idioms recur and are worth internalizing:
 
 ### Caveats to keep in mind
 
-- **Radiation models.** The radiation models are `NO_RADIATION`,
-  `SURFACE_ABSORPTION` and `BEER_LAMBERT`. The shipped examples use
-  `NO_RADIATION` (flux via the BC, applied in the surface balance exactly as
-  under `SURFACE_ABSORPTION`) or `SURFACE_ABSORPTION`; `BEER_LAMBERT` is one
-  keyword away in `06_cone_calorimeter.jl`.
+- **Radiation models.** The radiation models are `SURFACE_ABSORPTION` and
+  `BEER_LAMBERT`. The shipped examples use `SURFACE_ABSORPTION` (flux via the BC,
+  applied in the surface balance); `BEER_LAMBERT` is one keyword away in
+  `06_cone_calorimeter.jl`.
 - **Boundary energy.** Incoming gas carries reservoir enthalpy and outgoing
   gas carries surface enthalpy. The coupled LTE film converts heat to the
   reservoir control surface; adiabatic and prescribed-heat boundaries use the

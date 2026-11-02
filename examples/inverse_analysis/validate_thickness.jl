@@ -12,9 +12,7 @@ Runs the calibrated White Pine model (`wp_lateral_shrinkage_law`,
 The current radial law is an LSQ fit to the 30 / 50 / 70 kW diameter anchors.
 Thickness and mass remain validation checks, not radial-law fit targets.
 
-Note on θ: `BEST_THETA` was fit against the constant-A model. These
-predictions therefore mix new geometry with stale conductivities; a later
-inverse-fit re-run updates θ. Treat residuals in mass/thickness as
+Note on θ: `BEST_THETA` was fit against the constant-A model, so treat residuals in mass/thickness as
 diagnostics for BCs, kinetics, fixed dilatometry densities, and missing void/swelling
 physics rather than as radial-law fitting targets.
 """

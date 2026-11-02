@@ -14,10 +14,10 @@ option with examples, and
 sweep harness.
 
 ```@docs
-solve(::PyrolysisProblem{<:Pyrolysis.Meshes.Mesh})
+solve(::PyrolysisProblem)
 setup
 integrate
-CoreProblem
+PreparedProblem
 parameter_sweep
 ```
 

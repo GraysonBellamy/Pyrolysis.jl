@@ -3,7 +3,7 @@
 # ============================================================================
 
 """
-	jacobian_pattern(def::CoreDefinition) -> SparseMatrixCSC{Bool,Int}
+	jacobian_pattern(def::ResidualDefinition) -> SparseMatrixCSC{Bool,Int}
 	jacobian_pattern(layout, topology; closure = nothing, reach = 1)
 
 The structural pattern of the residual's Jacobian, from the connectivity
@@ -35,8 +35,7 @@ gradients), one otherwise.
   node, the masses and energy of its cell (through the strain rate), the
   area and the lateral rate, and under a [`LayerCorrection`](@ref) what the
   corrections of its cell's two nodes read: the positions of the nodes of
-  the cells beside it and, when the monitor reads the masses, the masses of
-  those cells. On a column of more than one dimension a lateral or pinned
+  the cells beside it. On a column of more than one dimension a lateral or pinned
   component reaches itself, a tied component its leader's, a balance row
   every velocity component and position of its cell's nodes and its cell's
   masses and energy; a prescribed velocity its node's position.
@@ -53,7 +52,7 @@ gradients), one otherwise.
 Every row holds its diagonal. The pattern is fixed for a solve: dead rows
 keep their entries and take zero values.
 """
-function jacobian_pattern(def::CoreDefinition)
+function jacobian_pattern(def::ResidualDefinition)
     relative = find_kernel(RelativeFluxKernel, def.kernels) !== nothing
     conduction = find_kernel(ConductionKernel, def.kernels)
     cross = conduction !== nothing && conduction.tensor !== nothing
@@ -78,7 +77,7 @@ function jacobian_pattern(
     D = dimension(layout)
     moving, bl, chi = is_moving(layout), has_intensities(layout), has_chi(layout)
     multipliers = moving && closure_unknowns(layout) === :multipliers
-    correction = closure === nothing ? NoCorrection() : closure.correction
+    correction = closure isa BalanceRowClosure ? closure.correction : NoCorrection()
     adjacency = _adjacency(topo)
     rows = Int[]
     cols = Int[]
@@ -312,8 +311,7 @@ function _velocity_pattern!(
 end
 
 # What the balance row `r` of cell `k` reads through the corrections of the
-# cell's two nodes: the positions of the nodes of the cells beside it and,
-# when the monitor reads the masses, those cells' masses.
+# cell's two nodes: the positions of the nodes of the cells beside it.
 _correction_reach!(add!, r, layout::StateLayout, topo, correction, adjacency, k) = nothing
 function _correction_reach!(
     add!,
@@ -327,10 +325,6 @@ function _correction_reach!(
     near = _within(adjacency, k, 1)
     for nd in _nodes_of(topo, near)
         add!(r, position_index(layout, nd))
-    end
-    iszero(corr.β) && return nothing
-    for i in near, j = 1:n_components(layout)
-        add!(r, mass_index(layout, i, j))
     end
     return nothing
 end

@@ -11,7 +11,7 @@
 
 The sharpest possible discrete-GCL assert: spatially uniform T*, ξ* with no
 reactions and zero-flux manufactured BCs, while the mesh is compressed to
-70 % of its initial thickness by the solve's `w_override` hook with the
+70 % of its initial thickness by a `PrescribedCorrection` with the
 uniform-stretch velocity
 
   w*(z, t) = (ṡ/s)·z,   s(t) = 1 − 0.15·(1 − cos(2πt/20)),   z_bottom pinned

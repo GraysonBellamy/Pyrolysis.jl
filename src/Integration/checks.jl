@@ -81,7 +81,7 @@ mutable struct ConstraintMonitor
     outcome::Symbol
 end
 
-ConstraintMonitor() = ConstraintMonitor(0.0, 0.0, 0, 0, 0, NaN, false, "", :running)
+ConstraintMonitor() = ConstraintMonitor(0.0, 0.0, 0, 0, 0, NaN, false, "", :none)
 
 """
 	MAX_CONSTRAINT_REJECTIONS
@@ -95,7 +95,7 @@ const MAX_CONSTRAINT_REJECTIONS = 50
 const _ErrorTestWrapper = FunctionWrapper{Bool,Tuple{}}
 
 """
-	DomainCheck(cp::CoreProblem; max_consecutive = MAX_CONSTRAINT_REJECTIONS)
+	DomainCheck(cp::PreparedProblem; max_consecutive = MAX_CONSTRAINT_REJECTIONS)
 
 The integrator's `isoutofdomain` test. A proposed state is rejected, and the
 step shrunk by the controller's minimum factor, when
@@ -119,7 +119,7 @@ state. After more than `max_consecutive` consecutive constraint rejections
 the state is accepted and the monitor marked failed, and the step observer
 ends the solve.
 """
-struct DomainCheck{D<:CoreDefinition,W<:CoreWorkspace}
+struct DomainCheck{D<:ResidualDefinition,W<:ResidualWorkspace}
     def::D
     ws::W
     du::Vector{Float64}
@@ -201,7 +201,7 @@ function (check::DomainCheck)(u, p, t)
         end
         return _reject!(m)
     end
-    m.outcome=:running
+    m.outcome=:none
     r = constraint_residual(check, ds, c, t)
     isfinite(r) || return _reject!(m)
     m.last = r

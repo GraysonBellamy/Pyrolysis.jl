@@ -128,7 +128,7 @@ end
     @test !identically_zero(LinearProperty(0.0, 1e-8))
     @test identically_zero(PolynomialProperty((0.0, 0.0, 0.0)))
     @test !identically_zero(PolynomialProperty((0.0, 0.0, 1e-12)))
-    @test identically_zero(ArrheniusProperty(0.0, 5e4, 300.0))
+    @test identically_zero(ArrheniusProperty(0.0, 5e4))
     @test identically_zero(TableProperty((300.0, 600.0), (0.0, 0.0)))
     # Zero at 200, 300, 1000 and 3000 K and positive between them.
     @test !identically_zero(

@@ -1,9 +1,9 @@
 # ============================================================================
-# From a PyrolysisProblem to the core's definition, workspace and state
+# From a PyrolysisProblem to its definition, workspace and state
 # ============================================================================
 
 """
-	CoreProblem
+	PreparedProblem
 
 A `PyrolysisProblem` set up for integration: the problem, the
 definition and workspace the residual reads, the
@@ -11,7 +11,13 @@ initial state, the relative tolerance and the absolute-tolerance vector, the
 colored Jacobian, the initial temperatures and masses, and the
 [`CellDeactivation`](@ref) state (`nothing` when cells are not deactivated).
 """
-struct CoreProblem{P,D<:CoreDefinition,W<:CoreWorkspace,J<:ColoredJacobianCache,X}
+struct PreparedProblem{
+    P,
+    D<:ResidualDefinition,
+    W<:ResidualWorkspace,
+    J<:ColoredJacobianCache,
+    X,
+}
     problem::P
     def::D
     ws::W
@@ -29,8 +35,8 @@ _energy_state(s::Symbol) =
     s === :enthalpy ? EnthalpyState() :
     throw(ArgumentError("energy_state must be :temperature or :enthalpy, got :$s"))
 
-# The physics this core implements on the problem's mesh. A problem that needs
-# anything else is refused rather than solved without it.
+# The physics implemented on the problem's mesh. A problem that needs anything
+# else is refused rather than solved without it.
 function _require_supported(
     problem::PyrolysisProblem{<:Mesh{D}},
     use_ale::Bool,
@@ -108,7 +114,7 @@ function _require_supported(
         )
     end
     if needs_lineage(material)
-        name = first(r for r in material.reactions if last(r.reactants[1]) != 1).name
+        name = first(r for r in material.reactions if r.order != 1).name
         correction isa NoCorrection || throw(
             ArgumentError(
                 "reaction :$name has an order other than one, whose cells must keep " *
@@ -290,10 +296,10 @@ function _reactive_references(material::Material, references::Matrix{Float64}, m
     reactants = Int[]
     reactive = zeros(size(m0, 2))
     for (r, reaction) in enumerate(material.reactions)
-        a, order = reaction.reactants[1]
+        a = reaction.reactant
         is_gas(material.components[a]) && continue
         push!(reactants, a)
-        reactive .+= order == 1 ? view(m0, a, :) : view(references, r, :)
+        reactive .+= reaction.order == 1 ? view(m0, a, :) : view(references, r, :)
     end
     reactive[_retained_volume(material, m0, T0) .>= VANISHING_VOLUME] .= 0.0
     return reactants, reactive
@@ -355,7 +361,7 @@ const CORRECTION_BAND = 0.1
 
 # Whether the bound correction of `closure` moves some layer.
 _moves(closure) =
-    closure !== nothing &&
+    closure isa BalanceRowClosure &&
     closure.correction isa LayerCorrection &&
     any(!iszero, closure.correction.gain)
 
@@ -434,7 +440,7 @@ end
 # sums, a second pass at the consistent lateral rate, then the closure's
 # unknowns. Returns `nothing`, or the residual and scale of a closure row left
 # above round-off.
-function _consistent_motion!(u, def::CoreDefinition, ws::CoreWorkspace, t)
+function _consistent_motion!(u, def::ResidualDefinition, ws::ResidualWorkspace, t)
     cl = def.closure
     cl === nothing && return nothing
     layout = def.layout
@@ -530,7 +536,12 @@ the node velocities or the cells' multipliers by the mesh closure. The
 integrator starts from such a state; a closure row left above round-off is
 an error.
 """
-function consistent_state!(u::AbstractVector, def::CoreDefinition, ws::CoreWorkspace, t)
+function consistent_state!(
+    u::AbstractVector,
+    def::ResidualDefinition,
+    ws::ResidualWorkspace,
+    t,
+)
     _consistent_intensities!(u, def, ws, t)
     left = _consistent_motion!(u, def, ws, t)
     left === nothing || error(
@@ -541,7 +552,7 @@ end
 
 # The face intensities of `u` that satisfy their algebraic rows at time `t`:
 # the consistent values the integrator starts from.
-function _consistent_intensities!(u, def::CoreDefinition, ws::CoreWorkspace, t)
+function _consistent_intensities!(u, def::ResidualDefinition, ws::ResidualWorkspace, t)
     layout = def.layout
     kernel = find_kernel(BeerLambertKernel, def.kernels)
     kernel === nothing && return u
@@ -575,7 +586,6 @@ end
 _register_closure!(t::SlotTables, closure) = t
 function _register_closure!(t::SlotTables, cl::BalanceRowClosure{<:LayerCorrection})
     corr = cl.correction
-    register_tables!(t, :cell, corr.monitor_scale)
     push!(t.gains, () -> slot_gains!(corr))
     return t
 end
@@ -586,7 +596,7 @@ function _register_tables!(
     t::SlotTables,
     cells::CellDeactivation,
     reference::CellReference,
-    def::CoreDefinition,
+    def::ResidualDefinition,
     tol::Vector{Float64};
     scale::Float64,
     time_scale::Float64,
@@ -611,13 +621,13 @@ end
 
 """
 	setup(problem; energy_state = :temperature, reltol = 1e-6, abstol = 1e-8,
-	      threshold = nothing, use_ale = false, radiation_model = NO_RADIATION,
-	      w_override = nothing, correction = nothing, lagrangian = nothing,
+	      threshold = nothing, pressure_tolerance = 1.0, use_ale = false,
+	      radiation_model = SURFACE_ABSORPTION, correction = nothing, lagrangian = nothing,
 	      deactivation = false, band = nothing, closure = nothing, slip = (),
 	      tensor = nothing, history = false, deformation = false,
-	      time_scale = problem.dt_initial, sources = NoSources()) -> CoreProblem
+	      time_scale = problem.dt_initial, sources = NoSources()) -> PreparedProblem
 
-Set up `problem`, whose mesh is a `Mesh{D}` ([`create_uniform_mesh`](@ref)
+Set up `problem`, whose mesh is a `Mesh{D}` ([`uniform_mesh`](@ref)
 and its siblings on a line, [`box_mesh`](@ref) and [`cell_mesh`](@ref) in two
 and three dimensions): the initial inventories
 `mᵢⱼ = ξⱼ(xᵢ) Vᵢ` and the energy state from `T(xᵢ)` at the cell centres `xᵢ`
@@ -627,10 +637,10 @@ incident flux under `BEER_LAMBERT`, the tolerance vector and the colored
 Jacobian. The coordinate system and the cross-section measure are the mesh's;
 the thermal and mass conditions are keyed by its boundary tags.
 
-`radiation_model` is `NO_RADIATION` or `SURFACE_ABSORPTION` (the incident
-flux enters the surface balance at the exposed cell's absorptivity, or the
-condition's own) or `BEER_LAMBERT` (it is absorbed in depth, through the
-face intensities of [`BeerLambertKernel`](@ref)).
+`radiation_model` is `SURFACE_ABSORPTION` (the incident flux enters the surface
+balance at the exposed cell's absorptivity, or the condition's own) or
+`BEER_LAMBERT` (it is absorbed in depth, through the face intensities of
+[`BeerLambertKernel`](@ref)).
 
 `use_ale` moves the mesh with the solid: the mesh's pinned nodes (on a line
 the back node) stay at rest and every other node follows the cells' reaction
@@ -651,12 +661,10 @@ under any equidistribution correction. `lagrangian` lists the mesh
 nodes that always move with the solid, the layer interfaces, beside the
 mesh's own; under an equidistribution correction every interior node between
 cells that start with different condensed components must be among them, and
-by default they are those nodes. `w_override`, a function `w(x, t)` (`x` a
-scalar on a line, an `SVector` otherwise), prescribes the velocity of every
-node instead ([`PrescribedCorrection`](@ref)), moving the mesh over a solid
-at rest (verification; the material must not react, and no other correction
-is given), the inventories crossing the faces at `−w`. `time_scale` [s]
-scales the velocity tolerances (the first step).
+by default they are those nodes. A [`PrescribedCorrection`](@ref) prescribes the
+velocity of every node instead, moving the mesh over a solid at rest
+(verification; the material must not react), the inventories crossing the faces
+at `−w`. `time_scale` [s] scales the velocity tolerances (the first step).
 
 A reaction of order other than one is evaluated on the conversion of its
 reactant against its lineage inventory, a constant of each cell
@@ -669,7 +677,7 @@ falls below the fraction `threshold` (`ε_m`, 1e-2 by default) of its initial
 condensed mass, or, at a reaction order other than one, whose reactive inventory
 falls below that fraction of its reference ([`below_threshold`](@ref); the default
 is then a tenth of the limiter's `conversion_threshold`, 1e-4 with the default
-limiter) ([`CellDeactivation`](@ref), [`ConservativeTransfer`](@ref)): on a moving
+limiter) ([`CellDeactivation`](@ref)): on a moving
 mesh wherever it sits, together with the contiguous cells around it below the
 fraction `band` (`ε_band`, in `[threshold, 1)`; by default the larger of the
 threshold and [`CORRECTION_BAND`](@ref) when the bound equidistribution correction
@@ -702,8 +710,7 @@ function setup(
     threshold::Union{Nothing,Real} = nothing,
     pressure_tolerance::Real = 1.0,
     use_ale::Bool = false,
-    radiation_model = NO_RADIATION,
-    w_override = nothing,
+    radiation_model::RadiationModel = SURFACE_ABSORPTION,
     correction::Union{Nothing,Correction} = nothing,
     lagrangian::Union{Nothing,AbstractVector{<:Integer}} = nothing,
     deactivation::Bool = false,
@@ -716,17 +723,11 @@ function setup(
     time_scale::Real = problem.dt_initial,
     sources = NoSources(),
 ) where {D}
-    if w_override !== nothing
-        (correction === nothing || correction isa NoCorrection) || throw(
-            ArgumentError("w_override prescribes the mesh velocity: give no correction"),
-        )
-        correction = PrescribedCorrection(w_override)
-    end
     material = problem.material
     NC = n_components(material)
     mesh = problem.mesh
     threshold = something(threshold, _default_threshold(material, deactivation))
-    T0, ξ0 = initial_fields(problem, mesh)
+    T0, ξ0 = initial_fields(problem)
     isfinite(pressure_tolerance) && pressure_tolerance>0 ||
         throw(ArgumentError("pressure_tolerance must be finite and positive"))
     errors=Problem.validate_initial_pore_state(problem)
@@ -846,7 +847,6 @@ function setup(
     cells =
         deactivation ?
         CellDeactivation(
-            ConservativeTransfer(),
             threshold,
             band,
             condensed0,
@@ -873,8 +873,8 @@ function setup(
         pressure_tolerance,
         references,
     )
-    def = CoreDefinition(layout, state_setup, kernels, cl, sources)
-    ws = CoreWorkspace(def, T0)
+    def = ResidualDefinition(layout, state_setup, kernels, cl, sources)
+    ws = ResidualWorkspace(def, T0)
 
     u0 = zeros(state_length(layout))
     for i = 1:n
@@ -919,7 +919,7 @@ function setup(
         time_scale = Float64(time_scale),
     )
     cj = ColoredJacobianCache(def, ws, u0, t0)
-    cp=CoreProblem(problem, def, ws, u0, Float64(reltol), tol, cj, T0, m0, cells)
+    cp=PreparedProblem(problem, def, ws, u0, Float64(reltol), tol, cj, T0, m0, cells)
     derive!(ws.derived, u0, layout, state_setup)
     _report_support(find_kernel(ConductionKernel, kernels), ws.derived, topo)
     check=DomainCheck(cp)

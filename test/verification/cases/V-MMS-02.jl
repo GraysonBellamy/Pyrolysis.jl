@@ -4,7 +4,7 @@
 #
 # The sharpest possible discrete-GCL assert: spatially uniform T*, ξ* with no
 # reactions and zero-flux manufactured BCs, while the mesh is compressed to
-# 70 % of its initial thickness by the solve's `w_override` hook with the
+# 70 % of its initial thickness by a `PrescribedCorrection` with the
 # uniform-stretch velocity
 #
 #   w*(z, t) = (ṡ/s)·z,   s(t) = 1 − 0.15·(1 − cos(2πt/20)),   z_bottom pinned
@@ -41,7 +41,7 @@ function _verification_case_vmms02()
 
     function build(n_cells)
         mat = make_material()
-        mesh = create_uniform_mesh(L, n_cells)
+        mesh = uniform_mesh(L, n_cells)
         # Uniform fields ⇒ every manufactured flux is identically zero; the
         # BCs still go through the manufactured-flux callables so the whole
         # path is the one V-MMS-03 uses.
@@ -66,7 +66,7 @@ function _verification_case_vmms02()
         problem,
         fields;
         use_ale = true,
-        w_override = w_star,
+        correction = PrescribedCorrection(w_star),
         energy_state = VERIFICATION_ENERGY_STATE,
         kwargs...,
     )

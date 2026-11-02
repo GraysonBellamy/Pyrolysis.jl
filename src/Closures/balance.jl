@@ -208,8 +208,7 @@ under a [`LayerCorrection`](@ref).
 @inline correction!(ds, cl::BalanceRowClosure, setup) =
     _correction!(ds.c, cl.correction, ds, setup.reference)
 
-# The velocity component `k` of node `nd` in a flat vector of `D` components per node.
-@inline _component(w, ::Val{D}, nd::Int, k::Int) where {D} = w[D*(nd-1)+k]
+# The velocity of node `nd` in a flat vector of `D` components per node.
 @inline _node_vector(w, ::Val{D}, nd::Int) where {D} =
     SVector{D}(ntuple(k -> w[D*(nd-1)+k], Val(D)))
 
@@ -378,7 +377,7 @@ The node velocities that satisfy every velocity row at the derived state
 `ds`, given the strain rates in `c.θ` (from [`closure_rows!`](@ref)), the
 lateral rate in `ds.θ_A` and the node corrections in `ds.c`: one sweep of the
 bidiagonal balance rows from the pinned node (the corrections read positions
-and masses only, so one pass is exact), zero on the row node of a dead cell,
+only, so one pass is exact), zero on the row node of a dead cell,
 or the prescribed velocity at every node.
 """
 function consistent_velocities!(

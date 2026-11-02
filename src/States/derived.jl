@@ -118,7 +118,6 @@ automatic differentiation):
   sums, which stay in `[0, 1]`)
 - `I`, `α`: face intensities [W/m²] as stored, and cell absorption
   coefficients at the positive-part concentrations [1/m] (in-depth radiation)
-- `λ`: cell gas-transfer coefficients [m²/s] (gas transport)
 - `φ`, `P`, `mob`: the smoothly floored porosity, the ideal-gas pressure [Pa]
   and the Darcy mobility `κ/μ` with a smoothly floored viscosity [m²/(Pa·s)]
   (both gas transport models)
@@ -153,7 +152,6 @@ struct DerivedState{NC,T,G<:MeshGeometry}
     a::Vector{T}
     I::Vector{T}
     α::Vector{T}
-    λ::Vector{T}
     φ::Vector{T}
     P::Vector{T}
     mob::Vector{T}
@@ -212,7 +210,6 @@ function DerivedState{T}(
         zeros(T, n),
         zeros(T, n),
         zeros(T, n),
-        zeros(T, n),
         zeros(T, NC, n),
         zeros(T, NC, n),
         zeros(T, n),
@@ -224,7 +221,7 @@ end
 """
 	derive!(ds, u, layout, setup) -> ds
 
-Map the state vector `u` to the derived state: the only reader of `u`.
+Map the state vector `u` to the derived state.
 
 Order: the live cells from the layout's mask; the geometry from the node
 positions (a fixed mesh keeps its precomputed geometry), with the node
@@ -317,7 +314,7 @@ function derive!(
             _guard_gas_mass!(ds, material.components, i, 1, pressure_mass_scale)
         end
         ξ⁺ = ntuple(j -> ds.ξ⁺[j, i], Val(NC))
-        k = effective_conductivity(ξ⁺, Tt, material; skip_absent = Val(true))
+        k = effective_conductivity(ξ⁺, Tt, material)
         ds.k_physical[i] = k
         ds.k[i] = smooth_floor(k, CONDUCTIVITY_FLOOR)
         ds.ε[i] = mixture_emissivity(ξ⁺, Tt, material)
@@ -367,7 +364,6 @@ end
 ) where {NC}
     ps = pore_state(ξ⁺, Tt, material)
     co = transport_coefficients(ξ⁺, Tt, material, ps.φ)
-    ds.λ[i] = co.λ
     ds.φ[i] = ps.φ
     ds.P[i] = ps.P
     ds.mob[i] = co.κ/smooth_floor(material.gas_viscosity(Tt), MU_FLOOR)

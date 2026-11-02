@@ -30,8 +30,8 @@ end
 # ============================================================================
 #
 # Three concrete subtypes of `AbstractComponent`. Phase is implicit in the
-# type, so `is_gas`, `is_solid`, `is_liquid`, `phase`, `molar_mass`, and
-# `has_permeability` all dispatch statically with no runtime field branching.
+# type, so `is_gas`, `is_solid`, `is_liquid`, `phase` and `molar_mass` all
+# dispatch statically with no runtime field branching.
 #
 # Each subtype carries only its phase-relevant fields:
 # - `SolidComponent`/`LiquidComponent`: matrix-forming, with `permeability`
@@ -138,14 +138,14 @@ struct LiquidComponent{
 end
 
 # ============================================================================
-# Convenience Constructors
+# Constructors
 # ============================================================================
 
 """
 	SolidComponent(name; ρ, c, k, ε=0.9, absorptivity=nothing, α=0.0,
 	               λ=nothing, κ=0.0, ρ_intrinsic=nothing, φ=nothing)
 
-Create a solid component with simplified interface.
+Create a solid component.
 
 # Arguments
 - `name::Symbol`: Component identifier
@@ -352,7 +352,7 @@ end
 """
 	GaseousComponent(name; M, c, k, ε=0.0, α=0.0)
 
-Create a gaseous component with simplified interface.
+Create a gaseous component.
 
 For ideal gases, density is computed from the ideal gas law **at the
 reference pressure**: ρ_g(T) = P_REF·M/(R·T). This T-only property enters
@@ -424,7 +424,7 @@ end
 	LiquidComponent(name; ρ, c, k, λ=nothing, κ=0.0, ε=0.95, absorptivity=nothing,
 	                α=0.0, ρ_intrinsic=nothing, φ=nothing)
 
-Create a liquid component with simplified interface.
+Create a liquid component.
 
 # Arguments
 - `name::Symbol`: Component identifier
@@ -590,15 +590,6 @@ absorptivity set mixes to exactly `ε_eff`.
     _absorptivity_or_kirchhoff(surface_absorptivity(comp), comp, T)
 @inline _absorptivity_or_kirchhoff(::Nothing, comp, T) = get_emissivity(comp, T)
 @inline _absorptivity_or_kirchhoff(a::Float64, comp, T) = a
-
-"""
-	has_permeability(comp::AbstractComponent) -> Bool
-
-True for matrix-forming components (solids and liquids). False for gases.
-"""
-@inline has_permeability(::SolidComponent) = true
-@inline has_permeability(::LiquidComponent) = true
-@inline has_permeability(::GaseousComponent) = false
 
 """
 	participates_in_transport(comp::AbstractComponent) -> Bool

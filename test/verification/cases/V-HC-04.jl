@@ -22,7 +22,7 @@
 # its a-priori Δz/2 sensitivity bound.
 #
 # Variant (d) uses the same prescribed 10.2 mm interface as (c), with a mesh
-# face placed there using create_mesh_from_nodes. Both have 40 cells. Its
+# face placed there using line_mesh. Both have 40 cells. Its
 # physical problem is unchanged, so the same native FDS/Gpyro runs apply.
 # Every member reports errors against the prescribed and represented geometry
 # separately; the off-face case remains a deliberate geometry-resolution test.
@@ -62,9 +62,9 @@ function _vhc04_case(
                 collect(range(0.0, z_i; length = n_left+1)),
                 collect(range(z_i, L; length = n_cells-n_left+1))[2:end],
             )
-            create_mesh_from_nodes(nodes)
+            line_mesh(nodes)
         else
-            create_uniform_mesh(L, n_cells)
+            uniform_mesh(L, n_cells)
         end
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(T_top), bottom = DirichletThermalBC(T_bot)),
@@ -96,7 +96,7 @@ function _vhc04_case(
 
     function qois(sol)
         out = QoIResult[]
-        z = get_cell_positions(sol)
+        z = sol.cell_centers[:, end]
         n = length(z)
         nodes = first.(sol.problem.mesh.positions)
         Δz = maximum(diff(nodes))
@@ -232,7 +232,7 @@ function _vhc04_case(
                               "their meshes and errors are retained without adjustment." :
                               "",
             curves = sol -> begin
-                z = get_cell_positions(sol)
+                z = sol.cell_centers[:, end]
                 curves = [
                     ReportCurve(
                         name = :T_profile_steady,

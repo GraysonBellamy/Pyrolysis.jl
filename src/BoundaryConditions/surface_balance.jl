@@ -20,7 +20,7 @@ model. Coupled species/thermal roots are assembled in `Kernels/gas_boundary.jl`.
 
 using ..Materials: STEFAN_BOLTZMANN, T_PROPERTY_MIN, T_PROPERTY_MAX
 using ..Materials: evaluate_param, evaluate_param_T
-using ..Materials: RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT
+using ..Materials: RadiationModel, SURFACE_ABSORPTION, BEER_LAMBERT
 using ForwardDiff
 using StaticArrays: SVector
 using ..Physics: primal, bounded_transport_root, implicit_transport_root, TransportFailure
@@ -65,10 +65,7 @@ iterate is not finite.
 
 Every `ConvectiveBC` inside `bc` applies its blowing model (`bc.blowing`, see
 [`blowing_state`](@ref)) to a [`BlowingFace`](@ref) rebuilt at every Newton
-iterate from `J_outward` and the current `T_s`. The Newton `df` uses the
-frozen-χ derivative `−h·χ`: Newton still converges to the exact residual root,
-marginally sub-quadratically, and the Dual fixed point is the exact
-implicit-function-theorem derivative.
+iterate from `J_outward` and the current `T_s`.
 
 # Non-convergence
 The Newton works on the balance divided by its local scale, the largest of
@@ -251,7 +248,7 @@ Radiation-model aware variant used by the boundary temperature solve.
 
 It keeps `RadiativeFluxBC` consistent with the residual: under `BEER_LAMBERT`
 the incident radiation is absorbed in depth and contributes **zero** boundary
-flux here; under `NO_RADIATION` and `SURFACE_ABSORPTION` it is absorbed at the
+flux here; under `SURFACE_ABSORPTION` it is absorbed at the
 surface, at the surface absorptivity.
 """
 @inline function evaluate_bc_flux_and_derivative(
@@ -273,8 +270,7 @@ Blowing-aware variant. `face` is the [`BlowingFace`](@ref) at this boundary
 convective BCs consume it — each `ConvectiveBC` asks its own blowing model for
 the ratio `χ = h_eff/h` against its own `h` and ambient temperature
 ([`blowing_ratio`](@ref)); every other BC type ignores `face` and falls
-through to the radiation-model-aware 5-argument method. Zero species fluxes
-reproduce the uncorrected flux exactly for every shipped model.
+through to the radiation-model-aware method. Zero species fluxes reproduce the uncorrected flux exactly for every shipped model.
 """
 @inline function evaluate_bc_flux_and_derivative(
     bc::AbstractThermalBC,
@@ -295,11 +291,8 @@ reproduce the uncorrected flux exactly for every shipped model.
     )
 end
 
-# ConvectiveBC with blowing: q = h·χ·(T_inf − T_s), χ from the BC's model.
-# The Newton derivative uses the frozen-χ form dq/dT_s = −h·χ, dropping the
-# h·(∂χ/∂T_s)·(T_inf − T_s) term. The derivative is first-order consistent:
-# Newton converges to the exact residual root, marginally sub-quadratically;
-# the Dual fixed point is still the exact implicit-function-theorem derivative.
+# ConvectiveBC with blowing: q = h·χ·(T_inf − T_s), χ from the BC's model, with
+# the frozen-χ slope dq/dT_s = −h·χ.
 @inline function evaluate_bc_flux_and_derivative(
     bc::ConvectiveBC,
     T_s::Real,
@@ -438,7 +431,7 @@ end
 # incident radiation is absorbed in depth. With `absorptivity = nothing` the BC
 # absorbs at the material's mixture surface absorptivity `a_eff` (= ε_eff
 # unless a component overrides it).
-# - NO_RADIATION/SURFACE_ABSORPTION: treat as boundary heat flux for correct T_surface
+# - SURFACE_ABSORPTION: treat as boundary heat flux for correct T_surface
 # - BEER_LAMBERT: handled volumetrically, return 0 to avoid double-counting
 # ----------------------------------------------------------------------------
 @inline function evaluate_bc_flux_and_derivative(
@@ -449,7 +442,7 @@ end
     radiation_model::RadiationModel;
     a_eff::Real = ε_eff,
 )
-    if radiation_model == NO_RADIATION || radiation_model == SURFACE_ABSORPTION
+    if radiation_model == SURFACE_ABSORPTION
         # Radiation absorbed at boundary - include in boundary balance
         # This ensures T_surface is physically correct (hotter than T_cell when net heating)
         flux = evaluate_param(bc.flux, t)
@@ -467,9 +460,7 @@ end
 end
 
 # ----------------------------------------------------------------------------
-# DirichletThermalBC: T = T_bc (special handling, not typical flux BC)
-# For boundary temperature solve, we return the prescribed temperature directly
-# since T_s = T_bc by definition
+# DirichletThermalBC: T = T_bc, as a stiff penalty flux toward T_bc
 # ----------------------------------------------------------------------------
 @inline function evaluate_bc_flux_and_derivative(
     bc::DirichletThermalBC,
@@ -478,9 +469,6 @@ end
     ε_eff::Real;
     a_eff::Real = ε_eff,
 )
-    # Dirichlet BC prescribes temperature directly
-    # The "flux" formulation: infinite conductance enforces T_s = T_bc
-    # We handle this by setting large h with T_inf = T_bc
     T_bc = evaluate_param(bc.T, t)
 
     # Use a very large heat transfer coefficient to enforce T_s ≈ T_bc

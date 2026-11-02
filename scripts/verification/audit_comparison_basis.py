@@ -267,28 +267,28 @@ def main():
     # FDS overlays and the V2 transport/reaction accuracy family.
     # FDS counts below are the timing-deck
     # counts; their sparse DEVC samples cannot independently verify a mesh.
-    legacy = [
+    decks = [
         ("V-HC-01", "fds", "fds/custom/vhc01_semi_infinite.fds", 133, .05, .1,
          "reported 133 cells; rerun to retain full grid and instantaneous probes"),
         ("V-RX-01", "fds", "fds/custom/two_step_solid_reaction_matched.fds", 1, .001, "native controller",
          "uniform kinetics; audit native outer step, solid substeps and averaging"),
     ]
     for suffix, native in zip("abcd", ("d_matched", "c_matched", "b_matched", "a_ext")):
-        legacy.append((f"V-HC-02{suffix}", "fds", f"fds/custom/heat_conduction_{native}.fds",
+        decks.append((f"V-HC-02{suffix}", "fds", f"fds/custom/heat_conduction_{native}.fds",
                        101, .1, .5, "dimensionless equivalence: t_Julia=2*t_FDS, dt_Julia-equivalent=1 s; probes time averaged"))
     for suffix in "ab":
-        legacy.extend([
+        decks.extend([
             (f"V-GT-07{suffix}", "gpyro_v2", f"gpyro/v2_accuracy/decks/vgt07{suffix}.data", 160, 1., .05,
              "161 boundary nodes; independent time/space refinements; point vs cell-average inventory references differ"),
             (f"V-GT-08{suffix}", "gpyro_v2", f"gpyro/v2_accuracy/decks/vgt08{suffix}.data", 80, .1, .005,
              "81 boundary nodes; independent time/space refinements; steady reference does not verify startup transient"),
         ])
     for suffix in "abc":
-        legacy.append((f"V-RX-05{suffix}", "gpyro_v2", f"gpyro/v2_accuracy/decks/vrx05{suffix}.data",
+        decks.append((f"V-RX-05{suffix}", "gpyro_v2", f"gpyro/v2_accuracy/decks/vrx05{suffix}.data",
                        1, .001, .001, "two boundary nodes; three time-refinement levels; homogeneous ODE; retained-gas constant mismatch in c"))
-    for case, solver, source, n, length, dt, note in legacy:
+    for case, solver, source, n, length, dt, note in decks:
         if not (REF / source).is_file():
-            raise ValueError(f"missing legacy deck: {source}")
+            raise ValueError(f"missing deck: {source}")
         time_status = ("independent dt, dt/2, dt/4 runs retained; common-observation audit pending"
                        if solver == "gpyro_v2" else "time-only three-level qualification required")
         rows.append(make_row(case, solver, source, (n, length/n, length/n), julia, all_julia,

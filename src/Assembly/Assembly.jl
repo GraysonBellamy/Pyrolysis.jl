@@ -17,7 +17,7 @@ include("definition.jl")
 include("residual.jl")
 
 export NoSources, VolumetricSources
-export CoreDefinition, CoreWorkspace, buffers
+export ResidualDefinition, ResidualWorkspace, buffers
 export residual!, assemble_rows!, add_sources!
 
 end # module Assembly

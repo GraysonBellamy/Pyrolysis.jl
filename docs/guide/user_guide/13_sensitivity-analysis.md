@@ -98,7 +98,7 @@ function p_inject(base, θ)
         reactions  = (rxn,),
     )
 
-    mesh = create_uniform_mesh(10.0e-3, 40)          # 10 mm, 40 cells, 1 m² cross section
+    mesh = uniform_mesh(10.0e-3, 40)          # 10 mm, 40 cells, 1 m² cross section
 
     bc_set = BoundaryConditionSet(
         thermal = (top    = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0)
@@ -147,7 +147,7 @@ handles:
 | `ρ_j`, `c_p`, `k_j` | `SolidComponent(...; ρ=, c=, k=)` | pass a number, or a `CallableProperty` closing over `θ` |
 | `λ_j`, `κ_j` | component `λ=`, `κ=` | superficial matrix transfer / permeability |
 | `ε_j`, `a_j`, `α_j` | component `ε=`, `absorptivity=`, `α=` | emissivity / surface absorptivity / mass-basis absorption coefficient |
-| BC parameters | `HeatFluxBC`, `ConvectiveBC(h=,T_inf=)`, `RadiativeFluxBC(flux=)`, … | external flux, `h_conv`, `T_∞` |
+| BC parameters | `HeatFluxBC(flux)`, `ConvectiveBC(h=,T_inf=)`, `RadiativeFluxBC(flux)`, … | external flux, `h_conv`, `T_∞` |
 | mixing `β` | `MixingSpec(WEIGHTED, β)` | conductivity / transport blend weight |
 
 For a temperature-dependent property whose coefficients are parameters, build the
@@ -210,7 +210,7 @@ J  = FiniteDiff.finite_difference_jacobian(y, θ0, Val(:central); relstep = 1e-4
 
 Pass every option that changes the solution — `radiation_model`, `use_ale`,
 `energy_state`, `deactivation`, `threshold`, `band`, the tolerances,
-`integrator_policy`, `linear_solver`, `dtmax`, `saveat` — identically to every
+`integrator_policy`, `dtmax`, `saveat` — identically to every
 solve, here through `solve_opts` (Technical Reference §17.7.1). An option that
 differs between the `+h` and the `−h` solve adds its own effect, divided by
 `2h`, to the estimate.
@@ -247,9 +247,9 @@ tolerance leaves. So:
 3. **Qualify a derivative you rely on** — for a calibration, an uncertainty
    estimate, or an objective that samples a burnout — with the convergence
    check of §13.4.1, which chooses the step and the tolerance together.
-4. **Do not ignore validation warnings.** A configuration `solve` warns about is
-   often non-smooth in `θ` as well. The §13.2 material with its solids left at
-   the default `λ = 0` (§13.9) needs 2,016 accepted and 379 rejected steps
+4. **Give the condensed components a small `λ`.** A closed matrix is often
+   non-smooth in `θ` as well. The §13.2 material with `λ = 0` on its solids (§13.9)
+   needs 2,016 accepted and 379 rejected steps
    where `λ = 1e-6` needs 295 and 23; a `1e-6` relative change in `A` moves
    `T_s` by up to 0.29 K (`8e-6` K with `λ = 1e-6`); and the derivative of the
    peak surface temperature with respect to `log10(A)` reads −1.08, −0.83,
@@ -583,8 +583,7 @@ Reference §17.6), but several configurations still spoil a derivative:
 **Defaults to remember.** Start from `relstep = 1e-4` and check it with steps
 ten times larger and smaller (§13.4); qualify a derivative you rely on, and any
 derivative through a burnout, with the convergence check (§13.4.1); pass
-`log10(A)`, not `A`; heed `solve`'s validation warnings and give the condensed
-components a small `λ` (§13.9). For sensitivity-safe solves: start every
+`log10(A)`, not `A`; give the condensed components a small `λ` (§13.9). For sensitivity-safe solves: start every
 solve from its own problem's initial state, pass the same `solve` options to
 every perturbed solve, and compare `sol.statistics.invocations` between them
 when `deactivation = true`.

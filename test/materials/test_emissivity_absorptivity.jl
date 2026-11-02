@@ -211,7 +211,7 @@ end
     _temperature(i) = 400.0 + 100.0 * i
     function _derived_for(mat)
         problem = PyrolysisProblem(
-            mesh = create_uniform_mesh(0.01, 5),
+            mesh = uniform_mesh(0.01, 5),
             material = mat,
             bc_set = BoundaryConditionSet(
                 thermal = (top = HeatFluxBC(0.0), bottom = AdiabaticBC()),

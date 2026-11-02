@@ -18,22 +18,11 @@ GasDiagnostics
 ## Accessors
 
 ```@docs
-get_times
-get_temperatures
-get_concentrations
-get_gas_generation_rate
-get_pressure
-get_partial_pressures
-get_intrinsic_gas_densities
 get_gas_composition
-get_porosity
 get_boundary_exchange
-n_timesteps
 succeeded
 completed
-get_cell_positions
 get_profile
-interpolate_solution
 interior_events
 ```
 

@@ -50,7 +50,7 @@ pmma = Material(
     ),
 )
 
-mesh = create_uniform_mesh(0.01, 100)
+mesh = uniform_mesh(0.01, 100)
 bcs  = BoundaryConditionSet(
     thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()),
     mass    = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),

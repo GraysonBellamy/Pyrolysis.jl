@@ -51,7 +51,7 @@ function _vgt07_case(id, hm)
             ),
         )
         PyrolysisProblem(
-            mesh = create_uniform_mesh(L, n),
+            mesh = uniform_mesh(L, n),
             material = mat,
             bc_set = BoundaryConditionSet(
                 thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -74,7 +74,7 @@ function _vgt07_case(id, hm)
         )
     end
     function profile_error(sol; last_only = false, cell_average = false)
-        z = get_cell_positions(sol)
+        z = sol.cell_centers[:, end]
         depths = L .- first.(sol.problem.mesh.positions)
         js = last_only ? (length(sol.t):length(sol.t)) : (2:length(sol.t))
         maximum(
@@ -152,8 +152,8 @@ function _vgt07_case(id, hm)
             ),
             QoIResult(
                 name = "isobaric invariant",
-                value = maximum(abs.(get_pressure(sol) .- P)),
-                error = maximum(abs.(get_pressure(sol) .- P))/P,
+                value = maximum(abs.(sol.gas.pressure .- P)),
+                error = maximum(abs.(sol.gas.pressure .- P))/P,
                 tol = 4e-9,
                 comment = "observed relative drift ≤1.05e-9 (0.000105 Pa); pressure tolerance 0.001 Pa",
             ),
@@ -221,7 +221,7 @@ function _vgt07_case(id, hm)
                               "resolutions also halve the timestep; no spatial order is inferred from them.",
             curves = sol -> begin
                 stem = "gpyro/v2_accuracy/" * lowercase(replace(id, "-" => ""))
-                half_width = L/(2length(get_cell_positions(sol)))
+                half_width = L/(2length(sol.cell_centers[:, end]))
                 gp_t, gp_x, gp_y = reference_columns(
                     stem * "_profiles.csv",
                     "t_s",
@@ -246,7 +246,7 @@ function _vgt07_case(id, hm)
                             [
                                 CurveSeries(
                                     label = "t = $(sol.t[j]) s",
-                                    x = L .- get_cell_positions(sol),
+                                    x = L .- sol.cell_centers[:, end],
                                     y = vec(sol.ξ[2, :, j]) ./ (φ*ρg),
                                     exact = x -> fraction(x, sol.t[j]),
                                 ) for j = 2:length(sol.t)
@@ -270,7 +270,7 @@ function _vgt07_case(id, hm)
                         series = [
                             CurveSeries(
                                 label = "t = $(sol.t[j]) s",
-                                x = L .- get_cell_positions(sol),
+                                x = L .- sol.cell_centers[:, end],
                                 y = vec(sol.ξ[2, :, j]) ./ (φ*ρg),
                                 exact = x ->
                                     Y∞*robin_diffusion_cell_average(

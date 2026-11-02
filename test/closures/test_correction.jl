@@ -23,7 +23,7 @@ using LinearSolve: UMFPACKFactorization
 function _inert(n; L = 0.007, ratio = 2.0, t_end = 3.0)
     a = SolidComponent(:a, ρ = 1000.0, c = 1000.0, k = 0.5)
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(L, n, ratio),
+        mesh = stretched_mesh(L, n, ratio),
         material = Material(name = :inert, components = (a,), reactions = ()),
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -46,7 +46,7 @@ function _composition(n; uniform = false, T0 = 800.0, ratio = 1.1)
     mat = Material(name = :composition, components = (a, b), reactions = ())
     front(z) = uniform ? 0.5 : (1 + tanh((z - L / 2) / (L / 10))) / 2
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(L, n, ratio),
+        mesh = stretched_mesh(L, n, ratio),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -71,7 +71,7 @@ function _uniform_slab(n; coordinates = Planar())
         depletion_limiter = DepletionLimiter(enabled = false),
     )
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(0.02, n, 1.1; coordinates),
+        mesh = stretched_mesh(0.02, n, 1.1; coordinates),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(400.0), bottom = DirichletThermalBC(400.0)),
@@ -118,11 +118,11 @@ function _two_layer(n_top, n_bottom; t_end = 100.0)
         range(L_bottom, L_bottom + L_top, length = n_top + 1)[2:end],
     )
     return PyrolysisProblem(
-        mesh = create_mesh_from_nodes(z),
+        mesh = line_mesh(z),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(flux = 5e4) + RadiativeBC(T_inf = 300.0),
+                top = RadiativeFluxBC(5e4) + RadiativeBC(T_inf = 300.0),
                 bottom = AdiabaticBC(),
             ),
             mass = (
@@ -152,7 +152,7 @@ function _uniform_burn(n; t_end = 480.0)
         reactions = (Reaction(:burn, 1 => 2; A = A, E = E, h = 0.0),),
     )
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(10e-3, n, 1.05),
+        mesh = stretched_mesh(10e-3, n, 1.05),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -170,7 +170,7 @@ end
 
 # A heterogeneous layer: two gasifying solids of different densities mixed in
 # every cell, the second's fraction graded through the layer, so the density
-# varies within the layer and the monitor's mass term acts.
+# varies within the layer.
 function _mixed(n)
     L = 4e-3
     a = SolidComponent(:a, φ = 0.3, ρ = 1200.0, c = 1500.0, k = 0.2, ε = 0.95, λ = 1e-6)
@@ -186,7 +186,7 @@ function _mixed(n)
     )
     f(z) = 0.1 + 0.4 * z / L
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(L, n, 1.1),
+        mesh = stretched_mesh(L, n, 1.1),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(5e4), bottom = AdiabaticBC()),
@@ -215,7 +215,7 @@ function _ablator(n; L = 3e-3, q = 2.8e6, t_end = 0.8)
         reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L, n),
+        mesh = uniform_mesh(L, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(q), bottom = AdiabaticBC()),
@@ -272,7 +272,6 @@ end
     # The substrate (cells 1 to 3), which cannot vanish, and the layer (cells
     # 4 to 7).
     @test corr.gain == [0, 0, 0, 0, 16 / τ, 16 / τ, 16 / τ, 0]
-    @test corr.monitor_scale == ones(7)
     @test cp.def.setup.reference.thickness ≈ diff(cp.def.setup.reference.positions)
 
     # The interface between the two compositions must be Lagrangian: by default
@@ -294,16 +293,8 @@ end
         correction = EquidistributionCorrection(),
         lagrangian = [4],
     )
-    @test_throws ArgumentError setup(
-        _composition(6);
-        use_ale = true,
-        w_override = (x, t) -> 0.0,
-        correction = EquidistributionCorrection(),
-    )
     @test_throws ArgumentError EquidistributionCorrection(τ = 0.0)
     @test_throws ArgumentError EquidistributionCorrection(activation = (0.1, 0.3))
-    @test_throws ArgumentError EquidistributionCorrection(monitor = (0.0, 1.0))
-    @test_throws ArgumentError EquidistributionCorrection(monitor = (1.0, -1.0))
 
     # The band defaults to CORRECTION_BAND when the bound correction moves some
     # layer, to the threshold otherwise.
@@ -598,7 +589,7 @@ end
     slide = (x, t) -> 2.5e-4 * sinpi(x / 0.01)
     p = _composition(20; ratio = 1.0)
     tol = (abstol = 1e-10, reltol = 1e-8)
-    cp = setup(p; use_ale = true, w_override = slide, tol...)
+    cp = setup(p; use_ale = true, correction = PrescribedCorrection(slide), tol...)
     @test cp.def.closure.correction isa PrescribedCorrection
     @test find_kernel(RelativeFluxKernel, cp.def.kernels) !== nothing
     u = copy(cp.u0)
@@ -654,19 +645,14 @@ end
 # ============================================================================
 
 # Every node partially active at the initial state (r_hi > 1 > r_lo), so the
-# activation's derivatives enter, and the monitor's mass term on. The upwind
+# activation's derivatives enter. The upwind
 # side of the relative fluxes switches where a node's correction is zero; at
-# an active node with equal M̃h on both sides it is exactly zero with nonzero
+# an active node with equal h on both sides it is exactly zero with nonzero
 # partials, a tie the kernel resolves by the value alone, so the colored and
 # the dense Jacobian take the same side (`tied`: the deck's own nodes, the
 # two-layer deck's uniform cells). The other states move every interior node
 # by up to 5 %.
-const _active = EquidistributionCorrection(
-    τ = 50.0,
-    activation = (1.5, 0.5),
-    monitor = (1.0, 1.0),
-    layers = :all,
-)
+const _active = EquidistributionCorrection(τ = 50.0, activation = (1.5, 0.5), layers = :all)
 const _correction_configurations = (
     two_layer = (problem = n -> _two_layer(n - 3, 3), lagrangian = [4]),
     uniform_burn = (problem = _uniform_burn, lagrangian = Int[]),
@@ -700,7 +686,7 @@ end
         energy_state = energy,
         use_ale = true,
         deactivation = true,
-        radiation_model = name === :two_layer ? BEER_LAMBERT : Pyrolysis.NO_RADIATION,
+        radiation_model = name === :two_layer ? BEER_LAMBERT : Pyrolysis.SURFACE_ABSORPTION,
         correction = _active,
         config.lagrangian,
     )
@@ -736,13 +722,11 @@ end
             Jd = _contained(cp, u)
             if state === :skewed
                 # The correction is active: a balance row reads the positions
-                # of the nodes beyond its cell and the masses of its
-                # neighbours through the monitor (cell 4's row node is
-                # interior to the two-layer deck's upper layer).
+                # of the nodes beyond its cell (cell 4's row node is interior
+                # to the two-layer deck's upper layer).
                 k = name === :two_layer ? 4 : 3
                 r = velocity_index(layout, cp.def.closure.row_node[k])
                 @test Jd[r, position_index(layout, k + 2)] != 0
-                @test Jd[r, mass_index(layout, k + 1, 1)] != 0
             end
         end
     end
@@ -856,8 +840,12 @@ end
     problem = _ablator(12)
     for linear_solver in (StructuredKLU(), UMFPACKFactorization())
         sols = [
-            Integration.solve(problem; _ablation..., linear_solver, saveat = Float64[])
-            for _ = 1:2
+            Integration.solve(
+                problem;
+                _ablation...,
+                integrator_policy = default_policy(linear_solver),
+                saveat = Float64[],
+            ) for _ = 1:2
         ]
         @test !isempty(sols[1].events)
         @test sols[2].raw_solution.t == sols[1].raw_solution.t

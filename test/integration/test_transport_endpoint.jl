@@ -43,7 +43,7 @@ function endpoint_problem(n, width; dusty = false)
         ),
     )
     PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, n),
+        mesh = uniform_mesh(0.01, n),
         material = mat,
         T_initial = z->500.0,
         ξ_initial = [z->500.0, z->0.0, z->0.0],
@@ -79,7 +79,7 @@ end
         dtmin = 1e-15,
     )
     @test completed(sol)
-    @test minimum(get_porosity(sol))≥0.5-1e-10
+    @test minimum(sol.gas.porosity)≥0.5-1e-10
     @test maximum(abs.(sol.T .- 500.0))<1e-5
     for i in axes(sol.T, 1)
         ξ=Tuple(sol.ξ[:, i, end])
@@ -90,7 +90,7 @@ end
             ξ,
             sol.T[i, end],
             p.material,
-            get_porosity(sol)[i, end],
+            sol.gas.porosity[i, end],
         ).κ==0
     end
     audit=gas_species_audit(sol, rec).species.gas

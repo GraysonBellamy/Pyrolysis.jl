@@ -77,7 +77,7 @@ const _compress = (x, t) -> (-0.15 * (2π / 20) * sin(2π * t / 20) / _stretch(t
         cp = setup(
             _uniform(6);
             use_ale = true,
-            w_override = _compress,
+            correction = PrescribedCorrection(_compress),
             abstol = 1e-12,
             reltol = 1e-12,
         )
@@ -110,7 +110,7 @@ const _swirl =
     cp = setup(
         _uniform(6);
         use_ale = true,
-        w_override = _swirl,
+        correction = PrescribedCorrection(_swirl),
         history = true,
         abstol = 1e-12,
         reltol = 1e-10,

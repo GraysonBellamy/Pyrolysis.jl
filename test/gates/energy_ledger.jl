@@ -33,14 +33,13 @@
 #    enthalpy is linear in the masses and the defect is round-off in both
 #    forms.
 # 3. V-BO-04 across its event: the case's run with deactivation, 40 cells, at
-#    its tolerance, with event location off and on. The inventory is the live
+#    its tolerance. The inventory is the live
 #    cells' extended energy (the inventories in the inventory form), the
 #    boundary terms are taken at the live boundary faces and the sources over
 #    the live cells; each invocation's lost enthalpy and regularization leave
 #    the inventory at the event, its lost masses the mass inventory. A probe
 #    located where the smallest threshold margin is `PRE_EVENT` gives the
-#    ledger its last node before each event; the steps after it to the event
-#    are what location shortens.
+#    ledger its last node before each event.
 # 4. An interior death: a five-cell column at order 0.5, reltol 1e-7, abstol 1e-9,
 #    with its third cell prepared just below the threshold beneath spent cells,
 #    a pressure tolerance of 1e-3 for the gas they then release, under an in-depth
@@ -205,7 +204,7 @@ end
 # The closures across the events of a deactivating solve: the energy and
 # mass defects against the trapezoidal ledger with the events' terms, the
 # inventory changes, and the events' terms.
-function event_closure(problem; energy_state, located, tol = VBO04_TOL)
+function event_closure(problem; energy_state, tol = VBO04_TOL)
     cp = Integration.setup(
         problem;
         use_ale = true,
@@ -246,7 +245,6 @@ function event_closure(problem; energy_state, located, tol = VBO04_TOL)
     sol = Integration.integrate(
         cp;
         callback = CallbackSet(pre_event, step),
-        located_events = located,
         min_thickness = 1e-6,
     )
     events = sol.events
@@ -346,19 +344,14 @@ for energy_state in (:temperature, :enthalpy)
     flush(stdout)
 end
 
-# V-BO-04 across its event, with event location off and on.
+# V-BO-04 across its event.
 vbo04_event = []
-for energy_state in (:temperature, :enthalpy), located in (false, true)
-    r = event_closure(
-        Base.invokelatest(_vbo04_setup, VBO04_CELLS).problem;
-        energy_state,
-        located,
-    )
+for energy_state in (:temperature, :enthalpy)
+    r = event_closure(Base.invokelatest(_vbo04_setup, VBO04_CELLS).problem; energy_state)
     push!(
         vbo04_event,
         (;
             energy_state,
-            location = located ? "on" : "off",
             r...,
             energy_closure = abs(r.energy_defect) / abs(r.ΔE),
             mass_closure = abs(r.mass_defect) / abs(r.Δm),
@@ -382,7 +375,7 @@ function interior_closure(config, energy_state)
     )
     layered = config === :layers
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 5),
+        mesh = uniform_mesh(0.01, 5),
         material = material,
         bc_set = BoundaryConditionSet(
             thermal = (top = RadiativeFluxBC(1000.0), bottom = AdiabaticBC()),
@@ -576,7 +569,7 @@ open(joinpath(OUT, "energy_ledger.md"), "w") do io
         io,
         "\n## V-BO-04 across its event\n\nThe case's run, $(VBO04_CELLS) cells on a moving ",
         "mesh with deactivation, abstol $(VBO04_TOL.abstol), reltol $(VBO04_TOL.reltol), ",
-        "event location off and on. Inventories over the live cells (the extended energy, ",
+        "Inventories over the live cells (the extended energy, ",
         "the inventory itself in the enthalpy form, and the mass), the boundary terms at the ",
         "live boundary faces, the sources over the live cells, trapezoidal over the accepted ",
         "steps with a node where the smallest threshold margin is $(PRE_EVENT); each ",
@@ -587,13 +580,13 @@ open(joinpath(OUT, "energy_ledger.md"), "w") do io
     )
     println(
         io,
-        "| form | location | retcode | outcome | invocations | events | event [s] | energy closure | mass closure | lost energy | regularization | created volume | steps |",
+        "| form | retcode | outcome | invocations | events | event [s] | energy closure | mass closure | lost energy | regularization | created volume | steps |",
     )
-    println(io, "|" * repeat("---|", 13))
+    println(io, "|" * repeat("---|", 12))
     for r in vbo04_event
         println(
             io,
-            "| $(r.energy_state) | $(r.location) | $(r.retcode) | $(r.outcome) | $(r.invocations) | ",
+            "| $(r.energy_state) | $(r.retcode) | $(r.outcome) | $(r.invocations) | ",
             "$(r.events) | $(_g(r.t_event; d = 7)) | $(_g(r.energy_closure)) | $(_g(r.mass_closure)) | ",
             "$(_g(abs(r.lost_energy) / abs(r.ΔE))) | $(_g(abs(r.regularization) / abs(r.ΔE))) | ",
             "$(_g(r.created_volume)) | $(r.steps) |",

@@ -501,8 +501,8 @@ function build_bcs(
     # otherwise fall back to ε_eff (baseline: absorptivity = emission = ε_eff).
     rad_flux =
         use_emission_split ?
-        RadiativeFluxBC(flux = scenario.q_ext, absorptivity = wp_eps_char(scenario.q_ext)) :
-        RadiativeFluxBC(flux = scenario.q_ext)
+        RadiativeFluxBC(scenario.q_ext, absorptivity = wp_eps_char(scenario.q_ext)) :
+        RadiativeFluxBC(scenario.q_ext)
     top_thermal =
         rad_flux +
         RadiativeBC(F = 1.0 - F_cone, T_inf = scenario.T_top_surr) +
@@ -625,7 +625,7 @@ function build_problem(
         end for j = 1:NC_WP
     ]
 
-    mesh = create_uniform_mesh(
+    mesh = uniform_mesh(
         scenario.sample_thickness,
         scenario.n_cells;
         cross_section = get(scenario, :A_0, WP_A0),

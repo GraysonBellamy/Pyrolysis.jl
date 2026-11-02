@@ -394,7 +394,7 @@ moisture_content_db = 0.10  # 10% moisture content on dry basis
 
 # The initial temperature and concentrations (WATER + PTW + pore air, rest
 # zero) come from the problem's T_initial and ξ_initial below.
-mesh = create_uniform_mesh(
+mesh = uniform_mesh(
     sample_thickness,      # domain length [m]
     n_cells,               # number of cells
 )
@@ -403,7 +403,9 @@ println("Mesh created:")
 println("  - Thickness: $(sample_thickness*1000) mm")
 println("  - Number of cells: $n_cells")
 println("  - Cell size: $(sample_thickness/n_cells*1000) mm")
-println("  - Initial dry PTW: $(round(ρ_PTW_initial, digits=1)) kg/m³ (oven-dry density $ρ_PTW_oven_dry kg/m³)")
+println(
+    "  - Initial dry PTW: $(round(ρ_PTW_initial, digits=1)) kg/m³ (oven-dry density $ρ_PTW_oven_dry kg/m³)",
+)
 println(
     "  - Initial water: $(round(ρ_water_initial, digits=1)) kg/m³ ($(round(moisture_content_db*100, digits=1))% dry basis)",
 )
@@ -431,7 +433,7 @@ println(
 # - Re-radiation losses (surface radiates to surroundings)
 # - Convective losses (natural + forced convection)
 top_thermal_bc =
-    RadiativeFluxBC(flux = q_external) +                      # Cone heater (uses material ε)
+    RadiativeFluxBC(q_external) +                      # Cone heater (uses material ε)
     RadiativeBC(T_inf = 300) +                                # Re-radiation losses (uses material ε)
     ConvectiveBC(h = h_conv, T_inf = 300)                     # Convective losses
 
@@ -535,9 +537,6 @@ solution = solve(
     radiation_model = SURFACE_ABSORPTION,  # All radiation absorbed at surface (opaque material)
     min_thickness = 0.5e-3,                # Stop when sample is < 0.5 mm
 )
-
-println("Solve() returned at $(time())!")
-flush(stdout)
 
 println("\nSolution completed!")
 println("  - Return code: $(solution.retcode)")
@@ -818,7 +817,7 @@ for t in profile_times
             continue
         end
         # Cell centres of the moving mesh at this time
-        z_coords = get_cell_positions(solution; at = idx) .* 1000
+        z_coords = solution.cell_centers[:, idx] .* 1000
         plot!(
             z_coords,
             T_profile,
@@ -1032,7 +1031,7 @@ open("ptw_spatial_50kWm2.csv", "w") do io
         n_cells_i = length(T_profile)
 
         nodes = get_profile(solution, :z, idx)
-        centers = get_cell_positions(solution; at = idx)
+        centers = solution.cell_centers[:, idx]
         live_front = maximum(filter(isfinite, nodes))
 
         for cell_idx = 1:n_cells_i

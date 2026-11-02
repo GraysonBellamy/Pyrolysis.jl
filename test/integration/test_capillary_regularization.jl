@@ -19,7 +19,7 @@ function capillary_problem(ε; n = 24)
         ),
     )
     PyrolysisProblem(
-        mesh = create_uniform_mesh(0.002, n),
+        mesh = uniform_mesh(0.002, n),
         material = mat,
         T_initial = z->500.0,
         ξ_initial = [z->500.0, z->0.5*(2e5-1e5*z/0.002)*0.03/(R_GAS*500)],

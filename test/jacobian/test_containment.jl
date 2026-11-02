@@ -10,7 +10,7 @@ using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!, buffers
 using Pyrolysis.ColoredJacobian
 using Pyrolysis.Deactivation
-using Pyrolysis.Integration: setup, consistent_state!, CoreProblem
+using Pyrolysis.Integration: setup, consistent_state!, PreparedProblem
 
 # ============================================================================
 # Materials and columns
@@ -56,7 +56,7 @@ end
 
 # A 1 cm column of `n` uniform cells, adiabatic at the back.
 _column(mat, n; top, bottom = AdiabaticBC(), mass = nothing) = PyrolysisProblem(
-    mesh = create_uniform_mesh(0.01, n),
+    mesh = uniform_mesh(0.01, n),
     material = mat,
     bc_set = mass === nothing ?
              BoundaryConditionSet(thermal = (top = top, bottom = bottom)) :
@@ -67,7 +67,7 @@ _column(mat, n; top, bottom = AdiabaticBC(), mass = nothing) = PyrolysisProblem(
 # Fixed and moving columns of PMMA and of a permeable wood, without radiation,
 # with surface absorption and with in-depth absorption, the incident flux a
 # radiative flux condition on the top face.
-const _incident = RadiativeFluxBC(flux = 50e3)
+const _incident = RadiativeFluxBC(50e3)
 const _column_configurations = (
     baseline_eulerian = (
         problem = n -> _column(_pmma(), n; top = HeatFluxBC(50e3)),
@@ -84,7 +84,7 @@ const _column_configurations = (
         options = (;),
         wood = true,
     ),
-    ale_no_radiation = (
+    ale_surface_absorption = (
         problem = n -> _column(_pmma(), n; top = HeatFluxBC(50e3)),
         options = (use_ale = true,),
         wood = false,
@@ -269,7 +269,7 @@ end
 @testset "the dense Jacobian equals finite differences: $(name), $(energy) form" for name in
                                                                                      (
         :baseline_eulerian,
-        :ale_no_radiation,
+        :ale_surface_absorption,
     ),
     energy in (:temperature, :enthalpy)
 
@@ -497,7 +497,7 @@ function _sliding(n)
     mat = Material(name = :sliding, components = (a, b), reactions = ())
     front(z) = (1 + tanh((z - 0.005) / 0.001)) / 2
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, n),
+        mesh = uniform_mesh(0.01, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -524,14 +524,14 @@ const _radial_configurations = (
     ),
     prescribed_velocity = (
         problem = () -> _sliding(6),
-        options = (use_ale = true, w_override = _slide),
+        options = (use_ale = true, correction = PrescribedCorrection(_slide)),
         wood = false,
     ),
 )
 
 # The problem with its mesh's node positions read as radii in `coordinates`.
 _on(p, coordinates) = PyrolysisProblem(
-    create_mesh_from_nodes(first.(p.mesh.positions); coordinates),
+    line_mesh(first.(p.mesh.positions); coordinates),
     p.material,
     p.bc_set,
     p.T_initial,
@@ -560,11 +560,12 @@ _on(p, coordinates) = PyrolysisProblem(
 end
 
 @testset "cells are not deactivated under a prescribed mesh velocity" begin
-    @test setup(_sliding(4); use_ale = true, w_override = _slide) isa CoreProblem
+    @test setup(_sliding(4); use_ale = true, correction = PrescribedCorrection(_slide)) isa
+          PreparedProblem
     @test_throws ArgumentError setup(
         _sliding(4);
         use_ale = true,
-        w_override = _slide,
+        correction = PrescribedCorrection(_slide),
         deactivation = true,
     )
 end
@@ -589,10 +590,10 @@ function _ablator(n; L = 3e-3, q = 2.8e6, t_end = 0.8)
         reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L, n),
+        mesh = uniform_mesh(L, n),
         material = mat,
         bc_set = BoundaryConditionSet(
-            thermal = (top = RadiativeFluxBC(flux = q), bottom = AdiabaticBC()),
+            thermal = (top = RadiativeFluxBC(q), bottom = AdiabaticBC()),
             mass = (
                 top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
                 bottom = ImpermeableBC(),

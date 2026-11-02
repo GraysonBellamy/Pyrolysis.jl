@@ -34,7 +34,7 @@ function _vrx06_setup(n_cells, order; t_end = _vrx06_window(order), x_th = 1e-6)
         ),
     )
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(L0, n_cells),
+        mesh = uniform_mesh(L0, n_cells),
         material = material,
         bc_set = bc_set,
         T_initial = z -> T0,

@@ -116,7 +116,7 @@ end
     T <= lo && return t.h[1] + t.c[1] * (T - lo)
     T >= hi && return t.h[end] + t.c[end] * (T - hi)
     isnan(T) && return T * NaN
-    k = min(floor(Int, _primal(T) - lo) + 1, length(t.h) - 1)
+    k = min(floor(Int, primal(T) - lo) + 1, length(t.h) - 1)
     s = T - (lo + (k - 1))
     s2 = s * s
     s3 = s2 * s
@@ -141,7 +141,7 @@ integrals, the derivative of the Hermite interpolant for a
     T <= lo && return t.c[1] + zero(T)
     T >= hi && return t.c[end] + zero(T)
     isnan(T) && return T * NaN
-    k = min(floor(Int, _primal(T) - lo) + 1, length(t.h) - 1)
+    k = min(floor(Int, primal(T) - lo) + 1, length(t.h) - 1)
     s = T - (lo + (k - 1))
     s2 = s * s
     return (6s2 - 6s) * t.h[k] +
@@ -355,8 +355,6 @@ least the cell's floor.
     return sum_products(regularization(ext, m, i), p, c)
 end
 
-@inline _primal(x) = x
-@inline _primal(x::ForwardDiff.Dual) = _primal(ForwardDiff.value(x))
 @inline _depth(x) = 0
 @inline _depth(x::ForwardDiff.Dual) = 1 + _depth(ForwardDiff.value(x))
 
@@ -383,8 +381,8 @@ function invert_caloric(
     maxiters::Int = 160,
 )
     if H isa ForwardDiff.Dual || eltype(m) <: ForwardDiff.Dual
-        mp = ntuple(j -> _primal(m[j]), length(m))
-        T0, its = _invert_primal(ext, laws, _primal(H), mp, i, T_start, maxiters)
+        mp = ntuple(j -> primal(m[j]), length(m))
+        T0, its = _invert_primal(ext, laws, primal(H), mp, i, T_start, maxiters)
         T = T0 + zero(H + sum(m))
         for _ = 1:max(_depth(H), maximum(_depth, m))
             T +=

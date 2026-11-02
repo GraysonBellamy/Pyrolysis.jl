@@ -29,7 +29,7 @@ gap (1.64% in flux, 1.47 K in profile at Δz = 0.5 mm) — pinned here against
 its a-priori Δz/2 sensitivity bound.
 
 Variant (d) uses the same prescribed 10.2 mm interface as (c), with a mesh
-face placed there using create_mesh_from_nodes. Both have 40 cells. Its
+face placed there using line_mesh. Both have 40 cells. Its
 physical problem is unchanged, so the same native FDS/Gpyro runs apply.
 Every member reports errors against the prescribed and represented geometry
 separately; the off-face case remains a deliberate geometry-resolution test.

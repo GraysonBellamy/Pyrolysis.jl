@@ -45,14 +45,14 @@ modifies the state.
 const DT_AFTER_EVENT = 1e-6
 
 """
-	kencarp4_policy(linear_solver)
+	kencarp4_policy(linear_solver = default_linear_solver())
 
 `KenCarp4` with the raw (unsmoothed) error estimate, the observer flag kept and
 the solver-chosen restart. The Jacobian is the colored one; the time
 derivative of the right-hand side, where the method needs it, is a finite
 difference.
 """
-kencarp4_policy(linsolve) = IntegratorPolicy(
+kencarp4_policy(linsolve = default_linear_solver()) = IntegratorPolicy(
     KenCarp4(autodiff = AutoFiniteDiff(), linsolve = linsolve, smooth_est = false),
     :solver_chosen,
     :keep,
@@ -60,7 +60,7 @@ kencarp4_policy(linsolve) = IntegratorPolicy(
 )
 
 """
-	rodas5p_policy(linear_solver; restart = :heuristic)
+	rodas5p_policy(linear_solver = default_linear_solver(); restart = :heuristic)
 
 `Rodas5P`, a Rosenbrock method that evaluates the exact colored Jacobian at
 every step and the time derivative of the right-hand side by finite
@@ -69,15 +69,16 @@ an event than keeping the step and keeps the mass ledger closer than either
 other kind. It rebuilds its Jacobian every step, so the observer flag changes
 nothing; the policy clears it.
 """
-rodas5p_policy(linsolve; restart::Symbol = :heuristic) = IntegratorPolicy(
-    Rodas5P(autodiff = AutoFiniteDiff(), linsolve = linsolve),
-    restart,
-    :clear,
-    DT_AFTER_EVENT,
-)
+rodas5p_policy(linsolve = default_linear_solver(); restart::Symbol = :heuristic) =
+    IntegratorPolicy(
+        Rodas5P(autodiff = AutoFiniteDiff(), linsolve = linsolve),
+        restart,
+        :clear,
+        DT_AFTER_EVENT,
+    )
 
 """
-	fbdf_policy(linear_solver)
+	fbdf_policy(linear_solver = default_linear_solver())
 
 `FBDF`, the variable-order backward-differentiation method, with the observer
 flag cleared (with it raised the method restarts at order one on every step),
@@ -87,7 +88,7 @@ a Newton failure, and a chord iteration slowed by a thinning cell converges
 without failing; at the default constant what it leaves in one gas row feeds
 back through the predictor and holds the step near 1e-5 s.
 """
-fbdf_policy(linsolve) = IntegratorPolicy(
+fbdf_policy(linsolve = default_linear_solver()) = IntegratorPolicy(
     FBDF(
         autodiff = AutoFiniteDiff(),
         linsolve = linsolve,
@@ -99,11 +100,11 @@ fbdf_policy(linsolve) = IntegratorPolicy(
 )
 
 """
-	default_policy(linear_solver)
+	default_policy(linear_solver = default_linear_solver())
 
 The default integrator: [`rodas5p_policy`](@ref) with the heuristic restart.
 """
-default_policy(linsolve) = rodas5p_policy(linsolve)
+default_policy(linsolve = default_linear_solver()) = rodas5p_policy(linsolve)
 
 """
 	apply_observer_flag!(integrator, policy)

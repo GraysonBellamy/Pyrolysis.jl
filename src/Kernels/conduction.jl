@@ -25,7 +25,7 @@ const GRADIENT_SUPPORT = 1e-4
 const INSULATING_NEIGHBOUR = 1e-12
 
 """
-	ConductionKernel{A} <: Kernel
+	ConductionKernel{A,F} <: Kernel
 
 Fourier conduction across the interior faces between live cells, with `d_o`,
 `d_n` the distances of the owner's and the neighbour's centers from the face

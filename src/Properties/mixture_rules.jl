@@ -1,9 +1,9 @@
 """
 Mixture property computations.
 
-PERFORMANCE NOTE: All functions that iterate over material.components use
-recursive dispatch to avoid allocations from indexing heterogeneous tuples
-with runtime indices. Each component access uses a compile-time constant index.
+PERFORMANCE NOTE: All functions that iterate over material.components are
+generated, so each component access uses a compile-time constant index and no
+allocation comes from indexing a heterogeneous tuple at run time.
 """
 
 # Promoted working scalar type for property evaluation with a (possibly
@@ -17,95 +17,6 @@ with runtime indices. Each component access uses a compile-time constant index.
 
 @inline _zero_ntuple(::Type{W}, ::Val{N}) where {W,N} = ntuple(_ -> zero(W), Val(N))
 
-# ============================================================================
-# Recursive helpers for heterogeneous tuple iteration
-# These avoid runtime indexing by using compile-time dispatch
-# ============================================================================
-
-# Compute specific volume from components recursively
-@inline function _sum_specific_vol(ξ, T, comps::Tuple{C}, ::Val{1}) where {C}
-    W = _prop_type(ξ, T)
-    ρ = comps[1].density(T)
-    return ξ[1] > 0.0 && ρ > 0.0 ? convert(W, ξ[1] / ρ) : zero(W)
-end
-
-@inline function _sum_specific_vol(ξ, T, comps::Tuple{C1,C2}, ::Val{2}) where {C1,C2}
-    v = zero(_prop_type(ξ, T))
-    ρ1 = comps[1].density(T)
-    if ξ[1] > 0.0 && ρ1 > 0.0
-        v += ξ[1] / ρ1
-    end
-    ρ2 = comps[2].density(T)
-    if ξ[2] > 0.0 && ρ2 > 0.0
-        v += ξ[2] / ρ2
-    end
-    return v
-end
-
-@inline function _sum_specific_vol(ξ, T, comps::Tuple{C1,C2,C3}, ::Val{3}) where {C1,C2,C3}
-    v = zero(_prop_type(ξ, T))
-    ρ1 = comps[1].density(T)
-    if ξ[1] > 0.0 && ρ1 > 0.0
-
-        v += ξ[1] / ρ1
-    end
-    ρ2 = comps[2].density(T)
-    if ξ[2] > 0.0 && ρ2 > 0.0
-
-        v += ξ[2] / ρ2
-    end
-    ρ3 = comps[3].density(T)
-    if ξ[3] > 0.0 && ρ3 > 0.0
-
-        v += ξ[3] / ρ3
-    end
-    return v
-end
-
-# Generic fallback for any number of components (NC > 3) using generated function
-@inline function _sum_specific_vol(ξ, T, comps::Tuple, ::Val{NC}) where {NC}
-    return _sum_specific_vol_gen(ξ, T, comps)
-end
-
-# Compute volume fractions tuple
-@inline function _vol_fracs(ξ, T, inv_v_total, comps::Tuple{C}, ::Val{1}) where {C}
-    W = _prop_type(ξ, T)
-    ρ = comps[1].density(T)
-    v = ξ[1] > 0.0 && ρ > 0.0 ? convert(W, ξ[1] / ρ * inv_v_total) : zero(W)
-    return (v,)
-end
-
-@inline function _vol_fracs(ξ, T, inv_v_total, comps::Tuple{C1,C2}, ::Val{2}) where {C1,C2}
-    W = _prop_type(ξ, T)
-    ρ1 = comps[1].density(T)
-    v1 = ξ[1] > 0.0 && ρ1 > 0.0 ? convert(W, ξ[1] / ρ1 * inv_v_total) : zero(W)
-    ρ2 = comps[2].density(T)
-    v2 = ξ[2] > 0.0 && ρ2 > 0.0 ? convert(W, ξ[2] / ρ2 * inv_v_total) : zero(W)
-    return (v1, v2)
-end
-
-@inline function _vol_fracs(
-    ξ,
-    T,
-    inv_v_total,
-    comps::Tuple{C1,C2,C3},
-    ::Val{3},
-) where {C1,C2,C3}
-    W = _prop_type(ξ, T)
-    ρ1 = comps[1].density(T)
-    v1 = ξ[1] > 0.0 && ρ1 > 0.0 ? convert(W, ξ[1] / ρ1 * inv_v_total) : zero(W)
-    ρ2 = comps[2].density(T)
-    v2 = ξ[2] > 0.0 && ρ2 > 0.0 ? convert(W, ξ[2] / ρ2 * inv_v_total) : zero(W)
-    ρ3 = comps[3].density(T)
-    v3 = ξ[3] > 0.0 && ρ3 > 0.0 ? convert(W, ξ[3] / ρ3 * inv_v_total) : zero(W)
-    return (v1, v2, v3)
-end
-
-# Generic fallback for any number of components (NC > 3) using generated function
-@inline function _vol_fracs(ξ, T, inv_v_total, comps::Tuple, ::Val{NC}) where {NC}
-    return _vol_fracs_gen(ξ, T, inv_v_total, comps)
-end
-
 """
 	volume_fractions(ξ::NTuple{NC,Float64}, T::Float64, material::Material) -> NTuple{NC,Float64}
 
@@ -117,14 +28,14 @@ Uses dispatch-based unrolling to avoid allocation from heterogeneous tuple index
 """
 @inline function volume_fractions(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
     comps = material.components
-    v_total = _sum_specific_vol(ξ, T, comps, Val(NC))
+    v_total = _sum_specific_vol(ξ, T, comps)
 
     if v_total < 1e-20
         return _zero_ntuple(_prop_type(ξ, T), Val(NC))
     end
 
     inv_v_total = 1.0 / v_total
-    return _vol_fracs(ξ, T, inv_v_total, comps, Val(NC))
+    return _vol_fracs(ξ, T, inv_v_total, comps)
 end
 
 # ============================================================================
@@ -328,7 +239,7 @@ Generates fully unrolled code like:
 	...
 	return v
 """
-@generated function _sum_specific_vol_gen(
+@generated function _sum_specific_vol(
     ξ::NTuple{NC,<:Real},
     T::Real,
     comps::Tuple,
@@ -352,7 +263,7 @@ end
 Generated function to compute volume fractions tuple.
 Generates fully unrolled code returning a compile-time sized tuple.
 """
-@generated function _vol_fracs_gen(
+@generated function _vol_fracs(
     ξ::NTuple{NC,<:Real},
     T::Real,
     inv_v_total::Real,

@@ -75,7 +75,7 @@ function _translucent_slab(
         depletion_limiter = DepletionLimiter(threshold = 1.0),
     )
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(0.01, n, 1.15; coordinates),
+        mesh = stretched_mesh(0.01, n, 1.15; coordinates),
         material = mat,
         bc_set = BoundaryConditionSet(thermal = (top = top, bottom = bottom)),
         T_initial = z -> 400.0 + 4e4 * z,
@@ -86,10 +86,10 @@ end
 
 _flux(t) = 3e4 * (1 + 0.5 * sin(t))
 const _radiation_tops = (
-    kirchhoff = RadiativeFluxBC(flux = _flux) +
+    kirchhoff = RadiativeFluxBC(_flux) +
                 RadiativeBC(T_inf = 300.0) +
                 ConvectiveBC(h = 10.0, T_inf = 300.0),
-    explicit = RadiativeFluxBC(flux = 4e4, absorptivity = t -> 0.9 - 0.01t) +
+    explicit = RadiativeFluxBC(4e4, absorptivity = t -> 0.9 - 0.01t) +
                ConvectiveBC(h = 10.0, T_inf = 300.0),
 )
 

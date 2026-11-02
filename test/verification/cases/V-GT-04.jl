@@ -39,7 +39,7 @@ function _verification_case_vgt04()
             ),
         )
         PyrolysisProblem(
-            mesh = create_uniform_mesh(0.001, n),
+            mesh = uniform_mesh(0.001, n),
             material = mat,
             T_initial = z->400.0,
             ξ_initial = [
@@ -71,7 +71,7 @@ function _verification_case_vgt04()
         )
     end
     profile_error(sol) = maximum(
-        abs.(get_gas_composition(sol)[1, :, end] .- reference.x.(get_cell_positions(sol))),
+        abs.(get_gas_composition(sol)[1, :, end] .- reference.x.(sol.cell_centers[:, end])),
     )
     flux_error(sol) =
         abs(get_boundary_exchange(sol, :top).fluxes[1, end]/(0.004*reference.n)-1)
@@ -100,8 +100,8 @@ function _verification_case_vgt04()
             ),
             QoIResult(
                 name = "isobaric solution",
-                value = maximum(abs.(get_pressure(sol) .- 1e5)),
-                error = maximum(abs.(get_pressure(sol) .- 1e5)),
+                value = maximum(abs.(sol.gas.pressure .- 1e5)),
+                error = maximum(abs.(sol.gas.pressure .- 1e5)),
                 tol = 0.01,
             ),
             QoIResult(
@@ -131,7 +131,7 @@ function _verification_case_vgt04()
                     series = [
                         CurveSeries(
                             label = "finite volume",
-                            x = get_cell_positions(sol),
+                            x = sol.cell_centers[:, end],
                             y = vec(get_gas_composition(sol)[1, :, end]),
                             exact = reference.x,
                         ),

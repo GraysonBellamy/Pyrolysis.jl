@@ -166,6 +166,6 @@ end
 """
 	default_linear_solver()
 
-The linear solve of every layout: [`StructuredKLU`](@ref).
+The default linear solve: [`StructuredKLU`](@ref).
 """
 default_linear_solver() = StructuredKLU()

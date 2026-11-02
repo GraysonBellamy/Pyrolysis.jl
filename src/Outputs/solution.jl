@@ -148,18 +148,18 @@ The solution at the saved times:
   in closed form)
 - `extras`: the [`SolutionExtras`](@ref) series
 - `events`: the [`DeactivationEvent`](@ref)s of the solve, in order
-- `outcome`: `:running` unless the deactivation or the thickness stop ended
+- `outcome`: `:none` unless the deactivation or the thickness stop ended
   the solve (`:burned_out`, `:interior`, `:min_thickness`); an event that
   leaves the state inadmissible or the node velocities inconsistent ends the
-  solve with a warning and `retcode` `:Failure`, the outcome `:running`
+  solve with a warning and `retcode` `:Failure`, the outcome `:none`
 - `retcode`: the integrator's return code
 - `solve_time`: wall time of the solve [s]
 - `statistics`: the [`SolverStatistics`](@ref)
 - `raw_solution`: the integrator's solution
-- `definition`: the core's definition of the solve, through which `sol(t)`
+- `definition`: the `ResidualDefinition` of the solve, through which `sol(t)`
   reconstructs the fields
 """
-struct PyrolysisSolution{P,D<:CoreDefinition}
+struct PyrolysisSolution{P,D<:ResidualDefinition}
     problem::P
     t::Vector{Float64}
     T::Matrix{Float64}
@@ -280,7 +280,7 @@ end
 
 """
 	PyrolysisSolution(problem, t, states, def, ws, retcode, solve_time, statistics, raw;
-	             deactivation = nothing, outcome = :running)
+	             deactivation = nothing, outcome = :none)
 
 Reconstruct the fields from the saved state vectors `states`: one residual
 evaluation per saved state, under the mask and reference masses its time had
@@ -294,14 +294,14 @@ function PyrolysisSolution(
     problem,
     t::AbstractVector{Float64},
     states::AbstractVector,
-    def::CoreDefinition,
-    ws::CoreWorkspace,
+    def::ResidualDefinition,
+    ws::ResidualWorkspace,
     retcode::Symbol,
     solve_time::Float64,
     statistics::SolverStatistics,
     raw;
     deactivation::Union{Nothing,CellDeactivation} = nothing,
-    outcome::Symbol = :running,
+    outcome::Symbol = :none,
 )
     layout = def.layout
     topo = def.setup.topology
@@ -492,7 +492,7 @@ function PyrolysisSolution(
         x,
         gas_output,
         deactivation === nothing ? DeactivationEvent[] : copy(deactivation.events),
-        deactivation === nothing || deactivation.outcome[] === :running ? outcome :
+        deactivation === nothing || deactivation.outcome[] === :none ? outcome :
         deactivation.outcome[],
         retcode,
         solve_time,

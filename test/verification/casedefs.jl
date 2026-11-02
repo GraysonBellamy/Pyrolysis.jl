@@ -11,7 +11,6 @@ exact solutions use depth x = L − z.
 """
 
 using Pyrolysis
-using Pyrolysis.Outputs: get_cell_positions
 using Pyrolysis.Materials: DepletionLimiter, STEFAN_BOLTZMANN
 using Pyrolysis.Materials: BEER_LAMBERT
 using Pyrolysis.Problem: step_profile

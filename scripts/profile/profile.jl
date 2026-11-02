@@ -99,7 +99,7 @@ function _wood()
 end
 
 _radiative_top() =
-    RadiativeFluxBC(flux = 50e3) +
+    RadiativeFluxBC(50e3) +
     RadiativeBC(T_inf = 300.0) +
     ConvectiveBC(h = 10.0, T_inf = 300.0)
 
@@ -156,7 +156,7 @@ const CONFIGS = Dict(
 function build_case(name; t_final)
     c = CONFIGS[name]
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, N_CELLS),
+        mesh = uniform_mesh(0.01, N_CELLS),
         material = c.material(),
         bc_set = c.bc(),
         tspan = (0.0, t_final),

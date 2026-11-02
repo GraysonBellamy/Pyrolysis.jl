@@ -92,14 +92,14 @@ end
 
 """
 	EquidistributionCorrection(; τ = ActivationTime(), activation = (0.3, 0.1),
-	                           monitor = (1.0, 0.0), layers = :vanishing) <: Correction
+	                           layers = :vanishing) <: Correction
 
 The relaxed equidistribution of a vanishing layer's cells. At an interior
 node `n` of a layer of `N` cells, between cell `n − 1` (inward) and cell `n`,
 
-	cₙ = aₙ N² (M̃ₙ hₙ − M̃ₙ₋₁ hₙ₋₁) / τ,
+	cₙ = aₙ N² (hₙ − hₙ₋₁) / τ,
 
-which moves the node into the thicker (or heavier) cell, so `M̃ h` relaxes
+which moves the node into the thicker cell, so `h` relaxes
 toward a common value over the layer in about `τ/π²` whatever `N`: `τ` [s] is
 the layer's equidistribution time, by default set for each layer at its first
 activation from its thinning ([`ActivationTime`](@ref)), or one value for
@@ -108,11 +108,7 @@ is the smooth "or" of the two cells' switches
 `aᵢ = S((ln r_hi − ln(hᵢ/hᵢ(0))) / (ln r_hi − ln r_lo))`, `S(x) = x²(3 − 2x)`
 clamped to `[0, 1]`, with `activation = (r_hi, r_lo)`: zero while a cell keeps
 at least `r_hi` of its initial thickness, one at and below `r_lo`, `C¹` in
-`ln h` between. The monitor `M = α + β ρ/ρ_ref`, with `monitor = (α, β)`, `ρ`
-a cell's condensed mass per volume and `ρ_ref` the largest initial one over
-the mesh, is divided by its mean over the layer's cells at the initial state,
-so `α` and `β` set its shape and not the relaxation time; with `β = 0`,
-`M̃ = 1`.
+`ln h` between.
 
 A layer is bounded by the pinned node, the mesh's Lagrangian nodes (the layer
 interfaces) and the end nodes; `c = 0` at each of them, at every node beside
@@ -127,19 +123,15 @@ struct EquidistributionCorrection{T<:Union{Float64,ActivationTime}} <: Correctio
     τ::T
     r_hi::Float64
     r_lo::Float64
-    α::Float64
-    β::Float64
     layers::Symbol
 end
 
 function EquidistributionCorrection(;
     τ::Union{Real,ActivationTime} = ActivationTime(),
     activation::Tuple{Real,Real} = (0.3, 0.1),
-    monitor::Tuple{Real,Real} = (1.0, 0.0),
     layers::Symbol = :vanishing,
 )
     r_hi, r_lo = activation
-    α, β = monitor
     τ isa ActivationTime ||
         τ > 0 ||
         throw(ArgumentError("the equidistribution time must be positive, got $τ"))
@@ -148,46 +140,36 @@ function EquidistributionCorrection(;
             "the activation needs 0 < r_lo < r_hi, got (r_hi, r_lo) = $activation",
         ),
     )
-    (α > 0 && β >= 0) ||
-        throw(ArgumentError("the monitor needs α > 0 and β ≥ 0, got (α, β) = $monitor"))
     layers in (:vanishing, :all) ||
         throw(ArgumentError("layers must be :vanishing or :all, got $(repr(layers))"))
     return EquidistributionCorrection(
         τ isa ActivationTime ? τ : Float64(τ),
         r_hi,
         r_lo,
-        α,
-        β,
         layers,
     )
 end
 
 """
-	LayerCorrection{NC} <: Correction
+	LayerCorrection <: Correction
 
 An [`EquidistributionCorrection`](@ref) bound to a mesh: per node the gain
 `N²/τ` of its layer (zero at the layers' bounding nodes), by slot, and the same
-gains by initial node; per cell the reciprocal of its layer's mean initial
-monitor, the activation's bounds `r_hi` and `r_lo` with `ln r_hi` and
-`ln r_hi − ln r_lo`, the monitor's `α` and `β/ρ_ref`, and the condensed
-component flags; per moving layer its bounding nodes on the initial mesh, its
-equidistribution time, the time that time was set at (`NaN` while it is not),
+gains by initial node; the activation's bounds `r_hi` and `r_lo` with `ln r_hi`
+and `ln r_hi − ln r_lo`; per moving layer its bounding nodes on the initial mesh,
+its equidistribution time, the time that time was set at (`NaN` while it is not),
 the stage of its estimate (zero before the first activation, one while a
 floored rate waits for the second, two once set), and its initial thickness,
 with the [`ActivationTime`](@ref) rule (`nothing` for one fixed time); per
 initial cell the layer it starts in, and per slot the initial cell there.
 """
-struct LayerCorrection{NC} <: Correction
+struct LayerCorrection <: Correction
     gain::Vector{Float64}
     initial_gain::Vector{Float64}
-    monitor_scale::Vector{Float64}
     r_hi::Float64
     r_lo::Float64
     log_hi::Float64
     log_span::Float64
-    α::Float64
-    β::Float64
-    condensed::NTuple{NC,Bool}
     layers::Vector{Tuple{Int,Int}}
     time::Vector{Float64}
     set_at::Vector{Float64}
@@ -240,7 +222,7 @@ retained_volumes(material::Material{NC}, T::Real) where {NC} = _left_by_conversi
 function _left_by_conversion(material::Material{NC}, left_alone::NTuple{NC}) where {NC}
     condensed = ntuple(j -> !is_gas(material.components[j]), Val(NC))
     returned(rxn, j) = sum((last(p) for p in rxn.products if first(p) == j); init = 0.0)
-    consumes(rxn, j) = any(r -> first(r) == j, rxn.reactants) && returned(rxn, j) < 1
+    consumes(rxn, j) = rxn.reactant == j && returned(rxn, j) < 1
     left(rxn, j, r) =
         sum((last(p) * r[first(p)] for p in rxn.products if first(p) != j); init = 0.0) /
         (1 - returned(rxn, j))
@@ -321,42 +303,28 @@ function bind_correction(
         ),
     )
     condensed = ntuple(j -> !is_gas(material.components[j]), Val(NC))
-    ρ0 = [
-        sum(m0[j, i] for j = 1:NC if condensed[j]; init = 0.0) / reference.volume[i] for
-        i = 1:n
-    ]
-    ρ_ref = maximum(ρ0)
-    β = ρ_ref > 0 ? corr.β / ρ_ref : 0.0
     bounds = sort!(unique([1; nn; topo.pinned; topo.lagrangian]))
     v = residues(material)
     gain = zeros(nn)
-    scale = zeros(n)
     layers = Tuple{Int,Int}[]
     span = Float64[]
     layer = zeros(Int, n)
     for (k, (lo, hi)) in enumerate(zip(bounds[1:(end-1)], bounds[2:end]))
-        N = hi - lo
         moves = corr.layers === :all || vanishes(v, m0, lo:(hi-1), condensed, threshold)
         if moves
             push!(layers, (lo, hi))
             push!(span, reference.positions[hi] - reference.positions[lo])
         end
-        M̄ = sum(corr.α + β * ρ0[i] for i = lo:(hi-1)) / N
-        scale[lo:(hi-1)] .= 1 / M̄
         layer[lo:(hi-1)] .= k
     end
     estimate = corr.τ isa ActivationTime ? corr.τ : nothing
     lc = LayerCorrection(
         gain,
         copy(gain),
-        scale,
         corr.r_hi,
         corr.r_lo,
         log(corr.r_hi),
         log(corr.r_hi) - log(corr.r_lo),
-        corr.α,
-        β,
-        condensed,
         layers,
         zeros(length(layers)),
         zeros(length(layers)),
@@ -542,16 +510,6 @@ before the logarithm), and `C¹` in `ln h` between.
     return x * x * (3 - 2x)
 end
 
-# The normalized monitor of cell `i`; one without the mass term.
-@inline function _monitor(corr::LayerCorrection{NC}, ds::DerivedState{NC}, i) where {NC}
-    iszero(corr.β) && return one(eltype(ds.m))
-    ρ = zero(eltype(ds.m))
-    @inbounds for j = 1:NC
-        corr.condensed[j] && (ρ += ds.m[j, i])
-    end
-    return (corr.α + corr.β * ρ / ds.V_eval[i]) * corr.monitor_scale[i]
-end
-
 # The node corrections `c` at the derived state `ds` (`correction!`).
 @inline _correction!(c, ::NoCorrection, ds, reference) = nothing
 
@@ -576,7 +534,7 @@ function _correction!(c, corr::LayerCorrection, ds::DerivedState, reference)
         g = corr.gain[nd]
         c[nd] =
             iszero(g) || !(ds.active[nd-1] && ds.active[nd]) || iszero(a) ? zero(T) :
-            a * g * (_monitor(corr, ds, nd) * h_out - _monitor(corr, ds, nd - 1) * h_in)
+            a * g * (h_out - h_in)
         h_in, a_in = h_out, a_out
     end
     return nothing

@@ -15,7 +15,7 @@ the prescribed uniform-stretch velocity
 
   w*(z, t) = (ṡ/s)·z,   s(t) = 1 − 0.15·(1 − cos(2πt/20)),  z_i(t) = z_i(0)·s(t)
 
-through the solve's `w_override` hook. The mesh moves over a solid at rest
+through a `PrescribedCorrection`. The mesh moves over a solid at rest
 and every inventory, T's energy with it, crosses the faces at the
 mesh-relative velocity, so the Eulerian manufactured sources — evaluated at
 the cell centers — make the fields exact on the moving mesh (see

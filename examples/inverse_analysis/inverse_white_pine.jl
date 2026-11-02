@@ -6,15 +6,15 @@ temperature time-series at multiple cone heat-flux levels.
 
 USAGE
 -----
-	julia -t auto --project=. examples/inverse_analysis/inverse_white_pine.jl                                       # default: stage 1, fit 20/30/40/50/60, val 70
-	julia -t auto --project=. examples/inverse_analysis/inverse_white_pine.jl --stage=3
-	julia -t auto --project=. examples/inverse_analysis/inverse_white_pine.jl --stage=1 --no-grid
-	julia -t auto --project=. examples/inverse_analysis/inverse_white_pine.jl --prior-weight=0                      # data only, no HFM/LFA prior
-	julia -t auto --project=. examples/inverse_analysis/inverse_white_pine.jl --prior-weight=1.0                    # max prior weight
-	julia -t auto --project=. examples/inverse_analysis/inverse_white_pine.jl --bootstrap=200                       # opt-in bootstrap covariance
-	julia -t auto --project=. examples/inverse_analysis/inverse_white_pine.jl --fit=30kW,50kW                       # UMD-only fit (drops all FSRI)
-	julia -t auto --project=. examples/inverse_analysis/inverse_white_pine.jl --fit=20kW,40kW,60kW --val=          # FSRI-only fit, no validation
-	julia -t auto --project=. examples/inverse_analysis/inverse_white_pine.jl --fit=20kW,30kW,40kW,50kW,60kW,70kW   # everything in fit (no val)
+	julia -t auto --project=examples examples/inverse_analysis/inverse_white_pine.jl                                       # default: stage 1, fit 20/30/40/50/60, val 70
+	julia -t auto --project=examples examples/inverse_analysis/inverse_white_pine.jl --stage=3
+	julia -t auto --project=examples examples/inverse_analysis/inverse_white_pine.jl --stage=1 --no-grid
+	julia -t auto --project=examples examples/inverse_analysis/inverse_white_pine.jl --prior-weight=0                      # data only, no HFM/LFA prior
+	julia -t auto --project=examples examples/inverse_analysis/inverse_white_pine.jl --prior-weight=1.0                    # max prior weight
+	julia -t auto --project=examples examples/inverse_analysis/inverse_white_pine.jl --bootstrap=200                       # opt-in bootstrap covariance
+	julia -t auto --project=examples examples/inverse_analysis/inverse_white_pine.jl --fit=30kW,50kW                       # UMD-only fit (drops all FSRI)
+	julia -t auto --project=examples examples/inverse_analysis/inverse_white_pine.jl --fit=20kW,40kW,60kW --val=          # FSRI-only fit, no validation
+	julia -t auto --project=examples examples/inverse_analysis/inverse_white_pine.jl --fit=20kW,30kW,40kW,50kW,60kW,70kW   # everything in fit (no val)
 
 Spread the heavy work across cores via `-t auto` (or `-t N`); the loss runs
 all fit scenarios in parallel via `Threads.@spawn`.

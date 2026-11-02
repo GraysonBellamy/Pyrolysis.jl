@@ -3,11 +3,11 @@
 # =============================================================================
 #
 # V-MMS-02/03 verify GCL + moving-mesh transport under PRESCRIBED motion
-# (`w_override`), which moves the mesh over a solid at rest and deliberately
+# (`PrescribedCorrection`), which moves the mesh over a solid at rest and deliberately
 # bypasses the balance rows' mesh velocity (the integral of θ) and the
 # cell-volume change with θ ≠ 0. Here the kinetics are manufactured so the
 # rates are analytic on the manufactured fields and the motion is genuinely
-# REACTION-DRIVEN — no `w_override` — closing the kinetics→θ→w→geometry chain.
+# REACTION-DRIVEN — no `PrescribedCorrection` — closing the kinetics→θ→w→geometry chain.
 #
 # ## Manufactured design (see exact/mms.jl, "Induced mesh motion")
 #
@@ -79,7 +79,7 @@ function _verification_case_vmms04()
     z_top(t) = ztop_sol(t)
 
     function build(n_cells)
-        mesh = create_uniform_mesh(L, n_cells)
+        mesh = uniform_mesh(L, n_cells)
         # Manufactured BC fluxes at the MOVING top face z*_top(t); bottom
         # pinned at 0. The thermal fluxes are identically zero for z-uniform
         # T*, but the closures stay field-derived so the case remains correct

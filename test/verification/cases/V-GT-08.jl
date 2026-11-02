@@ -35,7 +35,7 @@ function _vgt08_case(id; reverse = false)
         feed = MassFluxBC(fluxes = (gas = -J,), inflow_temperature = (gas = T,))
         vent = AmbientGasBC(GasReservoir(P = Pout, T = T, mole_fractions = (gas = 1.0,)))
         PyrolysisProblem(
-            mesh = create_uniform_mesh(L, n),
+            mesh = uniform_mesh(L, n),
             material = mat,
             bc_set = BoundaryConditionSet(
                 thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -49,7 +49,7 @@ function _vgt08_case(id; reverse = false)
     end
     profile_error(sol) =
         maximum(
-            abs.(get_pressure(sol)[:, end] .^ 2 .- pressure.(get_cell_positions(sol)) .^ 2),
+            abs.(sol.gas.pressure[:, end] .^ 2 .- pressure.(sol.cell_centers[:, end]) .^ 2),
         )/ΔP²
     function qois(sol)
         inflow = get_boundary_exchange(sol, inlet).fluxes[1, :]
@@ -164,8 +164,8 @@ function _vgt08_case(id; reverse = false)
                         series = [
                             CurveSeries(
                                 label = "steady pressure",
-                                x = get_cell_positions(sol),
-                                y = get_pressure(sol)[:, end],
+                                x = sol.cell_centers[:, end],
+                                y = sol.gas.pressure[:, end],
                                 exact = pressure,
                             ),
                             CurveSeries(

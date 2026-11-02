@@ -26,8 +26,8 @@ Outputs (saved to results/):
   - literature_comparison_qois.csv summary table
 
 Usage:
-  julia -p 10 --project=. examples/literature_comparison/literature_comparison.jl
-  julia --project=. examples/literature_comparison/literature_comparison.jl   # serial
+  julia -p 10 --project=examples examples/literature_comparison/literature_comparison.jl
+  julia --project=examples examples/literature_comparison/literature_comparison.jl   # serial
 """
 
 using Distributed
@@ -369,11 +369,11 @@ println("Running with $(nworkers()) worker(s)")
         ρ_DF_initial = ρ_DF_oven_dry / (1 + 0.06 * ρ_DF_oven_dry / 1000.0)
         ρ_moisture_initial = 0.06 * ρ_DF_initial
 
-        mesh = create_uniform_mesh(12.0e-3, 240)
+        mesh = uniform_mesh(12.0e-3, 240)
 
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(flux = 50000.0) +
+                top = RadiativeFluxBC(50000.0) +
                       RadiativeBC(T_inf = 300) +
                       ConvectiveBC(h = 10.0, T_inf = 300),
                 bottom = AdiabaticBC(),

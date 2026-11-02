@@ -22,7 +22,7 @@ this chapter:
 2. **The integrator policy** (`integrator_policy = ...`): the time-stepping
    method together with its rule for the step after an event and its rule
    for the derivative-discontinuity flag after a read-only observer.
-3. **The linear solver** (`linear_solver = ...`): how the integrator's
+3. **The linear solver**, the policy's argument: how the integrator's
    Newton matrix `W = J − M/(γΔt)` is factored, `StructuredKLU()` by default.
 
 The defaults work for every configuration the package supports, and you can
@@ -67,11 +67,10 @@ sol = solve(problem)                                            # the defaults
 sol = solve(problem; integrator_policy = default_policy(StructuredKLU()))  # the same, written out
 ```
 
-> Defaults at a glance: `integrator_policy = nothing` →
-> `rodas5p_policy(linear_solver)`, `linear_solver = nothing` →
-> `StructuredKLU()`, `abstol = 1e-8`, `reltol = 1e-6`, `dtmin = 1e-12`,
-> `dtmax = Inf`, `maxiters = 1_000_000`. The Jacobian is always the colored
-> one.
+> Defaults at a glance: `integrator_policy = default_policy()`, which is
+> `rodas5p_policy(StructuredKLU())`, `abstol = 1e-8`, `reltol = 1e-6`,
+> `dtmin = 1e-12`, `dtmax = Inf`, `maxiters = 1_000_000`. The Jacobian is always
+> the colored one.
 
 The integrator never sees the problem's own types: the residual and the
 Jacobian reach it behind problem-independent function wrappers (`ErasedRHS`,
@@ -92,7 +91,7 @@ residual yields many columns at once. It is exact to round-off (the test
 suite holds it to the dense reference at a relative `1e-12`, §11.7), it
 covers every coupling the residual has, including the moving-mesh and
 in-depth-radiation couplings, and nothing about it is configurable: `solve`
-has no Jacobian keyword, and an unknown keyword raises an `ArgumentError`.
+has no Jacobian keyword, and an unknown keyword is a Julia `MethodError`.
 
 ### 11.2.1 The pattern
 
@@ -153,8 +152,9 @@ are part of its contract with the package's callbacks:
 | `fbdf_policy(ls)` | `FBDF`, variable-order backward differentiation | `:forced_dt` | `:clear` |
 | `kencarp4_policy(ls)` | `KenCarp4`, singly diagonally implicit Runge–Kutta, raw error estimate | `:solver_chosen` | `:keep` |
 
-`ls` is the linear solver (§11.4). All three run with the colored Jacobian and
-`AutoFiniteDiff()` for the time derivative; the test suite runs each on a
+`ls` is the linear solver (§11.4), `default_linear_solver()` when omitted. All three
+run with the colored Jacobian and `AutoFiniteDiff()` for the time derivative; the test
+suite runs each on a
 moving mesh in both energy forms and through deactivation events.
 
 ```julia
@@ -224,7 +224,7 @@ tested.
 ## 11.4 The linear solver
 
 The integrator solves its Newton (Rosenbrock stage) systems with
-`W = J − M/(γΔt)`; the `linear_solver` keyword names the factorization.
+`W = J − M/(γΔt)`; the policy's linear solver names the factorization.
 
 ### 11.4.1 `StructuredKLU`, the default
 
@@ -244,8 +244,8 @@ entry the solve reaches has appeared.
 
 ### 11.4.2 Other factorizations
 
-Any LinearSolve factorization of a `SparseMatrixCSC` is passed directly; no
-extension is involved. `UMFPACKFactorization()` and plain
+Any LinearSolve factorization of a `SparseMatrixCSC` is passed as the policy's
+argument; no extension is involved. `UMFPACKFactorization()` and plain
 `KLUFactorization()` are the ones the test suite runs (repeated solves under
 each are bit-identical, and a deactivating solve under UMFPACK deactivates
 the same cells at the same times to `1e-6`):
@@ -253,14 +253,8 @@ the same cells at the same times to `1e-6`):
 ```julia
 using LinearSolve: UMFPACKFactorization, KLUFactorization
 
-sol = solve(problem; linear_solver = UMFPACKFactorization())
+sol = solve(problem; integrator_policy = default_policy(UMFPACKFactorization()))
 ```
-
-> **Pairing rule.** `linear_solver` is used only when `integrator_policy` is
-> left at its default. With an explicit policy, pass the linear solver to the
-> policy's constructor instead:
-> `solve(problem; integrator_policy = rodas5p_policy(UMFPACKFactorization()))`.
-> A `linear_solver` given beside an `integrator_policy` is ignored.
 
 ### 11.4.3 Linear solve and deactivation
 
@@ -306,8 +300,7 @@ when under gas transport a cell's porosity leaves `[0, 1]` by more
 than its mass tolerances allow, or when an algebraic row's residual exceeds
 `reltol` times its own equation's scale plus its unknown's absolute
 tolerance. After more than 50 consecutive constraint rejections
-(`MAX_CONSTRAINT_REJECTIONS`, the `max_constraint_rejections` keyword of
-`integrate`) the solve ends with `:Failure` and a warning. The largest
+(`MAX_CONSTRAINT_REJECTIONS`) the solve ends with `:Failure` and a warning. The largest
 scaled constraint residual of the accepted states is reported as
 `sol.statistics.largest_constraint_residual` (one or below passes). A
 fixed-step solve (`adaptive = false`) runs no domain test; its first accepted
@@ -343,7 +336,7 @@ Any other `kind` raises an `ArgumentError` naming the three. Chapter 9 shows
 the plots and how to draw depth profiles by hand.
 
 Linear solvers need no extension: `LinearSolve` is a dependency, so any of
-its factorizations is passed as `linear_solver` or to a policy's constructor
+its factorizations is passed to a policy's constructor
 (§11.4). Sensitivity analysis needs none either: Chapter 13 takes finite
 differences of ordinary `solve` calls, and Technical Reference §17 covers the
 theory.
@@ -392,16 +385,16 @@ whole state, so keep it to small meshes.
 
 ## 11.8 Custom loops: `setup` and `integrate`
 
-`solve(problem; kwargs...)` is three steps: `validate_problem(problem)`
-(unless `validate = false`), `cp = setup(problem; ...)`, and
+`solve(problem; kwargs...)` is three steps: `validate_problem(problem)`,
+`cp = setup(problem; ...)`, and
 `integrate(cp; ...)`. The two halves are exported, so you can set a problem
 up once and integrate it several times, or drive the integration yourself.
 
 | `setup` (what the problem is) | `integrate` (how it is run) |
 |---|---|
-| `energy_state`, `reltol`, `abstol`, `threshold`, `pressure_tolerance`, `use_ale`, `radiation_model`, `w_override`, `correction`, `lagrangian`, `deactivation`, `band`, `sources`, `time_scale` (the first step, `solve`'s `dt`) | `u0`, `maxiters`, `dt`, `adaptive`, `dtmin`, `dtmax`, `saveat`, `callback`, `progress`, `min_thickness`, `linear_solver`, `integrator_policy`, `located_events`, `max_constraint_rejections` |
+| `energy_state`, `reltol`, `abstol`, `threshold`, `pressure_tolerance`, `use_ale`, `radiation_model`, `correction`, `lagrangian`, `deactivation`, `band`, `sources`, `time_scale` (the first step, `solve`'s `dt`) | `u0`, `maxiters`, `dt`, `adaptive`, `dtmin`, `dtmax`, `saveat`, `callback`, `min_thickness`, `integrator_policy`, `progress`, `started` (the time the reported solve time counts from) |
 
-`setup` returns a `CoreProblem`: the problem, the definition the residual
+`setup` returns a `PreparedProblem`: the problem, the definition the residual
 reads (`cp.def`), its buffers (`cp.ws`), the consistent initial state
 (`cp.u0`), the relative tolerance and the absolute-tolerance vector, the
 colored Jacobian (`cp.jacobian`), the initial temperatures and masses, and
@@ -418,7 +411,7 @@ sol_fbdf  = integrate(cp; min_thickness = 1e-3,
 
 Every call starts with every cell live, the layer times before their first
 activation and the caloric inversion from the set-up temperatures, so
-repeated integrations of one `CoreProblem` are bit-identical. `integrate(cp;
+repeated integrations of one `PreparedProblem` are bit-identical. `integrate(cp;
 u0 = u)` starts from another state; its algebraic rows must be consistent,
 which `consistent_state!(u, cp.def, cp.ws, t)` ensures, and an inadmissible
 `u0` is refused with an `ArgumentError`.
@@ -481,13 +474,13 @@ using Pyrolysis.Internal   # everything the submodules export, in one place
 
 | Area | Names |
 |---|---|
-| The residual (Assembly) | `residual!`, `CoreDefinition`, `CoreWorkspace`, `buffers`, `NoSources`, `VolumetricSources` |
+| The residual (Assembly) | `residual!`, `ResidualDefinition`, `ResidualWorkspace`, `buffers`, `NoSources`, `VolumetricSources` |
 | The Jacobian (ColoredJacobian) | `ColoredJacobianCache`, `jac_prototype`, `jacobian!`, `jacobian_pattern`, `color_count`, `dense_jacobian`, `missing_entries`, `compare_entries` |
 | The layout (States) | `StateLayout`, `state_length`, `mass_index`, `energy_index`, `history_index`, `position_index`, `velocity_index`, `intensity_index`, `area_index`, `lateral_rate_index`, `cell_rows`, `node_rows`, `is_differential`, `mass_matrix`, `DerivedState`, `derive!` |
 | The integration (Integration) | `consistent_state!`, `inadmissible`, `DomainCheck`, `IntegratorPolicy`, `DT_AFTER_EVENT`, `FAILURE_MEMORY_GROWTH`, `FAILURE_MEMORY_STEPS`, `default_linear_solver`, `CORRECTION_BAND` |
 | Deactivation | `CellDeactivation`, `DeactivationEvent`, `deactivate!`, `threshold_margin`, `top_live_cell`, `replay_events!` |
-| The mesh motion (Closures) | `BalanceRowClosure`, `LayerCorrection`, `PrescribedCorrection`, `residues`, `vanishes`, `EQUIDISTRIBUTION_TIME`, `ACTIVATION_TIME_FACTOR` |
-| Meshes | `line_mesh`, `box_mesh`, `cell_mesh`, `MeshTopology`, `MeshGeometry`, `live_face` |
+| The mesh motion (Closures) | `BalanceRowClosure`, `LayerCorrection`, `residues`, `vanishes`, `EQUIDISTRIBUTION_TIME`, `ACTIVATION_TIME_FACTOR` |
+| Meshes | `live_face`, `n_cells`, `n_nodes`, `n_faces`, `boundary_tags`, `boundary_faces`, `geometry!` |
 
 Symbols reached through `Internal` are not part of the stable public API and
 may move or change between minor releases; prefer the top-level exports in
@@ -499,7 +492,7 @@ cross section, the correction and deactivation are refused there.
 
 ### 11.9.2 Reading a set-up problem
 
-A `CoreProblem`'s definition `cp.def` holds the state layout (`layout`), the
+A `PreparedProblem`'s definition `cp.def` holds the state layout (`layout`), the
 state setup (`setup`: the mesh topology with its pinned and Lagrangian
 nodes, the material, its caloric laws, the per-cell reference data, the
 caloric extension and the gas transport `setup` chose from the material),
@@ -531,7 +524,7 @@ layout.mask                          # the live rows
 Which configuration a problem gets follows from the problem and the
 keywords, never from a mode argument: `use_ale` moves the mesh,
 `radiation_model` adds the intensity rows, a permeable condensed component
-selects lumped gas transport gas transport, a `lateral_shrinkage_law` adds the
+selects lumped gas transport, a `lateral_shrinkage_law` adds the
 cross-section rows, and `energy_state` picks the energy unknown (Chapter 7).
 
 ---
@@ -552,9 +545,9 @@ sol = solve(problem; integrator_policy = kencarp4_policy(StructuredKLU()))
 # (c) Rodas5P with a forced restart step after each event.
 sol = solve(problem; integrator_policy = rodas5p_policy(StructuredKLU(); restart = :forced_dt))
 
-# (d) Another LinearSolve factorization, with the default policy or inside a policy.
-sol = solve(problem; linear_solver = UMFPACKFactorization())
-sol = solve(problem; integrator_policy = rodas5p_policy(UMFPACKFactorization()))
+# (d) Another LinearSolve factorization: the argument of a policy.
+sol = solve(problem; integrator_policy = default_policy(UMFPACKFactorization()))
+sol = solve(problem; integrator_policy = fbdf_policy(UMFPACKFactorization()))
 
 # (e) Burnout on a moving mesh (Chapter 10); nothing about the solver changes.
 sol = solve(problem; use_ale = true, deactivation = true, radiation_model = BEER_LAMBERT)

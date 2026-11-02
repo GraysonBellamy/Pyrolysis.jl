@@ -1,5 +1,7 @@
-_property_primal(x) = x
-_property_primal(x::ForwardDiff.Dual) = _property_primal(ForwardDiff.value(x))
+# The value of a number, through every level of dual numbers.
+@inline primal(x) = x
+@inline primal(x::ForwardDiff.Dual) = primal(ForwardDiff.value(x))
+
 # Matrix transport data use the bulk occupancy of the transport matrix (the
 # components `participates_in_transport` selects). This choice does not change
 # the independent thermal-property or skeletal-porosity mixture rules.
@@ -14,7 +16,7 @@ _property_primal(x::ForwardDiff.Dual) = _property_primal(ForwardDiff.value(x))
 @inline function transport_matrix_state(ξ::NTuple{NC}, T, material) where {NC}
     qj = map((c, x)->_transport_occupancy(c, x, T), material.components, ξ)
     q = sum(qj)
-    w = iszero(_property_primal(q)) ? map(zero, qj) : map(x->x/q, qj)
+    w = iszero(primal(q)) ? map(zero, qj) : map(x->x/q, qj)
     return q, w
 end
 
@@ -105,7 +107,7 @@ end
     ε > 0 && return sqrt(32model.tortuosity/φ)*κ/sqrt(κ+ε)
     # Exact zero is allowed only for an identically closed channel (setup checks
     # paths crossing zero). Its parameter derivative is intentionally undefined.
-    _property_primal(κ) == 0 && return zero(κ+φ)
+    primal(κ) == 0 && return zero(κ+φ)
     return sqrt(32model.tortuosity*κ/φ)
 end
 @inline function _transport_coefficients(model::DustyGas, λ, κ, κm, φ, T, w, comps)

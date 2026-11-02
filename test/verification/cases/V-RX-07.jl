@@ -28,7 +28,7 @@ function _vrx07_problem(n_cells)
         depletion_limiter = DepletionLimiter(enabled = false),
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(1e-3, n_cells),
+        mesh = uniform_mesh(1e-3, n_cells),
         material = material,
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(T_iso), bottom = DirichletThermalBC(T_iso)),

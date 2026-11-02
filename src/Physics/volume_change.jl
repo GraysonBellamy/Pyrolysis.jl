@@ -1,62 +1,19 @@
 """
 Volume change computations.
 
-PERFORMANCE NOTE: All functions that iterate over material.components use
-dispatch-based unrolling (explicit overloads for small tuple sizes) to avoid
-allocations from indexing heterogeneous tuples with runtime indices.
+PERFORMANCE NOTE: All functions that iterate over material.components are
+generated, to avoid allocations from indexing heterogeneous tuples with runtime
+indices.
 """
 
 # ============================================================================
-# Dispatch-based volume change rate helpers (allocation-free)
+# Volume change rate helpers (allocation-free)
 # ============================================================================
 #
 # `is_gas` resolves from the component type, so a gas term is folded away at
 # compile time and its reference density is never evaluated.
 
-@inline function _volume_change_rate(dξ, T, comps::Tuple{C}, ::Val{1}) where {C}
-    W = promote_type(typeof(T), eltype(dξ))
-    comp = comps[1]
-    is_gas(comp) && return zero(W)
-    ρⱼ = comp.density(T)
-    return convert(W, dξ[1] / ρⱼ)
-end
-
-@inline function _volume_change_rate(dξ, T, comps::Tuple{C1,C2}, ::Val{2}) where {C1,C2}
-    θ = zero(promote_type(typeof(T), eltype(dξ)))
-    if !is_gas(comps[1])
-        ρ1 = comps[1].density(T)
-        θ += dξ[1] / ρ1
-    end
-    if !is_gas(comps[2])
-        ρ2 = comps[2].density(T)
-        θ += dξ[2] / ρ2
-    end
-    return θ
-end
-
-@inline function _volume_change_rate(
-    dξ,
-    T,
-    comps::Tuple{C1,C2,C3},
-    ::Val{3},
-) where {C1,C2,C3}
-    θ = zero(promote_type(typeof(T), eltype(dξ)))
-    if !is_gas(comps[1])
-        ρ1 = comps[1].density(T)
-        θ += dξ[1] / ρ1
-    end
-    if !is_gas(comps[2])
-        ρ2 = comps[2].density(T)
-        θ += dξ[2] / ρ2
-    end
-    if !is_gas(comps[3])
-        ρ3 = comps[3].density(T)
-        θ += dξ[3] / ρ3
-    end
-    return θ
-end
-
-# @generated version for NC > 3 components (allocation-free via compile-time unrolling)
+# Unrolled at compile time, so the iteration does not allocate.
 @generated function _volume_change_rate(
     dξ,
     T,

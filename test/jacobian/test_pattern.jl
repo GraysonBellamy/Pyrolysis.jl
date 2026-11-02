@@ -81,11 +81,11 @@ function _problem(NC, n; law = nothing, reacting = true, coordinates = Planar())
     mat = _material(NC; law, reacting)
     L = 0.01
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(L, n, 1.05; coordinates),
+        mesh = stretched_mesh(L, n, 1.05; coordinates),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(flux = 3e4) + RadiativeBC(T_inf = 300.0),
+                top = RadiativeFluxBC(3e4) + RadiativeBC(T_inf = 300.0),
                 bottom = AdiabaticBC(),
             ),
             mass = (
@@ -132,12 +132,12 @@ const _color_cases = (
         reacting = true,
     ),
     reconstruction = (
-        options = (use_ale = true, w_override = (x, t) -> -0.01x),
+        options = (use_ale = true, correction = PrescribedCorrection((x, t) -> -0.01x)),
         law = nothing,
         reacting = false,
     ),
     reconstruction_cross_section = (
-        options = (use_ale = true, w_override = (x, t) -> -0.01x),
+        options = (use_ale = true, correction = PrescribedCorrection((x, t) -> -0.01x)),
         law = χ -> 1 - 0.3χ,
         reacting = false,
     ),
@@ -155,11 +155,11 @@ const _color_cases = (
         law = nothing,
         reacting = true,
     ),
-    equidistribution_monitor_cross_section = (
+    equidistribution_cross_section = (
         options = (
             use_ale = true,
             radiation_model = BEER_LAMBERT,
-            correction = EquidistributionCorrection(monitor = (1.0, 1.0)),
+            correction = EquidistributionCorrection(),
         ),
         law = χ -> 1 - 0.3χ,
         reacting = true,

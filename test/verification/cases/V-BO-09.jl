@@ -35,7 +35,7 @@ function _vbo09_problem(n, N, k, t_end)
     )
     f(z) = VBO09_F_HIGH - (VBO09_F_HIGH - VBO09_F_LOW) * z / VBO09_L
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(VBO09_L, N),
+        mesh = uniform_mesh(VBO09_L, N),
         material = material,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),

@@ -52,7 +52,7 @@ function _vrx05_case(id, heat; solid_yield = 1.0)
             ),
         )
         PyrolysisProblem(
-            mesh = create_uniform_mesh(L, n),
+            mesh = uniform_mesh(L, n),
             material = mat,
             bc_set = BoundaryConditionSet(
                 thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -147,8 +147,7 @@ function _vrx05_case(id, heat; solid_yield = 1.0)
                               (
                                   solid_yield < 1 ?
                                   ", and its gas product stays in the element without " *
-                                  "occupying volume." :
-                                  "."
+                                  "occupying volume." : "."
                               ),
             curves = sol -> begin
                 stem = "gpyro/v2_accuracy/" * lowercase(replace(id, "-" => ""))

@@ -23,7 +23,7 @@ Enumeration of property mixing rules for multi-component materials.
 - `CARMAN_KOZENY`: Porosity-based permeability closure (κ channel only):
   κ = ℓ²·φ³ / (180·(1-φ)²), with ℓ the characteristic particle/pore diameter
   supplied as `MixingSpec(CARMAN_KOZENY; length_scale = ℓ)`. This is the
-  EMT-replacement for permeability — `BRUGGEMAN` is not a valid κ closure.
+  permeability's effective-medium closure; `BRUGGEMAN` is not a valid one.
 """
 @enum MixingRule begin
     PARALLEL = 1
@@ -49,9 +49,7 @@ channel), where it is the characteristic particle/pore diameter [m] entering
 and ignored otherwise; the constructor fails fast if `CARMAN_KOZENY` is requested
 without it.
 
-Used by `Material.mixing` to bundle the mixing rule and its parameters for each
-of the three mixed properties: thermal conductivity (`k`), gas transfer
-coefficient (`λ`), and permeability (`κ`).
+Bundled per mixed property by [`MaterialMixing`](@ref).
 """
 struct MixingSpec
     rule::MixingRule
@@ -73,31 +71,33 @@ struct MixingSpec
 end
 
 """
-	MaterialMixing(; k = MixingSpec(WEIGHTED, 0.5),
-				    λ = MixingSpec(PARALLEL, 0.5),
-				    κ = MixingSpec(WEIGHTED, 0.5))
+	MaterialMixing(; k = MixingSpec(WEIGHTED), λ = MixingSpec(PARALLEL),
+	               κ = MixingSpec(WEIGHTED))
 
-Build the `mixing` NamedTuple expected by `Material`. `k`, `λ`, `κ` may be passed
-either as `MixingSpec` instances or as bare `MixingRule` enum values (β defaults
-to 0.5 in that case).
+The mixing rules of a `Material`, one per mixed property: thermal conductivity
+`k`, gas transfer coefficient `λ` and permeability `κ`. Each is a `MixingSpec`
+or a bare `MixingRule`.
 """
-function MaterialMixing(;
-    k::Union{MixingSpec,MixingRule} = MixingSpec(WEIGHTED, 0.5),
-    λ::Union{MixingSpec,MixingRule} = MixingSpec(PARALLEL, 0.5),
-    κ::Union{MixingSpec,MixingRule} = MixingSpec(WEIGHTED, 0.5),
-)
-    k_spec = k isa MixingSpec ? k : MixingSpec(k, 0.5)
-    λ_spec = λ isa MixingSpec ? λ : MixingSpec(λ, 0.5)
-    κ_spec = κ isa MixingSpec ? κ : MixingSpec(κ, 0.5)
-    return (k = k_spec, λ = λ_spec, κ = κ_spec)
+struct MaterialMixing
+    k::MixingSpec
+    λ::MixingSpec
+    κ::MixingSpec
 end
+
+MaterialMixing(;
+    k::Union{MixingSpec,MixingRule} = MixingSpec(WEIGHTED),
+    λ::Union{MixingSpec,MixingRule} = MixingSpec(PARALLEL),
+    κ::Union{MixingSpec,MixingRule} = MixingSpec(WEIGHTED),
+) = MaterialMixing(MixingSpec(k), MixingSpec(λ), MixingSpec(κ))
+
+MixingSpec(spec::MixingSpec) = spec
 
 # ============================================================================
 # Material Type
 # ============================================================================
 
 """
-	Material{NC,NR,C,RT,LSL,Pμ,DL,GT} <: AbstractMaterial
+	Material{NC,NR,C,RT,LSL,Pμ,GT}
 
 A complete material definition with components, reactions, mixing rules, and gas transport.
 
@@ -116,9 +116,8 @@ A complete material definition with components, reactions, mixing rules, and gas
 - `name::Symbol`: Material identifier
 - `components::C`: Material components tuple
 - `reactions::RT`: Decomposition reactions tuple
-- `mixing::NamedTuple{(:k,:λ,:κ),Tuple{MixingSpec,MixingSpec,MixingSpec}}`:
-  Mixing rules (and per-rule β) for thermal conductivity (`k`), gas transfer
-  coefficient (`λ`), and permeability (`κ`).
+- `mixing::MaterialMixing`: Mixing rules (and per-rule β) for thermal
+  conductivity (`k`), gas transfer coefficient (`λ`), and permeability (`κ`).
 - `lateral_shrinkage_law::LSL`: Optional A(t)/A_0 = law(χ̄). `nothing` ⇒ identity.
 - `gas_viscosity::Pμ`: Dynamic viscosity μ(T) of the pore gas [Pa·s]. Accepts
   anything `to_property` understands — a number, a `(p0, p1)` tuple, a
@@ -185,23 +184,13 @@ pmma = Material(
 )
 ```
 """
-struct Material{
-    NC,
-    NR,
-    C<:Tuple,
-    RT<:Tuple,
-    LSL,
-    Pμ,
-    DL<:AbstractDepletionLimiter,
-    GT<:GasTransport,
-} <: AbstractMaterial
+struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,GT<:GasTransport}
     name::Symbol
     components::C
     reactions::RT  # Full tuple type to preserve heterogeneous reaction types
 
-    # Bundled mixing specs for the three mixed channels (k, λ, κ). NamedTuple
-    # field order is fixed so accessors compile down to direct field reads.
-    mixing::NamedTuple{(:k, :λ, :κ),Tuple{MixingSpec,MixingSpec,MixingSpec}}
+    # Bundled mixing specs for the three mixed channels (k, λ, κ).
+    mixing::MaterialMixing
 
     # Variable cross-section: optional law A(t)/A_0 = law(χ̄). `nothing` ⇒ identity.
     # LSL is parameterized on the concrete law type so calls specialize (no
@@ -209,9 +198,8 @@ struct Material{
     lateral_shrinkage_law::LSL
 
     # Depletion limiter applied to every reaction-rate evaluation for this
-    # material (see DepletionLimiter). DL is the concrete
-    # limiter type, so rate evaluation specializes on it.
-    depletion_limiter::DL
+    # material (see DepletionLimiter).
+    depletion_limiter::DepletionLimiter
 
     # Dynamic viscosity of the pore gas, μ(T) [Pa·s]. Enters the model only as
     # the Darcy mobility κ/μ, so it is a single material-level curve rather
@@ -221,16 +209,16 @@ struct Material{
     gas_transport::GT
 
     # Inner constructor with validation
-    function Material{NC,NR,C,RT,LSL,Pμ,DL,GT}(
+    function Material{NC,NR,C,RT,LSL,Pμ,GT}(
         name::Symbol,
         components::C,
         reactions::RT,
-        mixing::NamedTuple{(:k, :λ, :κ),Tuple{MixingSpec,MixingSpec,MixingSpec}},
+        mixing::MaterialMixing,
         lateral_shrinkage_law::LSL,
-        depletion_limiter::DL,
+        depletion_limiter::DepletionLimiter,
         gas_viscosity::Pμ,
         gas_transport::GT,
-    ) where {NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,DL<:AbstractDepletionLimiter,GT<:GasTransport}
+    ) where {NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,GT<:GasTransport}
         # Validate component count matches
         length(components) == NC || throw(ArgumentError("Component count mismatch"))
         length(reactions) == NR || throw(ArgumentError("Reaction count mismatch"))
@@ -239,7 +227,7 @@ struct Material{
             throw(ArgumentError("lateral_shrinkage_law must be a Function or nothing"))
         _validate_gas_viscosity(gas_viscosity, name)
         _validate_transport_inputs(components, gas_transport, mixing)
-        new{NC,NR,C,RT,LSL,Pμ,DL,GT}(
+        new{NC,NR,C,RT,LSL,Pμ,GT}(
             name,
             components,
             reactions,
@@ -295,15 +283,14 @@ Create a material with keyword arguments.
 - `name::Symbol`: Material identifier
 - `components`: Tuple of components
 - `reactions`: Tuple of reactions (can be empty tuple `()`)
-- `mixing`: A `NamedTuple{(:k,:λ,:κ),Tuple{MixingSpec,MixingSpec,MixingSpec}}`,
-  typically built via [`MaterialMixing`](@ref). Defaults: k = `WEIGHTED, β=0.5`,
+- `mixing`: A [`MaterialMixing`](@ref). Defaults: k = `WEIGHTED, β=0.5`,
   λ = `PARALLEL, β=0.5` (superficial matrix transfer), κ = `WEIGHTED, β=0.5`.
   `BRUGGEMAN` is rejected for both transport coefficients at construction.
 - `lateral_shrinkage_law`: optional A(t)/A_0 = law(χ̄). `nothing` ⇒ identity.
-- `depletion_limiter`: the [`AbstractDepletionLimiter`](@ref) applied to every
-  reaction-rate evaluation for this material. Default: a
-  [`DepletionLimiter`](@ref) (a roll-off near reactant depletion that is zero
-  at and below zero concentration) with `threshold = 1.0` kg/m³, enabled.
+- `depletion_limiter`: the [`DepletionLimiter`](@ref) applied to every
+  reaction-rate evaluation for this material: a roll-off near reactant depletion
+  that is zero at and below zero concentration, by default at
+  `threshold = 1.0` kg/m³.
 - `gas_transport`: [`LumpedTransfer`](@ref) or [`DustyGas`](@ref), including
   the explicit endpoint and its domain when needed. Gas-free materials bind
   the internal no-gas specialization.
@@ -328,14 +315,12 @@ function Material(;
     name::Symbol,
     components::C,
     reactions::Tuple = (),
-    mixing::NamedTuple{(:k, :λ, :κ),Tuple{MixingSpec,MixingSpec,MixingSpec}} = MaterialMixing(),
+    mixing::MaterialMixing = MaterialMixing(),
     lateral_shrinkage_law::Union{Function,Nothing} = nothing,
-    depletion_limiter::AbstractDepletionLimiter = DepletionLimiter(),
+    depletion_limiter::DepletionLimiter = DepletionLimiter(),
     gas_viscosity = SutherlandProperty(),
     gas_transport::GasTransport = LumpedTransfer(),
 ) where {C<:Tuple}
-    # Resolve any PendingReactions (symbolic component names → integer indices)
-    # against the components tuple's name → index map.
     resolved = _resolve_reactions(reactions, components)
     # Function barrier: constructing through a helper whose `LSL` is bound by the
     # argument type makes the `Material{…,LSL}` apply_type monomorphic in each
@@ -361,11 +346,11 @@ function _construct_material(
     resolved::RT,
     mixing,
     lateral_shrinkage_law::LSL,
-    depletion_limiter::DL,
+    depletion_limiter::DepletionLimiter,
     gas_viscosity::Pμ,
     gas_transport::GT,
-) where {C<:Tuple,RT<:Tuple,LSL,Pμ,DL<:AbstractDepletionLimiter,GT<:GasTransport}
-    Material{length(components),length(resolved),C,RT,LSL,Pμ,DL,GT}(
+) where {C<:Tuple,RT<:Tuple,LSL,Pμ,GT<:GasTransport}
+    Material{length(components),length(resolved),C,RT,LSL,Pμ,GT}(
         name,
         components,
         resolved,
@@ -377,26 +362,13 @@ function _construct_material(
     )
 end
 
-# Walk the reactions tuple, resolve every PendingReaction to a Reaction. The
-# `name → index` map is built once per Material(...) call.
+# The reactions with their component names resolved against `components`.
 function _resolve_reactions(reactions::Tuple, components::Tuple)
-    # Detect whether resolution is needed before building the map (avoids the
-    # Dict allocation in the common no-symbolic-reactions case).
-    needs_resolution = false
-    for rxn in reactions
-        if rxn isa PendingReaction
-            needs_resolution = true
-            break
-        end
-    end
-    needs_resolution || return reactions
-    name_to_index = Dict{Symbol,Int}()
-    for (i, c) in enumerate(components)
-        haskey(name_to_index, c.name) &&
-            error("Duplicate component name :$(c.name) in components tuple")
-        name_to_index[c.name] = i
-    end
-    return map(rxn -> resolve_reaction(rxn, name_to_index), reactions)
+    any(r -> r isa PendingReaction, reactions) || return reactions
+    names = map(c -> c.name, components)
+    allunique(names) ||
+        throw(ArgumentError("the component names of a material must differ"))
+    return map(r -> resolve_reaction(r, names), reactions)
 end
 
 # ============================================================================
@@ -484,7 +456,7 @@ function dry_gas_flags(material::Material{NC}) where {NC}
     comps = material.components
     rxns = material.reactions
     lineage = Set(j for j = 1:NC if is_solid(comps[j]))
-    from_lineage(r) = any(p -> first(p) in lineage, r.reactants)
+    from_lineage(r) = r.reactant in lineage
     produces(r, j) = any(p -> first(p) == j && last(p) > 0, r.products)
     grown = true
     while grown
@@ -528,8 +500,7 @@ evaluated on the conversion of its reactant against the reactant's lineage
 inventory. Every first-order reaction is evaluated on its concentration, and a
 material with no other order carries no reference.
 """
-needs_lineage(material::Material) =
-    any(r -> any(p -> p[2] != 1.0, r.reactants), material.reactions)
+needs_lineage(material::Material) = any(r -> r.order != 1, material.reactions)
 
 """
 	LineageGraph
@@ -561,7 +532,7 @@ end
 function _lineage_channels(material::Material{NC}, condensed) where {NC}
     channels = [Vector{Pair{Int,Float64}}[] for _ = 1:NC]
     for r in material.reactions
-        a = first(r.reactants[1])
+        a = r.reactant
         condensed[a] || continue
         consumed = 1.0 - sum(y for (p, y) in r.products if p == a; init = 0.0)
         consumed > 0 || continue
@@ -663,12 +634,7 @@ the reaction otherwise, with `basis` as the remedy where there is one.
 """
 function lineage_graph(material::Material{NC}) where {NC}
     for r in material.reactions
-        length(r.reactants) == 1 || throw(
-            ArgumentError(
-                "reaction :$(r.name) needs exactly one reactant for an order other than one",
-            ),
-        )
-        all(p -> 1 <= first(p) <= NC, (r.reactants..., r.products...)) ||
+        all(j -> 1 <= j <= NC, (r.reactant, first.(r.products)...)) ||
             throw(ArgumentError("reaction :$(r.name) references a component outside 1:$NC"))
     end
     names = [c.name for c in material.components]
@@ -677,7 +643,7 @@ function lineage_graph(material::Material{NC}) where {NC}
     children = [unique(first(e) for channel in channels[v] for e in channel) for v = 1:NC]
     parents = [[v for v = 1:NC if p in children[v]] for p = 1:NC]
     gas_products = Int[
-        p for r in material.reactions if !condensed[first(r.reactants[1])] for
+        p for r in material.reactions if !condensed[r.reactant] for
         (p, y) in r.products if y > 0 && condensed[p]
     ]
     fed = _reachable(children, gas_products)
@@ -686,7 +652,7 @@ function lineage_graph(material::Material{NC}) where {NC}
     ancestors = [Bool[] for _ in reactions]
     reach = [Float64[] for _ in reactions]
     for (k, r) in enumerate(reactions)
-        a, n = r.reactants[1]
+        a, n = r.reactant, r.order
         n == 1 && continue
         condensed[a] || throw(
             ArgumentError(
@@ -715,8 +681,8 @@ function lineage_graph(material::Material{NC}) where {NC}
         [r.name for r in reactions],
         names,
         condensed,
-        [first(r.reactants[1]) for r in reactions],
-        [last(r.reactants[1]) for r in reactions],
+        [r.reactant for r in reactions],
+        [r.order for r in reactions],
         [r.basis for r in reactions],
         ancestors,
         reach,

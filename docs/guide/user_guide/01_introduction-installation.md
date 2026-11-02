@@ -84,7 +84,7 @@ To set expectations up front, the model does **not** support:
   hexahedral meshes, but these are building blocks, not a supported solve path.)
 - A full two-temperature gas phase (the pore gas shares the matrix temperature
   and stores sensible heat at it — see Technical Reference §3).
-- Multi-reactant reactions — each reaction has a single reactant (`NRin == 1`);
+- Multi-reactant reactions — each reaction has one reactant by construction;
   multi-step schemes are built as *sequences* of single-reactant reactions (see
   Technical Reference §6).
 - Temperature- or pressure-dependent pre-exponential factors, and distributed
@@ -111,7 +111,7 @@ To set expectations up front, the model does **not** support:
 | Planar, cylindrical, or spherical geometry | `coordinates` keyword of the mesh constructors | UG 6 |
 | Burnout by cell deactivation | `solve(...; deactivation = true)` | UG 10, TR §14 |
 | Temperature or enthalpy as the energy state | `solve(...; energy_state = :enthalpy)` | UG 8, TR §3 |
-| Integrator and linear solver | `solve(...; integrator_policy = …, linear_solver = …)` | UG 11, TR §15 |
+| Integrator and linear solver | `solve(...; integrator_policy = …)`, the linear solver being the policy's argument | UG 11, TR §15 |
 | Mass and energy conservation audit | `callback = ConservationRecorder()`, `conservation_audit` | UG 9, TR §16 |
 | Sensitivity analysis (local finite differences, global Sobol) | finite differences of `solve`; `parameter_sweep` | UG 13 |
 | Parameter sweeps (serial or `Distributed`) | `parameter_sweep` | UG 12 |
@@ -119,9 +119,9 @@ To set expectations up front, the model does **not** support:
 A few features carry caveats; this guide flags them plainly wherever they
 appear:
 
-- The radiation models you can pass to `solve` are `NO_RADIATION`,
-  `SURFACE_ABSORPTION`, and `BEER_LAMBERT`. `BEER_LAMBERT` needs planar
-  coordinates (see Technical Reference §8).
+- The radiation models you can pass to `solve` are `SURFACE_ABSORPTION`, the
+  default, and `BEER_LAMBERT`. `BEER_LAMBERT` needs planar coordinates (see
+  Technical Reference §8).
 - **Burnout** (`deactivation = true`) removes cells whose condensed mass falls
   below a fraction of their initial condensed mass, in events located inside
   the step. The state keeps its size; an event is a discrete change of the
@@ -369,10 +369,10 @@ Without `Plots` loaded there is no `plot` function to call; the recipes are
 covered in UG 9.
 
 The alternative linear solver needs no extension: the default `StructuredKLU()`
-is exported, and LinearSolve's `UMFPACKFactorization()` is passed as
-`linear_solver` after `Pkg.add("LinearSolve")` and `using LinearSolve` (UG 8,
-UG 11). Sensitivity analysis needs none either: it takes finite differences of
-ordinary `solve` calls (UG 13).
+is exported, and LinearSolve's `UMFPACKFactorization()` is passed as a policy's
+argument after `Pkg.add("LinearSolve")` and `using LinearSolve` (UG 8, UG 11).
+Sensitivity analysis needs none either: it takes finite differences of ordinary
+`solve` calls (UG 13).
 
 ---
 
@@ -386,7 +386,7 @@ using Pyrolysis
 
 @assert isdefined(Pyrolysis, :Material)
 @assert isdefined(Pyrolysis, :solve)
-@assert isdefined(Pyrolysis, :create_uniform_mesh)
+@assert isdefined(Pyrolysis, :uniform_mesh)
 println("Pyrolysis.jl loaded successfully.")
 ```
 
@@ -429,12 +429,12 @@ material = Material(name=:porous_polymer,
 bcs = BoundaryConditionSet(
     thermal=(top=HeatFluxBC(50e3), bottom=AdiabaticBC()),
     mass=(top=AmbientGasBC(GasReservoir(P=0., T=300.)), bottom=ImpermeableBC()))
-problem = PyrolysisProblem(mesh=create_uniform_mesh(.01,40), material=material,
+problem = PyrolysisProblem(mesh=uniform_mesh(.01,40), material=material,
     bc_set=bcs, T_initial=z->300., tspan=(0.,60.))
 solution = solve(problem; pressure_tolerance=1.)
 @assert completed(solution)
 println(solution.surface_T[end])
-println(maximum(get_pressure(solution)))
+println(maximum(solution.gas.pressure))
 ```
 
 The default initial concentration fills the first solid at its bulk density;
@@ -458,7 +458,8 @@ with conductance in kg/(m² s). See Chapters 3, 5 and 7 for the complete inputs.
 stable, user-facing API. The top-level exports cover:
 
 - **Materials:** `Material`, `SolidComponent`, `GaseousComponent`,
-  `LiquidComponent`, `Reaction`, `DepletionLimiter`, the mixing rules
+  `LiquidComponent`, `Reaction`, `DepletionLimiter`, the gas-transport models
+  (`LumpedTransfer`, `DustyGas`, `LumpedEndpoint`, `DustyEndpoint`), the mixing rules
   (`MixingRule`, `PARALLEL`, `SERIES`, `WEIGHTED`, `BRUGGEMAN`, `CARMAN_KOZENY`),
   `MixingSpec`, `MaterialMixing`, and the phase predicates (`is_solid`, `is_gas`,
   `is_liquid`, `phase`, `molar_mass`).
@@ -477,23 +478,22 @@ stable, user-facing API. The top-level exports cover:
   `fuller_diffusivity`, `BlowingFace`, `blowing_state`, `blowing_ratio`,
   `blowing_factor`); and `background_gas_concentration` for pore-air
   initialization in lumped gas transport problems.
-- **Radiation models:** `RadiationModel`, `NO_RADIATION`, `SURFACE_ABSORPTION`,
-  `BEER_LAMBERT`.
-- **The mesh:** `create_uniform_mesh`, `create_stretched_mesh`,
-  `create_mesh_from_nodes`, the coordinate systems `Planar`, `Cylindrical`,
-  `Spherical`, and the mesh's parts `MeshTopology`, `MeshGeometry`.
+- **Radiation models:** `RadiationModel`, `SURFACE_ABSORPTION`, `BEER_LAMBERT`.
+- **The mesh:** `uniform_mesh`, `stretched_mesh`, `line_mesh`, `box_mesh`,
+  `cell_mesh`, the coordinate systems `Planar`, `Cylindrical`, `Spherical`, and
+  the mesh's parts `MeshTopology`, `MeshGeometry`.
 - **Problem and solve:** `PyrolysisProblem`, `PyrolysisSolution`,
-  `SolverStatistics`, `solve`, `setup`, `integrate`, `CoreProblem` (the set-up
-  problem `setup` returns and `integrate` runs, for custom loops, UG 11), and
-  `parameter_sweep`.
+  `SolverStatistics`, `validate_problem`, `solve`, `setup`, `integrate`,
+  `PreparedProblem` (the set-up problem `setup` returns and `integrate` runs, for
+  custom loops, UG 11), and `parameter_sweep`.
 - **The mesh correction and the integrator:** `NoCorrection`,
-  `EquidistributionCorrection`, `ActivationTime` (UG 10); the integrator
-  policies `default_policy`, `rodas5p_policy`, `fbdf_policy`,
-  `kencarp4_policy`, and the linear solver `StructuredKLU` (UG 11).
-- **The solution's accessors and the conservation audit:** `get_times`,
-  `get_temperatures`, `get_concentrations`, `get_gas_generation_rate`,
-  `n_timesteps`, `succeeded`, `completed`, `get_profile`, `get_cell_positions`,
-  `interpolate_solution`, `ConservationRecorder`, `conservation_audit` (UG 9).
+  `EquidistributionCorrection`, `ActivationTime`, `PrescribedCorrection` (UG 8,
+  UG 10); the integrator policies `default_policy`, `rodas5p_policy`,
+  `fbdf_policy`, `kencarp4_policy`, and the linear solver `StructuredKLU` (UG 11).
+- **The solution's accessors and the conservation audit:** `succeeded`,
+  `completed`, `get_profile`, `interior_events`, `GasDiagnostics`,
+  `get_gas_composition`, `get_boundary_exchange`, `ConservationRecorder`,
+  `conservation_audit`, `gas_species_audit` (UG 9).
 
 Anything not exported at the top level remains reachable in one of two ways:
 
@@ -513,15 +513,14 @@ discretization), `Problem`, `Outputs`, and `Integration`. `Internal` re-exports
 the union of their exports: among them the residual (`residual!`), the colored
 Jacobian (`jacobian!`, and `dense_jacobian`, the dense forward-mode reference the
 tests compare it with), the state layout and its indices, the kernels and
-closures of a set-up problem, the deactivation events, and the
-multi-dimensional mesh builders (`box_mesh`, `cell_mesh`) at the residual level.
+closures of a set-up problem, and the deactivation events.
 A name that two submodules export as different objects is not re-exported;
 reach it through its submodule.
 
 A couple of practical notes you will encounter later in the guide:
 
 - The simulation modes — a fixed or moving mesh, the radiation rows, lumped or
-  lumped gas transport gas transport, the energy state, the variable cross-section — are
+  lumped gas transport, the energy state, the variable cross-section — are
   not types you pick. `setup` decides them from the material (a permeable
   component selects gas transport, a `lateral_shrinkage_law` the
   cross-section rows) and from the `solve` keywords (`use_ale`,
@@ -546,7 +545,6 @@ with:
 | File | What it demonstrates |
 |---|---|
 | `examples/06_cone_calorimeter.jl` | PMMA, 5.8 mm, at 25 kW/m²: single-step kinetics, temperature-dependent properties, combined thermal conditions, a mesh moving with the solid and cell deactivation; overlays ThermaKin outputs when present |
-| `examples/06_cone_calorimeter_surface_absorption.jl` | The same case with `radiation_model = SURFACE_ABSORPTION`; writes figures and a CSV to `output/` |
 | `examples/07_douglas_fir_cone.jl` | Douglas fir, 12 mm, at 75 kW/m²: five-step kinetics with moisture evaporation, gas transport with background pore air, surface absorption, a moving mesh |
 | `examples/08_gas_transport.jl` | Lumped and dusty-gas transport with a finite reservoir film |
 | `examples/08_pressure_treated_wood_cone.jl` | Pressure-treated wood with moisture and multi-step Arrhenius kinetics |

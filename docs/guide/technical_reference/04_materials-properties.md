@@ -106,7 +106,6 @@ without a runtime field-existence test:
 | `phase(c)` | `SOLID` / `LIQUID` | `GAS` |
 | `molar_mass(c)` | `0.0` | `c.molar_mass` |
 | `get_permeability(c, T)` | `c.permeability(T)` | `0.0` |
-| `has_permeability(c)` | `true` | `false` |
 | `get_intrinsic_density(c, T)` | `c.intrinsic_density(T)` | `0.0` |
 | `participates_in_transport(c)` | `true` / declares $\lambda$ or a $\kappa$ not identically zero | `false` |
 
@@ -118,7 +117,7 @@ mixing rules (a gas contributes nothing to permeability or to the solid
 skeleton).
 
 > **Implementation note.** Accessors `get_intrinsic_density`, `get_permeability`,
-> `has_permeability`, `get_emissivity`, `get_absorptivity`,
+> `get_emissivity`, `get_absorptivity`,
 > `is_solid/is_liquid/is_gas`, `phase`, `molar_mass`, `participates_in_transport`, all in
 > `src/Materials/components.jl`. Kernels read the remaining property fields
 > (`density`, `heat_capacity`, …) directly.
@@ -562,15 +561,15 @@ kernel reads. It is **immutable** and **heterogeneously typed** so the compiler
 can specialize every loop over its components and reactions:
 
 ```julia
-struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,DL<:AbstractDepletionLimiter} <:
-       AbstractMaterial
+struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,GT<:GasTransport}
     name::Symbol
     components::C          # heterogeneous component tuple
     reactions::RT          # heterogeneous reaction tuple
-    mixing::NamedTuple{(:k,:λ,:κ),Tuple{MixingSpec,MixingSpec,MixingSpec}}
+    mixing::MaterialMixing # the mixing rules of k, λ and κ
     lateral_shrinkage_law::LSL   # A(t)/A₀ = law(χ̄), or nothing
-    depletion_limiter::DL  # one-sided rate roll-off near depletion (§6.3)
+    depletion_limiter::DepletionLimiter  # one-sided rate roll-off near depletion (§6.3)
     gas_viscosity::Pμ      # pore-gas μ(T), default SutherlandProperty() (§5.9)
+    gas_transport::GT      # LumpedTransfer or DustyGas (Chapter 9)
 end
 ```
 
@@ -592,13 +591,13 @@ The type parameters carry compile-time information:
   the same reason so `material.gas_viscosity(T)` stays monomorphic. The inner
   constructor probes the curve at 200, 300, 500, 800, 1200 and 1800 K and rejects
   one that is not positive and finite at any of them (§5.9).
-- `DL` — the concrete type of the depletion limiter, so that rate evaluation
-  specializes on it.
+- `GT` — the concrete type of the gas-transport model, so that the transport
+  kernel specializes on it.
 
-The `mixing` field bundles three `MixingSpec`s — one each for thermal
-conductivity ($k$), gas transfer ($\lambda$), and permeability ($\kappa$) — in a
-fixed-order `NamedTuple` so that `material.mixing.k` compiles to a direct field
-read. Each `MixingSpec` carries `(rule, β, ℓ)`: the mixing rule, the WEIGHTED
+The `mixing` field is a `MaterialMixing`, a struct of three `MixingSpec`s — one
+each for thermal conductivity ($k$), gas transfer ($\lambda$), and permeability
+($\kappa$) — so that `material.mixing.k` is a direct field read. Each
+`MixingSpec` carries `(rule, β, ℓ)`: the mixing rule, the WEIGHTED
 blend weight $\beta$ (default 0.5), and the Carman–Kozeny characteristic length
 $\ell$ (NaN unless the rule is `CARMAN_KOZENY`). The default channel rules are
 
@@ -636,50 +635,52 @@ Reaction(:decomposition, :virgin => :MMA;          A=8.5e12, E=188e3, h=870e3)
 Reaction(:charring,      :virgin => (:char, :gas); A=1e15,  E=2e5, h=5e5, yields=(0.2,0.8))
 ```
 
-A symbolic constructor produces a `PendingReaction`, which stores the symbol
-payloads plus the kinetic parameters. When `Material(...)` is called, it builds a
-`name → index` map from the components tuple (erroring on a duplicate component
-name) and resolves every `PendingReaction` into a numeric `Reaction`. The
-resolution path is taken **only if** at least one reaction is pending — the common
-all-numeric case skips the `Dict` allocation entirely:
+Given names, `Reaction` returns a `PendingReaction`, a small internal struct
+holding the names and the options; the options are checked there, before the
+components are known. `Material(...)` resolves every pending reaction against the
+names of its components through `resolve_reaction`, which places each name in the
+tuple and calls `Reaction` with the indices, so the numeric path validates it. The
+resolution runs **only if** at least one reaction is pending, and a duplicate
+component name is an error there:
 
+```julia
+function _resolve_reactions(reactions::Tuple, components::Tuple)
+    any(r -> r isa PendingReaction, reactions) || return reactions
+    names = map(c -> c.name, components)
+    allunique(names) ||
+        throw(ArgumentError("the component names of a material must differ"))
+    return map(r -> resolve_reaction(r, names), reactions)
+end
 ```
-needs_resolution = any(rxn isa PendingReaction for rxn in reactions)
-needs_resolution || return reactions          # fast path, no Dict
-```
 
-Numeric reactions (built against integer indices directly) bypass resolution.
+`resolve_reaction` returns a numeric `Reaction` as it is, and a name not found in
+the components throws an `ArgumentError` naming the reaction and the component.
 
-> **Implementation note.** `PendingReaction`, the symbolic `Reaction` constructors,
-> `resolve_reaction`, and `_resolve_reactions` (called from the `Material`
-> constructor) in `src/Materials/reactions.jl` and `src/Materials/materials.jl`.
+> **Implementation note.** `PendingReaction`, `resolve_reaction` and `Reaction` in
+> `src/Materials/reactions.jl`; `_resolve_reactions`, called from the `Material`
+> constructor, in `src/Materials/materials.jl`.
 
 ### 4.6.3 The single-reactant mass-balance convention
 
-The `Reaction` type is n-ary in both reactants and products in principle, but the
-current model **supports only single-reactant reactions** ($N_\mathrm{in}=1$). The
-mass-balance convention (developed fully in Chapter 6) is:
+A `Reaction` has **one reactant** and any number of products. The mass-balance
+convention (developed fully in Chapter 6) is:
 
-- The lone reactant is consumed with implicit mass stoichiometry $-1$ per unit
+- The reactant is consumed with implicit mass stoichiometry $-1$ per unit
   reaction extent.
 - Each product $j$ is produced with an explicit mass yield $\nu_j > 0$.
 - Mass conservation requires $\sum_{\text{products}} \nu_j = 1$.
 
-The `Reaction` inner constructor enforces this at build time — every
-construction path, including the bare positional constructor, runs the
-validators. Reaction orders must be $n \ge 0$ (`_validate_reaction_order`);
-every product yield must be $\ge 0$ (`_validate_yield`, enforced
-unconditionally — a negative yield consumes a species the rate law does not
+The `Reaction` constructor enforces this at build time. Reaction orders must
+be $n \ge 0$ (`_validate_reaction_order`); every product yield must be $\ge 0$
+(`_validate_yield` — a negative yield consumes a species the rate law does not
 see and drives its concentration negative without bound; note $(1.5, -0.5)$
-sums to 1 and would pass a sum-only check); and for a single-reactant reaction
-the product yields must sum to 1 (`_validate_stoichiometry`, relative tolerance
-$\max(10^{-10}\cdot(1+\Sigma\nu), 10^{-14})$), raising an `error` on violation.
-Passing `validate_mass=false` disables only the sum check (not recommended);
-the non-negativity and order checks always run.
+sums to 1 and would pass a sum-only check); and the product yields must sum to 1
+(`_validate_stoichiometry`, tolerance
+$\max(10^{-10}\cdot(1+\Sigma\nu), 10^{-14})$). Each throws an `ArgumentError` on
+violation, and all of them always run.
 
-> **Implementation note.** `_validate_stoichiometry`, `verify_stoichiometry`
-> (tol $10^{-10}$, returns `false` + `@warn` on failure), and `mass_balance_error`
-> in `src/Materials/reactions.jl`.
+> **Implementation note.** `_validate_reaction_order`, `_validate_yield` and
+> `_validate_stoichiometry` in `src/Materials/reactions.jl`.
 
 ### 4.6.4 Dry-pyrolysis-gas identification
 
@@ -897,11 +898,11 @@ matching the resulting effective properties and coupled problem. User Guide
 The following are documented limitations of the constitutive layer; several are
 revisited where the relevant physics is developed.
 
-1. **Single-reactant reactions only.** $N_\mathrm{in}=1$ is enforced. Multi-step
-   schemes must be modeled as *sequences* of single-reactant reactions.
-   Multi-reactant (e.g. genuine bimolecular char oxidation) would require
-   extending the reactant tuple to 3-ary `(idx, order, mass_stoich)` and a
-   revised mass-balance convention (Chapter 6).
+1. **Single-reactant reactions only.** A `Reaction` has one reactant by
+   construction. Multi-step schemes must be modeled as *sequences* of
+   single-reactant reactions. Multi-reactant chemistry (e.g. genuine bimolecular
+   char oxidation) would require each reactant to carry its own order and mass
+   stoichiometry, and a revised mass-balance convention (Chapter 6).
 
 2. **Intrinsic-density fallback may be unphysical.** When $\rho_{i,j}$ is not
    supplied it defaults to the bulk $\rho_j$, asserting the pure phase has no

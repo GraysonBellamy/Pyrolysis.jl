@@ -19,7 +19,7 @@ function _two_cells()
     c = LinearProperty(400.0, 2.0)
     solid = SolidComponent(:s, ρ = 1000.0, c = c, k = 50.0)
     mat = Material(name = :pair, components = (solid,), reactions = ())
-    mesh = create_uniform_mesh(0.02, 2)
+    mesh = uniform_mesh(0.02, 2)
     return PyrolysisProblem(
         mesh = mesh,
         material = mat,
@@ -87,7 +87,7 @@ function _reacting_cell()
         reactions = (Reaction(:r, 1 => 2; A = 0.5, E = 0.0, h = 0.0),),
         depletion_limiter = DepletionLimiter(enabled = false),
     )
-    mesh = create_uniform_mesh(1e-3, 1)
+    mesh = uniform_mesh(1e-3, 1)
     bcs = BoundaryConditionSet(
         thermal = (top = DirichletThermalBC(400.0), bottom = DirichletThermalBC(400.0)),
     )
@@ -122,11 +122,11 @@ end
         # The caller's problem is not touched.
         @test problem.mesh.positions == positions
     end
-    @test_throws ArgumentError Integration.solve(_reacting_cell(); bogus = 1)
+    @test_throws MethodError Integration.solve(_reacting_cell(); bogus = 1)
     @test_throws ArgumentError Integration.solve(
         _reacting_cell();
         use_ale = true,
-        w_override = (x, t) -> 0.0,
+        correction = PrescribedCorrection((x, t) -> 0.0),
     )
     @test_throws ArgumentError Integration.solve(
         _reacting_cell();
@@ -141,7 +141,7 @@ end
     mat = Material(name = :heated, components = (solid,), reactions = ())
     L, n, q = 0.01, 10, 2e4
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(L, n),
+        mesh = uniform_mesh(L, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(q), bottom = AdiabaticBC()),
@@ -159,7 +159,7 @@ end
     @test sol.surface_T ≈ sol.T[end, :] .+ q * (L / n / 2) / 0.4 rtol = 1e-12
     @test sol.boundary_T[:bottom] == sol.T[1, :]
     @test sol.surface_T == sol.boundary_T[:top]
-    @test get_cell_positions(sol) ≈ collect(range(L / 2n, L - L / 2n, length = n))
+    @test sol.cell_centers[:, end] ≈ collect(range(L / 2n, L - L / 2n, length = n))
     # The prescribed flux is what the surface applies and conducts.
     @test sol.extras.surface_heat_flux_net == fill(q, 3)
     @test sol.extras.surface_heat_flux_conduction ≈ fill(q, 3) rtol = 1e-12
@@ -188,11 +188,11 @@ end
     mat = Material(name = :charring, components = (solid, gas), reactions = (rxn,))
     h_back, T_back_inf = 5.0, 300.0
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 12),
+        mesh = uniform_mesh(0.01, 12),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(flux = 4e4) +
+                top = RadiativeFluxBC(4e4) +
                       RadiativeBC(T_inf = 300.0) +
                       ConvectiveBC(h = 10.0, T_inf = 300.0),
                 bottom = ConvectiveBC(h = h_back, T_inf = T_back_inf),
@@ -268,7 +268,7 @@ end
     gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03)
     rxn = Reaction(:pyro, 1 => 2, A = 1e8, E = 7e4, h = -300e3)
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.005, 8),
+        mesh = uniform_mesh(0.005, 8),
         material = Material(
             name = :wood,
             components = (virgin, gas),
@@ -283,7 +283,7 @@ end
         ),
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(flux = q) +
+                top = RadiativeFluxBC(q) +
                       RadiativeBC(T_inf = 300.0) +
                       ConvectiveBC(h = 10.0, T_inf = 300.0),
                 bottom = AdiabaticBC(),
@@ -330,7 +330,7 @@ function _ablating_column(n)
         ),
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(3e-3, n),
+        mesh = uniform_mesh(3e-3, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(2.8e6), bottom = AdiabaticBC()),

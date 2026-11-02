@@ -15,7 +15,7 @@ pmma = Material(
     reactions = (decomp,),
 )
 
-mesh = create_uniform_mesh(1e-4, 10)                  # 0.1 mm, 10 cells
+mesh = uniform_mesh(1e-4, 10)                  # 0.1 mm, 10 cells
 
 heating = t -> 300.0 + t / 6                          # 10 K/min
 bc_set = BoundaryConditionSet(
@@ -55,7 +55,7 @@ problem =
         completed(sol) && completed(tight) || continue
         @test maximum(abs.(sol.T .- tight.T))<0.001
         @test maximum(abs.(sol.extras.total_mass .- tight.extras.total_mass))<1e-6*0.119
-        @test maximum(abs.(get_pressure(sol) .- get_pressure(tight)))<20ptol
+        @test maximum(abs.(sol.gas.pressure .- tight.gas.pressure))<20ptol
     end
 end
 

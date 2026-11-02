@@ -80,7 +80,7 @@ function _vgt03_case(id; dusty = false, layered = false, reverse = false)
         left=GasReservoir(P = ref.PL, T = ref.T, mole_fractions = (gas = 1.0,))
         right=GasReservoir(P = ref.PR, T = ref.T, mole_fractions = (gas = 1.0,))
         PyrolysisProblem(
-            mesh = create_uniform_mesh(ref.L, n),
+            mesh = uniform_mesh(ref.L, n),
             material = material,
             bc_set = BoundaryConditionSet(
                 thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -99,7 +99,7 @@ function _vgt03_case(id; dusty = false, layered = false, reverse = false)
         )
     end
     pressure_error(sol) =
-        maximum(abs.(get_pressure(sol)[:, end] .- ref.profile.(get_cell_positions(sol))))/abs(
+        maximum(abs.(sol.gas.pressure[:, end] .- ref.profile.(sol.cell_centers[:, end])))/abs(
             ref.PL-ref.PR,
         )
     function qois(sol)
@@ -153,8 +153,8 @@ function _vgt03_case(id; dusty = false, layered = false, reverse = false)
                     series = [
                         CurveSeries(
                             label = "finite volume",
-                            x = get_cell_positions(sol),
-                            y = get_pressure(sol)[:, end],
+                            x = sol.cell_centers[:, end],
+                            y = sol.gas.pressure[:, end],
                             exact = ref.profile,
                         ),
                     ],

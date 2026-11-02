@@ -7,7 +7,7 @@ an optional temperature window. This chapter shows how to build reactions with
 the `Reaction` constructor, how to specify products and yields, how the heat-of-
 reaction sign convention works, how to model multi-step schemes (the single-
 reactant restriction), how the depletion limiter affects rates near zero
-concentration, and how to validate your stoichiometry. The physics and
+concentration, and what the constructor checks. The physics and
 derivations behind every formula here are in Technical Reference §6 (Reaction
 Kinetics and Stoichiometry).
 
@@ -54,9 +54,15 @@ Reference §6.1 for the derivation.
 
 ## 4.2 The `Reaction` constructor
 
-`Reaction` is exported by `using Pyrolysis`. There are four call forms,
-distinguished by whether you name components by **symbol** or by **integer index**,
-and whether the reaction has **one product** or **two products**.
+`Reaction` is exported by `using Pyrolysis`. It has one constructor:
+
+```
+Reaction(name, reactant => products; A, E, h, yields=(1.0,), n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, basis=nothing)
+```
+
+`reactant` is one component. `products` is one component or a tuple of any length,
+with one yield each. Components are indices on both sides of the pair or names on
+both sides.
 
 ### Symbolic vs. numeric component references
 
@@ -73,39 +79,42 @@ Reaction(:decomposition, :virgin => :MMA; A = 8.5e12, E = 188e3, h = 870e3)
 Reaction(:decomposition, 1 => 2; A = 8.5e12, E = 188e3, h = 870e3)
 ```
 
-The symbolic form returns a lightweight `PendingReaction`; `Material(...)`
-resolves the names to indices automatically using the `components` tuple, so you
-never construct a `PendingReaction` yourself. If a reaction references a name that
-is not in the components tuple, `Material(...)` raises a clear error. Prefer the
-**symbolic** form: it is self-documenting and immune to component reordering.
+A reaction given by component names is resolved by `Material(...)`, using the
+`components` tuple. If a reaction references a name that is not in the components
+tuple, `Material(...)` raises a clear error. Prefer the **symbolic** form: it is
+self-documenting and immune to component reordering.
 
-### Single-product form
+### One product
 
 ```
-Reaction(name, reactant => product; A, E, h, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true)
+Reaction(name, reactant => product; A, E, h)
 ```
 
-The product receives the full mass yield of 1.0 automatically; you do not pass
-`yields`.
+The product receives the full mass yield of 1.0; you do not pass `yields`.
 
 ```julia
 # virgin PMMA fully volatilizes to MMA gas, endothermic.
 Reaction(:decomposition, :virgin => :MMA; A = 8.5e12, E = 188e3, h = 870e3, n = 1.0)
 ```
 
-### Two-product form
+### Several products
 
 ```
-Reaction(name, reactant => (product1, product2); A, E, h, yields, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true)
+Reaction(name, reactant => (product1, product2, …); A, E, h, yields)
 ```
 
-Here `yields = (y1, y2)` gives the mass split between the two products and **must
-sum to 1.0** (see §4.3).
+Here `yields = (y1, y2, …)` gives the mass split between the products, one yield
+each, and **must sum to 1.0** (see §4.3). A reaction may have any number of
+products.
 
 ```julia
 # Charring: 1 kg virgin → 0.2 kg char + 0.8 kg gas, endothermic.
 Reaction(:charring, :virgin => (:char, :gas); A = 1e15, E = 200e3, h = 500e3,
          yields = (0.2, 0.8))
+
+# Three products: 1 kg virgin → 0.2 kg char + 0.5 kg tar + 0.3 kg gas.
+Reaction(:charring, :virgin => (:char, :tar, :gas); A = 1e15, E = 200e3, h = 500e3,
+         yields = (0.2, 0.5, 0.3))
 ```
 
 ### Keyword arguments and defaults
@@ -115,19 +124,23 @@ Reaction(:charring, :virgin => (:char, :gas); A = 1e15, E = 200e3, h = 500e3,
 | `A` | Arrhenius pre-exponential factor (required) | s⁻¹ | — |
 | `E` | Activation energy (required) | J·mol⁻¹ | — |
 | `h` | Heat of reaction (required; number, `(a,b)` tuple, or property function) | J·kg⁻¹ | — |
-| `yields` | Mass split for the two-product form (required there) | – | — |
+| `yields` | Mass yield of each product, summing to one | – | `(1.0,)` |
 | `n` | Reaction order w.r.t. the reactant, on its conversion when not 1 (§4.5) | – | `1.0` |
-| `basis` | The reference as a fraction of the initial condensed mass, in place of the lineage rules (§4.5) | – | `NaN` (lineage rules) |
+| `basis` | The reference as a fraction of the initial condensed mass, in place of the lineage rules (§4.5) | – | `nothing` (lineage rules) |
 | `T_min` | Lower temperature gate | K | `0.0` |
 | `T_max` | Upper temperature gate | K | `Inf` |
 | `gate_width` | Width of the tanh ramp of both gates (finite, > 0) | K | `1.0` |
-| `validate_mass` | Enforce mass balance at construction | – | `true` |
 
 `A`, `E`, and `h` are **required** keyword arguments — there are no defaults, and
-omitting any of them is an error. `yields` is required only for the two-product
-form. All arguments after the component pair are keyword arguments (note the `;`
+omitting any of them is an error. `yields` is required for more than one product.
+All arguments after the component pair are keyword arguments (note the `;`
 in the signatures above), though the examples also work with `,` because Julia
 accepts trailing keyword arguments either way.
+
+The reaction you get back holds its data in the fields `rxn.reactant` (an `Int`),
+`rxn.order` (a `Float64`), `rxn.products` (a `(component, yield)` tuple per
+product), `rxn.A`, `rxn.E`, `rxn.heat`, `rxn.T_min`, `rxn.T_max`, `rxn.gate_width`
+and `rxn.basis` (`NaN` when none was given).
 
 ---
 
@@ -142,20 +155,18 @@ stoichiometries you supply. Mass is conserved when the product yields sum to one
 Σ_products ν_{i,j} = 1.0
 ```
 
-For the single-product form, the lone product automatically gets yield `1.0`, so
-mass balance is trivially satisfied. For the two-product form, your `yields`
-tuple must sum to `1.0`:
+A lone product takes the default `yields = (1.0,)`, so mass balance is trivially
+satisfied. With several products your `yields` tuple must sum to `1.0`:
 
 ```julia
-yields = (0.2, 0.8)   # 0.2 + 0.8 = 1.0  ✓  (mass conserved)
-yields = (0.2, 0.7)   # 0.2 + 0.7 = 0.9  ✗  (validate_mass throws an error)
+yields = (0.2, 0.8)        # 0.2 + 0.8 = 1.0        ✓  (mass conserved)
+yields = (0.2, 0.5, 0.3)   # 0.2 + 0.5 + 0.3 = 1.0  ✓  (three products)
+yields = (0.2, 0.7)        # 0.2 + 0.7 = 0.9        ✗  (ArgumentError)
 ```
 
-When `validate_mass = true` (the default), the constructor runs an internal
-stoichiometry check and **throws an error at construction time** if the masses do
-not balance. This catches typos before you ever solve. You can pass
-`validate_mass = false` to skip the check (not recommended — it lets mass
-conservation silently break).
+The constructor always checks the yields against the product count and the mass
+balance, and **raises an `ArgumentError` at construction time** on a violation.
+This catches typos before you ever solve.
 
 The species source assembled per cell is the stoichiometric sum
 `S_j = Σ_i ν_{i,j} r_i` (kg·m⁻³·s⁻¹), with the reactant carrying `−r_i` and each
@@ -228,7 +239,7 @@ naming the reaction, when:
 - a positive reference is below `1e-12` of the cell's condensed mass, or `basis` is
   below `1e-6`;
 - the mesh has more than one dimension;
-- the solve has `deactivation = true`, or a `correction` (Technical Reference §6.10).
+- the solve has a `correction` (Technical Reference §6.10).
 
 A reaction whose reactant has no initial mass anywhere in its lineage is
 **inactive**: it never runs, and needs no row.
@@ -299,9 +310,8 @@ used at all temperatures.
 
 **Figure 13. The three-step wood example (schematic).** This is the reaction tuple immediately below: each arrow consumes exactly one component and its two product yields sum to one. Yields are per kilogram of the current step’s reactant, so complete conversion gives 0.5624 kg of char and 0.4376 kg of gases per kilogram of virgin wood. The package convention is $h>0$ for endothermic consumption and $h<0$ for exothermic release. Intermediate components are explicit state inventories, not additional reactants to a single reaction.
 
-The current implementation supports **single-reactant reactions only**
-(`NRin == 1`). Each `Reaction` consumes exactly one component. Attempting to apply
-a multi-reactant reaction is rejected by problem validation. This means you cannot
+Each reaction has **one reactant** by construction: the pair `reactant => products`
+names exactly one component on its left. This is a modelling limit. You cannot
 write a bimolecular reaction such as `char + O₂ → ...` as a single `Reaction` with
 two reactants.
 
@@ -615,43 +625,33 @@ material = Material(
 ```
 
 A material can also have **no reactions** — pass `reactions = ()` (the default) for
-a pure heat-conduction problem. `Material(...)` resolves symbolic reactions (a
-name that matches no component throws) into `Reaction`s, whose constructor
-checks the mass balance; integer component indices are range-checked when
-`solve` validates the problem (§3.7). Chapter 3 covers the rest of the
-`Material` constructor (components, mixing rules, lateral-shrinkage law).
+a pure heat-conduction problem. `Material(...)` resolves a reaction given by
+component names (a name that matches no component throws); integer component
+indices are range-checked when `solve` validates the problem (§3.7). Chapter 3
+covers the rest of the `Material` constructor (components, mixing rules,
+lateral-shrinkage law).
 
 ---
 
 ## 4.12 Validating reactions
 
-One helper lets you check mass balance explicitly, beyond the automatic
-check at construction. It is **not** part of the top-level `Pyrolysis`
-exports — reach it through its submodule as
-`Pyrolysis.Materials.verify_stoichiometry`, or bring it into scope with
-`using Pyrolysis.Materials: verify_stoichiometry`.
+The constructor validates every reaction, whichever way its components are given,
+and raises an `ArgumentError` on any of:
 
-**`verify_stoichiometry(rxn; tol=1e-10) -> Bool`** confirms that a single
-reaction's product yields sum to 1.0 (within `tol`). It returns `true` when
-balanced and issues a warning and returns `false` otherwise:
+- a `yields` tuple whose length differs from the product count;
+- a negative yield, or yields that do not sum to 1.0 within `1e-10`;
+- a negative order `n`;
+- a `gate_width` that is not finite and positive;
+- a `basis` outside `(0, 1]`, or a `basis` at first order.
 
 ```julia
-using Pyrolysis.Materials: verify_stoichiometry
-
-rxn = Reaction(:charring, 1 => (2, 3);
-               A = 1e15, E = 200e3, h = 500e3, yields = (0.25, 0.75))
-verify_stoichiometry(rxn)   # true: 0.25 + 0.75 = 1.0
-
-all(verify_stoichiometry, material.reactions)   # every reaction of a material
+Reaction(:charring, 1 => (2, 3); A = 1e15, E = 200e3, h = 500e3, yields = (0.25, 0.70))
+# ERROR: ArgumentError: Reaction :charring violates the mass balance: the yields sum to 0.95, not 1
 ```
 
-It takes a resolved `Reaction`: a reaction built with symbols is a
-`PendingReaction` until `Material(...)` resolves it, so check the material's
-`reactions` (or use the index form) rather than the symbolic object itself.
-
-It is a diagnostic: mass conservation is enforced by the single-reactant
-construction convention (§4.3), not by a projection during the solve, so the
-check is for catching setup mistakes. See Technical Reference §6.8.
+Mass conservation is enforced by the single-reactant construction convention
+(§4.3), not by a projection during the solve, so the check is for catching setup
+mistakes. See Technical Reference §6.8.
 
 ---
 
@@ -665,9 +665,6 @@ using Pyrolysis
 # `reaction_rate` lives in the Physics submodule and is exported from it, but is
 # not re-exported at the top level — bring it into scope explicitly.
 using Pyrolysis.Physics: reaction_rate
-# `verify_stoichiometry` is not exported at all; reach it through the Materials
-# submodule.
-using Pyrolysis.Materials: verify_stoichiometry
 
 # Three components: virgin solid, char residue, gas product.
 virgin = SolidComponent(:virgin, ρ = 1190, φ=.01, c = 1420, k = 0.21, ε = 0.86, λ=1e-5)
@@ -683,10 +680,6 @@ rxn_spec = Reaction(:decomposition, :virgin => (:char, :MMA);
 
 material = Material(name = :PMMA, components = (virgin, char, gas), reactions = (rxn_spec,))
 rxn = material.reactions[1]                          # the resolved reaction
-
-# Verify mass balance.
-@assert verify_stoichiometry(rxn)                  # 0.002 + 0.998 = 1.0
-@assert all(verify_stoichiometry, material.reactions)
 
 # Evaluate the rate at one cell state (concentrations in kg/m³, T in K).
 T_cell = 700.0
@@ -713,9 +706,9 @@ volume, since the component masses are the states; see Technical Reference §6.7
   `A·exp(−E/R_gT)·ξ_ref·xⁿ` on the conversion otherwise, `A` in s⁻¹ for every order,
   times the limiter's onset, with smooth `T_min`/`T_max` gates of width
   `gate_width` and a heat of reaction `h`.
-- Reference components by **symbol** (recommended) or integer index; product
-  `yields` must sum to **1.0**, enforced at construction unless
-  `validate_mass = false`.
+- Reference components by **symbol** (recommended) or integer index; a reaction
+  has any number of products, and its `yields`, one per product, must sum to
+  **1.0**, enforced at construction.
 - **Sign convention: `h > 0` is endothermic, `h < 0` is exothermic** — opposite
   to ThermaKin; flip the sign when porting ThermaKin parameters.
 - Only **single-reactant** reactions are supported; build multi-step schemes as
@@ -736,7 +729,6 @@ volume, since the component masses are the states; see Technical Reference §6.7
   `conversion_threshold`; a cell that would keep 1 % or more of its volume, as a
   char layer does, is not tested and stays (§7.3.3, §10.4, Technical Reference
   §6.10). Without deactivation a cell that empties stalls the solve there.
-- Re-check a reaction's mass balance with `verify_stoichiometry`.
 
 For the mathematics behind the rate law, the smooth gates, the depletion limiter,
 the stoichiometric sources, and the heat-source assembly, see Technical Reference

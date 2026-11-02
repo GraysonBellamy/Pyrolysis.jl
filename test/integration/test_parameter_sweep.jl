@@ -8,7 +8,7 @@ using Pyrolysis.Integration
 const _SWEEP = quote
     using Pyrolysis
     _sweep_problem(q) = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 8),
+        mesh = uniform_mesh(0.01, 8),
         material = Material(;
             name = :inert,
             components = (SolidComponent(:s, ρ = 1000.0, c = 1000.0, k = 0.2),),
@@ -46,7 +46,7 @@ const _GRID = [1e3, 5e3, 1e4]
     whole = parameter_sweep(base, _GRID[1:1]; modify = Main._sweep_modify, reltol = 1e-8)
     @test only(whole) isa Pyrolysis.Outputs.PyrolysisSolution
     @test only(whole).surface_T ≈ Integration.solve(base; reltol = 1e-8).surface_T
-    @test_throws ArgumentError parameter_sweep(base, _GRID; parallel = false)
+    @test_throws UndefKeywordError parameter_sweep(base, _GRID; parallel = false)
 end
 
 # An ablating solid heated at the top, its pre-exponential factor `A` the
@@ -66,7 +66,7 @@ function _ablator_material(A)
 end
 
 _ablator_problem(A) = PyrolysisProblem(
-    mesh = create_uniform_mesh(3e-3, 8),
+    mesh = uniform_mesh(3e-3, 8),
     material = _ablator_material(A),
     bc_set = BoundaryConditionSet(
         thermal = (top = HeatFluxBC(2.8e6), bottom = AdiabaticBC()),

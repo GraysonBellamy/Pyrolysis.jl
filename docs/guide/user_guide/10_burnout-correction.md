@@ -89,12 +89,12 @@ material = Material(
 L_pmma, L_kw, n_pmma = 5.9e-3, 12e-3, 30
 dz = L_pmma / n_pmma
 n_kw = round(Int, L_kw / dz)
-mesh = create_uniform_mesh((n_pmma + n_kw) * dz, n_pmma + n_kw)
+mesh = uniform_mesh((n_pmma + n_kw) * dz, n_pmma + n_kw)
 z_if = n_kw * dz
 
 bcs = BoundaryConditionSet(
     thermal = (
-        top = RadiativeFluxBC(flux = 50e3, absorptivity = 0.96) +
+        top = RadiativeFluxBC(50e3, absorptivity = 0.96) +
               RadiativeBC(ε = 0.96, T_inf = 298.0) +
               ConvectiveBC(h = 8.2, T_inf = 298.0),
         bottom = RadiativeBC(ε = 1.0, T_inf = 298.0),
@@ -136,7 +136,6 @@ Kaowool cell, and the solve runs on to 600 s heating the bare substrate.
 | `band` | `nothing` | `ε_band`, in `[threshold, 1)`: on a moving mesh, the contiguous cells around a crossing cell below this fraction of their initial condensed mass go with a cell that crosses the threshold (§10.4). `nothing` gives `max(threshold, 0.1)` when the equidistribution correction moves some layer, `threshold` otherwise. |
 | `correction` | `nothing` | The mesh velocity relative to the solid on a moving mesh (§10.5). `nothing` installs the equidistribution correction by the rule of §10.5.1. |
 | `lagrangian` | `nothing` | Node ids that always move with the solid, the layer interfaces. `nothing` gives, under an equidistribution correction, every interior node between cells that start with different condensed components. |
-| `located_events` | `true` | Locate each event inside the step at the threshold crossing (§10.6). |
 | `use_ale` | `false` | Move the mesh with the solid (node positions and velocities enter the state). |
 | `min_thickness` | `1e-6` | [m] On a moving mesh, end the solve when the live thickness falls below this (§10.3). Must be positive. |
 
@@ -166,12 +165,11 @@ slot) and, on a moving mesh,
 decides the correction (§10.5.1). `solve` then adds to the integrator's
 callbacks:
 
-1. a **located deactivation event** (with `located_events = true`), a
-   continuous callback on the smallest threshold margin of the live cells
-   (§10.6);
+1. a **located deactivation event**, a continuous callback on the smallest
+   threshold margin of the live cells (§10.6);
 2. an **end-of-step event**, which deactivates every cell below the threshold
-   at the end of an accepted step: the only event without `located_events`,
-   and with it the safety net for a crossing the location does not see;
+   at the end of an accepted step, the safety net for a crossing the location
+   does not see;
 3. on a moving mesh under the equidistribution correction, the **layer-time
    event**, which sets each layer's equidistribution time at its first
    activation (§10.5.3);
@@ -251,8 +249,8 @@ still held when the first crossed the threshold; the band must exceed it
 the mass-loss rate shows a short burst just after the event, whose
 convergence under refinement is part of the envelope (§10.9).
 
-`sol(t)` and `interpolate_solution(sol, t)` reconstruct the fields at `t`
-with the mask and the tables of the last event at or before `t`, and refuse a `t` strictly
+`sol(t)` reconstructs the fields at `t`
+with the mask and the tables of the last event at or before `t`, and refuses a `t` strictly
 inside a saving interval that an event separates, since the integrator's
 interpolant there is not the trajectory; read the saved states on either
 side instead (Chapter 9).
@@ -397,8 +395,8 @@ On a moving mesh the nodes move with the solid velocity plus a correction,
 `w = v_s + c`. With `c = 0` (`NoCorrection()`) the mesh is Lagrangian: each
 cell keeps its solid, and the cells of a layer thin at their own rates, the
 hottest first. The **equidistribution correction** moves the interior nodes
-of a vanishing layer relative to the solid, toward the thicker (or heavier)
-cell, so that the layer's cells thin together and reach the threshold close
+of a vanishing layer relative to the solid, toward the thicker cell, so that
+the layer's cells thin together and reach the threshold close
 together; the inventories then cross the faces at the relative velocity
 `−c`, by an upwind flux with a limited reconstruction (Technical
 Reference §11). The balance rows hold the solid velocity `w − c` to each
@@ -409,13 +407,13 @@ At an interior node `n` of a layer of `n_layer` cells, between cell `n − 1`
 (inward) and cell `n`,
 
 ```
-c_n = ā_n n_layer² (𝓜̃_n Δz_n − 𝓜̃_{n−1} Δz_{n−1}) / τ_eq
+c_n = ā_n n_layer² (Δz_n − Δz_{n−1}) / τ_eq
 ```
 
-which relaxes `𝓜̃ Δz` toward a common value over the layer in about
-`τ_eq/π²`, whatever `n_layer`. `Δz_i` is the thickness of cell `i`, `𝓜̃_i` its
-normalized monitor (one by default, §10.5.4), `ā_n` the node's activation
-(§10.5.2) and `τ_eq` the layer's equidistribution time (§10.5.3).
+which relaxes `Δz` itself toward a common value over the layer in about
+`τ_eq/π²`, whatever `n_layer`. `Δz_i` is the thickness of cell `i`, `ā_n` the
+node's activation (§10.5.2) and `τ_eq` the layer's equidistribution time
+(§10.5.3).
 
 ### 10.5.1 The installation rule
 
@@ -501,15 +499,11 @@ c.time, c.set_at                         # ([617.88…], [97.07…]) on the deck
 | `fallback` | `720.0` s (`EQUIDISTRIBUTION_TIME`) | the time before the estimate, and of a layer that thins too slowly or thickens |
 | `floor` | `1.0` | the slowest thinning that gives an estimate, in initial thicknesses over the horizon |
 
-### 10.5.4 The monitor and the layers
+### 10.5.4 The layers
 
-`EquidistributionCorrection(; monitor = (α_M, β_M))` sets the monitor
-`𝓜 = α_M + β_M ρ_c/ρ_ref`, with `ρ_c` a cell's condensed mass per volume and `ρ_ref`
-the largest initial one over the mesh, divided by its mean over the layer's
-cells at the start; the default `(1.0, 0.0)` equidistributes thickness alone.
-A positive `β_M` weights the heavier cells, for a layer whose density varies
-across it. `layers = :all` moves every layer, including those that cannot
-vanish, for decks that exercise the correction itself.
+`layers = :vanishing`, the default, moves only the layers deactivation can
+remove. `layers = :all` moves every layer, including those that cannot vanish,
+for decks that exercise the correction itself.
 
 ### 10.5.5 Choosing a correction yourself
 
@@ -521,7 +515,6 @@ sol = solve(problem; use_ale = true, deactivation = true, radiation_model = BEER
             correction = EquidistributionCorrection(
                 τ = ActivationTime(λ = 1.8),   # or a number [s]: one time for every layer
                 activation = (0.3, 0.1),       # (r_hi, r_lo)
-                monitor = (1.0, 0.0),          # (α_M, β_M)
                 layers = :vanishing))
 
 # The Lagrangian mesh: each cell keeps its solid.
@@ -529,9 +522,9 @@ sol = solve(problem; use_ale = true, deactivation = true, radiation_model = BEER
             correction = NoCorrection())
 ```
 
-`EquidistributionCorrection` refuses a non-positive `τ`, an activation
-without `0 < r_lo < r_hi`, and a monitor without `α_M > 0` and `β_M ≥ 0`; any
-correction other than `NoCorrection()` needs `use_ale = true`. Under
+`EquidistributionCorrection` refuses a non-positive `τ` and an activation
+without `0 < r_lo < r_hi`; any correction other than `NoCorrection()` needs
+`use_ale = true`. Under
 `NoCorrection()` the band defaults to the threshold, so only the cells
 already below the threshold go in an event, one invocation to a cell or so: a tail
 handed to a receiver delays it past its inward neighbour, so cells leave from under
@@ -541,17 +534,18 @@ empties that cell first beneath a skin, and the solve ends there: the model has 
 to carry heat across a pocket (§10.7). The correction is what carries such a layer
 through burnout in one event.
 
-`w_override = (x, t) -> w` prescribes every node's velocity instead, moving
-the mesh over a solid at rest; it is a verification device (the material
-must not react) and cannot be combined with deactivation.
+`correction = PrescribedCorrection(w)`, with `w(x, t)` a function of the node
+position and time, prescribes every node's velocity, moving the mesh over a
+solid at rest; it is a verification device (the material must not react) and
+cannot be combined with deactivation.
 
 ---
 
 ## 10.6 Located events
 
-With `located_events = true` (the default) a deactivation event is located
-inside the step: a continuous callback watches the smallest margin of a live
-cell's condensed mass over its threshold, `(m − ε_m m_ref)/(ε_m m_ref)`, and
+A deactivation event is located inside the step: a continuous callback watches
+the smallest margin of a live cell's condensed mass over its threshold,
+`(m − ε_m m_ref)/(ε_m m_ref)`, and
 the event is applied at the interpolated state at its first downward root.
 There the crossing cell holds exactly its threshold, so the tests of §10.4
 are widened by the relative tolerance (`1 + reltol` times `ε_m` and
@@ -562,14 +556,9 @@ of a cell above the band stays.
 
 Location makes the event time converge with the tolerance and puts the
 event on the trajectory, which is what makes a deactivation time a smooth
-function of the parameters (§10.2.5). The end-of-step event remains as a
-safety net: it catches a cell that dips below the threshold and recovers
-inside one step, which the downward-root search does not see.
-
-`located_events = false` keeps only the end-of-step event: the cells below
-the threshold at the end of an accepted step go there. The event then lags
-the crossing by up to a step (on the deck of §10.2.1, 315.90 s against
-315.55 s located).
+function of the parameters (§10.2.5). The end-of-step event is the safety net:
+it takes the cells below the threshold at the end of an accepted step, for a
+crossing the downward-root search does not see.
 
 After every event the integrator restarts with the step its policy names:
 the default Rodas5P policy proposes its initial-step estimate at the state
@@ -587,12 +576,12 @@ the strict test, `:Success` only.
 
 | `retcode` | `outcome` | `succeeded` | Meaning |
 |---|---|---|---|
-| `:Success` | `:running` | `true` | The solve reached the end of `tspan`, with or without deactivations. |
+| `:Success` | `:none` | `true` | The solve reached the end of `tspan`, with or without deactivations. |
 | `:Terminated` | `:burned_out` | `true` | The last live cell went; its inventories are written to the last event as lost. |
 | `:Terminated` | `:min_thickness` | `true` | The live thickness of a moving mesh fell below `min_thickness` (§10.3). |
 | `:Terminated` | `:interior` | `false` | A cell below the threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one; the solve warns and ends. |
 | `:DtLessThanMin` | `:pore_closure` | `false` | The domain test kept rejecting a cell whose porosity left the resolved pore domain until the step fell below `dtmin`: on a moving mesh a thinning cell's pore volume falls to its own uncertainty before the cell reaches the threshold. Tighter tolerances resolve it (§10.2.1). |
-| `:Failure` | `:running` | `false` | The state after an event was inadmissible (a receiver outside its own mass tolerances, crossed nodes, a cell at or below absolute zero, under gas transport a porosity outside `[0, 1]`), or no consistent node velocities exist after it; the solve warns naming the event's time. |
+| `:Failure` | `:none` | `false` | The state after an event was inadmissible (a receiver outside its own mass tolerances, crossed nodes, a cell at or below absolute zero, under gas transport a porosity outside `[0, 1]`), or no consistent node velocities exist after it; the solve warns naming the event's time. |
 
 The state a solve ends on is always saved, whether or not `saveat` names its
 time.
@@ -670,7 +659,6 @@ cases are listed in Technical Reference §18.
 | band `ε_band` | `band` | `0.1` under the correction | `0.1` (narrower bands fail, below) |
 | activation `(r_hi, r_lo)` | `EquidistributionCorrection(activation = …)` | `(0.3, 0.1)` | `(0.3, 0.1)`, `(0.7, 0.3)` |
 | layer time `τ` | `EquidistributionCorrection(τ = …)` | `ActivationTime()`, `λ = 1.8` | the default |
-| event location | `located_events` | `true` | the default |
 | tolerance | `reltol` (`abstol` the case's) | `1e-6` | `1e-6`, `1e-7` |
 | energy form | `energy_state` | `:temperature` | both |
 | cells across the layer | the mesh | — | 30 to 240 (10 to 80 on the 1 mm layer) |
@@ -734,11 +722,11 @@ fraction against the band.
 | `use_ale` | `solve`, `setup` | `false` | 10.2.1 |
 | `correction` | `solve`, `setup` | installed by rule | 10.5.1 |
 | `lagrangian` | `solve`, `setup` | the layer interfaces | 10.5.1 |
-| `located_events` | `solve`, `integrate` | `true` | 10.6 |
 | `min_thickness` | `solve`, `integrate` | `1e-6` m | 10.3 |
-| `EquidistributionCorrection(; τ, activation, monitor, layers)` | exported | `ActivationTime()`, `(0.3, 0.1)`, `(1.0, 0.0)`, `:vanishing` | 10.5 |
+| `EquidistributionCorrection(; τ, activation, layers)` | exported | `ActivationTime()`, `(0.3, 0.1)`, `:vanishing` | 10.5 |
 | `ActivationTime(; λ, fallback, floor)` | exported | `1.8`, `720.0` s, `1.0` | 10.5.3 |
 | `NoCorrection()` | exported | — | 10.5.5 |
+| `PrescribedCorrection(w)` | exported | — | 10.5.5 |
 
 **Key correctness reminders.** Deactivation conserves every component mass
 exactly (on a fixed mesh the dead cell's gas is vented and recorded) and the

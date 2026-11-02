@@ -30,7 +30,7 @@ function _verification_case_vgt05()
             ),
         )
         PyrolysisProblem(
-            mesh = create_uniform_mesh(0.002, n),
+            mesh = uniform_mesh(0.002, n),
             material = mat,
             T_initial = reference.T,
             ξ_initial = [
@@ -57,7 +57,7 @@ function _verification_case_vgt05()
     end
     flux_error(sol) = abs(get_boundary_exchange(sol, :top).fluxes[1, end]/reference.flux-1)
     profile_error(sol) =
-        maximum(abs.(get_pressure(sol)[:, end] .- reference.p.(get_cell_positions(sol))))/1e5
+        maximum(abs.(sol.gas.pressure[:, end] .- reference.p.(sol.cell_centers[:, end])))/1e5
     qois=sol->[
         QoIResult(
             name = "integrated nonisothermal wall resistance",
@@ -73,8 +73,8 @@ function _verification_case_vgt05()
         ),
         QoIResult(
             name = "linear thermal field",
-            value = maximum(abs.(sol.T[:, end] .- reference.T.(get_cell_positions(sol)))),
-            error = maximum(abs.(sol.T[:, end] .- reference.T.(get_cell_positions(sol)))),
+            value = maximum(abs.(sol.T[:, end] .- reference.T.(sol.cell_centers[:, end]))),
+            error = maximum(abs.(sol.T[:, end] .- reference.T.(sol.cell_centers[:, end]))),
             tol = 1e-8,
         ),
     ]
@@ -97,8 +97,8 @@ function _verification_case_vgt05()
                     series = [
                         CurveSeries(
                             label = "finite volume",
-                            x = get_cell_positions(sol),
-                            y = get_pressure(sol)[:, end],
+                            x = sol.cell_centers[:, end],
+                            y = sol.gas.pressure[:, end],
                             exact = reference.p,
                         ),
                     ],

@@ -1,7 +1,7 @@
 using Test
 using StaticArrays
 using Pyrolysis
-using Pyrolysis.Problem: initial_fields, cell_centers, validate_problem, is_valid_problem
+using Pyrolysis.Problem: initial_fields, cell_centers, validate_problem
 using Pyrolysis.Problem: step_profile, linear_profile, gaussian_profile, tanh_profile
 using Pyrolysis.Materials: n_components
 using Pyrolysis.Meshes: Mesh, line_mesh, box_mesh
@@ -49,7 +49,7 @@ _problem(mesh; material = _material(), kw...) = PyrolysisProblem(;
 )
 
 # The cell values the old mesh's initial-condition application wrote for these
-# profiles on `create_stretched_mesh(0.01, 7, 1.15)`, recorded from it.
+# profiles on `stretched_mesh(0.01, 7, 1.15)`, recorded from it.
 const _T_RECORDED = [
     300.81152818041426,
     335.68691935063157,
@@ -65,16 +65,13 @@ const _Ξ_RECORDED = [
 ]
 
 @testset "problem construction: the arguments kept, the conditions and output times filled" begin
-    mesh = create_uniform_mesh(0.01, 20)
+    mesh = uniform_mesh(0.01, 20)
     material = _material()
     keyword = PyrolysisProblem(; mesh, material, bc_set = _BCS, tspan = (0.0, 10.0))
     @test keyword.mesh === mesh
     @test keyword.material === material
     @test keyword.tspan == (0.0, 10.0)
     @test n_components(keyword.material) == 2
-    positional = PyrolysisProblem(mesh, material, _BCS, (0.0, 10.0))
-    @test positional.mesh === mesh && positional.material === material
-    @test positional.tspan == (0.0, 10.0)
 
     # A set given only the top's thermal condition: an adiabatic bottom and
     # impermeable faces.
@@ -89,7 +86,6 @@ const _Ξ_RECORDED = [
     @test partial.bc_set.mass.top isa ImpermeableBC
     @test partial.bc_set.mass.bottom isa ImpermeableBC
     @test validate_problem(partial)
-    @test is_valid_problem(partial)
 
     # Without output times, times from the start to the end of the span.
     auto = PyrolysisProblem(; mesh, material, bc_set = _BCS, tspan = (0.0, 100.0))
@@ -98,26 +94,26 @@ const _Ξ_RECORDED = [
     @test last(auto.output_times) == 100.0
 
     # Both display forms name the type, the material and its components.
-    text = sprint(show, positional)
+    text = sprint(show, keyword)
     @test occursin("PyrolysisProblem", text)
     @test occursin("inert", text)
     @test occursin("20 cells", text)
-    full = sprint(show, MIME("text/plain"), positional)
+    full = sprint(show, MIME("text/plain"), keyword)
     @test occursin("PyrolysisProblem", full)
     @test occursin("Material: inert", full)
     @test occursin("Components: 2", full)
 end
 
 @testset "initial fields: the profiles at the cell centres" begin
-    mesh = create_stretched_mesh(0.01, 7, 1.15)
-    T0, ξ0 = initial_fields(_problem(mesh), mesh)
+    mesh = stretched_mesh(0.01, 7, 1.15)
+    T0, ξ0 = initial_fields(_problem(mesh))
     @test T0 == _T_RECORDED
     @test ξ0 == _Ξ_RECORDED
     z = [p[1] for p in mesh.positions]
     @test cell_centers(mesh) == [(z[i] + z[i+1]) / 2 for i = 1:7]
     # Radial meshes evaluate at the same midpoints.
-    radial = create_stretched_mesh(0.01, 7, 1.15; coordinates = Cylindrical())
-    @test initial_fields(_problem(radial), radial) == (T0, ξ0)
+    radial = stretched_mesh(0.01, 7, 1.15; coordinates = Cylindrical())
+    @test initial_fields(_problem(radial)) == (T0, ξ0)
 
     # On more dimensions at the centroids, as `SVector`s.
     box = box_mesh([0.0, 1.0, 3.0], [0.0, 2.0]; fixed = true)
@@ -126,14 +122,14 @@ end
         T_initial = x -> 300.0 + x[1] + 10x[2],
         ξ_initial = [x -> 1000.0 * x[1], x -> 0.0],
     )
-    T2, ξ2 = initial_fields(q, box)
+    T2, ξ2 = initial_fields(q)
     @test cell_centers(box) ≈ [SVector(0.5, 1.0), SVector(2.0, 1.0)]
     @test T2 ≈ [310.5, 312.0]
     @test ξ2 ≈ [500.0 2000.0; 0.0 0.0]
 end
 
 @testset "the set-up state holds the initial fields at the cell centres" begin
-    mesh = create_stretched_mesh(0.01, 7, 1.15)
+    mesh = stretched_mesh(0.01, 7, 1.15)
     z = [p[1] for p in mesh.positions]
     V = diff(z)
     problem = _problem(mesh)
@@ -173,11 +169,9 @@ end
 end
 
 @testset "validation on the native mesh: the same refusals" begin
-    mesh = create_uniform_mesh(0.01, 20)
+    mesh = uniform_mesh(0.01, 20)
     good = _problem(mesh)
     @test validate_problem(good)
-    @test is_valid_problem(good)
-    @test validate_problem(good; strict = true)
 
     # The mesh: a position per node, finite.
     short = Mesh(mesh.topology, mesh.positions[1:(end-1)])
@@ -242,7 +236,7 @@ end
     @test occursin("physical pore volume", err)
     @test occursin("raw φ", err)
     @test occursin("pore", err)
-    @test !is_valid_problem(darcy(z -> 500.0))
+    @test_throws ErrorException validate_problem(darcy(z -> 500.0))
     @test_throws ErrorException validate_problem(darcy(z -> 0.0))
     # An intrinsic density gives the matrix its pore space; a region that
     # starts at it is still refused.
@@ -299,10 +293,9 @@ end
         _problem(mesh; material = charring, ξ_initial = [z -> 500.0, z -> 0.0, z -> 0.0]),
     )
 
-    # Strict: the initial conditions must evaluate at a cell centre.
+    # The initial conditions must evaluate at a cell centre.
     throwing = _problem(mesh; T_initial = z -> error("no temperature"))
     @test_throws ErrorException validate_problem(throwing)
-    @test_throws ErrorException validate_problem(throwing; strict = true)
 
     # The solve validates by default.
     @test_throws ErrorException Pyrolysis.Integration.solve(
@@ -325,7 +318,7 @@ end
         reactions = reactive ? (Reaction(:ablate, 1 => 2; A = 1e10, E = 1e5, h = 1e6),) : ()
         return Material(; name = :ablation, components = (solid, gas), reactions)
     end
-    mesh = create_uniform_mesh(0.01, 10)
+    mesh = uniform_mesh(0.01, 10)
     deck(material) = _problem(mesh; material, ξ_initial = [z -> 1000.0, z -> 0.0])
     @test_throws ArgumentError ablating(λ_solid = nothing)
     # Explicitly closed wall and Darcy channels are legal, including a sealed
@@ -336,42 +329,16 @@ end
     @test_logs validate_problem(deck(ablating(reactive = false)))
 end
 
-@testset "unsupported stoichiometry cannot pass validation" begin
-    for reactants in ((), ((1, 1.0), (2, 1.0)))
-        rxn = Reaction(
-            :unsupported,
-            reactants,
-            ((2, 1.0),),
-            1.0,
-            0.0,
-            Pyrolysis.Materials.to_property(0.0),
-            0.0,
-            Inf,
-        )
-        @test isnan(Pyrolysis.Materials.mass_balance_error(rxn))
-        @test_logs (:warn, r"unverifiable mass balance") @test !Pyrolysis.Materials.verify_stoichiometry(
-            rxn,
-        )
-        material = Material(
-            name = :unsupported,
-            components = _material().components,
-            reactions = (rxn,),
-        )
-        problem = _problem(create_uniform_mesh(0.01, 2); material)
-        @test_throws r"requires exactly one reactant" validate_problem(problem)
-    end
-    balanced = Reaction(:balanced, 1 => 2; A = 1.0, E = 0.0, h = 0.0)
-    @test Pyrolysis.Materials.verify_stoichiometry(balanced)
-    unbalanced = Reaction(
+@testset "a reaction that does not conserve mass is refused" begin
+    balanced =
+        Reaction(:balanced, 1 => (1, 2); A = 1.0, E = 0.0, h = 0.0, yields = (0.2, 0.8))
+    @test sum(last, balanced.products) == 1.0
+    @test_throws ArgumentError Reaction(
         :unbalanced,
         1 => (1, 2);
         A = 1.0,
         E = 0.0,
         h = 0.0,
         yields = (0.2, 0.9),
-        validate_mass = false,
-    )
-    @test_logs (:warn, r"mass balance error") @test !Pyrolysis.Materials.verify_stoichiometry(
-        unbalanced,
     )
 end

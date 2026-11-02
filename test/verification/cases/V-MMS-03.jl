@@ -8,7 +8,7 @@
 #
 #   w*(z, t) = (ṡ/s)·z,   s(t) = 1 − 0.15·(1 − cos(2πt/20)),  z_i(t) = z_i(0)·s(t)
 #
-# through the solve's `w_override` hook. The mesh moves over a solid at rest
+# through a `PrescribedCorrection`. The mesh moves over a solid at rest
 # and every inventory, T's energy with it, crosses the faces at the
 # mesh-relative velocity, so the Eulerian manufactured sources — evaluated at
 # the cell centers — make the fields exact on the moving mesh (see
@@ -61,7 +61,7 @@ function _verification_case_vmms03()
 
     function build(n_cells)
         mat = make_material()
-        mesh = create_uniform_mesh(L, n_cells)
+        mesh = uniform_mesh(L, n_cells)
         # Manufactured BC fluxes must be evaluated at the MOVING boundary:
         # the top face sits at z_top(t) = L·s(t) (bottom pinned at 0), so the
         # fixed-L helpers do not apply here.
@@ -97,7 +97,7 @@ function _verification_case_vmms03()
         problem,
         fields;
         use_ale = true,
-        w_override = w_star,
+        correction = PrescribedCorrection(w_star),
         energy_state = VERIFICATION_ENERGY_STATE,
         kwargs...,
     )

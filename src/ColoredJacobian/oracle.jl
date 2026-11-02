@@ -11,7 +11,12 @@ Every column is differentiated, without the pattern or the coloring, in
 batches of the colored Jacobian's width, so both evaluate the residual at one
 dual-number type at every mesh size.
 """
-function dense_jacobian(def::CoreDefinition, ws::CoreWorkspace, u::AbstractVector, t)
+function dense_jacobian(
+    def::ResidualDefinition,
+    ws::ResidualWorkspace,
+    u::AbstractVector,
+    t,
+)
     backend = AutoForwardDiff(; chunksize = _chunk_width(color_count(def)))
     du = zeros(length(u))
     return DifferentiationInterface.jacobian(

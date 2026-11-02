@@ -109,17 +109,17 @@ The residual is a pure function of the state and the time, parameterized by an
 immutable definition and a set of buffers:
 
 ```julia
-residual!(du, u, def::CoreDefinition, t, ws::CoreWorkspace) -> nothing
+residual!(du, u, def::ResidualDefinition, t, ws::ResidualWorkspace) -> nothing
 ```
 
-- `def::CoreDefinition` (`src/Assembly/definition.jl`) holds the state layout;
+- `def::ResidualDefinition` (`src/Assembly/definition.jl`) holds the state layout;
   the state setup (the topology, the material, the caloric laws of its
   components, the per-cell reference data, the caloric extension of the
   enthalpy form, and the gas transport the problem needs); the kernels, a tuple
   in assembler order; the mesh closure (`nothing` on a fixed mesh); and the
   external sources (`NoSources()`, or `VolumetricSources` for manufactured
   solutions).
-- `ws::CoreWorkspace` holds the buffers of one evaluation: the derived state
+- `ws::ResidualWorkspace` holds the buffers of one evaluation: the derived state
   (`DerivedState`, the quantities the state mapping produces) and the kernel
   contributions (`Contributions`) with `Float64` elements, their twins for every
   dual-number element type automatic differentiation evaluates the residual at
@@ -146,7 +146,7 @@ so one set-up problem serves one integration at a time; `integrate` resets both
 at its start.
 
 `setup(problem; …)` builds the definition, the buffers and everything else the
-integrator needs into a `CoreProblem` (`src/Integration/setup.jl`): the problem,
+integrator needs into a `PreparedProblem` (`src/Integration/setup.jl`): the problem,
 `def`, `ws`, the initial state `u0` (the masses $m_{j,i}=\xi_j(z^c_i)V_i$ and the
 energy state from $T(z^c_i)$ at the cell centres, the algebraic unknowns made
 consistent, §15.4), the relative tolerance and the absolute-tolerance vector
@@ -284,7 +284,7 @@ differential unknowns: the face intensities by the recurrence; under a variable
 cross section, one residual pass for the strain and history rates, the area and
 lateral rate from the column sums, and a second pass at the consistent lateral
 rate; then the node velocities by one sweep (one pass is exact, since the
-corrections read positions and masses only) or the multipliers by one solve. A
+corrections read positions only) or the multipliers by one solve. A
 closure row left above $10^{-10}$ of its scale is an error. `setup` calls it at
 $t_0$, and the deactivation event calls its parts after every transfer
 (§14.3.5); the integrator itself runs no initialization (`initializealg =
@@ -332,7 +332,7 @@ callback machinery raises before every discrete callback's `affect!`.
 | `kencarp4_policy(ls)` | `KenCarp4`, an ESDIRK method with Newton stage solves, the raw (unsmoothed) error estimate | `:solver_chosen` | kept |
 | `fbdf_policy(ls)` | `FBDF`, variable-order backward differentiation | `:forced_dt` | cleared |
 
-`ls` is the linear solver (§15.10). Every policy takes the Jacobian from the
+`ls` is the linear solver, by default `default_linear_solver()` (§15.10). Every policy takes the Jacobian from the
 colored one and the time derivative of the right-hand side, where the method
 needs it, by finite differences (`autodiff = AutoFiniteDiff()`). The restarts:
 `:solver_chosen` keeps the integrator's own proposal; `:forced_dt` proposes
@@ -345,9 +345,8 @@ re-evaluates the derivative at the accepted state; `:clear` clears it, so a
 read-only observer is numerically inert. `Rodas5P` rebuilds its Jacobian every
 step and is indifferent to the flag; `FBDF` with the flag raised restarts at
 order one on every step, and after an event it restarts at order one, hence the
-forced small step. `solve` takes a policy through `integrator_policy` and a
-linear solver through `linear_solver`; without either it uses
-`default_policy(StructuredKLU())`.
+forced small step. `solve` takes a policy through `integrator_policy`; without
+one it uses `default_policy()`, whose linear solver is `StructuredKLU()`.
 
 ### 15.5.2 The W matrix and the stage solves
 
@@ -392,7 +391,7 @@ fixed-signature function wrapper (§15.5.7) and is assembled into one
 | Callback | Kind | Role |
 |---|---|---|
 | step observer | discrete, every accepted step | records the largest constraint residual of the accepted states; ends the solve with `ReturnCode.Failure` and a warning once the domain test gave up (§15.5.4) or a fixed step left the domain; applies the Newton-failure step cap (§15.5.5); applies the flag rule |
-| located deactivation | continuous, on the threshold margin (`deactivation`, `located_events`) | §14.3.5 |
+| located deactivation | continuous, on the threshold margin (`deactivation`) | §14.3.5 |
 | deactivation safety net | discrete, every accepted step (`deactivation`) | §14.3.5 |
 | layer times | continuous, on the activation margin (every moving mesh) | sets the layers' equidistribution times (§14.2.2) |
 | thickness stop | continuous, on the live thickness minus `min_thickness` (moving mesh) | ends the solve with outcome `:min_thickness` |
@@ -743,9 +742,9 @@ union, and that repeated solves are bit-identical under `StructuredKLU()`,
 LinearSolve's `KLUFactorization()` and `UMFPACKFactorization()`, on fixed and
 moving meshes and under in-depth radiation (`test/integration/test_policies.jl`).
 
-Another LinearSolve factorization is selected with `linear_solver` (for example
-`UMFPACKFactorization()`), which `solve` passes to the default policy, or by
-passing a policy built with it (`integrator_policy = fbdf_policy(KLUFactorization())`).
+Another LinearSolve factorization is selected by passing a policy built with it
+(`integrator_policy = default_policy(UMFPACKFactorization())`,
+`integrator_policy = fbdf_policy(KLUFactorization())`).
 The linear solve is a sparse direct factorization; the package configures no
 iterative solver or preconditioner.
 
@@ -783,7 +782,7 @@ conductivities of the neighbours' neighbours), one otherwise.
   its cell's masses and energy state (through the strain rate), the area and the
   lateral rate, and under an equidistribution correction what the corrections
   of its cell's two nodes read: the positions of the nodes of the cells beside
-  it and, when the monitor reads the masses, those cells' masses.
+  it.
 - **A multiplier row** reaches the multipliers of the cells that share a node
   with its cell, the positions of their nodes, and its cell's masses and energy
   state; a **deformation-gradient row** also reaches the velocities of its
@@ -882,11 +881,11 @@ material = Material(
     reactions = (Reaction(:pyrolysis, 1 => 2, A = 8.5e12, E = 188e3, h = 870e3),),
 )
 problem = PyrolysisProblem(
-    mesh = create_uniform_mesh(1e-3, 12),
+    mesh = uniform_mesh(1e-3, 12),
     material = material,
     bc_set = BoundaryConditionSet(
         thermal = (
-            top = RadiativeFluxBC(flux = 100e3) + RadiativeBC(T_inf = 300.0),
+            top = RadiativeFluxBC(100e3) + RadiativeBC(T_inf = 300.0),
             bottom = AdiabaticBC(),
         ),
         mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),

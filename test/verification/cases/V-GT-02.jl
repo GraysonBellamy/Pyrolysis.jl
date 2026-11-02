@@ -61,7 +61,7 @@ function _verification_case_vgt02()
             depletion_limiter = DepletionLimiter(enabled = false),
         )
         ξ_g0 = background_gas_concentration(mat, 2, (1000.0, 0.0), T_iso; P = P∞)
-        mesh = create_uniform_mesh(L, n_cells)
+        mesh = uniform_mesh(L, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(T_iso), bottom = DirichletThermalBC(T_iso)),
             mass = (
@@ -93,13 +93,13 @@ function _verification_case_vgt02()
             ),
         ]
         mat = sol.problem.material
-        z = get_cell_positions(sol)
+        z = sol.cell_centers[:, end]
         μ = mat.gas_viscosity(T_iso)
         ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
         P²_exact(zz) = P∞^2 + ΔP²_coeff * (L^2 - zz^2)
         ΔP²_scale = ΔP²_coeff * L^2  # back-face overpressure² scale
 
-        P_num = get_pressure(sol)[:, end]
+        P_num = sol.gas.pressure[:, end]
 
         err_P² = maximum(abs(P_num[i]^2 - P²_exact(z[i])) / ΔP²_scale for i in eachindex(z))
         push!(
@@ -160,10 +160,10 @@ function _verification_case_vgt02()
     # L∞ of the P² profile (normalized) for the order check, at t_end.
     function p2_error(sol)
         mat = sol.problem.material
-        z = get_cell_positions(sol)
+        z = sol.cell_centers[:, end]
         μ = mat.gas_viscosity(T_iso)
         ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
-        P=get_pressure(sol)[:, end]
+        P=sol.gas.pressure[:, end]
         maximum(abs.(P .^ 2 .- (P∞^2 .+ ΔP²_coeff .* (L^2 .- z .^ 2))))/(ΔP²_coeff*L^2)
     end
 
@@ -197,10 +197,10 @@ function _verification_case_vgt02()
             qoi_curves = (:P2_profile, :exit_flux_history),
             curves = sol -> begin
                 mat = sol.problem.material
-                z = get_cell_positions(sol)
+                z = sol.cell_centers[:, end]
                 μ = mat.gas_viscosity(T_iso)
                 ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
-                P_num = get_pressure(sol)[:, end]
+                P_num = sol.gas.pressure[:, end]
                 [
                     ReportCurve(
                         name = :P2_profile,
@@ -234,10 +234,10 @@ function _verification_case_vgt02()
             end,
             error_norms = sol -> begin
                 mat = sol.problem.material
-                z = get_cell_positions(sol)
+                z = sol.cell_centers[:, end]
                 μ = mat.gas_viscosity(T_iso)
                 ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
-                P = get_pressure(sol)[:, end]
+                P = sol.gas.pressure[:, end]
                 e = map(eachindex(z)) do i
                     (P[i]^2 - (P∞^2 + ΔP²_coeff * (L^2 - z[i]^2))) / (ΔP²_coeff * L^2)
                 end

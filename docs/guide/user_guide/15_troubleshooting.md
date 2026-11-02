@@ -34,7 +34,7 @@ they end the solve.
 sol = solve(problem; use_ale = true, deactivation = true)
 
 sol.retcode        # :Success, :Terminated, :Failure, :DtLessThanMin, :MaxIters, …
-sol.outcome        # :running, :burned_out, :min_thickness or :interior
+sol.outcome        # :none, :burned_out, :min_thickness or :interior
 succeeded(sol)     # :Success, or :Terminated by a complete burnout or the thickness stop
 completed(sol)     # :Success only: the solve reached tspan[2]
 ```
@@ -42,7 +42,7 @@ completed(sol)     # :Success only: the solve reached tspan[2]
 | `retcode` | Meaning | Typical cause | See |
 |---|---|---|---|
 | `:Success` | reached `tspan[2]` | — | — |
-| `:Terminated` | an event ended the solve | the last live cell deactivated (outcome `:burned_out`); a moving mesh thinner than `min_thickness` (`:min_thickness`); on a fixed mesh, a cell below the deactivation threshold inward of a live one (`:interior`); a `terminate!` in a callback of yours (outcome `:running`) | §15.4 |
+| `:Terminated` | an event ended the solve | the last live cell deactivated (outcome `:burned_out`); a moving mesh thinner than `min_thickness` (`:min_thickness`); on a fixed mesh, a cell below the deactivation threshold inward of a live one (`:interior`); a `terminate!` in a callback of yours (outcome `:none`) | §15.4 |
 | `:Failure` | the solve's own checks ended it | more than 50 consecutive proposals rejected on a constraint residual; an inadmissible state, or no consistent node velocities, after a deactivation event; an inadmissible state accepted by a fixed-step solve | §15.3, §15.4.4 |
 | `:DtLessThanMin` | the step fell below `dtmin` (default `1e-12` s) | every proposal rejected: a cell driven to absolute zero, a trajectory leaving the physical domain | §15.3.2 |
 | `:MaxIters` | the step count reached `maxiters` (default `1_000_000`) | a step size that collapsed long before the end | §15.3 |
@@ -50,7 +50,7 @@ completed(sol)     # :Success only: the solve reached tspan[2]
 
 | `outcome` | Set when | `succeeded(sol)` |
 |---|---|---|
-| `:running` | neither the deactivation nor the thickness stop ended the solve (it reached the end, failed, or a callback of yours ended it) | `true` only with `:Success` |
+| `:none` | neither the deactivation nor the thickness stop ended the solve (it reached the end, failed, or a callback of yours ended it) | `true` only with `:Success` |
 | `:burned_out` | the last live cell deactivated | `true` |
 | `:min_thickness` | on a moving mesh, the distance from the back node to the outermost live node fell below `min_thickness` | `true` |
 | `:interior` | a cell below its threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one | `false` |
@@ -99,11 +99,11 @@ time, and a solve that fails ends on the last state the integrator accepted.
 why:
 
 ```julia
-k = n_timesteps(sol)                 # the last saved state
+k = length(sol.t)                 # the last saved state
 sol.t[k]                             # where the solve stopped [s]
 get_profile(sol, :T, k)              # cell temperatures [K], NaN in a dead cell
 get_profile(sol, :m, k)              # component masses, NC × n_cells [kg]
-get_cell_positions(sol; at = k)      # cell centres [m], NaN in a dead cell
+sol.cell_centers[:, k]      # cell centres [m], NaN in a dead cell
 sol.extras.live_cells[k]             # cells still live
 ```
 
@@ -129,12 +129,11 @@ message names the remedy.
 
 ### 15.2.1 Keywords
 
-`solve` accepts exactly the keywords of its reference table (§16.7) and refuses
-any other with an `ArgumentError`:
+`solve` accepts exactly the keywords of its reference table (§16.7); any other is an
+ordinary Julia `MethodError`:
 
 ```julia
-solve(problem; tstops = [10.0])
-# ArgumentError: solve(): unknown keyword `tstops`
+solve(problem; tstops = [10.0])   # MethodError: solve has no keyword `tstops`
 ```
 
 It also refuses an `energy_state` other than `:temperature` or `:enthalpy`, a
@@ -163,7 +162,7 @@ a combination it does not implement:
 | `the lateral shrinkage law must be positive and finite on [-0.001, 1.001]`; `… must equal one at zero conversion` | a law that vanishes or is not one at `χ̄ = 0` | a law such as `χ̄ -> 1 - 0.3χ̄` |
 | `a correction moves the mesh relative to the solid, which needs use_ale = true` | a `correction` other than `NoCorrection()` on a fixed mesh | `use_ale = true` |
 | `reaction :r has an order other than one, whose cells must keep their material, … give no correction` | a `correction` with a reaction of order other than one | give no correction (§4.14) |
-| `a prescribed mesh velocity needs use_ale = true`, and its siblings | `w_override` on a fixed mesh, on a reacting material, with `deactivation`, or with a `correction` | `w_override` is a verification hook (§16.7) |
+| `a prescribed mesh velocity needs use_ale = true`, and its siblings | `PrescribedCorrection` on a fixed mesh, on a reacting material, or with `deactivation` | `PrescribedCorrection` is a verification hook (§16.7) |
 | `the cells beside node(s) … start with different condensed components: give the layer interfaces as lagrangian nodes …` | an explicit `lagrangian` list that omits a layer interface under the equidistribution correction | leave `lagrangian` at its default, which lists the interfaces, or add them |
 | `the mass conditions name the tag :x, which the mesh does not have` | a mass condition keyed by a tag the mesh lacks | key the conditions by the mesh's tags |
 
@@ -187,8 +186,8 @@ The constructors reject a deck before a problem exists:
   constant `ρ`.
 - **Material.** `gas_viscosity` must be positive and finite at 200, 300, 500,
   800, 1200 and 1800 K.
-- **Reaction.** The order `n ≥ 0`, `gate_width > 0`, yields `≥ 0` summing to one
-  (`validate_mass = false` drops the sum check only).
+- **Reaction.** The order `n ≥ 0`, `gate_width > 0`, one yield per product, yields
+  `≥ 0` summing to one.
 - **Mixing.** `MixingSpec(CARMAN_KOZENY)` needs a positive `length_scale`;
   `TableProperty` needs strictly increasing temperatures.
 
@@ -250,8 +249,7 @@ its own equation and `a` the absolute tolerance of its unknown, so tightening
 
 After more than 50 consecutive constraint rejections
 (`Pyrolysis.Integration.MAX_CONSTRAINT_REJECTIONS`) the solve ends with
-`:Failure` and the warning of §15.1.3. A custom loop sets the bound with
-`integrate(cp; max_constraint_rejections = …)` (Chapter 11). On a solve that
+`:Failure` and the warning of §15.1.3. On a solve that
 completes, `sol.statistics.largest_constraint_residual` reports the largest
 scaled residual over the accepted states; one or below passes.
 
@@ -296,7 +294,7 @@ The number of invocations per vanishing layer is reported, not a criterion of
 correctness.
 
 The integrator's interpolant on the step that ends at an event is not the
-trajectory, so `sol(t)` and `interpolate_solution(sol, t)` refuse a time
+trajectory, so `sol(t)` refuses a time
 strictly between two saved states that an event separates, with an
 `ArgumentError` naming the event. Read such a time from the saved states, or
 save it with `saveat`.
@@ -335,7 +333,7 @@ crawls, raise `threshold`, which lets the cell leave thicker, or `reltol`, or
 
 ### 15.4.4 Inadmissible or inconsistent states after an event
 
-Two warnings end a burnout run with `:Failure`, the outcome left `:running`:
+Two warnings end a burnout run with `:Failure`, the outcome left `:none`:
 
 - "the state after deactivating cell(s) at t = … is inadmissible": the receiver,
   holding the merged inventories, fails admissibility against its own
@@ -519,7 +517,7 @@ corrections `c = w − v_s` at the saved times are `sol.correction_velocity`
 cells that start with different condensed components: those layer interfaces
 are Lagrangian nodes, listed by default. A layered deck should therefore put
 nodes on its interfaces, so that each cell starts with one composition;
-`create_mesh_from_nodes` builds such a mesh (Chapter 6, Chapter 10).
+`line_mesh` builds such a mesh (Chapter 6, Chapter 10).
 
 ### 15.8.3 Mass-loss rate under a variable cross section
 
@@ -533,20 +531,18 @@ that tracks `A(t)/A_0` is being read from the wrong one.
 ## 15.9 Radiation surprises
 
 The radiation model is the `radiation_model` keyword of `solve` (default
-`NO_RADIATION`).
+`SURFACE_ABSORPTION`).
 
 ### 15.9.1 Model selection
 
 | Model | An incident `RadiativeFluxBC` | Absorption coefficients `α_j` | Rows added |
 |---|---|---|---|
-| `NO_RADIATION` | its absorbed share enters the surface energy balance | not read | none |
-| `SURFACE_ABSORPTION` | the same | not read | none |
+| `SURFACE_ABSORPTION` | its absorbed share enters the surface energy balance | not read | none |
 | `BEER_LAMBERT` | absorbed in depth through the face intensities; it contributes nothing to the surface balance | read | one face intensity per node (algebraic); on a fixed mesh these make the system a mass-matrix DAE |
 
-`NO_RADIATION` and `SURFACE_ABSORPTION` treat an incident flux identically: the
-absorbed share `a·q` (the condition's `absorptivity`, or the exposed cell's
-mixture absorptivity) enters the surface balance. `BEER_LAMBERT` needs planar
-coordinates.
+Under `SURFACE_ABSORPTION` the absorbed share `a·q` is the condition's
+`absorptivity`, or the exposed cell's mixture absorptivity, times the incident
+flux. `BEER_LAMBERT` needs planar coordinates.
 
 ### 15.9.2 "Nothing absorbs", or "it never burns out"
 
@@ -570,8 +566,7 @@ Choose the model by the optical thickness `τ = α L`:
 | `τ = α·L` | Regime | Model |
 |---|---|---|
 | > 10 | optically thick | `SURFACE_ABSORPTION` |
-| 0.1–10 | semi-transparent | `BEER_LAMBERT` |
-| < 0.1 | transparent | `NO_RADIATION` |
+| < 10 | semi-transparent | `BEER_LAMBERT` |
 
 `SURFACE_ABSORPTION` on a semi-transparent sample concentrates the absorbed flux
 at the surface and overheats it; `BEER_LAMBERT` on an opaque char adds the
@@ -579,7 +574,7 @@ intensity rows and their coupling for no benefit (Technical Reference §8).
 
 ### 15.9.4 Time-varying incident flux
 
-A flux given as a function of time (`RadiativeFluxBC(flux = t -> 25e3 * (1 - exp(-t / 10)))`)
+A flux given as a function of time (`RadiativeFluxBC(t -> 25e3 * (1 - exp(-t / 10)))`)
 is evaluated at every residual evaluation. `solve` has no list of times the
 integrator must step to, so a flux feature shorter than the steps the error
 test would take across it (a short pulse) can be stepped over: bound the step
@@ -590,7 +585,7 @@ scale with the largest incident flux over the time span, sampled at 101 times.
 
 ## 15.10 Gas pressure and surface-solve diagnostics
 
-Use `get_pressure(sol)` and `get_porosity(sol)` for current pore states,
+Use `sol.gas.pressure` and `sol.gas.porosity` for current pore states,
 `get_boundary_exchange(sol,tag)` for signed species exchange and local residuals,
 and `gas_species_audit(sol,recorder)` to separate generation, escape, ingress
 and vented species. Do not rebuild boundary fluxes from initial cell widths.
@@ -623,7 +618,8 @@ grid = [(A = a, E = e) for a in (1e12, 1e13), e in (1.5e5, 2.0e5)]
     m = problem.material
     reaction = Reaction(:decomp, 1 => 2; A = p.A, E = p.E, h = 2e5)
     material = Material(; name = m.name, components = m.components,
-                        reactions = (reaction,), mixing = m.mixing)
+                        reactions = (reaction,), mixing = m.mixing,
+                        gas_viscosity = m.gas_viscosity, gas_transport = m.gas_transport)
     return PyrolysisProblem(; mesh = problem.mesh, material, bc_set = problem.bc_set,
                             T_initial = problem.T_initial, ξ_initial = problem.ξ_initial,
                             tspan = problem.tspan, output_times = problem.output_times)
@@ -663,7 +659,7 @@ Work top to bottom; each item is cheap to try and the early ones dominate.
    per cell and two global rows that read every cell. Use the smallest mesh
    that converges the quantities you need (Technical Reference §18.5 and
    `examples/convergence_douglas_fir.jl`), and grade cells toward the surface
-   with `create_stretched_mesh(L, n, stretch)` rather than refining uniformly.
+   with `stretched_mesh(L, n, stretch)` rather than refining uniformly.
 2. **Tolerances.** `reltol` (default `1e-6`) is the most direct speed knob: it
    scales every row's tolerance but the temperature's, and the constraint test
    with them. `abstol` (default `1e-8`) is the temperature tolerance in kelvin.
@@ -680,8 +676,8 @@ Work top to bottom; each item is cheap to try and the early ones dominate.
 4. **The linear solver.** `StructuredKLU()`, the default, factors the
    integrator's `W` on the entries that have been nonzero at some step of the
    solve rather than on every entry the connectivity allows.
-   `linear_solver = UMFPACKFactorization()` (`using LinearSolve`) is the
-   alternative direct solver.
+   `integrator_policy = default_policy(UMFPACKFactorization())` (`using LinearSolve`)
+   is the alternative direct solver.
 5. **`dtmax`.** The step-size ceiling (default `Inf`) does not speed a solve up.
    Set it when a time-dependent condition has features shorter than the steps
    the error test would take across them (§15.9.4).

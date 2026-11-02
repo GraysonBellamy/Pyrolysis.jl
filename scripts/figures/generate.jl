@@ -35,7 +35,7 @@ function small_problem(; law = nothing)
         lateral_shrinkage_law = law,
     )
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(0.01, 6, 1.1),
+        mesh = stretched_mesh(0.01, 6, 1.1),
         material = material,
         bc_set = BoundaryConditionSet(
             thermal = (

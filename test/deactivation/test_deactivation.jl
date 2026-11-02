@@ -8,7 +8,6 @@ using Pyrolysis.States: StateLayout, state_length
 using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!, buffers
 using Pyrolysis.Deactivation
-using Pyrolysis.Deactivation: ConservativeTransfer
 using Pyrolysis.Closures:
     NoCorrection,
     EquidistributionCorrection,
@@ -68,12 +67,12 @@ function _ablator(
         lateral_shrinkage_law = law,
         gas_transport = LumpedTransfer(; endpoint),
     )
-    heated = something(top, radiating ? RadiativeFluxBC(flux = q) : HeatFluxBC(q))
+    heated = something(top, radiating ? RadiativeFluxBC(q) : HeatFluxBC(q))
     thermal =
         from_bottom ? (top = AdiabaticBC(), bottom = heated) :
         (top = heated, bottom = AdiabaticBC())
     return PyrolysisProblem(
-        mesh = something(mesh, create_uniform_mesh(L, n)),
+        mesh = something(mesh, uniform_mesh(L, n)),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = thermal,
@@ -131,7 +130,7 @@ function _on_substrate(n_top, n_bottom; L_top = 2e-3, L_bottom = 1e-3)
         range(L_bottom, L_bottom + L_top, length = n_top + 1)[2:end],
     )
     return PyrolysisProblem(
-        mesh = create_mesh_from_nodes(z),
+        mesh = line_mesh(z),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(5e4), bottom = AdiabaticBC()),
@@ -289,7 +288,7 @@ _ledger(cp, u, events) =
         _deplete!(u, cp, i, 2 * cells.threshold)
     end
     @test deactivate!(u, cells, def, 1.0) === :transferred
-    @test cells.outcome[] === :running
+    @test cells.outcome[] === :none
     @test [(e.cell, e.receiver) for e in cells.events] == [(8, 3), (7, 3), (6, 3), (5, 3), (4, 3)]
     @test top_live_cell(layout) == 3
 end
@@ -540,7 +539,7 @@ end
     # added, stays; the cell below it inward of a live one goes into the cell
     # beneath it.
     @test deactivate!(u, cells, def, 1.0) === :transferred
-    @test cells.outcome[] === :running
+    @test cells.outcome[] === :none
     @test [e.cell => e.receiver for e in cells.events] == [8 => 6, 7 => 6, 4 => 3]
     @test all(e.fraction < ε_m for e in cells.events)
     # The band of the correction takes the run through the cell below.
@@ -597,7 +596,7 @@ end
     false,
 )
     for stretch_from in (:top, :bottom)
-        mesh = create_stretched_mesh(3e-3, 12, 1.35; stretch_from)
+        mesh = stretched_mesh(3e-3, 12, 1.35; stretch_from)
         cp = setup(
             _ablator(12; mesh);
             use_ale = moving,
@@ -646,7 +645,7 @@ end
     _deplete!(u, cp, 6, 0.5ε_m)
     @test threshold_margin(cells, layout, u) ≈ -0.5 rtol = 1e-12
     @test deactivate!(u, cells, def, 0.3) === :transferred
-    @test cells.outcome[] === :running
+    @test cells.outcome[] === :none
     @test [e.cell => e.receiver for e in cells.events] == [6 => 5]
     fill!(layout.mask, true)
     if moving
@@ -662,7 +661,7 @@ end
             pressure_tolerance = 1e-3,
         )
         @test sol.retcode === :Success
-        @test sol.outcome === :running
+        @test sol.outcome === :none
         @test !isempty(sol.events) && all(e -> e.cell > 3, sol.events)
     end
 end
@@ -710,7 +709,7 @@ function _merge_pair(
     NC = length(components)
     mat = Material(name = :pair, components = components, reactions = ())
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(2.0, 2),
+        mesh = uniform_mesh(2.0, 2),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -728,16 +727,7 @@ function _merge_pair(
         end
         u[energy_index(layout, i)] = s.T
     end
-    Pyrolysis.Deactivation._merge!(
-        u,
-        cp.deactivation,
-        ConservativeTransfer(),
-        cp.def,
-        1,
-        2:2,
-        0.0,
-        1,
-    )
+    Pyrolysis.Deactivation._merge!(u, cp.deactivation, cp.def, 1, 2:2, 0.0, 1)
     ds = cp.ws.derived
     derive!(ds, u, layout, cp.def.setup)
     V = use_ale ? u[position_index(layout, 2)] - u[position_index(layout, 1)] : 1.0
@@ -863,7 +853,7 @@ end
 # balance with the beam absorbed in depth; the lateral column carries the
 # history pair and the cross-section rows, which follow the last node.
 const _surface_balance_top =
-    RadiativeFluxBC(flux = 2.8e6) +
+    RadiativeFluxBC(2.8e6) +
     ConvectiveBC(h = 10.0, T_inf = 300.0) +
     RadiativeBC(T_inf = 300.0)
 const _masked_configurations = (
@@ -1018,7 +1008,7 @@ end
         pressure_tolerance = 1e-3,
     )
     @test sol.retcode === :Success
-    @test sol.outcome === :running
+    @test sol.outcome === :none
     cells = [e.cell for e in sol.events]
     @test length(cells) >= 5
     @test cells == 30:-1:(31-length(cells))
@@ -1135,7 +1125,7 @@ end
     @test sol.outcome === :pore_closure
     @test sol.statistics.domain_rejections > 0
     @test sol.statistics.largest_constraint_residual <= 1
-    @test minimum(filter(isfinite, vec(get_porosity(sol)))) > 0.29
+    @test minimum(filter(isfinite, vec(sol.gas.porosity))) > 0.29
     # Refining the geometric and mass budget resolves the same physical
     # trajectory and permits all four top-down deactivations.
     refined = Integration.solve(
@@ -1239,7 +1229,7 @@ function _staggered_pair()
     )
     L = 2e-3
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L, 2),
+        mesh = uniform_mesh(L, 2),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -1264,27 +1254,24 @@ end
     # The cells' threshold thickness, ε_m h₀, is 1 µm: below it the solve ends
     # by deactivation, not at the default `min_thickness`, whose root would
     # leave the last cell at its threshold to round-off.
-    events(located, reltol) = Integration.solve(
+    events(reltol) = Integration.solve(
         problem;
         use_ale = moving,
         deactivation = true,
         abstol = 1e-2 * reltol,
         reltol,
-        located_events = located,
         min_thickness = 1e-8,
     ).events
-    reference = first(events(true, 1e-9)).t
-    shift(located, reltol) = abs(first(events(located, reltol)).t - reference)
-    located = [shift(true, reltol) for reltol in (1e-5, 1e-6, 1e-7)]
+    reference = first(events(1e-9)).t
+    shift(reltol) = abs(first(events(reltol)).t - reference)
+    located = [shift(reltol) for reltol in (1e-5, 1e-6, 1e-7)]
     @test all(diff(located) .< 0)
-    @test located[1] < shift(false, 1e-5) / 10
-    # The located cell goes at its threshold, the end-of-step event below it.
-    @test all(e -> isapprox(e.fraction, 1e-2; rtol = 1e-12), events(true, 1e-5))
-    @test all(e -> e.fraction < 0.999e-2, events(false, 1e-5))
+    # The located cell goes at its threshold.
+    @test all(e -> isapprox(e.fraction, 1e-2; rtol = 1e-12), events(1e-5))
 end
 
-@testset "location and the end-of-step test deactivate the same cells: $(moving ? "moving" : "fixed") mesh" for moving in
-                                                                                                                (
+@testset "every located invocation holds its crossing cell at the threshold: $(moving ? "moving" : "fixed") mesh" for moving in
+                                                                                                                      (
     true,
     false,
 )
@@ -1295,13 +1282,9 @@ end
         reltol = 1e-6,
         pressure_tolerance = 1e-3,
     )
-    discrete = Integration.solve(_ablator(30); options..., located_events = false)
-    located = Integration.solve(_ablator(30); options..., located_events = true)
-    @test located.retcode === discrete.retcode === :Success
+    located = Integration.solve(_ablator(30); options...)
+    @test located.retcode === :Success
     @test length(located.events) >= 15
-    @test [e.cell for e in located.events] == [e.cell for e in discrete.events]
-    @test [e.invocation for e in located.events] == [e.invocation for e in discrete.events]
-    # Every invocation came from a located root: its crossing cell at the threshold.
     for k in unique(e.invocation for e in located.events)
         fractions = [e.fraction for e in located.events if e.invocation == k]
         @test minimum(fractions) ≈ 1e-2 rtol = 1e-12
@@ -1340,7 +1323,7 @@ end
         integrator -> push!(ends, integrator.t);
         save_positions = (false, false),
     )
-    sol = integrate(cp; u0, located_events = true, callback = probe)
+    sol = integrate(cp; u0, callback = probe)
     @test sol.retcode === :Success
     @test first(sol.events).cell == 4
     @test first(sol.events).t == first(ends)
@@ -1348,31 +1331,13 @@ end
 end
 
 @testset "two crossings in one step are located at their own roots" begin
-    ends = Tuple{Float64,Float64}[]
-    probe = DiscreteCallback(
-        (u, t, integrator) -> true,
-        integrator -> push!(ends, (integrator.tprev, integrator.t));
-        save_positions = (false, false),
-    )
     options = (deactivation = true, abstol = 1e-7, reltol = 1e-5)
-    discrete = Integration.solve(
-        _staggered_pair();
-        options...,
-        located_events = false,
-        callback = probe,
-    )
-    located = Integration.solve(_staggered_pair(); options..., located_events = true)
-    # The end-of-step test takes both cells at the end of one step.
-    @test discrete.outcome === :burned_out
-    @test [e.cell for e in discrete.events] == [2, 1]
-    @test [e.invocation for e in discrete.events] == [1, 1]
-    step = ends[findfirst(s -> s[2] == first(discrete.events).t, ends)]
-    # Location takes each at its own root inside that step.
+    located = Integration.solve(_staggered_pair(); options...)
     @test located.outcome === :burned_out
     @test [e.cell for e in located.events] == [2, 1]
     @test [e.invocation for e in located.events] == [1, 2]
     t1, t2 = (e.t for e in located.events)
-    @test step[1] < t1 < t2 < step[2]
+    @test t1 < t2
     @test all(e -> isapprox(e.fraction, 1e-2; rtol = 1e-12), located.events)
 end
 
@@ -1422,7 +1387,7 @@ end
         end;
         save_positions = (false, false),
     )
-    sol = integrate(cp; located_events = true, callback = probe)
+    sol = integrate(cp; callback = probe)
     @test sol.retcode === :Success
     @test length(results) == length(unique(e.invocation for e in sol.events)) >= 3
     @test [r.t for r in results] == unique(e.t for e in sol.events)
@@ -1460,8 +1425,11 @@ end
         pressure_tolerance = 1e-3,
     )
     klu = Integration.solve(_ablator(30); options...)
-    umfpack =
-        Integration.solve(_ablator(30); options..., linear_solver = UMFPACKFactorization())
+    umfpack = Integration.solve(
+        _ablator(30);
+        options...,
+        integrator_policy = default_policy(UMFPACKFactorization()),
+    )
     @test umfpack.retcode === :Success
     @test [e.cell for e in umfpack.events] == [e.cell for e in klu.events]
     @test [e.t for e in umfpack.events] ≈ [e.t for e in klu.events] rtol = 1e-6
@@ -1479,7 +1447,7 @@ end
     solid = SolidComponent(:a; φ = 0.3, ρ = 500.0, c = 1000.0, k = 0.2, λ = 1e-6, α = 3.0)
     gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02)
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 4),
+        mesh = uniform_mesh(0.01, 4),
         material = Material(
             name = :void,
             components = (solid, gas),
@@ -1489,7 +1457,7 @@ end
             ),
         ),
         bc_set = BoundaryConditionSet(
-            thermal = (top = RadiativeFluxBC(flux = 1e4), bottom = AdiabaticBC()),
+            thermal = (top = RadiativeFluxBC(1e4), bottom = AdiabaticBC()),
             mass = (
                 top = AmbientGasBC(GasReservoir(P = 0.0, T = 600.0)),
                 bottom = ImpermeableBC(),
@@ -1568,7 +1536,7 @@ function _burning(
         SolidComponent(:sub; ρ = 250.0, φ = 0.5, c = 1200.0, k = 0.1, λ = 1e-6, α = 300.0)
     gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02)
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L, n),
+        mesh = uniform_mesh(L, n),
         material = Material(
             name = :burning,
             components = (solid, inert, gas),
@@ -1577,7 +1545,7 @@ function _burning(
         ),
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = radiating ? RadiativeFluxBC(flux = 1000.0) : AdiabaticBC(),
+                top = radiating ? RadiativeFluxBC(1000.0) : AdiabaticBC(),
                 bottom = AdiabaticBC(),
             ),
             mass = (
@@ -1817,10 +1785,10 @@ end
     @test cp.deactivation.tables.origin == 1:5
 end
 
-@testset "location and the end-of-step test take the same cells on an interior crossing" begin
+@testset "a located interior crossing leaves in its pass" begin
     problem = _burning(6; t_end = 6.0)
     fractions = [0.8, 0.05, 0.07, 0.03, 0.06, 0.04]
-    cells(located) = begin
+    root = let
         cp = setup(
             problem;
             use_ale = true,
@@ -1832,10 +1800,8 @@ end
         )
         u = _prepared(cp, fractions)
         consistent_state!(u, cp.def, cp.ws, 0.0)
-        integrate(cp; u0 = u, located_events = located, maxiters = 30_000, dtmin = 1e-14)
+        integrate(cp; u0 = u, maxiters = 30_000, dtmin = 1e-14)
     end
-    discrete, root = cells(false), cells(true)
-    @test [(e.cell, e.receiver) for e in root.events] == [(e.cell, e.receiver) for e in discrete.events]
     @test length(root.events) >= 3
     @test all(
         minimum(e.fraction for e in root.events if e.invocation == k) ≈ 1e-2 for
@@ -1979,7 +1945,7 @@ end
     inert = SolidComponent(:inert; ρ = 500.0, φ = 0.3, c = 1000.0, k = 0.2, λ = 1e-6)
     gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02)
     problem(order) = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 5),
+        mesh = uniform_mesh(0.01, 5),
         material = Material(
             name = :charring,
             components = (a, char, inert, gas),
@@ -2057,7 +2023,7 @@ end
     # The last live cell has no receiver and is read on its condensed mass.
     one_cell = setup(
         PyrolysisProblem(
-            mesh = create_uniform_mesh(0.002, 1),
+            mesh = uniform_mesh(0.002, 1),
             material = problem(0.5).material,
             bc_set = problem(0.5).bc_set,
             T_initial = z -> 600.0,
@@ -2092,7 +2058,7 @@ end
     b = SolidComponent(:b; ρ = 500.0, φ = 0.3, c = 1000.0, k = 0.2, λ = 1e-6)
     gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02)
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 20),
+        mesh = uniform_mesh(0.01, 20),
         material = Material(
             name = :mixed,
             components = (a, b, gas),
@@ -2259,7 +2225,7 @@ end
 @testset "the tables follow a surface removal after an interior one" begin
     problem = _on_mesh(
         _burning(5; k = 0.02, t_end = 0.2),
-        create_mesh_from_nodes([0.0, 0.001, 0.003, 0.006, 0.00601, 0.01101]),
+        line_mesh([0.0, 0.001, 0.003, 0.006, 0.00601, 0.01101]),
     )
     cp = setup(problem; use_ale = true, deactivation = true, correction = NoCorrection())
     layout, cells = cp.def.layout, cp.deactivation
@@ -2292,10 +2258,8 @@ end
     ),
     energy in (:temperature, :enthalpy)
 
-    problem = _on_mesh(
-        _burning(5; k = 0.02, t_end = 0.2),
-        create_uniform_mesh(0.01, 5; coordinates),
-    )
+    problem =
+        _on_mesh(_burning(5; k = 0.02, t_end = 0.2), uniform_mesh(0.01, 5; coordinates))
     cp = setup(
         problem;
         use_ale = true,
@@ -2315,10 +2279,8 @@ end
     :temperature,
     :enthalpy,
 )
-    problem = _on_mesh(
-        _burning(3; k = 0.02, t_end = 0.2),
-        create_mesh_from_nodes([0.0, 0.001, 0.0011, 0.01]),
-    )
+    problem =
+        _on_mesh(_burning(3; k = 0.02, t_end = 0.2), line_mesh([0.0, 0.001, 0.0011, 0.01]))
     cp = setup(
         problem;
         use_ale = true,
@@ -2368,7 +2330,7 @@ end
     # Little of the mass stays, all of the volume.
     (0.01, 5.0, false),
 )
-    problem = _on_mesh(_burning(4; t_end = 0.2), create_uniform_mesh(0.01, 4))
+    problem = _on_mesh(_burning(4; t_end = 0.2), uniform_mesh(0.01, 4))
     problem = PyrolysisProblem(
         mesh = problem.mesh,
         material = _charring(y, ρ_c, 0.5),

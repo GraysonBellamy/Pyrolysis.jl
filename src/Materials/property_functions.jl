@@ -72,24 +72,21 @@ Primarily used for reaction rate constants.
 # Fields
 - `A::T`: Pre-exponential factor
 - `E::T`: Activation energy [J/mol]
-- `T_ref::T`: Reference temperature (for normalization, optional)
 
 # Example
 ```julia
-k = ArrheniusProperty(8.5e12, 188e3, 298.15)
+k = ArrheniusProperty(8.5e12, 188e3)
 k(600.0)  # Returns 8.5e12 * exp(-188000 / (8.314 * 600))
 ```
 """
 struct ArrheniusProperty{T<:Real} <: AbstractPropertyFunction
     A::T       # pre-exponential factor
     E::T       # activation energy [J/mol]
-    T_ref::T   # reference temperature
 end
 
-# Convenience constructors: promote mixed numeric types to a common float type
-# (so e.g. `ArrheniusProperty(8.5e12, 188_000)` with an integer E works).
-ArrheniusProperty(A::Real, E::Real, T_ref::Real = T_REF) =
-    ArrheniusProperty(promote(float(A), float(E), float(T_ref))...)
+# Promote mixed numeric types to a common float type (so e.g.
+# `ArrheniusProperty(8.5e12, 188_000)` with an integer E works).
+ArrheniusProperty(A::Real, E::Real) = ArrheniusProperty(promote(float(A), float(E))...)
 
 """
 	TableProperty{N,T<:Real}
@@ -242,13 +239,7 @@ end
     linear_interpolate(p.temperatures, p.values, property_temperature(Tq))
 
 # Temperature and state evaluation (state ignored for non-state-dependent properties)
-@inline (p::ConstantProperty)(T, ξ) = p.value
-@inline (p::LinearProperty)(T, ξ) = p(T)
-@inline (p::PolynomialProperty)(T, ξ) = p(T)
-@inline (p::ArrheniusProperty)(T, ξ) = p(T)
-@inline (p::CallableProperty)(T, ξ) = p(T)
-@inline (p::SutherlandProperty)(T, ξ) = p(T)
-@inline (p::TableProperty{N,T})(Tq::Real, ξ) where {N,T} = p(Tq)
+@inline (p::AbstractPropertyFunction)(T, ξ) = p(T)
 
 # StateDependentProperty requires both T and ξ
 @inline (p::StateDependentProperty)(T, ξ) = p.func(property_temperature(T), ξ)
@@ -282,11 +273,9 @@ identically_zero(::AbstractPropertyFunction) = false
 """
 	linear_interpolate(xs, ys, x)
 
-Perform linear interpolation in a sorted table.
-Extrapolates using the nearest segment if x is outside the table range.
+Perform linear interpolation in a sorted table, holding the end values outside it.
 """
 @inline function linear_interpolate(xs::NTuple{N,T}, ys::NTuple{N,T}, x::Real) where {N,T}
-    # Handle extrapolation
     if x <= xs[1]
         return ys[1]
     elseif x >= xs[N]

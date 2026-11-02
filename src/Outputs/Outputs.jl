@@ -23,18 +23,10 @@ include("solution.jl")
 include("conservation.jl")
 include("accessors.jl")
 
-export GasDiagnostics,
-    get_porosity,
-    get_pressure,
-    get_partial_pressures,
-    get_intrinsic_gas_densities,
-    get_gas_composition,
-    get_boundary_exchange,
-    gas_species_audit
+export GasDiagnostics, get_gas_composition, get_boundary_exchange, gas_species_audit
 export PyrolysisSolution, SolutionExtras, SolverStatistics
-export get_times, get_temperatures, get_concentrations, get_gas_generation_rate
-export n_timesteps, succeeded, completed
-export get_profile, get_cell_positions, interpolate_solution, interior_events
+export succeeded, completed
+export get_profile, interior_events
 export ConservationRecorder, conservation_audit, ledger_rates, live_inventories
 
 end # module Outputs

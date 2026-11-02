@@ -1,6 +1,6 @@
 # Verification suite report
 
-Verification and regression checks for Pyrolysis.jl use analytical,
+Verification checks for Pyrolysis.jl use analytical,
 manufactured and independent conservation constraints as identified in
 each case. The report includes error norms, tolerances with provenance,
 and observed convergence orders where available. Burnout histories without

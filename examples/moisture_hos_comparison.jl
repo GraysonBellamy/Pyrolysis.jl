@@ -355,11 +355,11 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
     ρ_DF_initial = ρ_DF_oven_dry / (1 + mc_db * ρ_DF_oven_dry / 1000.0)
     ρ_moisture_initial = mc_db * ρ_DF_initial
 
-    mesh = create_uniform_mesh(sample_thickness, n_cells)
+    mesh = uniform_mesh(sample_thickness, n_cells)
 
     bc_set = BoundaryConditionSet(
         thermal = (
-            top = RadiativeFluxBC(flux = 50000.0) +
+            top = RadiativeFluxBC(50000.0) +
                   RadiativeBC(T_inf = 300) +
                   ConvectiveBC(h = 10.0, T_inf = 300),
             bottom = AdiabaticBC(),

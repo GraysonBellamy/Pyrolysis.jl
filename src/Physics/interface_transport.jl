@@ -82,15 +82,6 @@ struct LocalTransportTag end
     end
 end
 
-"""
-    bounded_transport_root(f, x0; tolerance=5e-13, maxiters=60)
-
-Newton solve of a dimensionless local residual on the nonnegative orthant.
-A merit-function line search and a relative trust bound keep trials in the
-physical root domain. A converged residual and nonsingular local Jacobian
-are required; exhaustion raises `TransportFailure`. This is a local root
-qualification, not a theorem of global uniqueness for arbitrary material data.
-"""
 # Equilibrate equations and unknowns before solving or estimating condition.
 # A trace-species flux can be many orders smaller than its derivative with
 # respect to pressure. Dividing its equation by that flux is a useful residual
@@ -116,6 +107,15 @@ qualification, not a theorem of global uniqueness for arbitrary material data.
     return (matrix = row_scaled ./ transpose(columns), rows = rows, columns = columns)
 end
 
+"""
+    bounded_transport_root(f, x0; tolerance=5e-13, maxiters=60)
+
+Newton solve of a dimensionless local residual on the nonnegative orthant.
+A merit-function line search and a relative trust bound keep trials in the
+physical root domain. A converged residual and nonsingular local Jacobian
+are required; exhaustion raises `TransportFailure`. This is a local root
+qualification, not a theorem of global uniqueness for arbitrary material data.
+"""
 function bounded_transport_root(
     f::F,
     x0::S;

@@ -35,7 +35,8 @@ grid = [(A = a, E = e) for a in (1e12, 1e13), e in (1.5e5, 2.0e5)]
 	m = problem.material
 	reaction = Reaction(:decomp, 1 => 2; A = p.A, E = p.E, h = 2e5)
 	material = Material(; name = m.name, components = m.components,
-	                    reactions = (reaction,), mixing = m.mixing)
+	                    reactions = (reaction,), mixing = m.mixing,
+	                    gas_transport = m.gas_transport)
 	return PyrolysisProblem(; mesh = problem.mesh, material, bc_set = problem.bc_set,
 	                        T_initial = problem.T_initial, ξ_initial = problem.ξ_initial,
 	                        tspan = problem.tspan, output_times = problem.output_times)
@@ -46,9 +47,9 @@ results = parameter_sweep(problem, grid; modify, extract)
 ```
 """
 function parameter_sweep(
-    problem::PyrolysisProblem{<:Mesh},
+    problem::PyrolysisProblem,
     grid;
-    modify::Function = _default_sweep_modify,
+    modify::Function,
     extract::Function = identity,
     parallel::Bool = nworkers() > 1,
     solve_kwargs...,
@@ -57,10 +58,3 @@ function parameter_sweep(
     points = collect(grid)
     return parallel ? pmap(work, points) : map(work, points)
 end
-
-_default_sweep_modify(_, _) = throw(
-    ArgumentError(
-        "parameter_sweep needs `modify = (problem, point) -> problem`, which builds " *
-        "the problem of each grid point",
-    ),
-)

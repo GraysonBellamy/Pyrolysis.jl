@@ -113,7 +113,7 @@ function problem_for(kind, n; t_end = 80.0, outputs = 3, solid_λ = nothing, flu
         )
     end
     thermal = (
-        top = RadiativeFluxBC(flux = flux) +
+        top = RadiativeFluxBC(flux) +
               RadiativeBC(T_inf = 300.0) +
               ConvectiveBC(h = 10.0, T_inf = 300.0),
         bottom = AdiabaticBC(),
@@ -127,7 +127,7 @@ function problem_for(kind, n; t_end = 80.0, outputs = 3, solid_λ = nothing, flu
             bottom = ImpermeableBC(),
         ) : (top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)), bottom = ImpermeableBC())
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, n),
+        mesh = uniform_mesh(0.01, n),
         material = mat,
         bc_set = BoundaryConditionSet(; thermal, mass),
         tspan = (0.0, t_end),

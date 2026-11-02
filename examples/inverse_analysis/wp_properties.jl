@@ -539,8 +539,7 @@ const WP_T_EMIT_REP = 700.0
 #                                            the 1D column is the centerline)
 #     F_sample,avg (disk-avg)   = 0.565
 #     F_gauge (Schmidt-Boelter) = 0.586
-# The earlier 0.656 was the standard-25 mm-spacing value and too high for the
-# 40 mm CAPA gap. F_sample,avg/F_gauge ≈ 0.96 means the sample averages ~4% less
+# F_sample,avg/F_gauge ≈ 0.96 means the sample averages ~4% less
 # than the gauge-nominal flux (it overhangs the ~66 mm aperture); that radial
 # non-uniformity is a CENTERLINE-vs-MLR modeling choice and is deliberately NOT
 # folded into q_ext here (the centerline column sees ≈ nominal).
@@ -700,20 +699,9 @@ const WP_STAGE3_BOUNDS =
 # WHY THE 30 kW OUTLIER — it is a CONVERSION mismatch, not a shrinkage one.
 # The forward model predicts χ̄ = 0.648 at 30 kW, but the sample only lost
 # 52.3% of its dry mass (χ̄_exp = 0.523): the kinetics over-pyrolyze at low
-# flux. The PREVIOUS calibration anchored on the *simulated* χ̄
-# (0.648/0.723/0.746), which collapses all three anchors onto one line
-# (s_r² = 0.807, RMS 0.0004, "30× under noise") — but that tightness was
-# partly circular: s_r² silently absorbed the model's 30 kW conversion bias.
-# Anchoring on measured mass instead makes s_r² independent of the model's own
-# χ̄; the cost is the now-visible 30 kW misfit, which correctly flags the
-# kinetics rather than hiding it. Because the runtime law is still driven by
-# the model's χ̄, the change to forward-model geometry is tiny (≈0.3% in
-# diameter at every flux). If/when the low-flux kinetics are corrected so
-# χ̄_sim → χ̄_exp, re-examine this fit.
-#
-# Note on the original single-anchor fit (s_r² = 0.778): used χ̄_anchor ≈ 0.65
-# from end-of-test residue 23.8% on the R1 sample only (D_0 = 69.62); the
-# multi-replicate D_0 average is 69.50.
+# flux. Anchoring on measured mass keeps s_r² independent of the model's own
+# χ̄, at the cost of a visible 30 kW misfit, which flags the kinetics. If the
+# low-flux kinetics are corrected so χ̄_sim → χ̄_exp, re-examine this fit.
 #
 # Axial thickness is NOT separately modeled or "out of scope" — it is the
 # emergent remainder L_f/L₀ = (V_f/V₀)/(A_f/A₀), with V from the density model

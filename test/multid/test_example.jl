@@ -74,7 +74,7 @@ function _example(;
         range(0.0, 0.01; length = ny + 1);
         transform = distorted ? _inside : identity,
     )
-    top = heated ? RadiativeFluxBC(flux = 5e4) + RadiativeBC(T_inf = 300.0) : AdiabaticBC()
+    top = heated ? RadiativeFluxBC(5e4) + RadiativeBC(T_inf = 300.0) : AdiabaticBC()
     return PyrolysisProblem(
         mesh = mesh,
         material = material,
@@ -184,7 +184,11 @@ end
     @test_throws ArgumentError setup(p; radiation_model = BEER_LAMBERT)
     @test_throws ArgumentError setup(_example(material = _wood(λ = 1e-5)))
     @test_throws ArgumentError setup(p; use_ale = true, closure = :balance)
-    @test_throws ArgumentError setup(p; use_ale = true, w_override = (x, t) -> 0 * x)
+    @test_throws ArgumentError setup(
+        p;
+        use_ale = true,
+        correction = PrescribedCorrection((x, t) -> 0 * x),
+    )
     @test_throws ArgumentError setup(p; use_ale = true, closure = :lagrangian)
     @test_throws ArgumentError setup(
         p;
@@ -294,7 +298,7 @@ end
     @test maximum(abs, c.r_multiplier) <= 1e-12 * maximum(abs, c.θ .* ds.V_eval)
 
     line = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 3),
+        mesh = uniform_mesh(0.01, 3),
         material = _wood(),
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),

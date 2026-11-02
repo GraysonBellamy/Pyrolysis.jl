@@ -8,7 +8,7 @@ Jacobian is, how to choose the energy state, how to switch on the optional
 physics (a moving mesh, radiation, cell deactivation), how callbacks and the
 conservation recorder are wired in, how output is saved, and how to read the
 return code and the outcome. Every keyword shown here is a real `solve`
-keyword: `solve` refuses an unknown keyword with an `ArgumentError`, so a typo
+keyword: an unknown keyword is an ordinary Julia `MethodError`, so a typo
 never passes silently. The physics behind these options is derived in the
 Technical Reference; this chapter tells you which knob to turn and what each
 one does. The temporal integration, the differential-algebraic system and the
@@ -24,7 +24,7 @@ keywords:
 ```julia
 using Pyrolysis
 
-solution = solve(problem)   # all defaults: Rodas5P, StructuredKLU, fixed mesh, no radiation
+solution = solve(problem)   # all defaults: Rodas5P, StructuredKLU, fixed mesh, surface absorption
 ```
 
 That call validates the problem (`validate_problem`), builds the problem the
@@ -47,10 +47,10 @@ The full keyword set, with defaults, is:
 
 | Keyword | Default | What it controls |
 |---|---|---|
-| `integrator_policy` | `nothing` → `default_policy(linear_solver)` (`Rodas5P`) | Integrator with its restart and flag rules; §8.2 |
-| `linear_solver` | `nothing` → `StructuredKLU()` | Linear solve of the default policy; §8.4 |
+| `integrator_policy` | `default_policy()` (`Rodas5P`, `StructuredKLU()`) | Integrator with its restart and flag rules and its linear solver; §8.2, §8.4 |
 | `abstol` | `1e-8` | Temperature tolerance [K]; the other rows derive theirs (§8.3) |
 | `reltol` | `1e-6` | Relative tolerance of every row; §8.3 |
+| `pressure_tolerance` | `1.0` | Absolute local pressure-error budget [Pa] of the gas rows; §7.5.2 |
 | `threshold` | `1e-2`; with `deactivation` at an order other than one `conversion_threshold/10` | `ε_m`, the deactivation threshold as a fraction of a cell's reference; also scales the mass, position and velocity tolerances; §8.3, §8.9 |
 | `maxiters` | `1_000_000` | Maximum number of integrator steps; §8.3 |
 | `dt` | `problem.dt_initial` | First step [s] (the fixed step with `adaptive = false`); also the time scale of the node-velocity tolerances; §8.3 |
@@ -60,25 +60,20 @@ The full keyword set, with defaults, is:
 | `energy_state` | `:temperature` | Energy variable per cell, `:temperature` or `:enthalpy`; §8.6 |
 | `use_ale` | `false` | Moving mesh; §8.7 |
 | `min_thickness` | `1e-6` | End a moving-mesh solve when the live thickness falls below it [m]; §8.7, §8.9 |
-| `correction` | `nothing` → by rule | Mesh correction (`NoCorrection()`, `EquidistributionCorrection(...)`); §8.7, Chapter 10 |
+| `correction` | `nothing` → by rule | Mesh correction (`NoCorrection()`, `EquidistributionCorrection(...)`, `PrescribedCorrection(w)`); §8.7, Chapter 10 |
 | `lagrangian` | `nothing` → the layer interfaces | Node ids that always move with the solid; §8.7 |
-| `w_override` | `nothing` | Prescribed mesh velocity `w(x, t)` over a solid at rest (verification); §8.7 |
-| `radiation_model` | `NO_RADIATION` | `NO_RADIATION`, `SURFACE_ABSORPTION` or `BEER_LAMBERT`; §8.8 |
+| `radiation_model` | `SURFACE_ABSORPTION` | `SURFACE_ABSORPTION` or `BEER_LAMBERT`; §8.8 |
 | `deactivation` | `false` | Deactivate burned-out cells during the solve; §8.9 |
 | `band` | `nothing` → 0.1 under a moving correction, else `threshold` | `ε_band`, the near-threshold band; §8.9 |
-| `located_events` | `true` | Locate each deactivation inside the step; §8.9 |
 | `callback` | `nothing` | Your callbacks and `ConservationRecorder`s; §8.10 |
 | `progress` | `false` | Draw a progress bar; §8.10 |
 | `saveat` | `problem.output_times` | Saved times (a vector, or a spacing); §8.12 |
-| `validate` | `true` | Run `validate_problem` before solving; §8.11 |
 | `sources` | `NoSources()` | External volumetric sources (verification); §8.11 |
 
-The authoritative list is `Pyrolysis.Integration._SOLVE_KEYWORDS`; anything
-else is refused before any work is done:
+An unknown keyword is an ordinary Julia `MethodError`:
 
 ```julia
-solve(problem; jacobian = 1)
-# ERROR: ArgumentError: solve(): unknown keyword `jacobian`
+solve(problem; jacobian = 1)   # MethodError: solve has no keyword `jacobian`
 ```
 
 `solve` always returns a `PyrolysisSolution`; see Chapter 9 for its fields and
@@ -113,7 +108,8 @@ OrdinaryDiffEq algorithm together with two rules that belong to its contract.
   discrete callback of yours) leaves the steps unchanged (§8.10).
 
 Four policy constructors are exported. Each takes the linear solver as its
-argument:
+argument `ls`, with `default_linear_solver()`, which is `StructuredKLU()`, as the
+default:
 
 | Constructor | Method | Restart | Observer flag |
 |---|---|---|---|
@@ -295,21 +291,18 @@ appeared.
 
 Two other sparse direct factorizations from LinearSolve.jl are accepted and
 tested: `UMFPACKFactorization()` and `KLUFactorization()` (plain KLU on `W`'s
-own structure). Pass one either through `linear_solver`, which configures the
-default policy, or as the argument of a policy constructor:
+own structure). Pass one as the argument of a policy constructor:
 
 ```julia
 using LinearSolve: UMFPACKFactorization
 
-solve(problem; linear_solver = UMFPACKFactorization())                     # default policy
-solve(problem; integrator_policy = fbdf_policy(UMFPACKFactorization()))   # another policy
+solve(problem; integrator_policy = default_policy(UMFPACKFactorization()))   # the default integrator
+solve(problem; integrator_policy = fbdf_policy(UMFPACKFactorization()))      # another policy
 ```
 
-A policy carries its own linear solver, so `linear_solver` is read only when
-`integrator_policy` is not given. `StructuredKLU` is exported by
-`using Pyrolysis`; the LinearSolve factorizations are imported from
-LinearSolve. Under each of the three, repeating a solve gives bit-identical
-results.
+`StructuredKLU` is exported by `using Pyrolysis`; the LinearSolve factorizations
+are imported from LinearSolve. Under each of the three, repeating a solve gives
+bit-identical results.
 
 ---
 
@@ -421,7 +414,7 @@ solve(problem;
       min_thickness   = 0.5e-3)          # stop below 0.5 mm
 ```
 
-Three keywords shape the motion:
+Two keywords shape the motion:
 
 - **`correction`** sets how the mesh moves relative to the solid. With the
   default `nothing`, `setup` installs the equidistribution correction
@@ -432,15 +425,15 @@ Three keywords shape the motion:
   rule. The correction exists to make a burning layer's cells thin together
   and leave together; Chapter 10 describes it and its parameters. A
   correction other than `NoCorrection()` requires `use_ale = true`.
+  `PrescribedCorrection(w)`, with `w(x, t)` [m/s] a function of the node position
+  and time, prescribes every node's velocity, moving the mesh over a solid at
+  rest. It is a verification hook: the material must not react, and cells are not
+  deactivated under it.
 - **`lagrangian`** lists node ids that always move with the solid, beside the
   mesh's own. Under an equidistribution correction every interior node
   between cells that start with different condensed components (a layer
   interface) must be among them, and by default they are exactly those nodes;
   a list that leaves one out is refused with an `ArgumentError` naming it.
-- **`w_override`**, a function `w(x, t)` [m/s] of the node position and time,
-  prescribes every node's velocity instead, moving the mesh over a solid at
-  rest. It is a verification hook: the material must not react, no other
-  correction may be given, and cells are not deactivated under it.
 
 For fixed-mesh problems (`use_ale = false`) the thickness is constant until
 cells are deactivated, and `solution.z` is a `0 × 0` matrix. Mesh-motion
@@ -455,8 +448,7 @@ The `radiation_model` keyword selects where the incident radiant flux of a
 
 | Value | Physics | State and Jacobian |
 |---|---|---|
-| `NO_RADIATION` (default) | The absorbed incident flux enters the surface energy balance; no in-depth absorption | no extra rows |
-| `SURFACE_ABSORPTION` | The same: the absorbed flux `a·q` enters the surface balance (opaque materials); component absorption coefficients are not read | no extra rows |
+| `SURFACE_ABSORPTION` (default) | The absorbed flux `a·q` enters the surface energy balance (opaque materials); component absorption coefficients are not read | no extra rows |
 | `BEER_LAMBERT` | Exponential in-depth absorption through the cells' absorption coefficients (semi-transparent materials) | one algebraic intensity row per face; the Jacobian stays banded |
 
 ```julia
@@ -464,9 +456,7 @@ solve(problem; radiation_model = SURFACE_ABSORPTION)   # opaque char, wood
 solve(problem; radiation_model = BEER_LAMBERT)         # semi-transparent polymer
 ```
 
-`NO_RADIATION` and `SURFACE_ABSORPTION` treat a `RadiativeFluxBC` the same way;
-name `SURFACE_ABSORPTION` when the incident flux is the physics you mean. The
-absorptivity `a` is the condition's own `absorptivity` when given, otherwise
+The absorptivity `a` is the condition's own `absorptivity` when given, otherwise
 the effective absorptivity of the exposed cell (Kirchhoff's law unless a
 component sets its own).
 
@@ -497,7 +487,7 @@ tracked whenever it starts varying. Make the `flux` a function of `t` for a
 time-dependent source:
 
 ```julia
-top_bc = RadiativeFluxBC(flux = t -> 25e3 + 250.0 * t, absorptivity = 0.9) +
+top_bc = RadiativeFluxBC(t -> 25e3 + 250.0 * t, absorptivity = 0.9) +
          RadiativeBC(ε = 0.9, T_inf = 300) +
          ConvectiveBC(h = 10, T_inf = 300)
 ```
@@ -536,8 +526,12 @@ The keywords:
 | `deactivation` | `false` | Deactivate cells during the solve |
 | `threshold` | `1e-2`; `conversion_threshold/10` at an order other than one | `ε_m`; a cell that starts with no condensed mass, or at such an order with no reactive lineage, never deactivates |
 | `band` | `max(threshold, 0.1)` when the equidistribution correction moves a layer, else `threshold` | `ε_band` in `[threshold, 1)`: on a moving mesh, the contiguous cells below this fraction around a cell that crosses `ε_m` go with it |
-| `located_events` | `true` | Locate each event inside the step at the first time a live cell reaches its threshold, and apply it at the interpolated state there; at the end of every step, cells below the threshold go in one event as a safety net (the only events with `located_events = false`) |
 | `correction` | by rule (§8.7) | On a moving mesh with `deactivation`, the equidistribution correction makes a layer's cells thin together and leave in one event |
+
+Each event is located inside the step at the first time a live cell reaches its
+threshold and applied at the interpolated state there. At the end of every step,
+cells below the threshold go in one event, the safety net for a crossing the
+location does not see.
 
 How the two meshes differ:
 
@@ -554,7 +548,7 @@ The ways a deactivating solve ends:
 
 | Outcome (`solution.outcome`) | Return code | Meaning |
 |---|---|---|
-| `:running` | `:Success` | Reached the end of the time span; cells may have been deactivated on the way |
+| `:none` | `:Success` | Reached the end of the time span; cells may have been deactivated on the way |
 | `:burned_out` | `:Terminated` | The last live cell went |
 | `:min_thickness` | `:Terminated` | A moving mesh thinned below `min_thickness` |
 | `:interior` | `:Terminated` | A cell below the threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one; `solve` warns, naming the cell |
@@ -636,7 +630,7 @@ solution = solve(problem; callback = budget)
 ```
 
 A solve your callback terminates returns `:Terminated` with outcome
-`:running`, and `succeeded(solution)` is `false` for it (§8.14), so a
+`:none`, and `succeeded(solution)` is `false` for it (§8.14), so a
 termination of yours is never read as a burnout. A callback that tests a
 condition on a cell needs the state's layout; §8.11 shows how to reach it.
 
@@ -675,18 +669,18 @@ is off by default. Leave it off for batch runs and parameter sweeps.
 problem several times, or that need the state layout:
 
 ```julia
-cp = setup(problem; use_ale = true, radiation_model = SURFACE_ABSORPTION)  # a CoreProblem
+cp = setup(problem; use_ale = true, radiation_model = SURFACE_ABSORPTION)  # a PreparedProblem
 sol1 = integrate(cp; saveat = collect(0.0:1.0:300.0))
 sol2 = integrate(cp; saveat = collect(0.0:1.0:300.0))   # bit-identical to sol1
 ```
 
 `setup` takes the keywords that define the problem the integrator runs
 (`energy_state`, `reltol`, `abstol`, `threshold`, `pressure_tolerance`, `use_ale`, `radiation_model`,
-`correction`, `lagrangian`, `w_override`, `deactivation`, `band`, `sources`,
+`correction`, `lagrangian`, `deactivation`, `band`, `sources`,
 and `time_scale`, the time scale of the velocity tolerances that `solve` sets
 from `dt`); `integrate` takes those of the integration (`maxiters`, `dt`,
 `adaptive`, `dtmin`, `dtmax`, `saveat`, `callback`, `min_thickness`,
-`linear_solver`, `integrator_policy`, `located_events`, `progress`, and an
+`integrator_policy`, `progress`, and an
 initial state `u0`, by default the set-up one). Every call of `integrate`
 starts with every cell live and from the set-up temperatures, so repeated
 integrations of one problem are bit-identical. An initial state `u0` of your
@@ -706,18 +700,16 @@ stop = ContinuousCallback((u, t, integrator) -> u[k] - 500.0, terminate!)
 sol = integrate(cp; callback = stop)                  # ends where T₁ = 500 K
 ```
 
-Two further `solve` keywords belong here:
+`solve` always runs `validate_problem(problem)` first, which refuses an
+inconsistent problem with a list of its errors (Chapter 7); `setup` and
+`integrate` never validate.
 
-- **`validate`** (default `true`) runs `validate_problem(problem)` first, which
-  refuses an inconsistent problem with a list of its errors and warns about
-  degenerate gas transport (Chapter 7). `validate = false` skips it; `setup`
-  and `integrate` never validate.
-- **`sources`** is the external-source hook for verification by manufactured
-  solutions: `VolumetricSources(mass, energy)` (from `Pyrolysis.Internal`),
-  with `mass(z, t)` returning a tuple of volumetric mass sources per component
-  [kg/(m³·s)] and `energy(z, t)` a temperature-rate source [K/s], either
-  `nothing`, evaluated at the cell centres. The default `NoSources()` leaves
-  the physics alone.
+One further `solve` keyword belongs here: **`sources`** is the external-source
+hook for verification by manufactured solutions: `VolumetricSources(mass, energy)`
+(from `Pyrolysis.Internal`), with `mass(z, t)` returning a tuple of volumetric
+mass sources per component [kg/(m³·s)] and `energy(z, t)` a temperature-rate
+source [K/s], either `nothing`, evaluated at the cell centres. The default
+`NoSources()` leaves the physics alone.
 
 Chapter 11 describes `setup`, `integrate` and the building blocks
 `Pyrolysis.Internal` exposes (the residual, the Jacobian cache, the layout).
@@ -772,7 +764,7 @@ A short checklist for fast, reliable solves:
    fastest, and it is what the verification suite exercises (§8.2, §8.4).
 2. **Right-size the mesh.** Smaller cells force smaller diffusion-limited
    steps, so cost grows faster than the cell count. Use a mesh graded toward
-   the surface (`create_stretched_mesh(L, n, 1.1)`, finest cells at the
+   the surface (`stretched_mesh(L, n, 1.1)`, finest cells at the
    exposed top by default) instead of a uniformly fine mesh; see Chapter 6 and
    the `convergence_douglas_fir` example.
 3. **Loosen `reltol` for sweeps** and exploratory runs, and confirm the trend at
@@ -807,7 +799,7 @@ Common return codes:
 | `retcode` | Meaning | Typical response |
 |---|---|---|
 | `:Success` | Integrated to `tspan[2]` | — |
-| `:Terminated` | Stopped by the deactivation (`:burned_out`, `:interior`), the thickness stop (`:min_thickness`) or a callback of yours (`:running`) | Read `solution.outcome`; widen `min_thickness` if the stop is premature |
+| `:Terminated` | Stopped by the deactivation (`:burned_out`, `:interior`), the thickness stop (`:min_thickness`) or a callback of yours (`:none`) | Read `solution.outcome`; widen `min_thickness` if the stop is premature |
 | `:Failure` | The domain test gave up (§8.3), a fixed step left the physical domain, or a deactivation event left an inadmissible or inconsistent state (§8.9); `solve` warns with the reason | Read the warning; see Chapter 15 |
 | `:MaxIters` | Hit `maxiters` before the end | Raise `maxiters` or loosen the tolerances |
 | `:DtLessThanMin` | The step fell below `dtmin` | Read the warning that names the cell; check the problem before lowering `dtmin` |

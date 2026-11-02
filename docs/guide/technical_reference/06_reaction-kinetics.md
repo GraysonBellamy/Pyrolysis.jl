@@ -101,15 +101,15 @@ rate includes a cumulative-mass normalization (§6.9).
 The finite-volume discretisation (§13, Finite-Volume Discretization) collocates
 all state at cell centres. The reaction kernel (`ReactionKernel`,
 src/Kernels/reactions.jl) evaluates the reaction model once per cell, from the
-cell's concentrations and trial temperature in the derived state (§5.13). A
-material whose reactions are all first order runs:
+cell's concentrations and trial temperature in the derived state (§5.13):
 
 ```julia
 ξ = ntuple(j -> ds.ξ[j, i], Val(NC))
 kernel.limiter.enabled && _all_quenched(ξ, material.reactions) && continue
 T = ds.T_trial[i]
 V = ds.V_eval[i]
-evaluate_reactions!(c.rates, c.heats, ξ, T, material, kernel.limiter)
+ξ_ref = ntuple(r -> kernel.reference[r, i] / V, Val(NR))
+evaluate_reactions!(c.rates, c.heats, ξ, T, material, kernel.limiter, ξ_ref)
 species_source_terms!(c.species, c.rates, material)
 for j = 1:NC
     c.S_mass[j, i] += c.species[j] * V
@@ -117,18 +117,10 @@ end
 c.S_energy[i] += reaction_heat_source(c.rates, c.heats) * V
 ```
 
-`ReactionKernel{Conv}` is specialised on whether some order differs from one. With
-such a reaction the same body also forms the reference concentrations and hands
-them to the reference method of `evaluate_reactions!`:
-
-```julia
-ξ_ref = ntuple(r -> kernel.reference[r, i] / V, Val(NR))
-evaluate_reactions!(c.rates, c.heats, ξ, T, material, kernel.limiter, ξ_ref)
-```
-
-A first-order reaction does not read its entry, and a reaction of another order
-with a zero reference (§6.5.5) writes zero rate and zero heat without reaching
-`reaction_rate`, whatever the limiter or the trial state.
+`ξ_ref` holds the reference concentrations. A first-order reaction does not read
+its entry, and a reaction of another order with a zero reference (§6.5.5) writes
+zero rate and zero heat without reaching `reaction_rate`, whatever the limiter or
+the trial state.
 
 The rates read the signed concentrations $\xi_{j} = m_{j}/V_{\text{eval}}$ of the
 cell (not the positive parts the property laws see: the limiter itself makes a
@@ -302,12 +294,12 @@ conversion.
 ### 6.3.2 The one-sided rate factor
 
 Pyrolysis.jl rolls the rate off smoothly as a reactant depletes and stops it
-exactly at zero. Each reactant contributes a multiplicative factor to the rate,
+exactly at zero. The reactant contributes a multiplicative factor to the rate,
 the power of a finite base times a one-sided **onset** applied to the *rate*,
 not to the power-law base:
 
 $$
-r_i \;=\; k_i(T)\prod_{j\,\in\,\mathrm{reactants}(i)} f(\xi_j;\,n_{i,j}),
+r_i \;=\; k_i(T)\,f(\xi_a;\,n_i),
 \qquad
 f(\xi;\,n) =
 \begin{cases}
@@ -354,11 +346,11 @@ threshold — pays no transcendental. The implementation:
 ```julia
 if limiter.enabled
     ξ <= 0 && return zero(conc) * zero(ξ)
-    conc *= _fast_pow(_finite_base(ξ, limiter.base_scale), order)
+    conc *= _finite_base(ξ, limiter.base_scale)
     conc *= one_sided_factor(ξ / limiter.threshold, limiter.join)
     return conc
 end
-return conc * _finite_power(ξ, limiter.base_scale, order)
+return conc * _finite_power(ξ, limiter.base_scale, 1.0)
 ```
 
 (`_reactant_factor`, src/Physics/kinetics.jl). At and below zero the factor and
@@ -576,10 +568,10 @@ routes through a fast-path helper that special-cases the two most common orders:
 (src/Physics/kinetics.jl). For $n=0$ it returns `one(x)`: a zero-order reaction
 runs at $k_i\,\xi_{\mathrm{ref}}$, and its onset still gates the rate to zero as
 the reactant runs out (§6.3.2). Because the finite base is positive, $x^n$ is
-always real-valued even for fractional $n$. The first-order path never forms a
-conversion (`reaction_rate(rxn, ξ, T)`, which refuses any other order); the
-reference method `reaction_rate(rxn, ξ, T, ξ_ref)` dispatches on the order before
-it reads the reference, and requires a finite positive `ξ_ref` otherwise.
+always real-valued even for fractional $n$. `reaction_rate(rxn, ξ, T, ξ_ref =
+NaN; limiter)` branches on the order before it reads the reference: the first-order
+path never forms a conversion, and any other order requires a finite positive
+`ξ_ref` and is refused without one.
 
 **The reference.** $M_{\mathrm{ref},r,i}$ is computed at `setup` for every reaction of
 order other than one (§6.5.5) and stays a constant of the cell: at such an order the
@@ -614,32 +606,27 @@ face fluxes (§6.5.4).
 
 ### 6.5.2 The single-reactant mass convention
 
-The model supports exactly one reactant per reaction. Per unit reaction
+A reaction has exactly one reactant. Per unit reaction
 extent, that reactant is consumed with **unit mass stoichiometry** (an implicit
 $\nu = -1$), and the products are produced with their explicit per-product mass
 yields. The function that applies one reaction to the source vector is:
 
 ```julia
-@inline function _apply_reaction_source!(src, rxn::Reaction{NRin}, r) where {NRin}
-    NRin == 1 || error("Multi-reactant reaction $(rxn.name) (NRin=$NRin) ...")
-    @inbounds src[rxn.reactants[1][1]] -= r          # reactant: ν = -1
+@inline function _apply_reaction_source!(src, rxn::Reaction, r)
+    @inbounds src[rxn.reactant] -= r
     @inbounds for (idx, ν) in rxn.products
-        src[idx] += ν * r                            # products: ν = yield ≥ 0
+        src[idx] += ν * r
     end
     return nothing
 end
 ```
 
-(src/Physics/kinetics.jl). The `NRin == 1` guard **errors at runtime** if
-a multi-reactant reaction is ever applied — multi-reactant support would require
-extending the reactant tuple to a 3-ary `(idx, order, mass_stoich)` form so that a
-mass stoichiometry (not just a rate order) could be attached to each reactant
-(src/Materials/reactions.jl). Note the asymmetry baked into the model: a
-reactant carries a rate **order** $n_{i,j}$ (how its concentration scales the
-rate) but its **mass** stoichiometry is fixed at $1$; a product carries a mass
-**yield** but no rate order (products never appear in the rate's composition factor).
+(src/Physics/kinetics.jl). Note the asymmetry baked into the model: the
+reactant carries a rate **order** $n_i$ (how its conversion scales the rate) but
+its **mass** stoichiometry is fixed at $1$; a product carries a mass **yield** but
+no rate order (products never appear in the rate's composition factor).
 
-For a single-reactant reaction, then, the coefficients are
+The coefficients are, then,
 
 $$
 \nu_{i,\text{reactant}} = -1, \qquad
@@ -663,22 +650,19 @@ $$
 $$
 
 This is enforced **at construction time**, not at run time — in the `Reaction`
-inner constructor itself, so no construction path bypasses it.
-`_validate_stoichiometry` (src/Materials/reactions.jl) sums the product yields
-and requires $\sum_p y_{i,p} = 1$ against the implicit unit reactant mass of
-the single-reactant convention. Each yield is additionally required to be
-non-negative (`_validate_yield`, enforced even with `validate_mass = false` —
+constructor. `_validate_stoichiometry` (src/Materials/reactions.jl) sums the
+product yields and requires $\sum_p y_{i,p} = 1$ against the implicit unit reactant
+mass. Each yield is additionally required to be non-negative (`_validate_yield` —
 a pair like $(1.5, -0.5)$ sums to 1 but would silently drive the
 negative-yield species' concentration negative without bound), and each
 reaction order must satisfy $n \ge 0$ (`_validate_reaction_order`). The
 tolerance is relative to the total coefficient mass with an absolute floor:
 
 $$
-\text{tol} = \max\!\bigl(10^{-10}\,(m_{\mathrm{react}} + m_{\mathrm{prod}}),\ 10^{-14}\bigr),
+\text{tol} = \max\!\bigl(10^{-10}\,(1 + \textstyle\sum_p y_{i,p}),\ 10^{-14}\bigr),
 $$
 
-(src/Materials/reactions.jl). A violation raises an error at construction unless
-the user passes `validate_mass = false`, which disables only the sum check.
+(src/Materials/reactions.jl). A violation throws an `ArgumentError`.
 
 Worked example (the canonical charring reaction):
 
@@ -693,8 +677,7 @@ whose sum is exactly $0$ — mass is conserved instantaneously.
 
 Because conservation is guaranteed by the build-time check and the implicit
 $\nu=-1$ convention, **no run-time projection or Lagrange multiplier is used**; the
-species sum $\sum_j S_j$ is identically zero up to floating-point roundoff. The
-validation utilities of §6.8 exist purely as diagnostics.
+species sum $\sum_j S_j$ is identically zero up to floating-point roundoff.
 
 ### 6.5.4 Gas-vs-solid dispatch
 
@@ -881,9 +864,9 @@ $$
 enthalpy inventory, adds the formation term $\sum_j S_j V\,h_j(T_{\mathrm{cell}})$
 instead, §7.3.3).
 
-**Units check.** $[h_i] = $ J·kg⁻¹ (per kg of first reactant) and $[r_i] = $
+**Units check.** $[h_i] = $ J·kg⁻¹ (per kg of reactant) and $[r_i] = $
 kg·m⁻³·s⁻¹, so $[h_i r_i] = $ J·m⁻³·s⁻¹ $=$ W·m⁻³, the volumetric power density
-demanded by (6.9). The "per kg of first reactant" basis is consistent with the
+demanded by (6.9). The "per kg of reactant" basis is consistent with the
 single-reactant mass convention of §6.5: the reactant is consumed at mass rate
 $r_i$, and $h_i$ is the enthalpy per unit of that mass.
 
@@ -895,7 +878,7 @@ $h_i$ is not restricted to a constant. The `heat::Ph` field is typed by any
 concentration tuple $\boldsymbol{\xi}$:
 
 ```julia
-heats[$i] = rxn.heat(T, ξ)   # Pass ξ for state-dependent heats
+heats[$i] = rxn.heat(T, ξ)
 ```
 
 (src/Physics/kinetics.jl). The two-argument call dispatches as follows
@@ -1001,16 +984,15 @@ on the (compile-time-known) reaction and component counts $N_R$ and $N_C$. Two
 `@generated` kernels and one inline reduction achieve this.
 
 **Rate and heat evaluation.** `evaluate_reactions!(rates, heats, ξ, T, material,
-limiter = material.depletion_limiter)` forwards to `_evaluate_reactions_gen!`
-(src/Physics/kinetics.jl), which the compiler expands into a flat block — one
-explicit `rates[i] = reaction_rate(rxn, ξ, T; limiter)` and
-`heats[i] = rxn.heat(T, ξ)` statement per reaction — with no run-time loop over
-the heterogeneous `reactions` tuple. The reference method
-`evaluate_reactions!(rates, heats, ξ, T, material, limiter, ξ_ref, inactive)` is
-the same block with `reaction_rate(rxn, ξ, T, ξ_ref[i]; limiter)`, and writes zero
-rate and heat for a reaction flagged `inactive`. Heterogeneity (each `Reaction` may have a
-different `NRin`, `NRout`, and heat property type) is therefore handled by static
-dispatch with no `Union` boxing and no allocation.
+limiter = material.depletion_limiter, ξ_ref = NaNs)` forwards to
+`_evaluate_reactions_gen!` (src/Physics/kinetics.jl), which the compiler expands
+into a flat block — one explicit `rates[i] = reaction_rate(rxn, ξ, T, ξ_ref[i];
+limiter)` and `heats[i] = rxn.heat(T, ξ)` statement per reaction — with no run-time
+loop over the heterogeneous `reactions` tuple. A reaction of order other than one
+with a zero reference writes zero rate and heat, and with no reference given it is
+refused. Heterogeneity (each `Reaction` may have a different number of products and
+heat property type) is therefore handled by static dispatch with no `Union` boxing
+and no allocation.
 
 **Species sources.** `species_source_terms!(sources, rates, material)` zeroes the
 output and calls `_species_source_terms_gen!`, again unrolled to one
@@ -1036,37 +1018,22 @@ evaluation uses the dual twin of the buffer (§7.7).
 
 ---
 
-## 6.8 Validation Utilities
+## 6.8 Validation
 
-Stoichiometry errors are caught when a reaction is built (§6.5.3); two small
-diagnostics check a reaction afterwards.
-
-**`verify_stoichiometry(rxn; tol=1e-10)`** computes the mass-balance error of a
-single reaction via `mass_balance_error`:
-
-$$
-\varepsilon_{\mathrm{mb}}(i) = \Bigl|\,1 - \textstyle\sum_p y_{i,p}\,\Bigr|.
-$$
-
-For a single-reactant reaction it compares the implicit unit reactant mass against
-the product-yield sum; for $N_{\mathrm{in}} > 1$ `mass_balance_error` returns
-`NaN` (unsupported), which the comparison does not flag. The function warns and
-returns `false` if $\varepsilon_{\mathrm{mb}} > $ `tol`. `validate_problem`, which
-`solve` calls with `strict = false` unless `validate = false`, checks among other
+Stoichiometry errors are caught when a reaction is built (§6.5.3).
+`validate_problem`, which `solve` always runs first, checks among other
 things (the mesh, the boundary conditions, the time span, the initial
 conditions, the initial porosity of a gas problem) that the material has
 at least one component and that every reactant and product index lies in
 $1..N_C$ (numeric reactions are not index-checked when the `Material` is built),
-and checks initial physical pore volume and gas-boundary data (§9). Called by the user with
-`strict = true` (`Pyrolysis.validate_problem(problem; strict = true)`), it also
-runs `verify_stoichiometry` over every reaction of the material.
+and checks initial physical pore volume and gas-boundary data (§9).
 
-Symbolic reactions are resolved to integer indices by `resolve_reaction` against
-the component name→index map when the `Material` is built, so a reaction that
-names a non-existent component errors with a clear message before any solve.
+Reactions given by name are resolved to integer indices by `resolve_reaction`
+against the names of the components when the `Material` is built, so a reaction
+that names a non-existent component errors with a clear message before any solve.
 
-> **Implementation note.** `verify_stoichiometry`, `mass_balance_error`,
-> `resolve_reaction`: src/Materials/reactions.jl. `validate_problem`:
+> **Implementation note.** `_validate_stoichiometry`, `resolve_reaction`:
+> src/Materials/reactions.jl. `validate_problem`:
 > src/Problem/problem_validation.jl.
 
 ---
@@ -1116,8 +1083,7 @@ $r=\theta_1r_{\mathrm{TK}}$, $A=\theta_1A_{\mathrm{TK}}$,
 $\nu_j=\theta_j/\theta_1$, and $h=-h_{\mathrm{TK}}/\theta_1$.
 This is an algebraic mapping of TK Eqs. 5–6 to our unit-consumption source,
 not an implementation of two-reactant chemistry. Pyrolysis.jl validates the
-single-reactant product-yield sum by default; the low-level constructor can
-disable that validation (`validate_mass=false`).
+product-yield sum when a reaction is built.
 
 ### 6.9.2 Gpyro V2
 
@@ -1228,14 +1194,11 @@ The kinetics model is deliberately the simplest one that covers the target
 applications (cone calorimetry, TGA/DSC/MCC idealisation, charring/non-charring/
 intumescent solids, moisture). Its boundaries, with the source-of-truth guards:
 
-1. **Single reactant only.** `_apply_reaction_source!` (src/Physics/kinetics.jl)
-   errors for $N_{\mathrm{in}} > 1$, and `mass_balance_error` returns `NaN`
-   for multi-reactant reactions (src/Materials/reactions.jl). True bimolecular
+1. **Single reactant only.** A `Reaction` holds one reactant index and one order
+   (src/Materials/reactions.jl). True bimolecular
    chemistry (ThermaKin's COMP1·COMP2, char oxidation consuming a gaseous O₂
-   reactant) is not representable. Extending it requires a 3-ary reactant tuple
-   `(idx, order, mass_stoich)` so a mass stoichiometry can be attached to each
-   reactant; the outer struct shape already anticipates this
-   (src/Materials/reactions.jl). Multi-step schemes are instead built as
+   reactant) is not representable. Extending it requires each reactant to carry
+   its own order and mass stoichiometry. Multi-step schemes are instead built as
    **sequences** of single-reactant reactions.
 
 2. **No oxygen or pressure dependence.** The rate (6.1) depends only on $T$ and

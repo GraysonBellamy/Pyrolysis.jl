@@ -35,7 +35,7 @@ function _verification_case_vgt01()
         solid = SolidComponent(:solid, ρ = 1000.0, c = 1000.0, k = 0.5, λ = Λ, φ = φ)
         gas = GaseousComponent(:gas, M = 0.028, c = 1000.0, k = 0.03)
         mat = Material(name = :VGT01, components = (solid, gas), reactions = ())
-        mesh = create_uniform_mesh(L, n_cells)
+        mesh = uniform_mesh(L, n_cells)
         bc_set =
             BoundaryConditionSet(thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()))
         return PyrolysisProblem(
@@ -57,7 +57,7 @@ function _verification_case_vgt01()
             tol = 1e-8,
             comment = "sealed, source-free uniform-temperature state",
         )]
-        z = get_cell_positions(sol)
+        z = sol.cell_centers[:, end]
         Δz = L / length(z)
         for (j, t) in enumerate(ts)
             peak = M_tot / sqrt(2π * σ2(t))
@@ -115,7 +115,7 @@ function _verification_case_vgt01()
     end
 
     function l2_error_t4(sol)
-        z = get_cell_positions(sol)
+        z = sol.cell_centers[:, end]
         Δz = L / length(z)
         return sqrt(
             sum((sol.ξ[2, i, 3] - ξ_exact(z[i], 4.0))^2 * Δz for i in eachindex(z)) / L,
@@ -151,7 +151,7 @@ function _verification_case_vgt01()
             profile_times = ts,
             qoi_curves = (:xi_profiles, :variance_history),
             curves = sol -> begin
-                z = get_cell_positions(sol)
+                z = sol.cell_centers[:, end]
                 Δz = L / length(z)
                 function var_num(j)
                     m = sum(sol.ξ[2, i, j] for i in eachindex(z)) * Δz
@@ -191,7 +191,7 @@ function _verification_case_vgt01()
                 ]
             end,
             error_norms = sol -> begin
-                z = get_cell_positions(sol)
+                z = sol.cell_centers[:, end]
                 peak = M_tot / sqrt(2π * σ2(4.0))
                 e = [sol.ξ[2, i, 3] - ξ_exact(z[i], 4.0) for i in eachindex(z)]
                 (L2 = sqrt(sum(abs2, e) / length(e)) / peak, Linf = maximum(abs, e) / peak)

@@ -18,7 +18,6 @@ import ..Materials: n_components  # Import to extend
 import ..Meshes
 using ..Properties
 using ..Physics
-import ..Materials: verify_stoichiometry, mass_balance_error
 
 # Include subfiles
 include("pyrolysis_problem.jl")
@@ -33,6 +32,6 @@ export initial_fields
 export step_profile, linear_profile, gaussian_profile, tanh_profile
 
 # Validation
-export validate_problem, is_valid_problem
+export validate_problem
 
 end # module Problem

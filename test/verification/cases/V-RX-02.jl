@@ -44,7 +44,7 @@ function _vrx02_build(;
             reactions = (rxn,),
             depletion_limiter = DepletionLimiter(enabled = limiter_enabled),
         )
-        mesh = create_uniform_mesh(1e-3, n_cells)
+        mesh = uniform_mesh(1e-3, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(T_iso), bottom = DirichletThermalBC(T_iso)),
         )

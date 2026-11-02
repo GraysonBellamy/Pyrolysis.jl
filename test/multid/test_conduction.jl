@@ -397,7 +397,7 @@ end
                 (HeatFluxBC(1e4), ds.T[i]),
                 (DirichletThermalBC(350.0), 350.0),
                 (AdiabaticBC(), ds.T[i]),
-                (RadiativeFluxBC(flux = 5e4) + RadiativeBC(T_inf = 300.0), ds.T[i]),
+                (RadiativeFluxBC(5e4) + RadiativeBC(T_inf = 300.0), ds.T[i]),
             )
                 q, Ts = boundary_energy_flux(bc, f, boundary, c, ds, topo, material, 0.0)
                 @test q == 0
@@ -610,7 +610,7 @@ const _mixed = (
     left = DirichletThermalBC(350.0),
     right = HeatFluxBC(1e3),
     bottom = AdiabaticBC(),
-    top = RadiativeFluxBC(flux = 5e4) + RadiativeBC(T_inf = 300.0),
+    top = RadiativeFluxBC(5e4) + RadiativeBC(T_inf = 300.0),
 )
 const _convective = (
     left = DirichletThermalBC(350.0),

@@ -82,8 +82,7 @@ change, so the integrator continues on the same vector and the same matrices.
 Deactivation is off by default and is turned on by
 `solve(problem; deactivation = true)`, with the keywords `threshold`
 ($\varepsilon_m$, default $10^{-2}$, at an order other than one a tenth of the
-limiter's `conversion_threshold`), `band` ($\varepsilon_{\rm band}$) and
-`located_events` (default `true`).
+limiter's `conversion_threshold`) and `band` ($\varepsilon_{\rm band}$).
 
 ---
 
@@ -189,8 +188,8 @@ the state; the layer's correction is zero up to its activation, so the event
 changes the right-hand side only where the activation has just begun. The
 callback is present on every moving mesh, with an infinite margin when no
 layer waits, so the integrator's type does not depend on the correction
-(§15.5.7). The correction's node formula, its smooth activation switch and its
-monitor are derived in §11.
+(§15.5.7). The correction's node formula and its smooth activation switch are
+derived in §11.
 
 ### 14.2.3 The band
 
@@ -242,15 +241,15 @@ cells. The full statement, with its limits, is User Guide chapter 10.
 
 **Figure 5. Burnout and retained state (schematic).** Here $r_i$ is the remaining condensed-mass ratio. A threshold crossing selects a surface-connected band; on a moving mesh its inventories and volume transfer to the inward receiver, and a band beneath live cells goes the same way with those cells moving down into its slots. Dead nodes coincide at the merged face, while state slots and topology remain allocated. The insets show fixed-mesh gas venting and an interior void blocked by live material. A callback can re-test the receiver and emit multiple per-cell records; gas venting and a final cell without a receiver enter the loss ledger.
 
-The deactivation state of a solve is a `CellDeactivation{P,NC,E}`
+The deactivation state of a solve is a `CellDeactivation{NC,E}`
 (`src/Deactivation/events.jl`), built by `setup` when `deactivation = true`:
-the policy (`ConservativeTransfer()`), the threshold $\varepsilon_m$, the band
+the threshold $\varepsilon_m$, the band
 $\varepsilon_{\rm band}$, the reference masses $m^s_i(0)$, the condensed
 flags, the caloric extension that merged temperatures are found with, the
 events so far, the outcome, the `SlotTables` of the solve and, at an order other
 than one, what the threshold reads there (§14.3.2). `integrate` resets it at the
 start of every integration (`reset_cells!`: every row live, every cell in its
-initial slot with the tables as set up, no events, outcome `:running`), so repeated
+initial slot with the tables as set up, no events, outcome `:none`), so repeated
 integrations of one set-up problem are bit-identical.
 
 Every table a solve reads by cell, node, face or row is held in two forms
@@ -263,7 +262,7 @@ re-evaluated at that state read the tables it had. Each event records the
 permutation after it. The tables are `CellReference` (volume, masses, floors,
 thickness, positions; the caloric extension reads the same arrays), the tolerance
 vector, the distance floors of the kernels, the reaction references, and under a
-correction the relative-flux tables, the monitor scale and the gains; a test
+correction the relative-flux tables and the gains; a test
 against a fresh setup of the mesh without the cell guards the list
 (`test/deactivation/test_slots.jl`).
 
@@ -401,7 +400,7 @@ relative tolerance.
 
 ### 14.3.3 The conservative transfer
 
-`ConservativeTransfer` moves the inventories of the dead cells $\mathcal{D}$ to
+The merge moves the inventories of the dead cells $\mathcal{D}$ to
 the receiver $k$, the live cell inward of them, or for a run from the innermost
 cell under live cells the live cell outward of it (`_merge!`, one transfer for both
 directions). It conserves mass and sensible enthalpy and finds the merged
@@ -610,7 +609,7 @@ alone, so a thin, nearly spent skin reads as spent.
 `integrate` installs the deactivation as two callbacks
 (`_deactivation_callback`, `src/Integration/solve.jl`):
 
-- **The located event** (`located_events = true`, the default). A continuous
+- **The located event.** A continuous
   callback on the threshold margin $g(u)$, tested for downward crossings only
   (`affect_neg!`), with the root found inside the step on the integrator's
   interpolant and the state taken just past it (`RightRootFind`). At the root
@@ -621,9 +620,8 @@ alone, so a thin, nearly spent skin reads as spent.
   from the located one.
 - **The safety net.** A discrete callback at the end of every accepted step
   whose condition is that some live cell is below the threshold (`any_below`),
-  running `deactivate!` with $s=0$. Without `located_events` it is the only
-  event; with it, it catches a crossing the location does not see. Location
-  takes a cell at its first crossing, so a cell under a correction that would
+  running `deactivate!` with $s=0$. It catches a crossing the location does
+  not see. Location takes a cell at its first crossing, so a cell under a correction that would
   have recovered by the step's end goes there; only the safety net, which sees
   the step's end alone, misses a dip and recovery inside one step.
 
@@ -782,7 +780,7 @@ cells at each saved time and `sol.statistics.invocations` the invocations.
 
 `replay_events!(d, layout, t)` reconstructs the mask of a state saved at $t$
 from the events at or before $t$; the solution's reconstruction of every saved
-state, `sol(t)` and `interpolate_solution` use it. Since the interpolant between
+state and `sol(t)` use it. Since the interpolant between
 two saved states that an event separates is not the trajectory, `sol(t)` refuses
 a time strictly inside such an interval, naming the event.
 
@@ -790,12 +788,12 @@ A solve ends in one of these ways:
 
 | End | `sol.retcode` | `sol.outcome` | `succeeded(sol)` |
 |---|---|---|---|
-| the time span reached | `:Success` | `:running` | `true` |
+| the time span reached | `:Success` | `:none` | `true` |
 | the last live cell went (§14.3.4, step 3) | `:Terminated` | `:burned_out` | `true` |
 | the live thickness fell below `min_thickness` (moving mesh) | `:Terminated` | `:min_thickness` | `true` |
 | a cell below the threshold inward of a live cell on a fixed mesh, or beneath a skin on a moving one | `:Terminated` | `:interior` | `false` |
-| no consistent node velocities after an event, or an inadmissible state after it | `:Failure` | `:running` | `false` |
-| any other integrator failure | its return code | `:running` | `false` |
+| no consistent node velocities after an event, or an inadmissible state after it | `:Failure` | `:none` | `false` |
+| any other integrator failure | its return code | `:none` | `false` |
 
 `completed(sol)` is the strict test, `:Success` only. The thickness stop is a
 continuous callback on the distance from the first node to the outermost live
@@ -821,11 +819,11 @@ material = Material(
     reactions = (Reaction(:pyrolysis, 1 => 2, A = 8.5e12, E = 188e3, h = 870e3),),
 )
 problem = PyrolysisProblem(
-    mesh = create_uniform_mesh(1e-3, 20),
+    mesh = uniform_mesh(1e-3, 20),
     material = material,
     bc_set = BoundaryConditionSet(
         thermal = (
-            top = RadiativeFluxBC(flux = 100e3) + RadiativeBC(T_inf = 300.0) +
+            top = RadiativeFluxBC(100e3) + RadiativeBC(T_inf = 300.0) +
                   ConvectiveBC(h = 10.0, T_inf = 300.0),
             bottom = AdiabaticBC(),
         ),
@@ -975,7 +973,7 @@ $\sum_j\mathrm{res}_j m_{j,i}(0)<\varepsilon_m m^s_i(0)$.
 **Layer time**: $\tau_{\rm eq}=\lambda_\tau L_{\rm layer}/|\dot L_{\rm layer}|$, $\lambda_\tau=1.8$, at the
 layer's first activation ($\Delta z_i<0.3\,\Delta z_i(0)$), fallback 720 s.
 
-**Transfer** (`ConservativeTransfer`):
+**Transfer** (`_merge!`):
 
 $$
 \hat m_{j,k}=m_{j,k}+\sum_{d\in\mathcal D}(m_{j,d}-m^{\rm vent}_{j,d}),\qquad

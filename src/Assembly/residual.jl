@@ -3,9 +3,9 @@
 # ============================================================================
 
 """
-	residual!(du, u, def::CoreDefinition, t, ws::CoreWorkspace) -> nothing
+	residual!(du, u, def::ResidualDefinition, t, ws::ResidualWorkspace) -> nothing
 
-The right-hand side of the core's mass-matrix system `M du/dt = f(u, t)`: the
+The right-hand side of the mass-matrix system `M du/dt = f(u, t)`: the
 state mapping, the node corrections of the mesh closure, the kernels in
 assembler order, the mesh closure (strain rates from the reaction sources,
 velocity rows), the external sources, then the row assembly. In the
@@ -20,16 +20,11 @@ integrator policy takes its time derivative by finite differences.
 function residual!(
     du::AbstractVector,
     u::AbstractVector,
-    def::CoreDefinition,
+    def::ResidualDefinition,
     t,
-    ws::CoreWorkspace,
+    ws::ResidualWorkspace,
 )
     ds, c = buffers(ws, def, eltype(u))
-    _residual!(du, u, def, t, ds, c)
-    return nothing
-end
-
-function _residual!(du, u, def::CoreDefinition, t, ds::DerivedState, c::Contributions)
     setup = def.setup
     derive!(ds, u, def.layout, setup)
     correction!(ds, def.closure, setup)

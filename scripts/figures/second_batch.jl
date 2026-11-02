@@ -4,10 +4,10 @@
 function constructor_figure()
     L = 7e-3
     meshes = [
-        create_uniform_mesh(L, 12),
-        create_stretched_mesh(L, 12, 1.2),
-        create_stretched_mesh(L, 12, 1.2; stretch_from = :bottom),
-        create_mesh_from_nodes(
+        uniform_mesh(L, 12),
+        stretched_mesh(L, 12, 1.2),
+        stretched_mesh(L, 12, 1.2; stretch_from = :bottom),
+        line_mesh(
             [
                 collect(range(0, 6e-3; length = 9));
                 collect(range(6e-3, L; length = 5))[2:end]

@@ -67,7 +67,7 @@ function transport_example(model)
     )
     final_time = SMOKE ? 10.0 : 120.0
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, SMOKE ? 10 : 50),
+        mesh = uniform_mesh(0.01, SMOKE ? 10 : 50),
         material = material,
         bc_set = bcs,
         T_initial = z->300.0,
@@ -85,7 +85,7 @@ function transport_example(model)
         callback = recorder,
     )
     completed(solution) || error("transport example ended with $(solution.outcome)")
-    pressure = get_pressure(solution)
+    pressure = solution.gas.pressure
     exchange = get_boundary_exchange(solution, :top)
     product = findfirst(==(:volatiles), solution.gas.species)
     ledger = gas_species_audit(solution, recorder)

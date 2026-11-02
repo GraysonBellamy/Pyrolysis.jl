@@ -186,7 +186,7 @@ end
 # Main
 # ============================================================================
 
-tk_file = joinpath(@__DIR__, "..", "docs", "DF_sensitivity_Cone_output.txt")
+tk_file = joinpath(@__DIR__, "thermakin", "DF_sensitivity_Cone_output.txt")
 julia_file = joinpath(@__DIR__, "..", "douglas_fir_results_50kWm2_fit.csv")
 
 println("Parsing ThermaKin output...")

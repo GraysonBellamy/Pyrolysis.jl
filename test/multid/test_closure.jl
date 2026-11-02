@@ -40,9 +40,9 @@ function _state(mesh; unknowns = :velocities)
 end
 
 # The potential closure's velocities and balance residuals at strain rates θ.
-function _potential(mesh, θ; slip = (), weighted = true)
+function _potential(mesh, θ; slip = ())
     s = _state(mesh; unknowns = :multipliers)
-    cl = PotentialClosure(s.topo; slip, weighted)
+    cl = PotentialClosure(s.topo; slip)
     s.c.θ .= θ
     s.ds.multiplier .= consistent_multipliers(cl, s.c, s.ds, s.topo)
     correction!(s.ds, cl, s.setup)
@@ -59,9 +59,6 @@ end
     @test norm(r.w[1, :]) == 0
     @test norm(r.w[:, 1:3]) == 0
     @test maximum(abs, r.c.r_multiplier) < 1e-14
-    bad = _potential(mesh, 1.0; slip, weighted = false)
-    @test bad.w[2, 4:6] ≈ [2 / 3, 4 / 3, 2 / 3] atol = 1e-12
-    @test maximum(abs, bad.c.r_multiplier) < 1e-14
 end
 
 # Bottom pinned, the side walls slipping, the top free: the potential flow of

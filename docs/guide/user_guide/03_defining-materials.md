@@ -55,12 +55,7 @@ package's top-level docstring and in Chapter 2; this chapter expands every optio
 > `Module.name` syntax resolves any name defined in the module:
 >
 > - From the `Materials` submodule: `Pyrolysis.Materials.n_components`,
->   `Pyrolysis.Materials.n_reactions`, `Pyrolysis.Materials.dry_gas_flags`,
->   are *exported* from `Materials`; the
->   stoichiometry helpers `Pyrolysis.Materials.verify_stoichiometry` and
->   `Pyrolysis.Materials.mass_balance_error` are *internal* (not exported, not part
->   of the stable public API) but are still callable through the same qualified
->   path.
+>   `Pyrolysis.Materials.n_reactions`, `Pyrolysis.Materials.dry_gas_flags`.
 > - From the `Properties` submodule: the effective-property functions
 >   (`Pyrolysis.Properties.effective_conductivity`,
 >   `mixture_emissivity`, `mixture_absorptivity`, `effective_permeability`,
@@ -71,11 +66,9 @@ package's top-level docstring and in Chapter 2; this chapter expands every optio
 > For convenience you may `using Pyrolysis.Internal`, which re-exports the union of
 > every submodule's *exports* and so brings the exported helpers
 > (`n_components`, `dry_gas_flags`, …) into scope
-> unqualified — but **not** the internal stoichiometry helpers above, which still
-> require the `Pyrolysis.Materials.` prefix. `Internal` is not the stable public
-> surface; prefer qualified access in production code. Material validation happens
-> at the problem level: build a `PyrolysisProblem` and let `solve` validate it (the
-> default, `validate = true`); see §3.7.
+> unqualified. `Internal` is not the stable public surface; prefer qualified
+> access in production code. Material validation happens at the problem level:
+> build a `PyrolysisProblem` and `solve` validates it; see §3.7.
 
 ---
 
@@ -275,13 +268,12 @@ cp(300.0)   # = 1690.0
 (1.716e-5 Pa·s at 273.15 K, `S = 110.4` K, so `μ(300 K) ≈ 1.846e-5` Pa·s), the
 default pore-gas viscosity of a `Material` (§3.6.1).
 
-**`ArrheniusProperty(A, E[, T_ref])`** — `p(T) = A · exp(−E / (R_g·T))`, `E` in
-J·mol⁻¹. `T_ref` defaults to 298.15 K. Mostly used for rate-constant-shaped
-properties; reaction kinetics themselves are specified on the `Reaction` (§3.4), not
-as an `ArrheniusProperty`.
+**`ArrheniusProperty(A, E)`** — `p(T) = A · exp(−E / (R_g·T))`, `E` in
+J·mol⁻¹. Mostly used for rate-constant-shaped properties; reaction kinetics
+themselves are specified on the `Reaction` (§3.4), not as an `ArrheniusProperty`.
 
 ```julia
-p = ArrheniusProperty(8.5e12, 188e3)   # T_ref defaults to T_REF = 298.15
+p = ArrheniusProperty(8.5e12, 188e3)
 ```
 
 **`TableProperty(temperatures, values)`** — tabulated `(Tᵢ, vᵢ)` with linear
@@ -353,7 +345,7 @@ Hermite polynomials, so its derivative is exact to that interpolant.
 
 ## 3.4 Defining reactions
 
-Reactions convert one reactant component into one or two product components by
+Reactions convert one reactant component into one or more product components by
 Arrhenius kinetics. They are usually attached to a material when you build it. The
 full physics — smooth temperature gates, the depletion limiter, species sources — is
 in **Chapter 4** and Technical Reference §6; here we cover the constructor surface
@@ -361,29 +353,24 @@ enough to build a material.
 
 ### 3.4.1 Constructor forms
 
-There are four `Reaction` constructors. They differ only in how reactant/product are
-named (integer index vs. symbol) and whether there are one or two products.
+`Reaction` has one constructor:
 
 ```julia
-# (a) integer index, single product
-Reaction(name, reactant::Int => product::Int;
-         A, E, h, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
-         validate_mass = true)
+Reaction(name, reactant => products;
+         A, E, h, yields = (1.0,), n = 1.0, T_min = 0.0, T_max = Inf,
+         gate_width = 1.0, basis = nothing)
+```
 
-# (b) symbol, single product (resolved by Material)
-Reaction(name, :reactant => :product;
-         A, E, h, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
-         validate_mass = true)
+`products` is one component or a tuple of any length, with one yield each.
+Components are indices on both sides of the pair or names on both sides:
 
-# (c) integer index, two products
-Reaction(name, reactant::Int => (p1::Int, p2::Int);
-         A, E, h, yields, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
-         validate_mass = true, basis = NaN)
-
-# (d) symbol, two products (resolved by Material)
-Reaction(name, :reactant => (:p1, :p2);
-         A, E, h, yields = (y1, y2), n = 1.0, T_min = 0.0, T_max = Inf,
-         gate_width = 1.0, validate_mass = true)
+```julia
+Reaction(:decomp, 1 => 2; A = 8.5e12, E = 188e3, h = 870e3)
+Reaction(:decomp, :virgin => :gas; A = 8.5e12, E = 188e3, h = 870e3)
+Reaction(:charring, 1 => (2, 3); A = 1e15, E = 200e3, h = 500e3,
+         yields = (0.2, 0.8))
+Reaction(:charring, :virgin => (:char, :tar, :gas); A = 1e15, E = 200e3, h = 500e3,
+         yields = (0.2, 0.5, 0.3))
 ```
 
 | Argument | Symbol | Meaning | Units | Default |
@@ -392,16 +379,16 @@ Reaction(name, :reactant => (:p1, :p2);
 | `A` | `A_i` | Arrhenius pre-exponential | s⁻¹ | required |
 | `E` | `E_i` | activation energy | J·mol⁻¹ | required |
 | `h` | `h` | heat of reaction (number or property fn) | J·kg⁻¹ | required |
-| `yields` | `ν_{i,j}` | per-product mass yields (two-product forms) | – | required for (c)/(d) |
+| `yields` | `ν_{i,j}` | mass yield of each product, summing to one | – | `(1.0,)` |
 | `n` | `n_{i,j}` | reaction order in the reactant (must be ≥ 0) | – | `1.0` |
 | `T_min` | `T_min,i` | lower temperature gate | K | `0.0` |
 | `T_max` | `T_max,i` | upper temperature gate | K | `Inf` |
 | `gate_width` | `w_gate` | tanh ramp width of both temperature gates (must be > 0 and finite) | K | `1.0` |
-| `validate_mass` | — | enforce `Σ yields = 1` at construction | – | `true` |
+| `basis` | — | the reference as a fraction of the initial condensed mass, at orders other than one (§4.5) | – | `nothing` |
 
-Yields must each be ≥ 0 and the order must satisfy `n ≥ 0` — both are enforced
-unconditionally at construction; `validate_mass = false` disables only the
-`Σ yields = 1` sum check.
+There must be one yield per product, each ≥ 0, summing to one, and the order must
+satisfy `n ≥ 0`. The constructor always checks these and raises an
+`ArgumentError` on a violation.
 
 The temperature gates are smooth tanh ramps,
 `0.5·(1 + tanh((T − T_min)/gate_width))` (mirrored for `T_max`), so the rate
@@ -414,10 +401,9 @@ the effective switching temperature — narrow the gate accordingly.
 
 ### 3.4.2 Symbolic vs. index references
 
-The **symbol** forms ((b), (d)) are the recommended style: you name components, and
-the `Material` constructor resolves the names to indices using the `components`
-tuple, so you never track integer positions by hand. Internally a symbolic reaction
-is stored as a `PendingReaction` until `Material(...)` resolves it.
+**Component names** are the recommended style: the `Material` constructor resolves
+the names to indices using the `components` tuple, so you never track integer
+positions by hand.
 
 ```julia
 pyrolysis = Reaction(:pyrolysis, :virgin => (:char, :gas),
@@ -426,8 +412,8 @@ pyrolysis = Reaction(:pyrolysis, :virgin => (:char, :gas),
                      T_min = 450.0)                    # gate below 450 K
 ```
 
-The **index** forms ((a), (c)) reference components by their 1-based position in the
-material's `components` tuple. They are handy in programmatically generated schemes:
+**Indices** reference components by their 1-based position in the material's
+`components` tuple. They are handy in programmatically generated schemes:
 
 ```julia
 rxn = Reaction(:decomp, 1 => 2, A = 8.5e12, E = 188e3, h = 870e3)
@@ -459,11 +445,10 @@ See the overload note H1 in the nomenclature and Technical Reference §6.6.
 
 ### 3.4.4 Yields and mass balance
 
-For single-product reactions the product yield is fixed at `1.0` (one unit of
-reactant → one unit of product). For two-product reactions you supply
-`yields = (y1, y2)`, and **mass conservation requires `y1 + y2 = 1.0`**. With the
-default `validate_mass = true`, the constructor enforces this and errors on a
-violation; you can bypass the check with `validate_mass = false` (not recommended).
+For a single product the default `yields = (1.0,)` applies (one unit of
+reactant → one unit of product). For several products you supply one yield each,
+`yields = (y1, y2, …)`, and **mass conservation requires them to sum to `1.0`**.
+The constructor enforces this and raises an `ArgumentError` on a violation.
 
 ```julia
 # Charring: 1 kg virgin → 0.20 kg char + 0.80 kg gas
@@ -492,19 +477,10 @@ drying = Reaction(:drying, :moisture => :H2O,
 
 ### 3.4.6 Verifying reactions
 
-The `Reaction` constructor already enforces mass balance (the product yields must
-sum to the reactant mass 1.0) and throws on an imbalance unless you pass
-`validate_mass = false`. To re-check a reaction after the fact, use the internal
-helper (not exported; qualify through `Materials`):
-
-```julia
-Pyrolysis.Materials.verify_stoichiometry(rxn)   # Bool, warns on failure
-```
-
-It compares the reactant mass (1.0) against the sum of product yields within a
-tolerance of `1e-10` and emits a warning (returning `false`) on imbalance.
-`validate_problem(problem; strict = true)` runs it on every reaction of the
-material (§3.7).
+The `Reaction` constructor checks every reaction it builds: the product yields must
+sum to the reactant mass 1.0 within a tolerance of `1e-10`, and an imbalance raises
+an `ArgumentError`. `validate_problem(problem)` checks that every reaction of the
+material names components the material has (§3.7).
 
 ---
 
@@ -558,9 +534,9 @@ MixingSpec(BRUGGEMAN)                            # EMT (k channel only)
 
 ### 3.5.2 `MaterialMixing`
 
-`MaterialMixing` builds the `(k, λ, κ)` NamedTuple that `Material` expects. Each
-channel accepts either a `MixingSpec` or a bare `MixingRule` (β defaults to 0.5 for
-the bare form). The **defaults** are:
+`MaterialMixing` holds the mixing rules of a `Material`, in the fields `k`, `λ`
+and `κ`. Each channel accepts either a `MixingSpec` or a bare `MixingRule` (β
+defaults to 0.5 for the bare form). The **defaults** are:
 
 ```julia
 MaterialMixing(; k = MixingSpec(WEIGHTED, 0.5),   # conductivity
@@ -693,7 +669,7 @@ Material(; name::Symbol,
 | `name` | material identifier (`Symbol`) | required |
 | `components` | tuple of components | required |
 | `reactions` | tuple of reactions (may be empty `()`) | `()` |
-| `mixing` | `(k, λ, κ)` NamedTuple from `MaterialMixing` | `MaterialMixing()` |
+| `mixing` | the `MaterialMixing`, with fields `k`, `λ`, `κ` | `MaterialMixing()` |
 | `lateral_shrinkage_law` | `A(t)/A_0 = law(χ̄)` or `nothing` (identity) | `nothing` |
 | `depletion_limiter` | `DepletionLimiter` applied to every reaction-rate evaluation (a C¹ rate factor that is zero at and below zero concentration and joins `tanh(ξ/threshold)` above it; §4.10) | `DepletionLimiter()` (`threshold = 1.0` kg·m⁻³, `join = 1.0`, `base_scale = 1e-8` kg·m⁻³, enabled) |
 | `gas_transport` | declared pore-gas model and endpoint domain | `LumpedTransfer()` for gas-bearing materials |
@@ -702,9 +678,9 @@ Material(; name::Symbol,
 - **Component order defines the index space.** The first component is index 1, the
   second is 2, etc. The per-cell component masses of the state follow this order,
   and integer reaction references (§3.4.2) use it. Component names must be unique.
-- **Symbolic reactions are resolved here.** Any `PendingReaction` built with symbol
-  references is matched against the `components` tuple's name→index map. An unknown
-  symbol raises a clear error naming the offending reaction and component.
+- **Reactions given by component names are resolved here.** Each name is matched
+  against the `components` tuple's name→index map. An unknown name raises a clear
+  error naming the offending reaction and component.
 - **`lateral_shrinkage_law`** is the variable-cross-section (intumescence/shrink)
   hook; it must be a `Function` of the column-average pyrolysis progress `χ̄`, or
   `nothing`. Most simulations leave it `nothing`. A material that carries a law
@@ -816,9 +792,9 @@ A material is checked in two places: its components and reactions validate
 themselves when they are constructed, and the assembled material is validated as
 part of the problem.
 
-Each two-product `Reaction` constructor enforces `Σ yields = 1.0` at construction
-time (unless `validate_mass = false`), and a symbolic component reference that
-names no component of the material throws when the `Material` is built.
+The `Reaction` constructor enforces one yield per product and `Σ yields = 1.0` at
+construction time, and a symbolic component reference that names no component of
+the material throws when the `Material` is built.
 
 Property laws are checked when the **component** is built: every temperature-
 dependent `ρ`, `c`, `k`, `λ`, `κ` and `ε` is sampled on the property bracket
@@ -842,8 +818,7 @@ tolerances, reachable matrix support and endpoint assumptions. Proposed and
 post-event states undergo the same physical-domain checks. An explicitly zero
 transport channel is valid; an omitted required coefficient is an error.
 
-`validate_problem(problem; strict=true)` also rechecks reaction mass balance.
-Errors are collected into one diagnostic when possible.
+`validate_problem(problem)` collects its errors into one diagnostic.
 
 ---
 
@@ -861,9 +836,9 @@ Errors are collected into one diagnostic when possible.
 | `ρ_intrinsic` | `= ρ` | `= ρ` | n/a |
 | density | required `ρ` | required `ρ` | ideal gas from `M` |
 
-**Reaction defaults:** `n = 1.0`, `T_min = 0.0`, `T_max = Inf`,
-`gate_width = 1.0` K, `validate_mass = true`; single-product yield fixed at `1.0`, two-product `yields`
-must sum to `1.0`. Sign: `h > 0` endothermic.
+**Reaction defaults:** `yields = (1.0,)`, `n = 1.0`, `T_min = 0.0`, `T_max = Inf`,
+`gate_width = 1.0` K, `basis = nothing`; the `yields` of several products must sum
+to `1.0`. Sign: `h > 0` endothermic.
 
 **Mixing defaults:** `k = WEIGHTED (β=0.5)`, `λ = PARALLEL (β=0.5)`,
 `κ = WEIGHTED (β=0.5)`. `BRUGGEMAN` is k-only; `CARMAN_KOZENY` is κ-only and requires

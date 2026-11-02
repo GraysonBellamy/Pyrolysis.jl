@@ -329,7 +329,11 @@ end
 
     @testset "an order other than one needs a reference" begin
         for n in (0.0, 0.5, 2.0)
-            @test_throws "needs a reference" reaction_rate(rxn(n), (1.0, 0.0), T)
+            @test_throws "needs a finite positive reference" reaction_rate(
+                rxn(n),
+                (1.0, 0.0),
+                T,
+            )
         end
     end
 

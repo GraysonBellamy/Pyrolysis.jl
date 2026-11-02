@@ -65,7 +65,7 @@ function oracle_problem(n, N, k, tend)
     )
     f(z) = FHIGH - (FHIGH - FLOW) * z / L0
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L0, N),
+        mesh = uniform_mesh(L0, N),
         material = material,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),

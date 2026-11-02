@@ -10,7 +10,7 @@ using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!
 using Pyrolysis.ColoredJacobian
 using Pyrolysis.Integration
-using Pyrolysis.Integration: setup, integrate, consistent_state!, CoreProblem
+using Pyrolysis.Integration: setup, integrate, consistent_state!, PreparedProblem
 using Pyrolysis.Closures: EquidistributionCorrection
 
 const _L = 0.01
@@ -23,7 +23,7 @@ function _composition(
     T0 = 800.0,
     law = nothing,
     c_b = 3000.0,
-    mesh = create_uniform_mesh(_L, n),
+    mesh = uniform_mesh(_L, n),
 )
     a = SolidComponent(:a, ρ = 1000.0, c = 1000.0, k = 0.5)
     b = SolidComponent(:b, ρ = 1000.0, c = c_b, k = 0.5)
@@ -92,7 +92,7 @@ end
         _composition(8; c_b);
         energy_state = energy,
         use_ale = true,
-        w_override = _slide,
+        correction = PrescribedCorrection(_slide),
     )
     @test find_kernel(RelativeFluxKernel, cp.def.kernels) !== nothing
     @test cp.def.setup.laws.h[2] isa TabulatedEnthalpy
@@ -108,7 +108,7 @@ end
         _composition(20);
         energy_state = energy,
         use_ale = true,
-        w_override = _slide,
+        correction = PrescribedCorrection(_slide),
         abstol = 1e-10,
         reltol = 1e-8,
     )
@@ -128,16 +128,16 @@ end
     # the temperature.
     def = cp.def
     relative = find_kernel(RelativeFluxKernel, def.kernels)
-    control = CoreDefinition(
+    control = ResidualDefinition(
         def.layout,
         def.setup,
         (def.kernels..., _WithoutEnergy(relative)),
         def.closure,
         def.sources,
     )
-    ws = CoreWorkspace(control, cp.T0)
+    ws = ResidualWorkspace(control, cp.T0)
     cj = ColoredJacobianCache(control, ws, cp.u0, 0.0)
-    cpc = CoreProblem(
+    cpc = PreparedProblem(
         cp.problem,
         control,
         ws,
@@ -166,7 +166,7 @@ end
         _composition(8);
         energy_state = energy,
         use_ale = true,
-        w_override = _slide,
+        correction = PrescribedCorrection(_slide),
         abstol = 1e-10,
         reltol = 1e-8,
     )
@@ -201,7 +201,7 @@ function _interior_gap()
     b = SolidComponent(:b; ρ = 1000.0, c = 1000.0, k = 0.5)
     q(z) = z < 0.25 ? 2.0 : z < 0.5 ? 0.0 : 1.0
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(1.0, 4),
+        mesh = uniform_mesh(1.0, 4),
         material = Material(name = :interior_gap, components = (a, b), reactions = ()),
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -226,7 +226,7 @@ const _gap_motion = (x, t) -> -0.64 * x * (x - 0.25) * (x - 0.75) * (x - 1.0)
         _interior_gap();
         energy_state = energy,
         use_ale = true,
-        w_override = _gap_motion,
+        correction = PrescribedCorrection(_gap_motion),
     )
     du = similar(cp.u0)
     residual!(du, cp.u0, cp.def, 0.0, cp.ws)
@@ -245,7 +245,7 @@ end
     g = GaseousComponent(:gas; M = 0.032, c = 1000.0, k = 0.03)
     q(z) = z < 0.05 ? 2.0 : z < 0.1 ? 0.0 : 1.0
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.2, 4),
+        mesh = uniform_mesh(0.2, 4),
         material = Material(name = :gap_correction, components = (s, g), reactions = ()),
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -292,13 +292,13 @@ end
 # The front at rest under the slide: each cell holds the front's integral over
 # its own nodes at every time, so the cell masses have an exact reference.
 # Returns their error at the end, relative to the column's mass.
-function _front_at_rest_error(n; mesh = create_uniform_mesh(_L, n))
+function _front_at_rest_error(n; mesh = uniform_mesh(_L, n))
     w = _L / 10
     I(z) = 1000.0 * (z / 2 + (w / 2) * log(cosh((z - _L / 2) / w)))
     cp = setup(
         _composition(n; mesh);
         use_ale = true,
-        w_override = _slide,
+        correction = PrescribedCorrection(_slide),
         abstol = 1e-12,
         reltol = 1e-10,
     )
@@ -321,7 +321,7 @@ end
 # center distances would leave an error of zeroth order.
 function _alternating(n)
     h = 2_L / 3n
-    return create_mesh_from_nodes(cumsum([0.0; [isodd(i) ? h : 2h for i = 1:n]]))
+    return line_mesh(cumsum([0.0; [isodd(i) ? h : 2h for i = 1:n]]))
 end
 
 @testset "the relative fluxes converge on a front at rest over alternating cell sizes" begin
@@ -334,7 +334,7 @@ end
 function _uniform(n; coordinates = Planar())
     s = SolidComponent(:s, ρ = 800.0, c = 1000.0, k = 0.3)
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(_L, n; coordinates),
+        mesh = uniform_mesh(_L, n; coordinates),
         material = Material(name = :uniform, components = (s,), reactions = ()),
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -353,7 +353,7 @@ function _free_stream_error(coords, dt; energy = :temperature)
         _uniform(12; coordinates = coords);
         energy_state = energy,
         use_ale = true,
-        w_override = _compress,
+        correction = PrescribedCorrection(_compress),
         dt,
         adaptive = false,
         abstol = 1e-12,
@@ -383,7 +383,7 @@ end
     cp = setup(
         _composition(16; law = χ -> 1 - 0.3χ);
         use_ale = true,
-        w_override = _slide,
+        correction = PrescribedCorrection(_slide),
         abstol = 1e-10,
         reltol = 1e-8,
     )
@@ -427,7 +427,7 @@ end
         _composition(n; law);
         energy_state = energy,
         use_ale = true,
-        w_override = _slide,
+        correction = PrescribedCorrection(_slide),
     )
     def, ws, cj = cp.def, cp.ws, cp.jacobian
     layout = def.layout

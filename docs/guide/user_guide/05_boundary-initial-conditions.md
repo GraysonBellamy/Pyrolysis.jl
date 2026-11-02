@@ -274,9 +274,9 @@ is the surface's *own* re-radiation loss) and from `HeatFluxBC` (which injects a
 bare flux with no absorptivity or in-depth treatment).
 
 ```julia
-bc = RadiativeFluxBC(flux = 25e3)                          # incident 25 kW/m², a = a_eff
-bc = RadiativeFluxBC(flux = 50e3, absorptivity = 0.9)      # fixed absorptivity
-bc = RadiativeFluxBC(flux = t -> 25e3*(1 - exp(-t/10)))    # time-varying flux
+bc = RadiativeFluxBC(25e3)                          # incident 25 kW/m², a = a_eff
+bc = RadiativeFluxBC(50e3, absorptivity = 0.9)      # fixed absorptivity
+bc = RadiativeFluxBC(t -> 25e3*(1 - exp(-t/10)))    # time-varying flux
 ```
 
 Fields:
@@ -295,8 +295,7 @@ Fields:
 
 | `radiation_model` (in `solve`) | What `RadiativeFluxBC` does |
 |---|---|
-| `NO_RADIATION` | Absorbed flux `a·q_inc` deposited as a surface boundary heat flux |
-| `SURFACE_ABSORPTION` | Same — absorbed at the surface (opaque material) |
+| `SURFACE_ABSORPTION` | Absorbed flux `a·q_inc` deposited as a surface boundary heat flux (opaque material) |
 | `BEER_LAMBERT` | Boundary flux is **zero**; the absorbed `a·q_inc` enters the first live cell as the intensity of its exposed face and is absorbed in depth (`extras.volumetric_absorption`); what leaves the last face is transmitted (`extras.radiation_transmitted`) |
 
 Under `BEER_LAMBERT` the incident radiation enters through the `:top` face only:
@@ -323,9 +322,9 @@ incoming radiation, re-radiation loss, and convective loss. Add them with `+`:
 
 ```julia
 top_thermal =
-    RadiativeFluxBC(flux = 50e3, absorptivity = 0.96) +  # cone heater (incoming)
-    RadiativeBC(ε = 0.96, T_inf = 330.0) +               # re-radiation loss
-    ConvectiveBC(h = 10.0, T_inf = 330.0)                # convective loss
+    RadiativeFluxBC(50e3, absorptivity = 0.96) +  # cone heater (incoming)
+    RadiativeBC(ε = 0.96, T_inf = 330.0) +        # re-radiation loss
+    ConvectiveBC(h = 10.0, T_inf = 330.0)         # convective loss
 ```
 
 The combined flux is the sum of the component fluxes,
@@ -338,7 +337,7 @@ A canonical cone-calorimeter top face:
 ```julia
 bc_set = BoundaryConditionSet(
     thermal = (
-        top = RadiativeFluxBC(flux = 50e3, absorptivity = 0.96) +
+        top = RadiativeFluxBC(50e3, absorptivity = 0.96) +
               RadiativeBC(ε = 0.96, T_inf = 330.0) +
               ConvectiveBC(h = 10.0, T_inf = 330.0),
         bottom = AdiabaticBC(),
@@ -436,15 +435,14 @@ supply complete composition and incoming energy data and support either gas mode
 
 ## 5.6 Radiation models and the boundary conditions
 
-The three radiation models are selected by the `radiation_model` keyword of
-`solve()` (default `NO_RADIATION`), not by a BC in the set, and there is no
+The two radiation models are selected by the `radiation_model` keyword of
+`solve()` (default `SURFACE_ABSORPTION`), not by a BC in the set, and there is no
 radiation BC type: the incoming radiation is always a `RadiativeFluxBC` in the
 thermal slot (§5.2.6), and the surface's own emission a `RadiativeBC` (§5.2.4).
 
 | `radiation_model` | Where the absorbed incident flux goes | Requirements |
 |---|---|---|
-| `NO_RADIATION` (default) | the surface balance of the face carrying the `RadiativeFluxBC` | — |
-| `SURFACE_ABSORPTION` | the same (opaque material) | — |
+| `SURFACE_ABSORPTION` (default) | the surface balance of the face carrying the `RadiativeFluxBC` (opaque material) | — |
 | `BEER_LAMBERT` | in depth, through algebraic face intensities attenuated cell by cell with the components' `α` | the `RadiativeFluxBC` on `:top` only; planar coordinates; `α > 0` on the absorbing components |
 
 Under `BEER_LAMBERT` the face intensities are unknowns of the state, each tied to
@@ -506,7 +504,7 @@ single-argument function. The solver evaluates it at the current time. Examples:
 HeatFluxBC(t -> 50e3 * min(t / 5.0, 1.0))           # linear ramp to 50 kW/m² over 5 s
 
 # Time-varying incident radiation
-RadiativeFluxBC(flux = t -> 25e3 * (1 - exp(-t / 10)))
+RadiativeFluxBC(t -> 25e3 * (1 - exp(-t / 10)))
 
 # Warming ambient in a convective loss term
 ConvectiveBC(h = 10.0, T_inf = t -> 300 + 0.5 * t)
@@ -520,7 +518,7 @@ MassFluxBC(t -> t < 50 ? 0.0 : -1e-3)
 > alike, with no up-front constancy detection; under `BEER_LAMBERT` the
 > exposed-face intensity row is `I_e = a·q_inc(t)` at that time. A ramped or modulated
 > flux is therefore always tracked. You do not need to do anything special —
-> just supply `flux = t -> …`.
+> just supply `t -> …` as the flux.
 
 ---
 
@@ -545,7 +543,7 @@ submodule), which returns the cell-centre temperatures and the `NC × n`
 concentration matrix:
 
 ```julia
-T0, ξ0 = Pyrolysis.Problem.initial_fields(problem, problem.mesh)
+T0, ξ0 = Pyrolysis.Problem.initial_fields(problem)
 ```
 
 The integrator refuses an initial state in which a component mass is more
@@ -605,7 +603,7 @@ reads, `m_{dry,i} = V_i · Σ_{solid} ξ_{j,i}(0)` over the
 `SolidComponent`s (see Technical Reference §12.8 and §10.3).
 
 **Layered samples.** Put a material interface on a mesh node (for example with
-`create_mesh_from_nodes`) and give the components a step there, so every cell
+`line_mesh`) and give the components a step there, so every cell
 starts with one layer's composition. `setup` finds the layer interfaces from
 which condensed components each cell starts with, and on a moving mesh with
 deactivation it keeps those nodes with the solid (Chapter 10); the `lagrangian`
@@ -665,7 +663,7 @@ face:
 ```julia
 bc_set = BoundaryConditionSet(
     thermal = (
-        top = RadiativeFluxBC(flux = 50e3, absorptivity = 0.96) +
+        top = RadiativeFluxBC(50e3, absorptivity = 0.96) +
               RadiativeBC(ε = 0.96, T_inf = 330.0) +
               ConvectiveBC(h = 10.0, T_inf = 330.0),
         bottom = AdiabaticBC(),
@@ -686,7 +684,7 @@ absorption coefficients on the components):
 ```julia
 bc_set = BoundaryConditionSet(
     thermal = (
-        top = RadiativeFluxBC(flux = 50e3) +          # a defaults to a_eff (= ε_eff by Kirchhoff)
+        top = RadiativeFluxBC(50e3) +          # a defaults to a_eff (= ε_eff by Kirchhoff)
               RadiativeBC(T_inf = 300.0) +
               ConvectiveBC(h = 10.0, T_inf = 300.0),
         bottom = AdiabaticBC(),
@@ -736,13 +734,11 @@ named flow measure when the exterior instead has a hydraulic resistance.
   reservoir carried enthalpy directly. Use the assembled boundary diagnostics
   to avoid adding incoming energy twice (§5.4).
 
-- **`radiation_model` defaults to `NO_RADIATION`.** A `RadiativeFluxBC` only does
-  something if you pass an appropriate `radiation_model` to `solve()`. With the
-  default `NO_RADIATION`, an incident `RadiativeFluxBC` is still absorbed at the
-  surface (the absorbed flux is applied as a boundary heat flux), but choose
-  `SURFACE_ABSORPTION` (opaque) or `BEER_LAMBERT` (semi-transparent) explicitly
-  to make the intent clear and to enable the in-depth distribution. Under
-  `BEER_LAMBERT` the `RadiativeFluxBC` must sit on `:top`.
+- **`radiation_model` defaults to `SURFACE_ABSORPTION`.** A `RadiativeFluxBC` is
+  always applied: under the default it is absorbed at the surface (the absorbed
+  flux is applied as a boundary heat flux). Choose `BEER_LAMBERT`
+  (semi-transparent) for the in-depth distribution; the `RadiativeFluxBC` must then
+  sit on `:top`.
 
 - **Only thermal and mass BCs go in the set.** `BoundaryConditionSet` accepts
   only `AbstractThermalBC` and `AbstractMassBC` payloads — a wrong-kind BC

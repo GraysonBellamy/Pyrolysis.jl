@@ -16,5 +16,5 @@ Problem.step_profile
 Problem.linear_profile
 Problem.gaussian_profile
 Problem.tanh_profile
-Problem.validate_problem
+validate_problem
 ```

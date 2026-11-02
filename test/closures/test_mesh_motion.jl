@@ -66,7 +66,7 @@ function _slab(
         mass === nothing ? BoundaryConditionSet(thermal = (top = top, bottom = bottom)) :
         BoundaryConditionSet(thermal = (top = top, bottom = bottom), mass = mass)
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(0.01, n, 1.15; coordinates),
+        mesh = stretched_mesh(0.01, n, 1.15; coordinates),
         material = mat,
         bc_set = bcs,
         T_initial = z -> 500.0 + 4e4 * z,
@@ -94,7 +94,7 @@ const _configurations = (
         problem = n -> _slab(
             n;
             radiating = true,
-            top = RadiativeFluxBC(flux = t -> 3e4 * (1 + 0.5 * sin(t))) +
+            top = RadiativeFluxBC(t -> 3e4 * (1 + 0.5 * sin(t))) +
                   RadiativeBC(T_inf = 300.0),
         ),
         options = (radiation_model = BEER_LAMBERT,),
@@ -253,7 +253,7 @@ function _uniform_slab(n; law = nothing, ρ_b = 400.0, coordinates = Planar())
         lateral_shrinkage_law = law,
     )
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(0.02, n, 1.1; coordinates),
+        mesh = stretched_mesh(0.02, n, 1.1; coordinates),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(400.0), bottom = DirichletThermalBC(400.0)),
@@ -314,8 +314,15 @@ end
     @test rank_check(BalanceRowClosure(sphere.topology), sphere.topology, gs)
 
     reacting = _uniform_slab(4)
-    @test_throws ArgumentError setup(reacting; use_ale = true, w_override = (x, t) -> 0.0)
-    @test_throws ArgumentError setup(reacting; w_override = (x, t) -> 0.0)
+    @test_throws ArgumentError setup(
+        reacting;
+        use_ale = true,
+        correction = PrescribedCorrection((x, t) -> 0.0),
+    )
+    @test_throws ArgumentError setup(
+        reacting;
+        correction = PrescribedCorrection((x, t) -> 0.0),
+    )
     @test_throws ArgumentError setup(_uniform_slab(4; law = χ -> 1 - 0.5χ))
     @test_throws ArgumentError setup(
         _uniform_slab(4; law = χ -> 1 - 0.5χ, coordinates = Cylindrical());
@@ -372,7 +379,7 @@ end
 @testset "solve: an inert column on a moving mesh stays put and matches the fixed mesh" begin
     solid = SolidComponent(:solid, ρ = 1000.0, c = 1000.0, k = 0.5, ε = 0.9)
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.02, 40),
+        mesh = uniform_mesh(0.02, 40),
         material = Material(name = :inert, components = (solid,), reactions = ()),
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(500.0), bottom = AdiabaticBC()),

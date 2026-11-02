@@ -65,7 +65,7 @@ function _vbo07_problem(n_pmma::Int; t_end = 500.0, porosity = 0.1)
     dz = VBO_L_PMMA / n_pmma
     n_kw = round(Int, VBO_L_KW / dz)
     n = n_pmma + n_kw
-    mesh = create_uniform_mesh(n * dz, n)
+    mesh = uniform_mesh(n * dz, n)
     z_if = n_kw * dz
     ξ0 = [
         z -> z > z_if ? _vbo07_concentrations(_vbo07_fraction(z, z_if))[1] : 0.0,

@@ -84,7 +84,7 @@ boundary face carries it out of the domain.
 > (`src/Meshes/topology.jl`). `MeshTopology{D,C,FT,CT}` holds the coordinate
 > system, the faces, the cells, the node count, the boundary tags (tag → face
 > ids), the pinned nodes, the Lagrangian nodes (layer interfaces that always move
-> with the solid, §11.7.5) and the cross-section measure $A_0$. `Mesh{D}` is the
+> with the solid, §11.7.4) and the cross-section measure $A_0$. `Mesh{D}` is the
 > topology plus the reference positions of the nodes, the positions at which
 > `setup` evaluates the problem's `T_initial` and `ξ_initial` (at the cell
 > centres, §12.8). The mesh carries no component count, no initial state and no
@@ -122,7 +122,7 @@ reproduces the steady piecewise-linear profile of a two-layer slab to integrator
 precision for conductivity ratios 10:1 and 100:1 (§18). Because the initial
 conditions are sampled at the cell centres, a composition interface that does not
 lie on a face is moved to the nearest face (there are no mixed cells); a node
-placed on each interface (`create_mesh_from_nodes`, §13.9.4) avoids that
+placed on each interface (`line_mesh`, §13.9.4) avoids that
 quantization.
 
 Two places are first-order by construction. A **boundary face** is reached from
@@ -164,7 +164,7 @@ starts at the axis or the centre has a zero face area there, so that face carrie
 no flux whatever its condition. On a line from the axis to $r=1$ cm in four
 cylindrical cells the face areas are $0$, $0.0157$, $0.0314$, $0.0471$ and
 $0.0628$ m² per metre of axial length and the volumes sum to $\pi r^2$ exactly
-(`geometry!` on `create_uniform_mesh(0.01, 4; coordinates = Cylindrical())`).
+(`geometry!` on `uniform_mesh(0.01, 4; coordinates = Cylindrical())`).
 
 The volume is **signed**: an inverted trial mesh gives a non-positive volume,
 which the state mapping floors for evaluation (§13.2.4) and the admissibility test
@@ -439,8 +439,8 @@ type, the layout's flags, the closure), so `residual!` has one method and
 ### 13.4.3 Buffers and element types
 
 The residual is a pure function of the state, the time and an immutable
-`CoreDefinition` (the layout, the state setup, the kernels, the closure and the
-external sources), writing into a `CoreWorkspace` of buffers: the derived state and
+`ResidualDefinition` (the layout, the state setup, the kernels, the closure and the
+external sources), writing into a `ResidualWorkspace` of buffers: the derived state and
 the contributions with `Float64` elements, and their twins for every dual-number
 element type the colored Jacobian evaluates the residual at, built on first use
 (`src/Assembly/definition.jl`; §15.2). The sizes are fixed for the whole solve; a
@@ -754,7 +754,7 @@ Albada slope, an inventory's face state is bounded by the upwind cell's inventor
 a boundary face takes the one-sided extrapolation of its cell, and a face with an
 exactly zero relative velocity is skipped (§11.6). The energy is never reconstructed
 separately, so an isothermal composition profile advected across the mesh stays
-isothermal. A prescribed mesh velocity (`w_override`, §11.7.8) moves the mesh over a
+isothermal. A prescribed mesh velocity (`PrescribedCorrection`, §11.7.7) moves the mesh over a
 solid at rest, and the same kernel carries every inventory at the mesh-relative
 velocity. Under `NoCorrection` the kernel is absent.
 
@@ -781,7 +781,7 @@ coordinates. The three user constructors below build on it; each returns a
 
 ### 13.9.2 Uniform mesh
 
-`create_uniform_mesh(L, n; coordinates = Planar(), cross_section)` divides $[0,L]$
+`uniform_mesh(L, n; coordinates = Planar(), cross_section)` divides $[0,L]$
 into $n\ge1$ equal cells:
 
 $$
@@ -794,7 +794,7 @@ the axis or the centre to the surface at radius $L$.
 
 ### 13.9.3 Geometric-stretch mesh
 
-`create_stretched_mesh(L, n, s; stretch_from = :top, coordinates, cross_section)`
+`stretched_mesh(L, n, s; stretch_from = :top, coordinates, cross_section)`
 concentrates cells near one boundary to resolve the steep thermal and reaction fronts
 there. Neighbouring cells differ by the ratio $s\ge1$, and the cell widths form a
 geometric series summing to $L$:
@@ -814,7 +814,7 @@ orientation is chosen by `stretch_from` alone, never by a ratio below one.
 
 ### 13.9.4 Mesh from a node list
 
-`create_mesh_from_nodes(z; coordinates, cross_section)` builds a line on strictly
+`line_mesh(z; coordinates, cross_section)` builds a line on strictly
 increasing positions that start at zero. It puts a node on every layer interface so
 that no cell straddles a composition change (§13.1.3), and builds graded layered
 meshes such as the one of V-BO-06 (§18).
@@ -825,7 +825,7 @@ meshes such as the one of V-BO-06 (§18).
 using Pyrolysis
 using Pyrolysis.Internal: geometry!, center_to_face_distance, boundary_faces
 
-mesh = create_stretched_mesh(0.01, 5, 1.2)      # 1 cm, 5 cells, finest at z = L
+mesh = stretched_mesh(0.01, 5, 1.2)      # 1 cm, 5 cells, finest at z = L
 topo = mesh.topology
 x = [p[1] for p in mesh.positions]
 println(diff(x))                                 # cell widths [m]
@@ -1030,7 +1030,7 @@ material = Material(
     reactions = (Reaction(:gasification, 1 => 2, A = 8.5e12, E = 188e3, h = 8.7e5),),
 )
 problem = PyrolysisProblem(
-    mesh = create_uniform_mesh(0.002, 20),
+    mesh = uniform_mesh(0.002, 20),
     material = material,
     bc_set = BoundaryConditionSet(
         thermal = (

@@ -558,7 +558,7 @@ end
         function build(n)
             solid = SolidComponent(:s, ρ = ρs, c = cs, k = ks)
             mat = Material(name = :MMSSelfE2E, components = (solid,), reactions = ())
-            mesh = create_uniform_mesh(L, n)
+            mesh = uniform_mesh(L, n)
             bcs = mms_thermal_bcs(mat, fields, L)
             bc_set = BoundaryConditionSet(thermal = (top = bcs.top, bottom = bcs.bottom))
             return PyrolysisProblem(

@@ -36,7 +36,7 @@ using Pyrolysis.BoundaryConditions:
     evaluate_bc_flux_and_derivative,
     compute_boundary_heat_fluxes,
     _blowing_conductance
-using Pyrolysis.Materials: SURFACE_ABSORPTION, NO_RADIATION
+using Pyrolysis.Materials: SURFACE_ABSORPTION
 using Pyrolysis.States: trial_temperature
 
 # ----------------------------------------------------------------------------
@@ -146,36 +146,38 @@ end
         χ = blowing_factor(mcp / h)
 
         conv = ConvectiveBC(h = h, T_inf = T_inf, blowing = CouetteFilm())
-        q, dq = evaluate_bc_flux_and_derivative(conv, T_s, t, ε, NO_RADIATION, face)
+        q, dq = evaluate_bc_flux_and_derivative(conv, T_s, t, ε, SURFACE_ABSORPTION, face)
         @test q ≈ h * χ * (T_inf - T_s) rtol = 1e-14
         @test dq ≈ -h * χ rtol = 1e-14
 
         # Zero outflow reproduces the uncorrected flux exactly.
-        q0, dq0 = evaluate_bc_flux_and_derivative(conv, T_s, t, ε, NO_RADIATION, face0)
+        q0, dq0 =
+            evaluate_bc_flux_and_derivative(conv, T_s, t, ε, SURFACE_ABSORPTION, face0)
         @test q0 === h * (T_inf - T_s)
         @test dq0 === -h
 
         # The default model leaves the coefficient alone whatever the outflow.
         bare = ConvectiveBC(h = h, T_inf = T_inf)
         @test bare.blowing === NoBlowing()
-        @test ConvectiveBC(h, T_inf).blowing === NoBlowing()
-        qb, dqb = evaluate_bc_flux_and_derivative(bare, T_s, t, ε, NO_RADIATION, face)
+        @test ConvectiveBC(h = h, T_inf = T_inf).blowing === NoBlowing()
+        qb, dqb = evaluate_bc_flux_and_derivative(bare, T_s, t, ε, SURFACE_ABSORPTION, face)
         @test qb === q0
         @test dqb === dq0
 
         # Non-convective BCs ignore the face.
         rad = RadiativeBC(T_inf = T_inf)
-        qr, dqr = evaluate_bc_flux_and_derivative(rad, T_s, t, ε, NO_RADIATION, face)
-        qr5, dqr5 = evaluate_bc_flux_and_derivative(rad, T_s, t, ε, NO_RADIATION)
+        qr, dqr = evaluate_bc_flux_and_derivative(rad, T_s, t, ε, SURFACE_ABSORPTION, face)
+        qr5, dqr5 = evaluate_bc_flux_and_derivative(rad, T_s, t, ε, SURFACE_ABSORPTION)
         @test qr == qr5 && dqr == dqr5
 
         flux = HeatFluxBC(2e4)
-        qf, _ = evaluate_bc_flux_and_derivative(flux, T_s, t, ε, NO_RADIATION, face)
+        qf, _ = evaluate_bc_flux_and_derivative(flux, T_s, t, ε, SURFACE_ABSORPTION, face)
         @test qf == 2e4
 
         # Combined: convective child rescaled, others untouched.
         combo = flux + conv + rad
-        qc, dqc = evaluate_bc_flux_and_derivative(combo, T_s, t, ε, NO_RADIATION, face)
+        qc, dqc =
+            evaluate_bc_flux_and_derivative(combo, T_s, t, ε, SURFACE_ABSORPTION, face)
         @test qc ≈ qf + q + qr rtol = 1e-14
         @test dqc ≈ dq + dqr rtol = 1e-14
 
@@ -185,7 +187,7 @@ end
             T_inf = T_inf,
             blowing = FunctionBlowing((f, hh, Ti) -> 1 / (1 + sum(f.ṁ) / 0.01)),
         )
-        qu, _ = evaluate_bc_flux_and_derivative(custom, T_s, t, ε, NO_RADIATION, face)
+        qu, _ = evaluate_bc_flux_and_derivative(custom, T_s, t, ε, SURFACE_ABSORPTION, face)
         @test qu ≈ h / 3 * (T_inf - T_s) rtol = 1e-14
     end
 
@@ -213,7 +215,7 @@ end
         λ = 0.31
         conv = ConvectiveBC(h = h, T_inf = T_inf, blowing = CouetteFilm(λ))
         χ = blowing_factor(2λ * mcp / h)
-        q, dq = evaluate_bc_flux_and_derivative(conv, T_s, t, ε, NO_RADIATION, face)
+        q, dq = evaluate_bc_flux_and_derivative(conv, T_s, t, ε, SURFACE_ABSORPTION, face)
         @test q ≈ h * χ * (T_inf - T_s) rtol = 1e-14
         @test dq ≈ -h * χ rtol = 1e-14
         q_def, _ = evaluate_bc_flux_and_derivative(
@@ -221,19 +223,19 @@ end
             T_s,
             t,
             ε,
-            NO_RADIATION,
+            SURFACE_ABSORPTION,
             face,
         )
         @test abs(q) > abs(q_def)
 
         # The diagnostic decomposition applies the same factor.
-        dec = compute_boundary_heat_fluxes(conv, T_s, t, ε, NO_RADIATION, face)
+        dec = compute_boundary_heat_fluxes(conv, T_s, t, ε, SURFACE_ABSORPTION, face)
         @test dec.net ≈ q rtol = 1e-14
         @test dec.convection ≈ -q rtol = 1e-14
 
         # Inside a combined BC each convective member keeps its own model.
         combo = ConvectiveBC(h = h, T_inf = T_inf, blowing = CouetteFilm()) + conv
-        qc, _ = evaluate_bc_flux_and_derivative(combo, T_s, t, ε, NO_RADIATION, face)
+        qc, _ = evaluate_bc_flux_and_derivative(combo, T_s, t, ε, SURFACE_ABSORPTION, face)
         @test qc ≈ q_def + q rtol = 1e-14
     end
 
@@ -330,7 +332,7 @@ end
     @testset "integration: solve() with blowing" begin
         function _solve(model)
             mat = _blowing_material()
-            mesh = create_uniform_mesh(0.005, 8)
+            mesh = uniform_mesh(0.005, 8)
             bcs = BoundaryConditionSet(
                 thermal = (
                     top = HeatFluxBC(50e3) +

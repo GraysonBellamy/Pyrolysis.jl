@@ -406,7 +406,7 @@ char = SolidComponent(:char; ρ = 200.0, φ=.3, c = 1200.0, k = 0.10, λ = 1e-6)
 gas = GaseousComponent(:gas; M = 0.100, c = 1500.0, k = 0.02,)
 rxn0 = Reaction(:decomp, 1 => (2, 3); A = 1e13, E = 1.88e5, h = 8.7e5, yields = (0.2, 0.8))
 base_problem = PyrolysisProblem(;
-    mesh = create_uniform_mesh(10.0e-3, 40),
+    mesh = uniform_mesh(10.0e-3, 40),
     material = Material(name = :charring_polymer, components = (virgin, char, gas),
                         reactions = (rxn0,)),
     bc_set = BoundaryConditionSet(
@@ -648,7 +648,7 @@ the mesh, the tolerances and every option that changes the solution are part
 of the map. Every solve of one difference — and of one convergence check at a
 given tolerance — must be made with identical options: `energy_state`,
 `abstol`, `reltol`, `use_ale`, `radiation_model`, `deactivation`, `threshold`,
-`band`, `located_events`, `integrator_policy`, `linear_solver`, `dtmax`,
+`band`, `integrator_policy`, `dtmax`,
 `saveat`, and the problem's `output_times`. An option that differs between the
 $+h$ and the $-h$ solve adds its own effect divided by $2h$ to the estimate.
 **Rule:** pass the options through one named tuple to every solve (User Guide

@@ -1,7 +1,7 @@
 # On every verification case, in both energy forms: the largest scaled
 # constraint residual of the accepted states and the achieved temperature
 # error against the requested tolerance, and on the deactivating cases the
-# event timing with event location off and on.
+# event timing.
 #
 # Each case is solved as the suite solves it (its builder at the CI
 # resolution, its solve keywords and its solve function), then again with both
@@ -20,14 +20,12 @@
 # `statistics.largest_constraint_residual`; one or below passes.
 #
 # Under deactivation (`deactivation = true`) a temperature just after an event
-# follows the event's time, so each such case is solved with event location
-# off and on (`located_events`, its reference likewise) and judged on the
-# event-time shift instead: the largest difference of the deactivation
-# invocations' times between the solve and its reference, over the median
-# interval between the reference's invocations, or, for a case with a single
-# invocation, between its saved times (where its quantities are read). A case
-# passes when the located shift is at most `LOCATED_BUDGET` of that interval
-# and at most a `LOCATED_GAIN`-th of the shift without location.
+# follows the event's time, so each such case is judged on the event-time
+# shift instead: the largest difference of the deactivation invocations' times
+# between the solve and its reference, over the median interval between the
+# reference's invocations, or, for a case with a single invocation, between its
+# saved times (where its quantities are read). A case passes when the shift is
+# at most `LOCATED_BUDGET` of that interval.
 #
 # Run from the repository root:
 #   julia --project=test --startup-file=no --threads=1 test/gates/case_accuracy.jl [case ids...]
@@ -42,7 +40,6 @@ mkpath(OUT)
 const TIGHTEN = (100.0, 10.0)
 const BUDGET = 10.0
 const LOCATED_BUDGET = 0.05
-const LOCATED_GAIN = 3.0
 const ONLY = ARGS
 # The tolerances of `Integration.solve`, which a case without a solve function
 # and without its own tolerances is solved at.
@@ -113,11 +110,8 @@ _statistic(sol, name) =
     hasproperty(sol, :statistics) && sol.statistics !== nothing ?
     getproperty(sol.statistics, name) : NaN
 
-# `located` is `nothing` for a case without deactivation, else whether its
-# events are located.
-function survey(m, case, energy; located = nothing)
+function survey(m, case, energy)
     kw = case.solve_kwargs
-    located === nothing || (kw = merge(kw, (; located_events = located)))
     if case.solve_fn !== nothing && !(haskey(kw, :reltol) && haskey(kw, :abstol))
         error("$(case.id): a case with a solve function needs explicit tolerances")
     end
@@ -144,7 +138,7 @@ function survey(m, case, energy; located = nothing)
     return (;
         case = case.id,
         energy,
-        location = located === nothing ? "" : located ? "on" : "off",
+        deactivating = get(kw, :deactivation, false),
         retcode = sol.retcode,
         reference_retcode = ref.retcode,
         tightened,
@@ -176,56 +170,35 @@ for energy in ("temperature", "enthalpy")
     m, cases = load_cases(energy)
     for case in cases
         isempty(ONLY) || case.id in ONLY || continue
-        located = get(case.solve_kwargs, :deactivation, false) ? (false, true) : (nothing,)
-        for l in located
-            row = try
-                survey(m, case, energy; located = l)
-            catch err
-                println(
-                    "[$(case.id) $energy] error: ",
-                    sprint(showerror, err)[1:min(end, 400)],
-                )
-                continue
-            end
-            push!(rows, row)
-            println(join(("$k=$v" for (k, v) in pairs(row)), " "))
-            flush(stdout)
+        row = try
+            survey(m, case, energy)
+        catch err
+            println("[$(case.id) $energy] error: ", sprint(showerror, err)[1:min(end, 400)])
+            continue
         end
+        push!(rows, row)
+        println(join(("$k=$v" for (k, v) in pairs(row)), " "))
+        flush(stdout)
     end
 end
 load_end = Sys.loadavg()
 
-# The event timing, per deactivating case and form: the shifts with location
-# off and on, as fractions of the median interval.
-timing = []
-for r in rows
-    r.location == "on" || continue
-    off = only(
-        filter(o -> o.case == r.case && o.energy == r.energy && o.location == "off", rows),
-    )
-    gain = off.shift / r.shift
-    push!(
-        timing,
-        (;
-            r.case,
-            r.energy,
-            r.invocations,
-            off_shift = off.shift,
-            on_shift = r.shift,
-            interval = r.interval,
-            off_fraction = off.shift / r.interval,
-            on_fraction = r.shift / r.interval,
-            gain,
-            passes = off.completed &&
-                     r.completed &&
-                     r.shift / r.interval <= LOCATED_BUDGET &&
-                     gain >= LOCATED_GAIN,
-        ),
-    )
-end
+# The event timing, per deactivating case and form: the shift as a fraction of
+# the median interval.
+timing = [
+    (;
+        r.case,
+        r.energy,
+        r.invocations,
+        r.shift,
+        r.interval,
+        fraction = r.shift / r.interval,
+        passes = r.completed && r.shift / r.interval <= LOCATED_BUDGET,
+    ) for r in rows if r.deactivating
+]
 # A deactivating case's solves are judged on their event timing.
 rows = [
-    r.location == "" ? r :
+    r.deactivating ?
     merge(
         r,
         (;
@@ -234,7 +207,7 @@ rows = [
                 timing,
             ),
         ),
-    ) for r in rows
+    ) : r for r in rows
 ]
 
 open(joinpath(OUT, "case_accuracy.csv"), "w") do io
@@ -265,8 +238,7 @@ open(joinpath(OUT, "case_accuracy.md"), "w") do io
         "compared: the saved times compared, zero for the final state; to: the last time ",
         "compared [s]); ratio: that error over ",
         "reltol times the reference's largest temperature, within budget at ",
-        "$(Int(BUDGET)) or less. Under deactivation each case is solved with event ",
-        "location off and on (location; its reference likewise) and judged on the event ",
+        "$(Int(BUDGET)) or less. Under deactivation each case is judged on the event ",
         "timing below: invocations, the deactivation invocations; event shift, the largest ",
         "difference of the invocation times from the reference's over the median ",
         "interval between the reference's invocations (between its saved times for a ",
@@ -276,13 +248,13 @@ open(joinpath(OUT, "case_accuracy.md"), "w") do io
     )
     println(
         io,
-        "| case | form | location | retcode | reltol | tightened | error [K] | compared | to [s] | ratio | invocations | event shift | within budget | constraint | steps | wall [s] |",
+        "| case | form | retcode | reltol | tightened | error [K] | compared | to [s] | ratio | invocations | event shift | within budget | constraint | steps | wall [s] |",
     )
-    println(io, "|" * repeat("---|", 16))
+    println(io, "|" * repeat("---|", 15))
     for r in rows
         println(
             io,
-            "| $(r.case) | $(r.energy) | $(r.location) | $(r.retcode) | $(r.reltol) | $(Int(r.tightened)) | ",
+            "| $(r.case) | $(r.energy) | $(r.retcode) | $(r.reltol) | $(Int(r.tightened)) | ",
             "$(_g(r.error)) | $(r.compared) | $(_g(r.compared_to)) | $(_g(r.ratio)) | $(r.invocations) | $(_g(r.event_shift)) | $(r.within_budget) | $(_g(r.constraint)) | ",
             "$(r.steps isa AbstractFloat && isnan(r.steps) ? "" : r.steps) | $(_g(r.wall)) |",
         )
@@ -295,26 +267,25 @@ open(joinpath(OUT, "case_accuracy.md"), "w") do io
         "$(length(rows)) with every constraint residual at or below one.",
     )
     isempty(timing) && return
-    println(io, "\n## Event timing with location off and on\n")
+    println(io, "\n## Event timing\n")
     println(
         io,
         "Per deactivating case and form, the largest shift of the invocation times ",
-        "between the solve and its reference [s] with location off and on, the median ",
-        "interval between the reference's invocations, or between its saved times for ",
-        "a single invocation [s], and the shifts as fractions of it, and gain, the shift off over the shift on. Passes when the located ",
-        "shift is at most $(LOCATED_BUDGET) of the interval and the gain at least ",
-        "$(LOCATED_GAIN), both solves completing as the case expects.\n",
+        "between the solve and its reference [s], the median interval between the ",
+        "reference's invocations, or between its saved times for a single invocation ",
+        "[s], and the shift as a fraction of it. Passes when the shift is at most ",
+        "$(LOCATED_BUDGET) of the interval, the solve completing as the case expects.\n",
     )
     println(
         io,
-        "| case | form | invocations | shift off [s] | shift on [s] | interval [s] | off / interval | on / interval | gain | passes |",
+        "| case | form | invocations | shift [s] | interval [s] | fraction | passes |",
     )
-    println(io, "|" * repeat("---|", 10))
+    println(io, "|" * repeat("---|", 7))
     for t in timing
         println(
             io,
-            "| $(t.case) | $(t.energy) | $(t.invocations) | $(_g(t.off_shift)) | $(_g(t.on_shift)) | ",
-            "$(_g(t.interval)) | $(_g(t.off_fraction)) | $(_g(t.on_fraction)) | $(_g(t.gain)) | $(t.passes) |",
+            "| $(t.case) | $(t.energy) | $(t.invocations) | $(_g(t.shift)) | ",
+            "$(_g(t.interval)) | $(_g(t.fraction)) | $(t.passes) |",
         )
     end
     println(io, "\n$(count(t -> t.passes, timing)) of $(length(timing)) pass.")

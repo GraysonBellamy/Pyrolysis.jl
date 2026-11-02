@@ -156,7 +156,7 @@ h_conv = 7.2              # W/(m²·K)
 # Create uniform mesh; the initial temperature and concentrations (virgin PMMA
 # + char + MMA gas) come from the problem's T_initial and ξ_initial below.
 # Convention: z=0 is the back face, z=L the exposed surface
-mesh = create_uniform_mesh(
+mesh = uniform_mesh(
     sample_thickness,      # domain length [m]
     n_cells,               # number of cells
 )
@@ -175,19 +175,17 @@ println("  - Cell size: $(sample_thickness/n_cells*1000) mm")
 # - Re-radiation losses (surface radiates to surroundings)
 # - Convective losses (natural + forced convection)
 #
-# IMPORTANT: Radiation model comparison
 # - RadiativeFluxBC: External radiative source (cone heater)
 #   → Subject to absorptivity (fraction absorbed = α × incident)
 #   → radiation_model=BEER_LAMBERT: absorbed radiation distributed via Beer-Lambert
-#   → radiation_model=SURFACE_ABSORPTION (or the default NO_RADIATION): all absorbed at the exposed face
+#   → radiation_model=SURFACE_ABSORPTION, the default: all absorbed at the exposed face
 # - HeatFluxBC: Direct contact heating or fully opaque surface absorption
 #   → NOT subject to absorptivity - full flux applied at surface
 # - RadiativeBC: Re-radiation losses to surroundings (σεT⁴)
 #   → Loss term, not a heat input
 
 top_thermal_bc =
-    RadiativeFluxBC(flux = q_external, absorptivity = 0.96) +  # Cone heater (model-dependent)
-    # RadiativeBC(ε = 0.96, T_inf = 360) +                 # Re-radiation losses (original)
+    RadiativeFluxBC(q_external, absorptivity = 0.96) +  # Cone heater (model-dependent)
     RadiativeBC(ε = 0.96, T_inf = 330) +                 # Re-radiation at the boundary; TK deposition may differ
     ConvectiveBC(h = h_conv, T_inf = 330)                # Convective losses
 
@@ -281,7 +279,6 @@ println("\nSolution completed!")
 println("  - Return code: $(solution.retcode)")
 println("  - Solve time: $(round(solution.solve_time, digits=2)) s")
 
-# Thickness history is now part of the solution (from state vector)
 thickness_times = solution.t
 thickness_values = solution.extras.thickness_history
 final_thickness = isempty(thickness_values) ? sample_thickness : thickness_values[end]
@@ -365,7 +362,7 @@ println("\nGenerating plots...")
 
 # Optional externally supplied ThermaKin outputs in `docs/thermakin_output/`.
 # Verify their actual input deck before comparing: the locally supplied
-# `docs/PMMA_cone.cnd` contains DF/moisture, not this PMMA problem.
+# `examples/thermakin/PMMA_cone.cnd` contains DF/moisture, not this PMMA problem.
 # These files have no pinned run provenance here; absent files skip the overlay.
 thermakin_output_dir = joinpath(@__DIR__, "..", "docs", "thermakin_output")
 has_thermakin = isdir(thermakin_output_dir)
@@ -535,7 +532,7 @@ for t in profile_times
             continue
         end
         # Cell centres of the moving mesh at this time
-        z_coords = get_cell_positions(solution; at = idx) .* 1000
+        z_coords = solution.cell_centers[:, idx] .* 1000
         plot!(
             z_coords,
             T_profile,

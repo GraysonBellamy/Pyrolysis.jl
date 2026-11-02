@@ -29,7 +29,7 @@ to `solve`. Set those to the times you want in the files. Cells removed by
 surface deactivation are left out of the profile file.
 
 The case below is a 5.8 mm PMMA slab under 50 kW/m² for 300 s, with the boundary
-conditions of `06_cone_calorimeter_surface_absorption.jl` and constant properties.
+conditions of `06_cone_calorimeter.jl` and constant properties.
 The files go to `output/` at the repository root.
 """
 
@@ -58,7 +58,7 @@ function write_results_csv(solution, prefix)
     names = [c.name for c in solution.problem.material.components]
     rows = Vector{Float64}[]
     for i in eachindex(t)
-        z = get_cell_positions(solution; at = i)
+        z = solution.cell_centers[:, i]
         for j in axes(solution.T, 1)
             isnan(solution.T[j, i]) && continue   # deactivated cell
             push!(rows, [t[i]; z[j]; solution.T[j, i]; solution.ξ[:, j, i]])
@@ -107,14 +107,14 @@ pmma = Material(
     ),
 )
 
-mesh = create_uniform_mesh(5.8e-3, CSV_SMOKE ? 12 : 60)
+mesh = uniform_mesh(5.8e-3, CSV_SMOKE ? 12 : 60)
 air_initial =
     background_gas_concentration(pmma, 4, (1210.0, 0.0, 0.0, 0.0), 300.0; P = 101325.0)
 t_final = CSV_SMOKE ? 20.0 : 300.0
 
 bc_set = BoundaryConditionSet(
     thermal = (
-        top = RadiativeFluxBC(flux = 50e3, absorptivity = 0.96) +
+        top = RadiativeFluxBC(50e3, absorptivity = 0.96) +
               RadiativeBC(ε = 0.96, T_inf = 300.0) +
               ConvectiveBC(h = 10.0, T_inf = 300.0),
         bottom = RadiativeBC(ε = 0.95, T_inf = 300.0) +

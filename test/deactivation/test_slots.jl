@@ -35,11 +35,11 @@ function _column(h, T, layer, ρ; radiating = false)
     z = cumsum(vcat(0.0, h))
     cell(x) = clamp(searchsortedlast(z, x), 1, length(h))
     return PyrolysisProblem(
-        mesh = create_mesh_from_nodes(z),
+        mesh = line_mesh(z),
         material = material,
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = radiating ? RadiativeFluxBC(flux = 1e4) : HeatFluxBC(1e4),
+                top = radiating ? RadiativeFluxBC(1e4) : HeatFluxBC(1e4),
                 bottom = AdiabaticBC(),
             ),
             mass = (

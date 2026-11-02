@@ -45,7 +45,7 @@ end
 # The derived state of a Darcy column at a uniform temperature `T`.
 function _visc_derived(mat, T)
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 4),
+        mesh = uniform_mesh(0.01, 4),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -213,7 +213,7 @@ end
                 gas_viscosity = μ_curve,
             )
             ξ_g0 = background_gas_concentration(mat, 2, (1000.0, 0.0), T_iso; P = P∞)
-            mesh = create_uniform_mesh(L, 40)
+            mesh = uniform_mesh(L, 40)
             bc = BoundaryConditionSet(
                 thermal = (
                     top = DirichletThermalBC(T_iso),
@@ -237,7 +237,7 @@ end
             )
             sol = Pyrolysis.Integration.solve(prob; abstol = 1e-10, reltol = 1e-8)
             @test sol.retcode == :Success
-            z = Pyrolysis.Outputs.get_cell_positions(sol)
+            z = sol.cell_centers[:, end]
             P = map(eachindex(z)) do i
                 ξi = (sol.ξ[1, i, end], sol.ξ[2, i, end])
                 φi = 1 - skeletal_volume_fraction(ξi, T_iso, mat)

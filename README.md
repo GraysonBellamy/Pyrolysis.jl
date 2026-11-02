@@ -43,7 +43,7 @@ pmma = Material(
     ),
 )
 
-mesh = create_uniform_mesh(0.01, 100)
+mesh = uniform_mesh(0.01, 100)
 bcs  = BoundaryConditionSet(
     thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()),
     mass    = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
@@ -88,11 +88,11 @@ advanced users. Highlights:
 | Properties | `ConstantProperty`, `LinearProperty`, `PolynomialProperty`, `ArrheniusProperty`, `TableProperty`, `CallableProperty`, `SutherlandProperty`, `StateDependentProperty` |
 | Boundary conditions | `HeatFluxBC`, `ConvectiveBC`, `RadiativeBC`, `RadiativeFluxBC`, `CombinedThermalBC`, `DirichletThermalBC`, `AdiabaticBC`, `ImpermeableBC`, `MassFluxBC`, `GasReservoir`, `AmbientGasBC`, `MassTransferFilm`, `NeumannPressureBC`, `ConvectivePressureBC`, `BoundaryConditionSet` |
 | Gas model | `LumpedTransfer`, `DustyGas`, `LumpedEndpoint`, `DustyEndpoint` |
-| Radiation | `RadiationModel`, `NO_RADIATION`, `SURFACE_ABSORPTION`, `BEER_LAMBERT` |
-| Mesh | `create_uniform_mesh`, `create_stretched_mesh`, `create_mesh_from_nodes`, `Planar`, `Cylindrical`, `Spherical` |
-| Problem & solve | `PyrolysisProblem`, `solve`, `setup`, `integrate`, `parameter_sweep` |
-| Solver configuration | `default_policy`, `rodas5p_policy`, `fbdf_policy`, `kencarp4_policy`, `StructuredKLU`, `EquidistributionCorrection`, `ActivationTime`, `NoCorrection` |
-| Solution | `PyrolysisSolution`, `get_times`, `get_temperatures`, `get_concentrations`, `get_pressure`, `get_porosity`, `get_boundary_exchange`, `get_profile`, `get_cell_positions`, `succeeded`, `completed`, `ConservationRecorder`, `conservation_audit` |
+| Radiation | `RadiationModel`, `SURFACE_ABSORPTION`, `BEER_LAMBERT` |
+| Mesh | `uniform_mesh`, `stretched_mesh`, `line_mesh`, `box_mesh`, `cell_mesh`, `Planar`, `Cylindrical`, `Spherical` |
+| Problem & solve | `PyrolysisProblem`, `validate_problem`, `solve`, `setup`, `integrate`, `PreparedProblem`, `parameter_sweep` |
+| Solver configuration | `default_policy`, `rodas5p_policy`, `fbdf_policy`, `kencarp4_policy`, `StructuredKLU`, `EquidistributionCorrection`, `ActivationTime`, `NoCorrection`, `PrescribedCorrection` |
+| Solution | `PyrolysisSolution`, `get_gas_composition`, `get_boundary_exchange`, `get_profile`, `succeeded`, `completed`, `interior_events`, `ConservationRecorder`, `conservation_audit` |
 
 ## Package extensions
 
@@ -119,6 +119,7 @@ grid = [(A = a, E = e) for a in (1e12, 1e13, 1e14), e in (1.5e5, 2.0e5)]
         components = m.components,
         reactions = (Reaction(:decomp, :virgin => :MMA; A = p.A, E = p.E, h = 870e3),),
         mixing = m.mixing,
+        gas_transport = m.gas_transport,
     )
     # A solve never changes the problem, so the points share its mesh.
     return PyrolysisProblem(
@@ -142,8 +143,7 @@ results = parameter_sweep(problem, grid; modify, extract, use_ale = true)
 
 End-to-end studies under [`examples/`](examples/) cover:
 
-- Cone calorimeter (PMMA, both Beer–Lambert and surface-absorption
-  radiation models)
+- PMMA cone calorimeter
 - Douglas fir cone calorimeter
 - Pressure-treated wood with moisture
 - Lumped and dusty-gas transport demonstration

@@ -12,7 +12,6 @@ through the physics and the code of the main studies in detail.
 | Script | What it models |
 |:---|:---|
 | [`06_cone_calorimeter.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/06_cone_calorimeter.jl) | PMMA slab under a 25 kW/m² cone heat flux with the incident radiation absorbed at the surface, single-step Arrhenius kinetics, and gas release, overlaid on ThermaKin reference outputs when they are present. |
-| [`06_cone_calorimeter_surface_absorption.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/06_cone_calorimeter_surface_absorption.jl) | The same PMMA case with the surface-absorption radiation model set explicitly; it absorbs the radiation at the exposed face as the default does. |
 | [`07_douglas_fir_cone.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/07_douglas_fir_cone.jl) | Douglas fir with multi-step kinetics, moisture, lumped wall transfer and Darcy flow, and a mesh that moves with the solid. |
 | [`08_pressure_treated_wood_cone.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/08_pressure_treated_wood_cone.jl) | Pressure-treated wood with moisture and multi-step Arrhenius kinetics. |
 | [`macfp/macfp_gasification.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/macfp/macfp_gasification.jl) | MaCFP gasification benchmark with parallel solves. |

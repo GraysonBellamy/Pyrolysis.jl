@@ -35,7 +35,7 @@ function _column(n)
     mat = Material(name = :column, components = (matrix, fuel, gas), reactions = (rxn,))
     band(z) = 100.0 * exp(-((z / L - 0.3) / 0.08)^2)
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L, n),
+        mesh = uniform_mesh(L, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
@@ -69,7 +69,7 @@ function _ablator(n; L = 3e-3, t_end = 0.8)
         reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L, n),
+        mesh = uniform_mesh(L, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(2.8e6), bottom = AdiabaticBC()),
@@ -267,7 +267,7 @@ function _shrinking_vent(n)
         lateral_shrinkage_law = χ -> 1 - 0.3χ,
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, n),
+        mesh = uniform_mesh(0.01, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (

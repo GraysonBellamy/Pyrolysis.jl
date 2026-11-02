@@ -309,7 +309,7 @@ $T_\infty$. This term is the surface's own re-radiation to and absorption from a
 gray environment; it is the dominant cooling mechanism for a hot pyrolyzing
 surface. Its quartic temperature dependence is why the face temperature, not the
 cell-center temperature, must enter it (§12.1.1). The condition stays at the
-surface under every radiation model. (`surface_balance.jl`.)
+surface under both radiation models. (`surface_balance.jl`.)
 
 The displayed slope holds emissivity fixed. If emissivity depends on surface
 temperature, the full derivative additionally contains
@@ -329,17 +329,16 @@ $\varepsilon_{\text{eff}}$ by Kirchhoff's law unless a component sets its own
 `absorptivity` (§5.8.2).
 
 Its behavior is **dispatched on the `radiation_model`** passed to `solve` or
-`setup` (default `NO_RADIATION`; Chapter 8). The crucial design point is that
+`setup` (default `SURFACE_ABSORPTION`; Chapter 8). The crucial design point is that
 incident radiation must be deposited exactly once:
 
-- **`NO_RADIATION` and `SURFACE_ABSORPTION`** treat the radiation identically, as a
-  *surface* heat flux (a test asserts that the two give identical residuals). The
+- **`SURFACE_ABSORPTION`** treats the radiation as a *surface* heat flux. The
   Newton solve receives
   $$q_{\text{BC}} = a_s\,q_{\text{inc}}(t), \qquad dq_{\text{BC}}/dT_s = 0,$$
   so the absorbed flux enters the surface energy balance and raises $T_s$ above
   $T_{\text{cell}}$ when there is net heating. A direct call of
   `solve_boundary_temperature!` defaults its `radiation_model` keyword to
-  `SURFACE_ABSORPTION`, which is the same treatment.
+  `SURFACE_ABSORPTION`.
 - **`BEER_LAMBERT`**: the radiation is absorbed *in depth* by `BeerLambertKernel`,
   through face intensities that are algebraic unknowns of the state, the exposed
   face's intensity being $a_s\,q_{\text{inc}}(t)$ with $a_s$ the condition's own
@@ -351,8 +350,7 @@ Under `BEER_LAMBERT` the beam is fed by the **first** `RadiativeFluxBC` member o
 the `:top` condition (`get_radiative_flux_bc`, which returns the first
 `RadiativeFluxBC` it finds in a `CombinedThermalBC`), while every member contributes
 zero to the surface balance: a second radiative-flux member is dropped silently. On
-a slab of emissivity 0.9, `RadiativeFluxBC(flux = 30e3) + RadiativeFluxBC(flux =
-20e3)` gives an exposed-face intensity of 27 000 W·m⁻² ($0.9\times30$ kW·m⁻²) under
+a slab of emissivity 0.9, `RadiativeFluxBC(30e3) + RadiativeFluxBC(20e3)` gives an exposed-face intensity of 27 000 W·m⁻² ($0.9\times30$ kW·m⁻²) under
 `BEER_LAMBERT` and a conducted surface flux of 45 000 W·m⁻² ($0.9\times50$ kW·m⁻²)
 under `SURFACE_ABSORPTION`. Combine the incident fluxes into one condition when the
 model is `BEER_LAMBERT` (§12.12). `setup` refuses a `RadiativeFluxBC` on any other tag
@@ -365,10 +363,10 @@ model, so the energy enters once, through the face; only `BEER_LAMBERT` routes i
 through the volume, and only then is the boundary flux suppressed. The diagnostic
 decomposition `compute_boundary_heat_fluxes` follows the *same* dispatch: its `net`
 is the flux the balance actually applies — $a_s q_{\text{inc}}$ is inside `net`
-under `NO_RADIATION`/`SURFACE_ABSORPTION` and absent under `BEER_LAMBERT`, where the
+under `SURFACE_ABSORPTION` and absent under `BEER_LAMBERT`, where the
 in-depth deposit is reported separately as `extras.volumetric_absorption`
 (§12.9.1). The number called absorptivity means two things: under
-`NO_RADIATION` and `SURFACE_ABSORPTION` it is the absorptivity of an opaque
+`SURFACE_ABSORPTION` it is the absorptivity of an opaque
 face to the heater's spectrum (§5.8.2); under `BEER_LAMBERT` it is the
 fraction of the incident flux that enters the medium, $1-\rho_s$ with
 $\rho_s$ the surface reflectance ($0.04$–$0.08$ for PMMA, $n\approx1.49$),
@@ -421,7 +419,7 @@ Real surfaces experience several mechanisms at once. The `+` operator builds an
 additive composite, e.g. the canonical cone-calorimeter top BC
 
 ```julia
-bc = RadiativeFluxBC(flux = 50e3) +              # absorbed incident cone flux
+bc = RadiativeFluxBC(50e3) +              # absorbed incident cone flux
      RadiativeBC(ε = nothing, T_inf = 300.0) +   # surface re-radiation loss
      ConvectiveBC(h = 10.0, T_inf = 300.0)       # convective loss
 ```
@@ -492,15 +490,15 @@ every other node velocity follows from the balance rows of the cells,
 $0 = A_{i+1}(w-c)_{i+1} - A_i(w-c)_i - (\theta_i-\theta_A)V_i$ (`BalanceRowClosure`,
 §11.3.2), which on a planar line without a correction is the recursion
 $w_{i+1} = w_i + (\theta_i - \theta_A)\,\Delta z_i$ (Chapter 10). The exposed surface
-node is an end node, where the correction vanishes (§11.7.5), so it is always
+node is an end node, where the correction vanishes (§11.7.4), so it is always
 material-following (Lagrangian) — it recedes or expands with the integrated strain.
 
 There are no user-facing mesh-motion BC types: `BoundaryConditionSet` carries only
 thermal and mass slots. What a user chooses is `use_ale` (without it every node is
 pinned and the geometry never changes), the mesh itself (`line_mesh` pins its first
 node; `fixed = true` pins every node), and the `lagrangian` nodes that always move
-with the solid (layer interfaces; §11.7.5); `w_override` prescribes every node's
-velocity for verification (§11.7.8). The balance rows need exactly one pinned node,
+with the solid (layer interfaces; §11.7.4); `PrescribedCorrection` prescribes every
+node's velocity for verification (§11.7.7). The balance rows need exactly one pinned node,
 at an end of the line. See Chapter 11 for the full mesh-velocity derivation and the
 geometric conservation law.
 
@@ -575,7 +573,7 @@ Function-valued parameters cannot be checked at construction and are skipped
 The initial state is specified by a temperature closure $T_{\text{initial}}(z)$
 and per-component concentration closures $\xi_{j,\text{initial}}(z)$ on the problem,
 evaluated at each cell center $z_i^c$ of the mesh's reference positions by
-`initial_fields(problem, mesh)` (`src/Problem/initial_conditions.jl`):
+`initial_fields(problem)` (`src/Problem/initial_conditions.jl`):
 
 $$
 T_i(0) = T_{\text{initial}}(z_i^c), \qquad
@@ -598,14 +596,14 @@ using Pyrolysis.Problem: initial_fields, linear_profile
 
 slab = SolidComponent(:slab, ρ = 1000.0, c = 1500.0, k = 0.2, ε = 0.9)
 problem = PyrolysisProblem(
-    mesh = create_uniform_mesh(0.01, 4),
+    mesh = uniform_mesh(0.01, 4),
     material = Material(name = :inert, components = (slab,), reactions = ()),
     bc_set = BoundaryConditionSet(thermal = (top = HeatFluxBC(1e4), bottom = AdiabaticBC())),
     T_initial = z -> linear_profile(z; z_min = 0.0, z_max = 0.01,
                                     value_min = 300.0, value_max = 400.0),
     tspan = (0.0, 1.0),
 )
-T0, ξ0 = initial_fields(problem, problem.mesh)
+T0, ξ0 = initial_fields(problem)
 ```
 
 gives $T_0 = (312.5,\ 337.5,\ 362.5,\ 387.5)$ K at the four cell centres, and the
@@ -674,14 +672,14 @@ with the same ratio $R_b$ its blowing model gave the surface Newton
 For `ConvectiveBC` and `RadiativeBC`, the loss components are reported with the
 *opposite* sign to the into-domain convention (so a hot surface re-radiating shows
 a positive `reradiation`). Per component, `net` matches
-`evaluate_bc_flux_and_derivative` — the applied flux — for every
-radiation model, `DirichletThermalBC` excepted (its decomposition is all zero; the
+`evaluate_bc_flux_and_derivative` — the applied flux — for both
+radiation models, `DirichletThermalBC` excepted (its decomposition is all zero; the
 saved extras report the conducted flux as its net flux), so the ledger identity
 $\texttt{net} = q_{\text{cond}}$ holds at convergence (§12.9.2, §16.6). For combined
 BCs the components **and** `net` are summed over children; `net` is never recomputed
 from the components. Consequences of the model dispatch:
 
-- `NO_RADIATION` / `SURFACE_ABSORPTION`: a `RadiativeFluxBC` contributes
+- `SURFACE_ABSORPTION`: a `RadiativeFluxBC` contributes
   `absorbed = net` $= a_s q_{\text{inc}}$ ($a_s$ the explicit BC absorptivity or $a_{\text{eff}}$) — the
   flux is applied at the face.
 - `BEER_LAMBERT`: a `RadiativeFluxBC` contributes zero `absorbed` and zero `net` —
