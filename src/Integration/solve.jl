@@ -176,7 +176,7 @@ function integrate(
             return nothing
         end
     end
-    M = all(is_differential(layout)) ? I : mass_matrix(layout)
+    M = all(is_differential(layout)) ? I : lumped_mass(layout, J0)
     f = ODEFunction{true,FullSpecialize}(
         ErasedRHS(rhs!);
         mass_matrix = M,

@@ -14,6 +14,7 @@ using OrdinaryDiffEqSDIRK: KenCarp4
 using OrdinaryDiffEq.SciMLBase: get_proposed_dt
 using LinearSolve: LinearSolve, KLUFactorization, UMFPACKFactorization
 using SparseArrays
+import LinearAlgebra
 
 # A decomposing slab whose char is lighter than the virgin solid (the mesh
 # moves), porous with intrinsic densities, permeable when `κ > 0`, and
@@ -692,6 +693,33 @@ end
     # An entry outside the prototype is an error.
     cache.A = sparse([1, n], [n, 1], [1.0, 1.0], n, n) + W3
     @test_throws ErrorException LinearSolve.solve!(cache)
+end
+
+@testset "the lumped mass forms W in place on the Jacobian's structure" begin
+    n = 5
+    J = sparse(
+        vcat(1:n, 2:n, 1:(n-1)),
+        vcat(1:n, 1:(n-1), 2:n),
+        vcat(fill(2.0, n), fill(-1.0, n - 1), fill(0.5, n - 1)),
+        n,
+        n,
+    )
+    J[2, 1] = 0.0
+    d = [1.0, 0.0, 1.0, 1.0, 0.0]
+    M = LinearAlgebra.Diagonal(
+        Integration.LumpedMass(d, [J.colptr[j] + (j > 1) for j in findall(!iszero, d)]),
+    )
+    @test M == LinearAlgebra.Diagonal(d)
+    @test M * ones(n) == d
+    W = copy(J)
+    fill!(nonzeros(W), 1.0)
+    form! = Integration.OrdinaryDiffEqDifferentiation.jacobian2W!
+    form!(W, M, 0.25, J)
+    @test W.colptr == J.colptr && W.rowval == J.rowval
+    @test W == J - LinearAlgebra.Diagonal(d) / 0.25
+    allocated(W, M, J) = @allocated form!(W, M, 0.5, J)
+    allocated(W, M, J)
+    @test allocated(W, M, J) == 0
 end
 
 # The KLU factorization in Rosenbrock's linear cache, a new object exactly

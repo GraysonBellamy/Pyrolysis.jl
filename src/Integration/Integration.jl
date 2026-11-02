@@ -22,6 +22,7 @@ using SciMLBase: terminate!
 using OrdinaryDiffEq: OrdinaryDiffEq, ODEFunction, ODEProblem, DiscreteCallback, CallbackSet
 using OrdinaryDiffEq: ContinuousCallback, Rodas5P, ReturnCode, set_proposed_dt!
 using OrdinaryDiffEq: OrdinaryDiffEqCore
+import OrdinaryDiffEqDifferentiation
 using OrdinaryDiffEqBDF: FBDF, NLNewton
 using SciMLBase: SciMLBase, get_proposed_dt, auto_dt_reset!
 # `solve` is a method of the SciML ecosystem's common `solve`, so `using

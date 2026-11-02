@@ -13829,23 +13829,22 @@ The default linear solver of every layout is `StructuredKLU()`
 (`default_linear_solver()`, `src/Integration/linear_solve.jl`), KLU applied to
 $W$ on the entries of $W$ that have been nonzero at some step of the solve.
 
-The Jacobian's prototype holds every entry the connectivity allows, most of
-which are zero at any one step, and KLU factors a stored zero like any other
-entry, so factoring $W$ on the prototype's structure carries the fill of entries
-that never matter. For a mass matrix that is not a multiple of the identity,
-OrdinaryDiffEq forms $W$ by a sparse broadcast that stores only the entries
-that compute to nonzero, so $W$'s own structure changes whenever an entry passes
-through zero, and a KLU on that structure would analyse afresh at every such
-step.
+$W$ has the structure of the Jacobian's prototype, which holds every entry the
+connectivity allows, most of which are zero at any one step, and KLU factors a
+stored zero like any other entry, so factoring $W$ on that structure carries the
+fill of entries that never matter. A mass matrix that is not a multiple of the
+identity is a `Diagonal` of a `LumpedMass`, which forms $W$ in place: the
+Jacobian's stored values, with $1/(\gamma\Delta t)$ taken from the diagonal of the
+rows with a time derivative.
 
 The cache keeps the union of the prototype's entries that have been nonzero in
 this solve, with the diagonal, and copies each fresh $W$ into a matrix of that
 structure, where the inner KLU refactors it numerically. A nonzero outside the
 union grows it, and the inner KLU analyses the grown structure afresh; the union
-only grows, so the analyses stop once every entry the solve reaches has
-appeared. $W$'s stored entries must be a subset of the prototype's (the
-integrator hands the solver's initialization an all-ones $W$ of the prototype);
-an entry outside the prototype is an error. The tests check that the union is
+only grows, so its size alone tells the inner KLU that the structure changed,
+and the analyses stop once every entry the solve reaches has appeared. A $W$ on
+any other structure than the prototype's, which the integrator hands the solver's
+initialization as an all-ones $W$, is an error. The tests check that the union is
 smaller than the prototype, that the inner KLU analyses once per growth of the
 union, and that repeated solves are bit-identical under `StructuredKLU()`,
 LinearSolve's `KLUFactorization()` and `UMFPACKFactorization()`, on fixed and

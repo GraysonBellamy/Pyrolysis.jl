@@ -3,32 +3,78 @@
 # ============================================================================
 
 """
-	StructuredKLU(inner = KLUFactorization())
+	LumpedMass <: AbstractVector{Float64}
+
+The diagonal of the integrator's mass matrix, one on the rows with a time
+derivative and zero on the algebraic rows, with the place of the former's
+diagonal entries in the Jacobian's stored values. The matrix is a `Diagonal` of
+this vector, which forms `W = J − M/(γΔt)` in place on the Jacobian's own
+structure: the sparse broadcast a general mass matrix takes would allocate a
+matrix and search it on every step.
+"""
+struct LumpedMass <: AbstractVector{Float64}
+    diagonal::Vector{Float64}
+    shifted::Vector{Int}
+end
+
+Base.size(m::LumpedMass) = size(m.diagonal)
+Base.IndexStyle(::Type{LumpedMass}) = IndexLinear()
+Base.@propagate_inbounds Base.getindex(m::LumpedMass, i::Int) = m.diagonal[i]
+
+"""
+	lumped_mass(layout, J) -> Diagonal
+
+The integrator's mass matrix of `layout`, for the Jacobian prototype `J`.
+"""
+function lumped_mass(layout::StateLayout, J::SparseMatrixCSC{Float64,Int})
+    diagonal = diag(mass_matrix(layout))
+    rows = rowvals(J)
+    shifted = [
+        nzrange(J, i)[searchsortedfirst(view(rows, nzrange(J, i)), i)] for
+        i in eachindex(diagonal) if !iszero(diagonal[i])
+    ]
+    return Diagonal(LumpedMass(diagonal, shifted))
+end
+
+function OrdinaryDiffEqDifferentiation.jacobian2W!(
+    W::SparseMatrixCSC{Float64,Int},
+    M::Diagonal{Float64,LumpedMass},
+    dtgamma::Number,
+    J::SparseMatrixCSC{Float64,Int},
+)
+    values = nonzeros(W)
+    copyto!(values, nonzeros(J))
+    shift = inv(dtgamma)
+    @inbounds for k in M.diag.shifted
+        values[k] -= shift
+    end
+    return nothing
+end
+
+"""
+	StructuredKLU(inner = KLUFactorization(check_pattern = false))
 
 KLU for the integrator's `W = J − M/(γΔt)` on the entries of `W` that have
-been nonzero at some step of the solve. The Jacobian's prototype holds every
-entry the residual's connectivity allows, most of which are zero at any one
-step, and KLU factors a stored zero like any other entry, so factoring `W` on
-the prototype's structure carries the fill of entries that never matter. For
-a mass matrix that is not a multiple of the identity OrdinaryDiffEq forms `W`
-by a sparse broadcast that stores only the entries that compute to nonzero,
-so `W`'s own structure changes whenever an entry passes through zero, and a
-KLU on that structure would analyse afresh at every such step.
+been nonzero at some step of the solve. `W` has the structure of the Jacobian's
+prototype, which holds every entry the residual's connectivity allows, most of
+which are zero at any one step, and KLU factors a stored zero like any other
+entry, so factoring `W` on that structure carries the fill of entries that
+never matter.
 
 The cache keeps the union of the prototype's entries that have been nonzero
 in this solve, with the diagonal, and copies each fresh `W` into a matrix of
 that structure, where the inner KLU refactors it numerically. A nonzero
 outside the union grows it, and the inner KLU analyses the grown structure
-afresh; the union only grows, so the analyses stop once every entry the solve
-reaches has appeared. `W`'s stored entries are a subset of the prototype's,
-which the integrator hands `init` as an all-ones `W`; an entry of `W` outside
-the prototype is an error.
+afresh; the union only grows, so its size alone tells the inner KLU that the
+structure changed, and the analyses stop once every entry the solve reaches has
+appeared. A `W` on any other structure than the prototype's, which the
+integrator hands `init` as an all-ones `W`, is an error.
 """
 struct StructuredKLU <: LinearSolve.AbstractSparseFactorization
     inner::KLUFactorization
 end
 
-StructuredKLU() = StructuredKLU(KLUFactorization())
+StructuredKLU() = StructuredKLU(KLUFactorization(check_pattern = false))
 
 # The prototype's structure; which of its entries are in the union and where
 # each lies in the union's matrix (zero outside it); that matrix; the inner
@@ -91,46 +137,29 @@ function _union_matrix!(slot::Vector{Int}, prototype::SparseMatrixCSC, in_union:
     return SparseMatrixCSC(size(prototype, 1), n, colptr, rowval, zeros(m))
 end
 
-# Walk `A`'s stored entries in the prototype's structure, calling `visit(k, v)`
-# with each one's prototype entry `k` and value `v` until it returns false.
-# `:outside` when an entry of `A` lies outside the prototype, `:stopped` when a
-# visit returned false, `:done` otherwise.
-function _walk(visit, prototype::SparseMatrixCSC, A::SparseMatrixCSC)
-    rows, Arows, Avals = rowvals(prototype), rowvals(A), nonzeros(A)
-    @inbounds for col = 1:size(A, 2)
-        k = prototype.colptr[col]
-        last = prototype.colptr[col+1] - 1
-        for j in nzrange(A, col)
-            r = Arows[j]
-            while k <= last && rows[k] < r
-                k += 1
-            end
-            (k > last || rows[k] != r) && return :outside
-            visit(k, Avals[j]) || return :stopped
-        end
-    end
-    return :done
-end
-
-# Copy `A` into the union's matrix; `:stopped` when a nonzero of `A` lies
-# outside the union.
+# Copy `A` into the union's matrix; false when a nonzero of `A` lies outside the
+# union.
 function _load!(c::StructuredKLUCache, A::SparseMatrixCSC)
     vals = nonzeros(c.union)
-    fill!(vals, 0.0)
+    from = nonzeros(A)
     slot = c.slot
-    return _walk(c.prototype, A) do k, v
+    @inbounds for k in eachindex(from)
         s = slot[k]
-        s > 0 && (@inbounds vals[s] = v; return true)
-        return iszero(v)
+        if s > 0
+            vals[s] = from[k]
+        elseif !iszero(from[k])
+            return false
+        end
     end
+    return true
 end
 
 # Add `A`'s nonzeros to the union and rebuild its matrix.
 function _grow!(c::StructuredKLUCache, A::SparseMatrixCSC)
     in_union = c.in_union
-    _walk(c.prototype, A) do k, v
-        iszero(v) || (@inbounds in_union[k] = true)
-        return true
+    from = nonzeros(A)
+    @inbounds for k in eachindex(from)
+        iszero(from[k]) || (in_union[k] = true)
     end
     c.union = _union_matrix!(c.slot, c.prototype, in_union)
     c.growths += 1
@@ -140,14 +169,13 @@ end
 function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::StructuredKLU; kwargs...)
     c = cache.cacheval
     if cache.isfresh
-        status = _load!(c, cache.A)
-        if status === :stopped
-            _grow!(c, cache.A)
-            status = _load!(c, cache.A)
+        A = cache.A
+        same_structure(A, c.prototype) ||
+            error("StructuredKLU: W is not on the Jacobian prototype's structure")
+        if !_load!(c, A)
+            _grow!(c, A)
+            _load!(c, A)
         end
-        status === :done || error(
-            "StructuredKLU: W has a stored entry outside the Jacobian prototype's structure",
-        )
         c.inner.A = c.union
         cache.isfresh = false
     end
