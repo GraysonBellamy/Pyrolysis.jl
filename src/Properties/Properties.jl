@@ -20,9 +20,9 @@ include("gas_transport.jl")
 export volume_fractions, condensed_volume_fractions
 export skeletal_volume_fraction
 export primal
-export effective_conductivity
+export effective_conductivity, conductivity_of_fractions
 export effective_absorption
-export mixture_emissivity, mixture_absorptivity
+export mixture_emissivity, mixture_absorptivity, surface_properties_of_fractions
 export transport_matrix_state,
     transport_coefficients, transport_domain, closed_transport_channel
 export effective_gas_transfer

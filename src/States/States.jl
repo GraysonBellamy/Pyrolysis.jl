@@ -21,6 +21,8 @@ using ..Materials
 using ..Materials:
     ConstantProperty, LinearProperty, PolynomialProperty, TableProperty, T_REF
 using ..Properties: effective_conductivity, mixture_emissivity, mixture_absorptivity, primal
+using ..Properties: conductivity_of_fractions, surface_properties_of_fractions
+using ..Properties: mixing_volume_fractions
 using ..Properties: effective_gas_transfer, effective_permeability, skeletal_volume_fraction
 using ..Properties: MU_FLOOR, effective_absorption
 using ..Physics: ideal_gas_pressure

@@ -398,12 +398,23 @@ actual phase occupancy so k_eff degrades to the gas-mixture conductivity
 instead of 0. The parallel, series and weighted rules do not evaluate the
 conductivity of a component whose volume fraction is exactly zero.
 """
-@inline function effective_conductivity(
+@inline effective_conductivity(
     ξ::NTuple{NC,<:Real},
     T::Real,
     material::Material{NC},
+) where {NC} =
+    conductivity_of_fractions(mixing_volume_fractions(ξ, T, material), T, material)
+
+"""
+	conductivity_of_fractions(v, T, material) -> Real
+
+[`effective_conductivity`](@ref) at the mixing volume fractions `v`.
+"""
+@inline function conductivity_of_fractions(
+    v::NTuple{NC,<:Real},
+    T::Real,
+    material::Material{NC},
 ) where {NC}
-    v = mixing_volume_fractions(ξ, T, material)
     W = _prop_type(v, T)
     mixing = material.mixing.k.rule
     if mixing == BRUGGEMAN
@@ -493,6 +504,30 @@ end
     v = mixing_volume_fractions(ξ, T, material)
     return _sum_absorptivity(v, T, material.components, Val(NC))
 end
+
+"""
+	surface_properties_of_fractions(v, T, material) -> (ε, a)
+
+[`mixture_emissivity`](@ref) and [`mixture_absorptivity`](@ref) at the mixing
+volume fractions `v`. Under Kirchhoff's law for every component the two sums
+are the same operations, so the second is the first.
+"""
+@inline function surface_properties_of_fractions(
+    v::NTuple{NC,<:Real},
+    T::Real,
+    material,
+) where {NC}
+    ε = _sum_emissivity(v, T, material.components, Val(NC))
+    return ε,
+    _kirchhoff(material.components) ? ε :
+    _sum_absorptivity(v, T, material.components, Val(NC))
+end
+
+@inline _kirchhoff(::Tuple{}) = true
+@inline _kirchhoff(comps::Tuple) = _kirchhoff(first(comps)) && _kirchhoff(Base.tail(comps))
+@inline _kirchhoff(::GaseousComponent) = true
+@inline _kirchhoff(c::Union{SolidComponent,LiquidComponent}) =
+    c.surface_absorptivity === nothing
 
 """
 	effective_absorption(ξ::NTuple{NC,Float64}, material::Material) -> Float64

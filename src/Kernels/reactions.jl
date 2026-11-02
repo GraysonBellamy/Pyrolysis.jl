@@ -3,7 +3,7 @@
 # ============================================================================
 
 """
-	ReactionKernel <: Kernel
+	ReactionKernel{C} <: Kernel
 
 Arrhenius kinetics evaluated at the trial temperature: per cell the reaction
 mass sources `ωᵢⱼ Vᵢ` and the reaction heat `Q_rxn(Tᵢ) Vᵢ`, with the heats quoted
@@ -19,9 +19,10 @@ against its reference: `reference` holds each reaction's lineage inventory in ea
 cell [kg] (reactions × cells). A cell keeps its material, so the reference stays
 what it started as; it is zero for a first-order reaction, which does not read
 it, and for any other where the cell holds none of the lineage, which leaves its
-rate and heat zero there.
+rate and heat zero there. `C` is whether any reaction has such an order; if none
+does, no cell reads its references.
 """
-struct ReactionKernel <: Kernel
+struct ReactionKernel{C} <: Kernel
     limiter::DepletionLimiter
     reference::Matrix{Float64}
 end
@@ -33,7 +34,13 @@ The reaction kernel with the material's depletion limiter and the references
 of its reactions.
 """
 ReactionKernel(material::Material, reference::Matrix{Float64}) =
-    ReactionKernel(material.depletion_limiter, reference)
+    ReactionKernel{needs_lineage(material)}(material.depletion_limiter, reference)
+
+# The reference concentrations of the reactions in cell `i` of volume `V`.
+@inline _references(::ReactionKernel{false}, i, V, ::Val{NR}) where {NR} =
+    ntuple(_ -> NaN, Val(NR))
+@inline _references(kernel::ReactionKernel{true}, i, V, ::Val{NR}) where {NR} =
+    ntuple(r -> kernel.reference[r, i] / V, Val(NR))
 
 # Whether every reaction has a reactant at or below zero in `ξ`: under an
 # enabled one-sided limiter its rate and every derivative of it are then
@@ -56,7 +63,7 @@ function contribute!(
         kernel.limiter.enabled && _all_quenched(ξ, material.reactions) && continue
         T = ds.T_trial[i]
         V = ds.V_eval[i]
-        ξ_ref = ntuple(r -> kernel.reference[r, i] / V, Val(NR))
+        ξ_ref = _references(kernel, i, V, Val(NR))
         evaluate_reactions!(c.rates, c.heats, ξ, T, material, kernel.limiter, ξ_ref)
         species_source_terms!(c.species, c.rates, material)
         for j = 1:NC

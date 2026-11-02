@@ -48,8 +48,13 @@ end
 end
 
 # δ·softplus(ξ/δ) for ξ > 0: equal to ξ to within δ·log 2, and exactly ξ once
-# ξ/δ is large enough for the correction to round away.
-@inline _finite_base(ξ::Real, δ::Float64) = ξ + δ * log1p(exp(-ξ / δ))
+# ξ/δ is large enough for the correction to round away, which it has at 40: the
+# correction is then below ξ·2⁻⁶³, and its share of the slope below 2⁻⁵⁷.
+@inline function _finite_base(ξ::Real, δ::Float64)
+    x = ξ / δ
+    x >= 40 && return ξ
+    return ξ + δ * log1p(exp(-x))
+end
 
 # (δ·softplus(ξ/δ))^order for every real ξ. Below zero the power is formed in
 # log space, where log softplus(x) = x once exp(x) is below round-off, so the

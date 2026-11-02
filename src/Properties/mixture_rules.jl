@@ -121,15 +121,22 @@ the liquids that declare λ or κ, and has its own explicit endpoint closure.
     T::Real,
     material,
 ) where {NC}
-    comps = material.components
-    v_total = _sum_solid_specific_vol(ξ, T, comps, Val(NC))
+    return _condensed_fractions(matrix_volume_fraction(ξ, T, material), ξ, T, material)
+end
 
+# The condensed fractions given the sum `v_total` of the condensed occupancies.
+@inline function _condensed_fractions(
+    v_total,
+    ξ::NTuple{NC,<:Real},
+    T::Real,
+    material,
+) where {NC}
     if v_total < 1e-20
         return _zero_ntuple(_prop_type(ξ, T), Val(NC))
     end
 
     inv_v_total = 1.0 / v_total
-    return _solid_vol_fracs(ξ, T, inv_v_total, comps, Val(NC))
+    return _solid_vol_fracs(ξ, T, inv_v_total, material.components, Val(NC))
 end
 
 # Matrix volume fraction window over which the mixing weights blend from the
@@ -172,10 +179,10 @@ the system on a fixed mesh.
 """
 @inline function mixing_volume_fractions(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
     φ_m = matrix_volume_fraction(ξ, T, material)
-    φ_m >= MIXING_BLEND_HI && return condensed_volume_fractions(ξ, T, material)
+    φ_m >= MIXING_BLEND_HI && return _condensed_fractions(φ_m, ξ, T, material)
     v_full = volume_fractions(ξ, T, material)
     φ_m <= MIXING_BLEND_LO && return v_full
-    v_solid = condensed_volume_fractions(ξ, T, material)
+    v_solid = _condensed_fractions(φ_m, ξ, T, material)
     s = (φ_m - MIXING_BLEND_LO) / (MIXING_BLEND_HI - MIXING_BLEND_LO)
     w = s * s * (3 - 2 * s)
     return ntuple(j -> w * v_solid[j] + (1 - w) * v_full[j], Val(NC))

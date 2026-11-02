@@ -299,27 +299,14 @@ function derive!(
         for j = 1:NC
             ds.h[j, i] = h[j]
         end
-        if has_gas(material)
-            φ = smooth_floor(
-                1-skeletal_volume_fraction(ntuple(j->ds.ξ⁺[j, i], Val(NC)), Tt, material),
-                POROSITY_FLOOR,
-            )
-            ng = count(is_gas, material.components)
-            # Resolve the transition on the same scale as the gas error budget.
-            # A much narrower transition lets accepted local errors repeatedly
-            # cross its flat negative branch during trace-gas production.
-            # max₀≤s≤1 s(1-3s²+2s³) < 0.26, so the total pressure bias
-            # remains below 0.26 pressure_tolerance, independently of T and φV.
-            pressure_mass_scale=ref.pressure_tolerance/ng*φ*ds.V_eval[i]/(R_GAS*Tt)
-            _guard_gas_mass!(ds, material.components, i, 1, pressure_mass_scale)
-        end
+        raw = _guarded_pore!(ds, i, Tt, material, ref, setup.gas)
         ξ⁺ = ntuple(j -> ds.ξ⁺[j, i], Val(NC))
-        k = effective_conductivity(ξ⁺, Tt, material)
+        v = mixing_volume_fractions(ξ⁺, Tt, material)
+        k = conductivity_of_fractions(v, Tt, material)
         ds.k_physical[i] = k
         ds.k[i] = smooth_floor(k, CONDUCTIVITY_FLOOR)
-        ds.ε[i] = mixture_emissivity(ξ⁺, Tt, material)
-        ds.a[i] = mixture_absorptivity(ξ⁺, Tt, material)
-        _gas_properties!(ds, i, ξ⁺, Tt, material, setup.gas)
+        ds.ε[i], ds.a[i] = surface_properties_of_fractions(v, Tt, material)
+        _gas_properties!(ds, i, ξ⁺, Tt, material, setup.gas, raw)
         has_intensities(layout) && (ds.α[i] = effective_absorption(ξ⁺, material))
     end
     return ds
@@ -343,6 +330,38 @@ end
     return nothing
 end
 
+# The raw porosity of cell `i`, with its gas masses guarded on the budget of the
+# pressure tolerance. The skeleton holds no gas, so the guard leaves it unchanged.
+@inline _guarded_pore!(
+    ds::DerivedState{NC},
+    i,
+    Tt,
+    material,
+    ref,
+    ::NoGasTransport,
+) where {NC} = nothing
+
+@inline function _guarded_pore!(
+    ds::DerivedState{NC},
+    i,
+    Tt,
+    material,
+    ref,
+    ::GasTransport,
+) where {NC}
+    raw = 1-skeletal_volume_fraction(ntuple(j->ds.ξ⁺[j, i], Val(NC)), Tt, material)
+    φ = smooth_floor(raw, POROSITY_FLOOR)
+    ng = count(is_gas, material.components)
+    # Resolve the transition on the same scale as the gas error budget.
+    # A much narrower transition lets accepted local errors repeatedly
+    # cross its flat negative branch during trace-gas production.
+    # max₀≤s≤1 s(1-3s²+2s³) < 0.26, so the total pressure bias
+    # remains below 0.26 pressure_tolerance, independently of T and φV.
+    pressure_mass_scale=ref.pressure_tolerance/ng*φ*ds.V_eval[i]/(R_GAS*Tt)
+    _guard_gas_mass!(ds, material.components, i, 1, pressure_mass_scale)
+    return raw
+end
+
 # Pore-gas properties of cell `i` at the positive-part concentrations and the
 # trial temperature.
 @inline _gas_properties!(
@@ -352,6 +371,7 @@ end
     Tt,
     material,
     ::NoGasTransport,
+    raw,
 ) where {NC} = nothing
 
 @inline function _gas_properties!(
@@ -361,8 +381,9 @@ end
     Tt,
     material,
     ::GasTransport,
+    raw,
 ) where {NC}
-    ps = pore_state(ξ⁺, Tt, material)
+    ps = pore_state(ξ⁺, Tt, material, raw)
     co = transport_coefficients(ξ⁺, Tt, material, ps.φ)
     ds.φ[i] = ps.φ
     ds.P[i] = ps.P

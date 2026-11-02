@@ -11,7 +11,7 @@ using ..Materials: R_GAS, GAS, is_gas, molar_mass, component_index
 const POROSITY_FLOOR = 1e-12
 
 """
-    pore_state(ξ,T,material)
+    pore_state(ξ,T,material,raw = 1-skeletal_volume_fraction(ξ,T,material))
 
 Central ideal-gas pore state from nonnegative property concentrations [kg/m³
 bulk] and an admissible property temperature [K]. Raw porosity is one minus
@@ -20,8 +20,12 @@ is an identity for φ ≥ 2 POROSITY_FLOOR. Its use on trial states does not mak
 zero physical pore volume admissible. Vacuum has exactly zero pressures,
 intrinsic densities and fractions, without an imposed background species.
 """
-@inline function pore_state(ξ::NTuple{NC}, T, material) where {NC}
-    raw = 1-skeletal_volume_fraction(ξ, T, material)
+@inline function pore_state(
+    ξ::NTuple{NC},
+    T,
+    material,
+    raw = 1-skeletal_volume_fraction(ξ, T, material),
+) where {NC}
     φ = smooth_floor(raw, POROSITY_FLOOR)
     ρ = map((c, x)->is_gas(c) ? x/φ : zero(x+T), material.components, ξ)
     p = map((c, r)->is_gas(c) ? r*R_GAS*T/molar_mass(c) : zero(r), material.components, ρ)
