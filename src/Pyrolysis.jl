@@ -57,7 +57,6 @@ using SparseArrays
 using StaticArrays
 using ForwardDiff
 using LinearSolve
-using OrdinaryDiffEq
 
 
 # ============================================================================

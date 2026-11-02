@@ -19,9 +19,10 @@ using StaticArrays: SMatrix
 using FunctionWrappers: FunctionWrapper
 using SciMLBase: NullParameters, NoInit, FullSpecialize, derivative_discontinuity!
 using SciMLBase: terminate!
-using OrdinaryDiffEq: OrdinaryDiffEq, ODEFunction, ODEProblem, DiscreteCallback, CallbackSet
-using OrdinaryDiffEq: ContinuousCallback, Rodas5P, ReturnCode, set_proposed_dt!
-using OrdinaryDiffEq: OrdinaryDiffEqCore
+using SciMLBase: ODEFunction, ODEProblem, DiscreteCallback, CallbackSet, ContinuousCallback
+using SciMLBase: ReturnCode, set_proposed_dt!
+using OrdinaryDiffEqRosenbrock: Rodas5P
+import OrdinaryDiffEqCore
 import OrdinaryDiffEqDifferentiation
 using OrdinaryDiffEqBDF: FBDF, NLNewton
 using SciMLBase: SciMLBase, get_proposed_dt, auto_dt_reset!

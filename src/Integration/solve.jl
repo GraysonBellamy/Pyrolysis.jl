@@ -235,7 +235,7 @@ function integrate(
         CallbackSet(observer, events..., layer_times..., thin..., observers..., recorder)
 
     pressure_norm=PressureErrorNorm(cp)
-    integrator = OrdinaryDiffEq.init(
+    integrator = SciMLBase.init(
         ode,
         policy.alg;
         abstol = cp.abstol,
@@ -257,7 +257,7 @@ function integrate(
     integrator.opts.abstol = cp.abstol
     bind_pressure_norm!(pressure_norm, integrator)
     bind_error_test!(check, integrator)
-    raw = OrdinaryDiffEq.solve!(integrator)
+    raw = SciMLBase.solve!(integrator)
     monitor.cold == 0 ||
         @warn "solve(): stopped at t = $(raw.t[end]): the last proposed state, at t = $(monitor.cold_t), takes cell $(monitor.cold) to or below absolute zero"
     # A solve its controller stopped saves its last proposal, which it
