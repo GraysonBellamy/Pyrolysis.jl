@@ -10,9 +10,7 @@ module ColoredJacobian
 using SparseArrays
 using ForwardDiff
 using StaticArrays: SVector
-using ADTypes: AutoForwardDiff, AutoSparse, KnownJacobianSparsityDetector
-using DifferentiationInterface: DifferentiationInterface, Constant, prepare_jacobian
-using SparseMatrixColorings: GreedyColoringAlgorithm, column_groups, sparsity_pattern
+using SparseMatrixColorings: GreedyColoringAlgorithm, column_colors
 using SparseMatrixColorings: NaturalOrder, LargestFirst, SmallestLast, IncidenceDegree
 using SparseMatrixColorings: ColoringProblem, coloring, ncolors
 using ..Meshes

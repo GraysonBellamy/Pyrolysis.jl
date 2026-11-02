@@ -17,15 +17,18 @@ function dense_jacobian(
     u::AbstractVector,
     t,
 )
-    backend = AutoForwardDiff(; chunksize = _chunk_width(color_count(def)))
     du = zeros(length(u))
-    return DifferentiationInterface.jacobian(
-        ResidualFunction(def, ws),
+    x = Vector{Float64}(u)
+    config = ForwardDiff.JacobianConfig(
+        nothing,
         du,
-        backend,
-        Vector{Float64}(u),
-        Constant(Float64(t)),
+        x,
+        ForwardDiff.Chunk{_chunk_width(color_count(def))}(),
+        JacobianTag(),
     )
+    f! = ResidualFunction(def, ws)
+    τ = Float64(t)
+    return ForwardDiff.jacobian((y, z) -> f!(y, z, τ), du, x, config, Val(false))
 end
 
 """

@@ -5,7 +5,6 @@ authors = ["Pyrolysis.jl Contributors"]
 
 [deps]
 ADTypes = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
-DifferentiationInterface = "a0c0ee7d-e4b9-4e03-894e-1c5f64a51d63"
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 FunctionWrappers = "069b7b12-0de2-55c6-9aab-29f3d0a68a2e"
@@ -29,7 +28,6 @@ PyrolysisPlotsExt = "RecipesBase"
 
 [compat]
 ADTypes = "1.21.0"
-DifferentiationInterface = "0.7.21"
 Distributed = "1"
 ForwardDiff = "0.10, 1"
 FunctionWrappers = "1.1.3"

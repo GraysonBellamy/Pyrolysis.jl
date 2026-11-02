@@ -73,6 +73,13 @@ to `MAX_CHUNK` colors cost one pass.
 """
 const MAX_CHUNK = 24
 
+# The tag of the dual numbers of the Jacobian: one type at every state, mesh and
+# problem of a given batch width. A derivative taken inside the residual nests
+# within it.
+struct JacobianTag end
+ForwardDiff.:≺(::Type{JacobianTag}, ::Type{<:ForwardDiff.Tag}) = true
+ForwardDiff.:≺(::Type{<:ForwardDiff.Tag}, ::Type{JacobianTag}) = false
+
 # The batch width for `K` colors.
 _chunk_width(K::Int) = cld(K, cld(K, MAX_CHUNK))
 
@@ -97,35 +104,72 @@ color_count(def::ResidualDefinition) =
     _color_count(_colored_pattern(jacobian_pattern(def), dense_rows(def.layout)))
 
 """
+	ColoredPass{D}
+
+One dual-number residual of the colored Jacobian: the state `x`, seeded once
+with its batch of colors, into which every evaluation writes the values alone;
+the residual `y`; and, for each stored entry the batch reaches, its place in
+the Jacobian's stored values (`entry`) and that of its partial in `y`, read as
+a flat array of floats (`place`).
+"""
+struct ColoredPass{D}
+    x::Vector{D}
+    y::Vector{D}
+    entry::Vector{Int}
+    place::Vector{Int}
+end
+
+# The passes of `K` colors, `W` to a batch: the seeds of column `i` in the slot
+# its color takes in its batch, and each stored entry read from that slot.
+function _colored_passes(
+    colored::SparseMatrixCSC{Bool,Int},
+    colors::Vector{Int},
+    K::Int,
+    ::Val{W},
+) where {W}
+    D = ForwardDiff.Dual{JacobianTag,Float64,W}
+    n = size(colored, 2)
+    return map(1:cld(K, W)) do pass
+        slot(i) = colors[i] - (pass - 1) * W
+        seed(i) = ForwardDiff.Partials(ntuple(s -> Float64(s == slot(i)), Val(W)))
+        entry, place = Int[], Int[]
+        for col = 1:n, k in nzrange(colored, col)
+            1 <= slot(col) <= W || continue
+            push!(entry, k)
+            push!(place, (W + 1) * (colored.rowval[k] - 1) + 1 + slot(col))
+        end
+        return ColoredPass(D[D(0.0, seed(i)) for i = 1:n], zeros(D, n), entry, place)
+    end
+end
+
+"""
 	ColoredJacobianCache(def, ws, u, t)
 
 The residual's Jacobian by column-colored forward-mode automatic
 differentiation on the connectivity pattern of [`jacobian_pattern`](@ref):
 SparseMatrixColorings partitions the columns greedily in the best of
-[`COLORING_ORDERS`](@ref), and DifferentiationInterface evaluates one
-dual-number residual per batch of at most [`MAX_CHUNK`](@ref) colors and
-decompresses into a `SparseMatrixCSC`. Preparation happens once
-per problem structure; `jacobian!` then reuses it at any state and time.
+[`COLORING_ORDERS`](@ref), one dual-number residual runs per batch of at most
+[`MAX_CHUNK`](@ref) colors ([`ColoredPass`](@ref)), and every stored entry is
+read from the partial its column's color holds in its row. A colored pass
+holds its seeds from construction, so `jacobian!` writes only the state's
+values and reuses them at any state and time.
 
 The [`dense_rows`](@ref) of a variable cross section are colored by their
 diagonal alone, the colored result is scattered into the full pattern, and
 [`LateralRows`](@ref) writes them afterwards.
 
-The decompression writes stored values in order and checks only the matrix
-size and stored-entry count, so construction asserts that the prepared
-pattern and the colored pattern share `colptr` and `rowval`; the
-integrator's Jacobian must be allocated from [`jac_prototype`](@ref).
+The stored values are written in the pattern's order and only their count is
+checked, so the integrator's Jacobian must be allocated from
+[`jac_prototype`](@ref).
 """
-struct ColoredJacobianCache{F,B,P,D}
+struct ColoredJacobianCache{F,P,D}
     f!::F
-    backend::B
-    prep::P
+    passes::Vector{P}
     pattern::SparseMatrixCSC{Bool,Int}
     colored::SparseMatrixCSC{Bool,Int}
     J_colored::SparseMatrixCSC{Float64,Int}
     scatter::Vector{Int}
     dense::D
-    du::Vector{Float64}
     n_colors::Int
 end
 
@@ -138,21 +182,9 @@ function ColoredJacobianCache(
     pattern = jacobian_pattern(def)
     dense = dense_rows(def.layout)
     colored = _colored_pattern(pattern, dense)
-    f! = ResidualFunction(def, ws)
-    backend = AutoSparse(
-        AutoForwardDiff(; chunksize = _chunk_width(_color_count(colored)));
-        sparsity_detector = KnownJacobianSparsityDetector(colored),
-        coloring_algorithm = GreedyColoringAlgorithm(COLORING_ORDERS),
-    )
-    du = zeros(length(u))
-    x = Vector{Float64}(u)
-    prep = prepare_jacobian(f!, du, backend, x, Constant(Float64(t)))
-    prepared = sparsity_pattern(prep)
-    (
-        size(prepared) == size(colored) &&
-        SparseMatrixCSC(prepared).colptr == colored.colptr &&
-        SparseMatrixCSC(prepared).rowval == colored.rowval
-    ) || error("the prepared Jacobian's sparsity differs from the connectivity pattern")
+    result = coloring(colored, ColoringProblem(), GreedyColoringAlgorithm(COLORING_ORDERS))
+    K = ncolors(result)
+    passes = _colored_passes(colored, column_colors(result), K, Val(_chunk_width(K)))
     scatter = Int[]
     for col in axes(colored, 2), k in nzrange(colored, col)
         r = colored.rowval[k]
@@ -167,18 +199,15 @@ function ColoredJacobianCache(
         zeros(nnz(colored)),
     )
     lateral = isempty(dense) ? nothing : LateralRows(def, pattern)
-    n_colors = length(column_groups(prep))
     return ColoredJacobianCache(
-        f!,
-        backend,
-        prep,
+        ResidualFunction(def, ws),
+        passes,
         pattern,
         colored,
         J_colored,
         scatter,
         lateral,
-        du,
-        n_colors,
+        K,
     )
 end
 
@@ -207,30 +236,44 @@ function jacobian!(
     return J
 end
 
-function _jacobian!(J, cj::ColoredJacobianCache, ::Nothing, u, t)
-    DifferentiationInterface.jacobian!(
-        cj.f!,
-        cj.du,
-        J,
-        cj.prep,
-        cj.backend,
-        u,
-        Constant(Float64(t)),
-    )
+# The colored passes, each stored value of `J` from the partial of its pass.
+function _colored!(J, cj::ColoredJacobianCache, u, t)
+    values = J.nzval
+    τ = Float64(t)
+    for pass in cj.passes
+        _write_values!(pass.x, u)
+        cj.f!(pass.y, pass.x, τ)
+        _read_partials!(values, pass)
+    end
     return J
 end
 
+# A dual number is its value and its partials, in order, so a vector of them is
+# a flat array of floats.
+@inline function _write_values!(x::Vector{D}, u) where {D}
+    p = Ptr{Float64}(pointer(x))
+    stride = sizeof(D) ÷ sizeof(Float64)
+    GC.@preserve x @inbounds for i in eachindex(x)
+        unsafe_store!(p, u[i], stride * (i - 1) + 1)
+    end
+    return nothing
+end
+
+@inline function _read_partials!(values::Vector{Float64}, pass::ColoredPass)
+    y = pass.y
+    p = Ptr{Float64}(pointer(y))
+    entry, place = pass.entry, pass.place
+    GC.@preserve y @inbounds for m in eachindex(entry)
+        values[entry[m]] = unsafe_load(p, place[m])
+    end
+    return nothing
+end
+
+_jacobian!(J, cj::ColoredJacobianCache, ::Nothing, u, t) = _colored!(J, cj, u, t)
+
 function _jacobian!(J, cj::ColoredJacobianCache, dense::LateralRows, u, t)
     Jc = cj.J_colored
-    DifferentiationInterface.jacobian!(
-        cj.f!,
-        cj.du,
-        Jc,
-        cj.prep,
-        cj.backend,
-        u,
-        Constant(Float64(t)),
-    )
+    _colored!(Jc, cj, u, t)
     fill!(J.nzval, 0.0)
     @inbounds for k in eachindex(cj.scatter)
         J.nzval[cj.scatter[k]] = Jc.nzval[k]

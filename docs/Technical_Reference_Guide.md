@@ -13712,58 +13712,13 @@ once by `setup` at the initial state, holds
 
 - the residual as `f!(du, u, t)` (`ResidualFunction(def, ws)`), with the time a
   constant of the differentiation;
-- the backend, DifferentiationInterface's `AutoSparse(AutoForwardDiff(;
-  chunksize))` with the connectivity pattern as a known sparsity
-  (`KnownJacobianSparsityDetector`) and SparseMatrixColorings' greedy column
-  coloring;
-- the preparation (`prepare_jacobian`), done once per problem structure and
-  reused at every state and time;
+- the colored passes (`ColoredPass`), one per batch of colors (below): the
+  state seeded once with its batch's colors from SparseMatrixColorings' greedy
+  column coloring, the dual-number residual, and each stored entry's place in
+  the Jacobian and in that residual;
 - the full pattern, the colored pattern (the dense rows reduced to their
-  diagonal, §15.9), the decompression target and its scatter into the full
-  pattern, the dense-row assembler (`LateralRows`, or `nothing`), a residual
-  buffer and the color count.
-
-`jacobian!(J, cj, u, t)` writes the Jacobian at $(\boldsymbol u,t)$ into `J`,
-whose structure must be the pattern's: the decompression writes stored values
-in order and checks only the matrix size and stored-entry count, so the cache's
-construction asserts that the prepared pattern and the colored pattern share
-`colptr` and `rowval`, and the integrator's `jac!` checks
-`same_structure(J, pattern)` on every call and errors if the matrix lost the
-structure. The integrator allocates its Jacobian from `jac_prototype(cj)`, a
-zero matrix with exactly the pattern's structure. After warm-up a Jacobian
-evaluation allocates nothing (`test/jacobian/test_allocations.jl`, 100 cells,
-every physics configuration, both energy forms).
-
----
-
-## 15.7 Coloring, batching and decompression
-
-Two columns may share a color when no row holds both; one dual-number residual
-evaluation then carries the derivatives of every column of a color at once,
-each row reading its entry from the column of that color it stores.
-
-**Coloring.** SparseMatrixColorings colors the columns greedily in each of four
-vertex orders (`COLORING_ORDERS`: natural, largest-first, smallest-last and
-incidence-degree) and keeps the coloring with the fewest colors $n_c$. The
-largest number of stored entries in a row is a lower bound on any column
-coloring; on every configuration of the test suite the chosen coloring reaches
-it, and the count is constant in the cell count
-(`test/jacobian/test_pattern.jl`). On a line it follows
-
-$$
-n_c=\begin{cases}
-3N_C+9+2\delta_{\rm BL}+7\delta_\chi-n_{\rm mesh}, & \text{no relative fluxes},\\
-5N_C+13+2\delta_{\rm BL}+11\delta_\chi-n_{\rm mesh}, & \text{relative fluxes (a correction)},
-\end{cases}
-\qquad
-n_{\rm mesh}=\begin{cases}6 & \text{fixed mesh},\\ 2 & \text{moving mesh},\\ 0 & \text{prescribed mesh velocity},\end{cases}
-$$
-
-with $\delta_{\rm BL}$ and $\delta_\chi$ the flags of §15.1.1. For two
-components on 12 cells this gives 9 colors on a fixed mesh, 11 under in-depth
-radiation, 13 on a moving mesh, 15 on a moving mesh under in-depth radiation
-and 21 on a moving mesh with deactivation, which installs the equidistribution
-correction and its relative fluxes (measured with the script of §15.13).
+  diagonal, §15.9), the colored result and its scatter into the full pattern,
+  the dense-row assembler (`LateralRows`, or `nothing`) and the color count.
 
 **Batching.** One dual-number evaluation carries at most `MAX_CHUNK` $=24$
 partials. The colors are split into the fewest batches of at most 24, of equal
@@ -13772,11 +13727,12 @@ evaluation of the residual at a dual type of that width; the dense reference
 (§15.13) uses the same width, so both evaluate the residual at one dual-number
 type at every mesh size.
 
-**Decompression.** DifferentiationInterface decompresses the colored result
-into a `SparseMatrixCSC` with the colored pattern. Without dense rows that
-matrix is the Jacobian. With them, the colored result is scattered into the
-full pattern through a precomputed index map and the two dense rows are then
-written by `LateralRows` (§15.9).
+**Reading the Jacobian.** An evaluation writes the state's values into the seeded
+state of each pass and evaluates the residual; every stored entry then reads the
+partial its column's color holds in its row, in the colored pattern's order.
+Without dense rows that matrix is the Jacobian. With them, the colored result is
+scattered into the full pattern through a precomputed index map and the two dense
+rows are then written by `LateralRows` (§15.9).
 
 ---
 

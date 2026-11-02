@@ -2,7 +2,7 @@
 
 julia_version = "1.13.0"
 manifest_format = "2.1"
-project_hash = "e9e8ecf36304900c4d581bb5313633ea76d3857b"
+project_hash = "8f5216feebce2bc405fc762ff977af499190e374"
 
 [[deps.ADTypes]]
 deps = ["PrecompileTools"]
@@ -1129,7 +1129,7 @@ weakdeps = ["ForwardDiff"]
     PureKLUForwardDiffExt = "ForwardDiff"
 
 [[deps.Pyrolysis]]
-deps = ["ADTypes", "DifferentiationInterface", "Distributed", "ForwardDiff", "FunctionWrappers", "LinearAlgebra", "LinearSolve", "OrdinaryDiffEq", "OrdinaryDiffEqBDF", "OrdinaryDiffEqSDIRK", "PrecompileTools", "ProgressMeter", "SciMLBase", "SparseArrays", "SparseMatrixColorings", "StaticArrays"]
+deps = ["ADTypes", "Distributed", "ForwardDiff", "FunctionWrappers", "LinearAlgebra", "LinearSolve", "OrdinaryDiffEq", "OrdinaryDiffEqBDF", "OrdinaryDiffEqSDIRK", "PrecompileTools", "ProgressMeter", "SciMLBase", "SparseArrays", "SparseMatrixColorings", "StaticArrays"]
 path = "."
 uuid = "910b54fb-7370-4696-a92c-2242b531a32e"
 version = "0.1.0"
