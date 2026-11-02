@@ -153,9 +153,9 @@ How the methods differ in use:
 - **`KenCarp4`** iterates Newton on each stage, so the Newton-failure step cap
   of §8.3 applies to it, as it does to `FBDF`.
 
-In every policy the time derivative of the right-hand side, where the method
-needs one, is a finite difference; the Jacobian with respect to the state is
-the colored one. A policy other than the default compiles its integrator on
+The time derivative of the right-hand side, where the method needs one, is zero
+for a residual that does not read the time and a forward difference otherwise;
+the Jacobian with respect to the state is the colored one. A policy other than the default compiles its integrator on
 first use in a session. Chapter 11 describes building an `IntegratorPolicy`
 around another OrdinaryDiffEq algorithm, and Technical Reference §15 the
 methods and the matrix `W` they factor.

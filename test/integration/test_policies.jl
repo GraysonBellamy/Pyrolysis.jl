@@ -722,6 +722,46 @@ end
     @test allocated(W, M, J) == 0
 end
 
+@testset "the time derivative of the right-hand side" begin
+    _problem(q) = PyrolysisProblem(
+        mesh = uniform_mesh(0.01, 6),
+        material = _slab(6).material,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = RadiativeFluxBC(q), bottom = AdiabaticBC()),
+        ),
+        tspan = (0.0, 10.0),
+    )
+    time_free = setup(_problem(5e4); use_ale = true)
+    timed = setup(_problem(t -> 5e4 + 1e3t); use_ale = true)
+    @test !Integration._reads_time(time_free)
+    @test Integration._reads_time(timed)
+    rhs!(cp) = (du, u, p, t) -> residual!(du, u, cp.def, t, cp.ws)
+    # Without a time in the residual, its value at two times is the same bits,
+    # so the zero the method reads is exact.
+    a, b = zero(time_free.u0), zero(time_free.u0)
+    rhs!(time_free)(a, time_free.u0, nothing, 1.0)
+    rhs!(time_free)(b, time_free.u0, nothing, 2.0)
+    @test a == b
+    dT = ones(length(time_free.u0))
+    Integration._time_derivative(rhs!(time_free), time_free)(dT, time_free.u0, nothing, 1.0)
+    @test iszero(dT)
+    # With one, the forward difference, and backward at the end of the span.
+    h = sqrt(eps(Float64))
+    dT = zero(timed.u0)
+    derivative! = Integration._time_derivative(rhs!(timed), timed)
+    a, b = zero(dT), zero(dT)
+    derivative!(dT, timed.u0, nothing, 1.0)
+    rhs!(timed)(a, timed.u0, nothing, 1.0 + h)
+    rhs!(timed)(b, timed.u0, nothing, 1.0)
+    @test dT == (a .- b) ./ h
+    @test any(!iszero, dT)
+    derivative!(dT, timed.u0, nothing, 10.0)
+    step = 10.0 * h
+    rhs!(timed)(a, timed.u0, nothing, 10.0 - step)
+    rhs!(timed)(b, timed.u0, nothing, 10.0)
+    @test dT == (a .- b) ./ (-step)
+end
+
 # The KLU factorization in Rosenbrock's linear cache, a new object exactly
 # when KLU analyses afresh.
 _klu(cacheval) = cacheval

@@ -127,9 +127,8 @@ residual!(du, u, def::ResidualDefinition, t, ws::ResidualWorkspace) -> nothing
   temperatures of a plain evaluation.
 - `t` is a plain number. A dual-number state evaluates in its own buffers,
   chosen by the state's element type; a forward-mode derivative in time alone
-  (a dual `t` with a `Float64` state) is not supported, and every integrator
-  policy takes the time derivative of the residual by finite differences
-  (§15.5.1).
+  (a dual `t` with a `Float64` state) is not supported, and the time derivative
+  of the residual is zero or a finite difference (§15.5.1).
 
 In the temperature form the residual is a pure function of $(\boldsymbol u,t)$
 given `def`. In the enthalpy form the caloric inversion starts from `T_warm`,
@@ -333,8 +332,12 @@ callback machinery raises before every discrete callback's `affect!`.
 | `fbdf_policy(ls)` | `FBDF`, variable-order backward differentiation | `:forced_dt` | cleared |
 
 `ls` is the linear solver, by default `default_linear_solver()` (§15.10). Every policy takes the Jacobian from the
-colored one and the time derivative of the right-hand side, where the method
-needs it, by finite differences (`autodiff = AutoFiniteDiff()`). The restarts:
+colored one. The time derivative of the right-hand side, which a Rosenbrock method
+reads on every step, is exactly zero for a residual that does not read the time:
+no boundary condition holds a function, there is no external source and no
+prescribed mesh velocity. Any other residual takes the forward difference of step
+$\max(\sqrt{\epsilon}\,|t|,\sqrt{\epsilon})$, backward within the state's
+resolution of the end of the time span. The restarts:
 `:solver_chosen` keeps the integrator's own proposal; `:forced_dt` proposes
 `DT_AFTER_EVENT` $=10^{-6}$ s; `:heuristic` proposes the integrator's
 initial-step estimate at the state the event left (two right-hand-side
@@ -985,7 +988,8 @@ checked against the dense forward-mode reference.
   section, the equidistribution correction and deactivation are a line's, and
   full solves on such meshes are not a supported path.
 - **The time derivative.** No policy differentiates the residual in time
-  alone by dual numbers; the time derivative is a finite difference.
+  alone by dual numbers; where the residual reads the time, its time derivative
+  is a finite difference.
 - **Jacobian cost.** One Jacobian costs one dual-number residual per batch of up
   to 24 colors. The color count grows with the number of components and with
   the relative fluxes of a correction ($5N_C$ against $3N_C$), and on meshes of

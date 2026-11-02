@@ -769,8 +769,8 @@ $$
 The `convert(typeof(t), p)` for a constant returns a value in the number type
 of its argument, so the helper is type-stable for every argument type. In a
 residual evaluation $t$ is a plain number: a dual-number time is not supported,
-and every integrator policy takes the time derivative of the right-hand side by
-finite differences (the docstring of `residual!`, Chapter 15). Where a
+and the time derivative of the right-hand side is zero or a finite difference
+(§15.5.1). Where a
 time-dependent parameter meets the state, the kernel promotes it explicitly
 (the Beer–Lambert kernel adds `zero` of the state's element type to the incident
 flux it evaluates), and parameter sensitivities are finite differences of whole

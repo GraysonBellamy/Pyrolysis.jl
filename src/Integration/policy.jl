@@ -48,9 +48,7 @@ const DT_AFTER_EVENT = 1e-6
 	kencarp4_policy(linear_solver = default_linear_solver())
 
 `KenCarp4` with the raw (unsmoothed) error estimate, the observer flag kept and
-the solver-chosen restart. The Jacobian is the colored one; the time
-derivative of the right-hand side, where the method needs it, is a finite
-difference.
+the solver-chosen restart. The Jacobian is the colored one.
 """
 kencarp4_policy(linsolve = default_linear_solver()) = IntegratorPolicy(
     KenCarp4(autodiff = AutoFiniteDiff(), linsolve = linsolve, smooth_est = false),
@@ -62,9 +60,10 @@ kencarp4_policy(linsolve = default_linear_solver()) = IntegratorPolicy(
 """
 	rodas5p_policy(linear_solver = default_linear_solver(); restart = :heuristic)
 
-`Rodas5P`, a Rosenbrock method that evaluates the exact colored Jacobian at
-every step and the time derivative of the right-hand side by finite
-differences, with any restart. The heuristic restart rejects fewer steps after
+`Rodas5P`, a Rosenbrock method that evaluates the exact colored Jacobian and
+the time derivative of the right-hand side at every step, with any restart. The
+derivative in time is zero for a residual that does not read the time and a
+finite difference otherwise. The heuristic restart rejects fewer steps after
 an event than keeping the step and keeps the mass ledger closer than either
 other kind. It rebuilds its Jacobian every step, so the observer flag changes
 nothing; the policy clears it.

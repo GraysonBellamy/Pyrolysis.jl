@@ -181,6 +181,7 @@ function integrate(
         ErasedRHS(rhs!);
         mass_matrix = M,
         jac = ErasedJacobian{typeof(J0)}(jac!),
+        tgrad = ErasedRHS(_time_derivative(rhs!, cp)),
         jac_prototype = J0,
     )
     ode = ODEProblem(f, Vector{Float64}(u0), cp.problem.tspan)
@@ -289,6 +290,47 @@ function integrate(
         deactivation = cells,
         outcome = monitor.outcome === :none ? outcome[] : monitor.outcome,
     )
+end
+
+# Whether `x`, part of a problem's conditions, holds a function: a function of
+# the time, or of the temperature, which is not told apart.
+_holds_function(::Function) = true
+_holds_function(::Union{Number,Symbol,Nothing,AbstractString}) = false
+_holds_function(x::Union{Tuple,NamedTuple,AbstractArray}) = any(_holds_function, x)
+_holds_function(x) = any(k -> _holds_function(getfield(x, k)), 1:fieldcount(typeof(x)))
+
+# Whether the residual of `cp` can read the time: through its boundary
+# conditions, its external sources or a prescribed mesh velocity.
+function _reads_time(cp::PreparedProblem)
+    closure = cp.def.closure
+    return !(cp.def.sources isa NoSources) ||
+           (closure isa BalanceRowClosure && closure.correction isa PrescribedCorrection) ||
+           _holds_function(cp.problem.bc_set)
+end
+
+# The step of the forward difference in time, relative to the time and at least
+# itself.
+const TIME_STEP = sqrt(eps(Float64))
+
+# The derivative of `rhs!` in time, which a Rosenbrock method reads on every
+# step. A residual that does not read the time has exactly zero; any other takes
+# the forward difference, backward within the state's resolution of the end of
+# the time span, where the forward point lies beyond it.
+function _time_derivative(rhs!, cp::PreparedProblem)
+    _reads_time(cp) || return (dT, u, p, t) -> begin
+        fill!(dT, 0.0)
+        return nothing
+    end
+    ahead, here = zeros(length(cp.u0)), zeros(length(cp.u0))
+    t_end = Float64(cp.problem.tspan[2])
+    return (dT, u, p, t) -> begin
+        backward = t > t_end - maximum(abs, u) * TIME_STEP
+        h = max(TIME_STEP * abs(t), TIME_STEP) * (backward ? -1 : 1)
+        rhs!(ahead, u, p, t + h)
+        rhs!(here, u, p, t)
+        @. dT = (ahead - here) / h
+        return nothing
+    end
 end
 
 """

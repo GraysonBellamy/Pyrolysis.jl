@@ -14,8 +14,7 @@ only; in the inventory form the caloric inversion starts from the
 temperatures of the workspace's latest plain evaluation, so the result also
 depends on the evaluation history, at the inversion's round-off. Dual-number states evaluate in their own buffers, chosen by the state's
 element type, so `t` must be a plain number: a forward-mode derivative in
-time alone (a dual `t` with a `Float64` state) is not supported, and every
-integrator policy takes its time derivative by finite differences.
+time alone (a dual `t` with a `Float64` state) is not supported.
 """
 function residual!(
     du::AbstractVector,
