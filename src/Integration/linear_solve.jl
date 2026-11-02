@@ -2,38 +2,15 @@
 # The linear solve of the integrator's W
 # ============================================================================
 
-"""
-	LumpedMass <: AbstractVector{Float64}
-
-The diagonal of the integrator's mass matrix, one on the rows with a time
-derivative and zero on the algebraic rows, with the place of the former's
-diagonal entries in the Jacobian's stored values. The matrix is a `Diagonal` of
-this vector, which forms `W = J − M/(γΔt)` in place on the Jacobian's own
-structure: the sparse broadcast a general mass matrix takes would allocate a
-matrix and search it on every step.
-"""
-struct LumpedMass <: AbstractVector{Float64}
-    diagonal::Vector{Float64}
-    shifted::Vector{Int}
-end
-
-Base.size(m::LumpedMass) = size(m.diagonal)
-Base.IndexStyle(::Type{LumpedMass}) = IndexLinear()
-Base.@propagate_inbounds Base.getindex(m::LumpedMass, i::Int) = m.diagonal[i]
-
-"""
-	lumped_mass(layout, J) -> Diagonal
-
-The integrator's mass matrix of `layout`, for the Jacobian prototype `J`.
-"""
-function lumped_mass(layout::StateLayout, J::SparseMatrixCSC{Float64,Int})
-    diagonal = diag(mass_matrix(layout))
+# The places of the diagonal entries of `mass`'s nonzero rows in `J`'s stored values.
+function _locate_diagonal!(mass::LumpedMass, J::SparseMatrixCSC)
     rows = rowvals(J)
-    shifted = [
-        nzrange(J, i)[searchsortedfirst(view(rows, nzrange(J, i)), i)] for
-        i in eachindex(diagonal) if !iszero(diagonal[i])
-    ]
-    return Diagonal(LumpedMass(diagonal, shifted))
+    for i in eachindex(mass.diagonal)
+        iszero(mass.diagonal[i]) && continue
+        range = nzrange(J, i)
+        push!(mass.shifted, range[searchsortedfirst(view(rows, range), i)])
+    end
+    return mass
 end
 
 function OrdinaryDiffEqDifferentiation.jacobian2W!(
@@ -42,10 +19,12 @@ function OrdinaryDiffEqDifferentiation.jacobian2W!(
     dtgamma::Number,
     J::SparseMatrixCSC{Float64,Int},
 )
+    mass = M.diag
+    isempty(mass.shifted) && _locate_diagonal!(mass, J)
     values = nonzeros(W)
     copyto!(values, nonzeros(J))
     shift = inv(dtgamma)
-    @inbounds for k in M.diag.shifted
+    @inbounds for k in mass.shifted
         values[k] -= shift
     end
     return nothing

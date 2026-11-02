@@ -45,7 +45,7 @@ export n_components, node_width, cell_width, cell_rows, node_rows
 export mass_index, energy_index, history_index, position_index, velocity_index
 export multiplier_index
 export intensity_index, area_index, lateral_rate_index
-export is_differential, mass_matrix
+export is_differential, mass_matrix, LumpedMass
 export sensible_enthalpy, enthalpy_slope, enthalpy_law, TabulatedEnthalpy, CaloricLaws
 export component_enthalpies, component_enthalpy_slopes, component_heat_capacities
 export CaloricExtension, regularization, extended_energy, extended_capacity

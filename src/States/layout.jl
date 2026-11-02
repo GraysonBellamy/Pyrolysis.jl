@@ -454,9 +454,27 @@ function _differential_rows(l::StateLayout)
 end
 
 """
+	LumpedMass <: AbstractVector{Float64}
+
+The diagonal of the integrator's mass matrix, with the place of its nonzero
+entries in the Jacobian's stored values, filled when the first `W` is formed.
+The matrix is a `Diagonal` of this vector, for which the integrator forms
+`W = J − M/(γΔt)` in place on the Jacobian's own structure: the sparse broadcast
+a general mass matrix takes allocates a matrix and searches it on every step.
+"""
+struct LumpedMass <: AbstractVector{Float64}
+    diagonal::Vector{Float64}
+    shifted::Vector{Int}
+end
+
+Base.size(m::LumpedMass) = size(m.diagonal)
+Base.IndexStyle(::Type{LumpedMass}) = IndexLinear()
+Base.@propagate_inbounds Base.getindex(m::LumpedMass, i::Int) = m.diagonal[i]
+
+"""
 	mass_matrix(layout) -> Diagonal
 
 The integrator's mass matrix: one on the differential rows, zero on the
 algebraic rows.
 """
-mass_matrix(l::StateLayout) = Diagonal(Float64.(is_differential(l)))
+mass_matrix(l::StateLayout) = Diagonal(LumpedMass(Float64.(is_differential(l)), Int[]))

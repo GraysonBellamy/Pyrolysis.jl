@@ -706,15 +706,14 @@ end
     )
     J[2, 1] = 0.0
     d = [1.0, 0.0, 1.0, 1.0, 0.0]
-    M = LinearAlgebra.Diagonal(
-        Integration.LumpedMass(d, [J.colptr[j] + (j > 1) for j in findall(!iszero, d)]),
-    )
+    M = LinearAlgebra.Diagonal(Pyrolysis.States.LumpedMass(d, Int[]))
     @test M == LinearAlgebra.Diagonal(d)
     @test M * ones(n) == d
     W = copy(J)
     fill!(nonzeros(W), 1.0)
     form! = Integration.OrdinaryDiffEqDifferentiation.jacobian2W!
     form!(W, M, 0.25, J)
+    @test M.diag.shifted == [J.colptr[j] + (j > 1) for j in findall(!iszero, d)]
     @test W.colptr == J.colptr && W.rowval == J.rowval
     @test W == J - LinearAlgebra.Diagonal(d) / 0.25
     allocated(W, M, J) = @allocated form!(W, M, 0.5, J)

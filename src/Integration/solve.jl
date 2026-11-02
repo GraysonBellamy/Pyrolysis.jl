@@ -180,7 +180,7 @@ function integrate(
             return nothing
         end
     end
-    M = all(is_differential(layout)) ? I : lumped_mass(layout, J0)
+    M = all(is_differential(layout)) ? I : mass_matrix(layout)
     f = ODEFunction{true,FullSpecialize}(
         ErasedRHS(rhs!);
         mass_matrix = M,
@@ -660,6 +660,7 @@ function _layer_time_callback(cp::PreparedProblem, check::DomainCheck, policy)
                         horizon;
                         slack = reltol,
                     )
+                    forget!(check)
                     return nothing
                 end,
             ),
@@ -671,7 +672,6 @@ function _layer_time_callback(cp::PreparedProblem, check::DomainCheck, policy)
             nothing;
             affect_neg! = integrator -> begin
                 estimate(integrator.u, integrator.t)
-                forget!(check)
                 apply_observer_flag!(integrator, policy)
                 return nothing
             end,
