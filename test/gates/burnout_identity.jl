@@ -11,10 +11,12 @@
 # The decks split by the correction's installation rule. (A) A deck the rule
 # leaves without a correction (a fixed mesh, no deactivation, or no layer that
 # can vanish) must equal its reference; on a moving mesh it is solved again
-# with an equidistribution correction given explicitly, which must leave every
-# temperature and mass within 1e-10 of the first solve's, relative to the
-# field's largest, on the same accepted steps, with the correction exactly
-# zero. (B) A deck the rule installs the correction on records its digest at
+# with an equidistribution correction given explicitly, which must stay exactly
+# zero and leave every temperature and mass within the deck's `reltol` of the
+# first solve's, relative to the field's largest. The explicit correction adds
+# its couplings to the Jacobian's prototype, and so moves the KLU ordering taken
+# from it: the two solves are apart by that ordering's round-off and their step
+# counts may differ. (B) A deck the rule installs the correction on records its digest at
 # the package defaults as the reference, beside its steps without the
 # correction and the largest correction velocity; on V-BO-04's uniform column
 # that velocity must be exactly zero.
@@ -28,7 +30,9 @@
 # With `--record` the digests become the reference
 # (measurements/burnout_identity_reference.csv); without it every digest is
 # compared with the reference and the table says which decks are
-# bit-identical. Including this file defines the decks and the functions
+# bit-identical. A digest that differs from the reference or a class A check
+# that fails exits nonzero, and `--record` writes no reference then. Including
+# this file defines the decks and the functions
 # without solving anything (`deletion_identity.jl` and `ttfx.jl` do).
 #
 # Run from the repository root:
@@ -57,6 +61,9 @@ const DECKS = (
 const CHAR_LAYER = "V-CPL-06a"
 const CHAR_LAYER_CELLS = 80
 const DF_SECONDS = 60.0
+const DF_RELTOL = 1e-7
+# The `reltol` of a solve that gives none.
+const DEFAULT_RELTOL = 1e-6
 
 # The binding `name` of the module `m` in the latest world: the cases are
 # loaded into `m` at run time, in a newer world than the caller's.
@@ -181,7 +188,7 @@ douglas_fir_solve(df, extra...) = Base.invokelatest(
     use_ale = true,
     radiation_model = SURFACE_ABSORPTION,
     abstol = 1e-9,
-    reltol = 1e-7,
+    reltol = DF_RELTOL,
     dtmin = 1e-14,
     extra...,
 )
@@ -212,6 +219,29 @@ function difference(a, b)
 end
 
 largest_c(sol) = maximum(abs, filter(isfinite, sol.correction_velocity); init = 0.0)
+
+# Why a class A row fails, `nothing` if it holds.
+function class_a_failure(r)
+    r.check === nothing || r.installed || begin
+        r.check.largest == 0.0 || return "the explicit correction is not zero"
+        r.check.difference <= r.check.reltol ||
+            return "difference $(r.check.difference) above reltol $(r.check.reltol)"
+    end
+    return nothing
+end
+
+# What is wrong with `rows` against the digests `reference` (compared unless
+# recording), one line each.
+function failures(rows, reference; record = RECORD)
+    wrong = String[]
+    for r in rows
+        failure = class_a_failure(r)
+        failure === nothing || push!(wrong, "$(r.deck): $failure")
+        record || get(reference, r.deck, "") == r.digest ||
+            push!(wrong, "$(r.deck): digest differs from the reference")
+    end
+    return wrong
+end
 
 # The thinnest live cell over its initial thickness at the saved states (the
 # positions are `NaN` beyond the outermost live node).
@@ -250,7 +280,7 @@ end
 function main()
     m, cases = load_cases()
     rows = []
-    record(deck, problem, sol, b, solve) = begin
+    record(deck, problem, sol, b, solve, reltol) = begin
         moving, rule = b !== nothing, installed(b)
         second =
             rule ? solve(Pyrolysis.Closures.NoCorrection()) :
@@ -271,6 +301,7 @@ function main()
                            second.statistics.rejected == sol.statistics.rejected,
                     difference = difference(second, sol),
                     largest = largest_c(second),
+                    reltol,
                 )
             else
                 nothing
@@ -284,7 +315,14 @@ function main()
     end
     for id in DECKS
         problem, solve, kw = deck(m, cases, id)
-        record(id, problem, solve(), bound(problem, kw), c -> solve(:correction => c))
+        record(
+            id,
+            problem,
+            solve(),
+            bound(problem, kw),
+            c -> solve(:correction => c),
+            get(kw, :reltol, DEFAULT_RELTOL),
+        )
     end
     df = douglas_fir_problem()
     record(
@@ -293,6 +331,7 @@ function main()
         douglas_fir_solve(df),
         bound(df, (; use_ale = true)),
         c -> douglas_fir_solve(df, :correction => c),
+        DF_RELTOL,
     )
 
     reference = Dict{String,String}()
@@ -302,7 +341,8 @@ function main()
             reference[strip(deck, '"')] = dig
         end
     end
-    if RECORD
+    wrong = failures(rows, reference)
+    if RECORD && isempty(wrong)
         open(REFERENCE, "w") do io
             println(io, "deck,digest")
             for r in rows
@@ -315,7 +355,7 @@ function main()
         println(io, "# Burnout identity: the decks the correction must not change\n")
         println(
             io,
-            "Generated by `test/gates/burnout_identity.jl` at $(COMMIT_STAMP), temperature form, each deck at its CI resolution with its solve keywords; the digest is `hash((T, m, z, t))` of the solution. The reference digests are `burnout_identity_reference.csv`$(RECORD ? ", recorded by this run" : ""). Class A: the installation rule leaves the deck without a correction; on a moving mesh the deck solved again with an equidistribution correction given explicitly must take the same steps, stay within 1e-10 (relative) and keep the correction at zero. Class B: the rule installs the correction; its steps without it and the largest correction velocity are recorded. Thinnest h/h₀: per moving deck, the thinnest live cell over its initial thickness at the saved states of both solves. Activation (class B): the largest node activation at the saved states, and the most nodes active at one saved time (between two live cells, with nonzero gain and activation) with that time [s].\n",
+            "Generated by `test/gates/burnout_identity.jl` at $(COMMIT_STAMP), temperature form, each deck at its CI resolution with its solve keywords; the digest is `hash((T, m, z, t))` of the solution. The reference digests are `burnout_identity_reference.csv`$(RECORD && isempty(wrong) ? ", recorded by this run" : ""). Class A: the installation rule leaves the deck without a correction; on a moving mesh the deck solved again with an equidistribution correction given explicitly must keep the correction exactly at zero and stay within the deck's reltol (relative); its steps may differ, since the correction's couplings move the KLU ordering. Class B: the rule installs the correction; its steps without it and the largest correction velocity are recorded. Thinnest h/h₀: per moving deck, the thinnest live cell over its initial thickness at the saved states of both solves. Activation (class B): the largest node activation at the saved states, and the most nodes active at one saved time (between two live cells, with nonzero gain and activation) with that time [s].\n",
         )
         println(
             io,
@@ -332,7 +372,7 @@ function main()
                 r.check === nothing ? "" :
                 r.installed ?
                 "$(r.check.steps) steps without; largest |c| $(_g(r.check.largest)) m/s" :
-                "same steps: $(r.check.same); difference $(_g(r.check.difference)); largest |c| $(_g(r.check.largest))"
+                "same steps: $(r.check.same); difference $(_g(r.check.difference)) (reltol $(_g(r.check.reltol))); largest |c| $(_g(r.check.largest))"
             thin = r.moving ? _g(r.thinnest) : ""
             extent =
                 r.extent === nothing ? "" :
@@ -344,7 +384,9 @@ function main()
             )
         end
     end
-    return rows
+    foreach(println, wrong)
+    println(isempty(wrong) ? "PASS" : "FAIL")
+    return isempty(wrong) ? 0 : 1
 end
 
-abspath(PROGRAM_FILE) == @__FILE__() && main()
+abspath(PROGRAM_FILE) == @__FILE__() && exit(main())
