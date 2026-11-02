@@ -57,13 +57,13 @@ function GasDiagnostics(material, n, nf, nt, tags)
         fill(NaN, nf, nt),
     )
 end
-function _gas_diagnostics!(out::GasDiagnostics, k, def, ds, c)
+function _gas_diagnostics!(out::GasDiagnostics, k, def, ds::DerivedState{NC}, c) where {NC}
     mat=def.setup.material
     topo=def.setup.topology
     indices=gas_component_indices(mat.components)
     for i = 1:n_cells(topo)
         ds.active[i] || continue
-        p=pore_state(Tuple(ds.ξ⁺[:, i]), ds.T_trial[i], mat)
+        p=pore_state(ntuple(j->ds.ξ⁺[j, i], Val(NC)), ds.T_trial[i], mat)
         out.porosity[i, k]=p.φ
         out.pressure[i, k]=p.P
         for (g, j) in enumerate(indices)
