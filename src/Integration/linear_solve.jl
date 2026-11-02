@@ -88,7 +88,17 @@ function LinearSolve.init_cacheval(
     end
     slot = zeros(Int, nnz(prototype))
     union = _union_matrix!(slot, prototype, in_union, zeros(nnz(prototype)))
-    inner = LinearSolve.init(LinearSolve.LinearProblem(union, zeros(length(b))), alg.inner)
+    # Which stored entries count is the union's to decide: a reduction of the stored
+    # zeros inside the inner KLU would change the structure that a size alone stands
+    # for, and with no pattern check a W would refactor on another W's structure.
+    inner = LinearSolve.init(
+        LinearSolve.LinearProblem(union, zeros(length(b))),
+        alg.inner;
+        assumptions = LinearSolve.OperatorAssumptions(
+            true;
+            nonstructural_zeros = LinearSolve.NonstructuralZeros.None,
+        ),
+    )
     return StructuredKLUCache(prototype, in_union, slot, union, inner, 0)
 end
 

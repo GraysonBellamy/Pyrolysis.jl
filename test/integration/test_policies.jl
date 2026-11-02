@@ -695,6 +695,45 @@ end
     @test_throws ErrorException LinearSolve.solve!(cache)
 end
 
+@testset "the structured KLU factors every W on the union as it stands" begin
+    # A union whose first W holds stored zeros, then a growth, then a W with as
+    # many nonzeros in other places: a reduction of the stored zeros inside the
+    # inner KLU would refactor that W on the structure of the one before.
+    n = 8
+    tridiagonal(diagonal, lower, upper) = sparse(
+        vcat(1:n, 2:n, 1:(n-1)),
+        vcat(1:n, 1:(n-1), 2:n),
+        vcat(diagonal, lower, upper),
+        n,
+        n,
+    )
+    prototype = tridiagonal(ones(n), ones(n - 1), ones(n - 1))
+    sequence = (
+        tridiagonal(
+            vcat(0.0, 0.0, fill(4.0, n - 2)),
+            vcat(1.0, zeros(n - 2)),
+            vcat(1.0, zeros(n - 2)),
+        ),
+        tridiagonal(
+            vcat(0.0, 0.0, fill(4.0, n - 2)),
+            vcat(1.0, zeros(n - 2)),
+            vcat(1.0, 0.0, -1.0, zeros(n - 4)),
+        ),
+        tridiagonal(
+            vcat(2.0, 2.0, fill(4.0, n - 2)),
+            zeros(n - 1),
+            vcat(0.0, 0.0, -1.0, zeros(n - 4)),
+        ),
+    )
+    b = collect(1.0:n)
+    cache = LinearSolve.init(LinearSolve.LinearProblem(copy(prototype), b), StructuredKLU())
+    for W in sequence
+        cache.A = W
+        @test LinearSolve.solve!(cache).u ≈ Matrix(W) \ b
+    end
+    @test cache.cacheval.growths == 2
+end
+
 @testset "the lumped mass forms W in place on the Jacobian's structure" begin
     n = 5
     J = sparse(
