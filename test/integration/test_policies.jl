@@ -762,6 +762,24 @@ end
     @test dT == (a .- b) ./ (-step)
 end
 
+@testset "the domain test's residual serves the next step" begin
+    cp = setup(_slab(6))
+    check = DomainCheck(cp)
+    u = copy(cp.u0)
+    du, fresh = zero(u), zero(u)
+    Integration.evaluate!(check, u, 1.0)
+    @test Integration.reuse!(du, check, u, 1.0)
+    residual!(fresh, u, cp.def, 1.0, cp.ws)
+    @test du == fresh
+    # Only at that state and time, and not once an event has dropped it.
+    @test !Integration.reuse!(du, check, u, 2.0)
+    moved = copy(u)
+    moved[1] += 1e-12
+    @test !Integration.reuse!(du, check, moved, 1.0)
+    Integration.forget!(check)
+    @test !Integration.reuse!(du, check, u, 1.0)
+end
+
 # The KLU factorization in Rosenbrock's linear cache, a new object exactly
 # when KLU analyses afresh.
 _klu(cacheval) = cacheval

@@ -162,8 +162,12 @@ function integrate(
     copyto!(ws.T_warm, cp.T0)
     policy = integrator_policy
 
-    rhs! = let def = def, ws = ws
-        (du, u, p, t) -> residual!(du, u, def, t, ws)
+    check = DomainCheck(cp)
+    rhs! = let def = def, ws = ws, check = check
+        (du, u, p, t) -> begin
+            reuse!(du, check, u, t) || residual!(du, u, def, t, ws)
+            return nothing
+        end
     end
     J0 = jac_prototype(cj)
     pattern = cj.pattern
@@ -188,7 +192,6 @@ function integrate(
 
     # The domain test and every callback reach the problem through
     # fixed-signature wrappers, so the integrator's type does not depend on it.
-    check = DomainCheck(cp)
     out_of_domain = _DomainWrapper(check)
     monitor = check.monitor
     cap = NewtonCap()
@@ -212,7 +215,7 @@ function integrate(
     outcome = Ref(:none)
     thin = _thickness_termination(layout, Float64(min_thickness), outcome)
     events = _deactivation_callback(cp, check, policy)
-    layer_times = _layer_time_callback(cp, policy)
+    layer_times = _layer_time_callback(cp, check, policy)
     recs, callback = _split_recorders(callback)
     bound = [_BoundRecorder(r, cp, _crossings(cp, min_thickness)) for r in recs]
     # The last accepted state, after every callback of its step; then the
@@ -543,6 +546,7 @@ function _deactivation_callback(cp::PreparedProblem, check::DomainCheck, policy)
         (u, t, slack) -> begin
             made = length(cells.events)
             status = deactivate!(u, cells, def, t; slack)
+            forget!(check)
             status === :transferred ||
                 (status === :interior && length(cells.events) > made) ||
                 return status
@@ -627,7 +631,7 @@ end
 # to its activation, so the event changes the right-hand side only where the
 # activation has just begun; the integrator re-evaluates its derivative there
 # and the policy's flag rule applies as for an observer.
-function _layer_time_callback(cp::PreparedProblem, policy)
+function _layer_time_callback(cp::PreparedProblem, check::DomainCheck, policy)
     layout = cp.def.layout
     is_moving(layout) || return ()
     corr = _layer_correction(cp.def)
@@ -667,6 +671,7 @@ function _layer_time_callback(cp::PreparedProblem, policy)
             nothing;
             affect_neg! = integrator -> begin
                 estimate(integrator.u, integrator.t)
+                forget!(check)
                 apply_observer_flag!(integrator, policy)
                 return nothing
             end,
@@ -678,6 +683,6 @@ end
 
 # The derived state at `u`, from one residual evaluation into the check's buffer.
 function _derived(check::DomainCheck, u, t)
-    residual!(check.du, u, check.def, t, check.ws)
+    evaluate!(check, u, t)
     return check.ws.derived
 end

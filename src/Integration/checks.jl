@@ -123,6 +123,8 @@ struct DomainCheck{D<:ResidualDefinition,W<:ResidualWorkspace}
     def::D
     ws::W
     du::Vector{Float64}
+    state::Vector{Float64}
+    time::Base.RefValue{Float64}
     abstol::Vector{Float64}
     reltol::Float64
     intensity_scale::Float64
@@ -154,6 +156,8 @@ function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
         def,
         cp.ws,
         zeros(state_length(layout)),
+        zeros(state_length(layout)),
+        Ref(NaN),
         cp.abstol,
         cp.reltol,
         I_scale,
@@ -165,6 +169,41 @@ function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
         Float64[molar_mass(comps[j]) for j in gas],
     )
 end
+
+"""
+	evaluate!(check::DomainCheck, u, t) -> du
+
+The residual at `(u, t)` into the check's buffer, remembered: the state an
+accepted step ends on is the state the next step starts from, whose right-hand
+side the integrator asks for again, and a rejected step asks for it once more
+([`reuse!`](@ref)).
+"""
+function evaluate!(check::DomainCheck, u, t)
+    residual!(check.du, u, check.def, t, check.ws)
+    copyto!(check.state, u)
+    check.time[] = t
+    return check.du
+end
+
+"""
+	reuse!(du, check::DomainCheck, u, t) -> Bool
+
+Copy into `du` the residual [`evaluate!`](@ref) remembers, when it is that of
+`(u, t)`.
+"""
+@inline function reuse!(du, check::DomainCheck, u, t)
+    (t == check.time[] && u == check.state) || return false
+    copyto!(du, check.du)
+    return true
+end
+
+"""
+	forget!(check::DomainCheck) -> check
+
+Drop the remembered residual: an event has changed the residual itself, which
+it can do without moving the state.
+"""
+forget!(check::DomainCheck) = (check.time[] = NaN; check)
 
 """
 	bind_error_test!(check::DomainCheck, integrator) -> check
@@ -189,7 +228,7 @@ function (check::DomainCheck)(u, p, t)
         return _reject!(m)
     end
     m.cold = 0
-    residual!(check.du, u, check.def, t, check.ws)
+    evaluate!(check, u, t)
     ds, c = check.ws.derived, check.ws.contributions
     if _porosity_out(check, ds, setup.gas)
         m.consecutive+=1
