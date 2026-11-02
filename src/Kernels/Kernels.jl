@@ -21,6 +21,7 @@ using ..Properties:
     guarded_harmonic_mean, FACE_MEAN_GUARD, transport_coefficients, closed_transport_channel
 using ..Physics:
     interface_flux,
+    lumped_interface_flux,
     pore_half_flux,
     bounded_transport_root,
     implicit_transport_root,

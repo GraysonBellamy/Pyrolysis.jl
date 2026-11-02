@@ -24,21 +24,26 @@ end
     parallel = sum(map(*, w, values))
     spec.rule == PARALLEL && return parallel
     spec.rule == WEIGHTED && spec.β == 1 && return parallel
-    invseries = zero(parallel)
-    closed = false
-    for j in eachindex(w)
-        if w[j] > 0
-            if values[j] == 0
-                closed = true
-            else
-                invseries += w[j]/values[j]
-            end
-        end
-    end
+    invseries, closed = _inverse_series(w, values, zero(parallel), false)
     series = closed || invseries == 0 ? zero(parallel) : inv(invseries)
     spec.rule == SERIES && return series
     spec.rule == WEIGHTED && return spec.β*parallel+(1-spec.β)*series
     throw(ArgumentError("unsupported matrix transport mixing rule $(spec.rule)"))
+end
+
+# Σ w/v over the positive weights and whether a positive weight meets a zero
+# value, by recursion over the components, whose values differ in type.
+@inline _inverse_series(::Tuple{}, ::Tuple{}, s, closed) = (s, closed)
+@inline function _inverse_series(w::Tuple, values::Tuple, s, closed)
+    wj, vj = first(w), first(values)
+    if wj > 0
+        if vj == 0
+            closed = true
+        else
+            s += wj/vj
+        end
+    end
+    return _inverse_series(Base.tail(w), Base.tail(values), s, closed)
 end
 
 @inline function _matrix_coefficients(w, T, material, φ)

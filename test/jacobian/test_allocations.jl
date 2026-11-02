@@ -6,7 +6,7 @@ using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!
 using Pyrolysis.ColoredJacobian
 using Pyrolysis.Closures: EquidistributionCorrection
-using Pyrolysis.Integration: setup
+using Pyrolysis.Integration: setup, DomainCheck
 
 # The colored Jacobian evaluates the residual at one dual-number type in
 # buffers built once for it, and allocates nothing per call: the budget is the
@@ -49,6 +49,54 @@ function _wood(; α = 1000.0, κ = 1e-14, law = nothing)
         components = (virgin, gas),
         reactions = (rxn,),
         lateral_shrinkage_law = law,
+    )
+end
+
+# Several gases and a weighted transport mixing: the components differ in type,
+# and the gas path of the kernels and of the domain test must not index them at
+# run time.
+function _many_gases()
+    wood = SolidComponent(
+        :wood,
+        ρ = 500.0,
+        c = (1500.0, 0.5),
+        k = 0.15,
+        ε = 0.9,
+        κ = 1e-14,
+        λ = 1e-5,
+        ρ_intrinsic = 1500.0,
+    )
+    char = SolidComponent(
+        :char,
+        ρ = 150.0,
+        c = 1100.0,
+        k = T -> 0.08 + 1e-4T,
+        ε = 0.95,
+        κ = 1e-13,
+        λ = 1e-4,
+        ρ_intrinsic = 1800.0,
+    )
+    gases = ntuple(
+        j -> GaseousComponent(Symbol(:gas, j), M = 0.02 + 0.02j, c = 1500.0, k = 0.03),
+        3,
+    )
+    rxn = Reaction(
+        :pyrolysis,
+        1 => (2, 3, 4, 5);
+        A = 1e10,
+        E = 150e3,
+        h = 300e3,
+        yields = (0.25, 0.25, 0.25, 0.25),
+    )
+    return Material(
+        name = :many_gases,
+        components = (wood, char, gases...),
+        reactions = (rxn,),
+        mixing = MaterialMixing(;
+            k = MixingSpec(WEIGHTED, 0.5),
+            λ = MixingSpec(WEIGHTED, 0.5),
+            κ = MixingSpec(WEIGHTED, 0.5),
+        ),
     )
 end
 
@@ -98,6 +146,10 @@ const _configurations = (
         ),
         options = (use_ale = true, correction = PrescribedCorrection((x, t) -> -1e-3 * x)),
     ),
+    many_gases = (
+        problem = () -> _column(_many_gases(); top = HeatFluxBC(50e3)),
+        options = (use_ale = true,),
+    ),
     equidistribution = (
         problem = () -> _column(_pmma(); top = HeatFluxBC(50e3), stretch = 1.01),
         options = (
@@ -107,8 +159,8 @@ const _configurations = (
     ),
 )
 
-# Allocations of one residual and one colored Jacobian after warm-up, measured
-# inside a function.
+# Allocations of one residual, one colored Jacobian and one domain test after
+# warm-up, measured inside a function.
 function _allocations(cp)
     u = copy(cp.u0)
     du = similar(u)
@@ -116,9 +168,12 @@ function _allocations(cp)
     residual!(du, u, cp.def, 1.0, cp.ws)
     jacobian!(J, cp.jacobian, u, 1.0)
     jacobian!(J, cp.jacobian, u, 1.0)
+    check = DomainCheck(cp)
+    check(u, nothing, 1.0)
     r = @allocated residual!(du, u, cp.def, 1.0, cp.ws)
     j = @allocated jacobian!(J, cp.jacobian, u, 1.0)
-    return r, j
+    d = @allocated check(u, nothing, 1.0)
+    return r, j, d
 end
 
 @testset "allocations: $(name), $(energy) form" for name in keys(_configurations),
@@ -126,9 +181,10 @@ end
 
     config = _configurations[name]
     cp = setup(config.problem(); energy_state = energy, config.options...)
-    r, j = _allocations(cp)
+    r, j, d = _allocations(cp)
     @test r == 0
     @test j <= JACOBIAN_BUDGET
+    @test d == 0
     # The measured state moves the mesh relative to the solid at every
     # interior node.
     name === :equidistribution && @test count(!iszero, cp.ws.derived.c) == N_CELLS - 1

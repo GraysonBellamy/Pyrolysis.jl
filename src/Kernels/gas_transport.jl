@@ -85,6 +85,13 @@ end
 end
 @inline _face_pressures(::GasTransport, kernel, ds, i, guarded) = guarded
 
+# The flux through a face. The lumped law gives every gas species one wall
+# coefficient and no molecular resistance, so its flux is always the analytic one.
+@inline _gas_face_flux(::LumpedTransfer, pl, pr, Tl, Tr, dl, dr, cl, cr) =
+    lumped_interface_flux(pl, pr, Tl, Tr, dl, dr, cl, cr)
+@inline _gas_face_flux(::GasTransport, pl, pr, Tl, Tr, dl, dr, cl, cr) =
+    interface_flux(pl, pr, Tl, Tr, dl, dr, cl, cr)
+
 # The kernel's species mass fluxes through the interior face `f` between the
 # live cells `o` and `nb` [kg/(m² s)], with the two floored center-to-face
 # distances.
@@ -95,7 +102,17 @@ end
     guarded_r, cr=_cell_pore(ds, nb, kernel.indices)
     pl=_face_pressures(kernel.model, kernel, ds, o, guarded_l)
     pr=_face_pressures(kernel.model, kernel, ds, nb, guarded_r)
-    flux=interface_flux(pl, pr, ds.T_trial[o], ds.T_trial[nb], d_o, d_n, cl, cr)
+    flux=_gas_face_flux(
+        kernel.model,
+        pl,
+        pr,
+        ds.T_trial[o],
+        ds.T_trial[nb],
+        d_o,
+        d_n,
+        cl,
+        cr,
+    )
     return flux.n .* kernel.masses, d_o, d_n
 end
 

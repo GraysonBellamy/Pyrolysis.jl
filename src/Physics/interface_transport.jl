@@ -278,6 +278,17 @@ function _interface_residual(
 end
 
 """
+    lumped_interface_flux(pl,pr,Tl,Tr,dl,dr,cl,cr)
+
+The analytic flux through two half cells whose gas species share one wall
+coefficient and no molecular resistance; see [`interface_flux`](@ref).
+"""
+@inline function lumped_interface_flux(pl, pr, Tl, Tr, dl, dr, cl, cr)
+    Ts=(dr*Tl+dl*Tr)/(dl+dr)
+    return _lumped_interface(pl, pr, Tl, Tr, Ts, dl, dr, cl.K[1], cr.K[1], cl.mob, cr.mob)
+end
+
+"""
     interface_flux(pl,pr,Tl,Tr,dl,dr,cl,cr)
 
 Match total molar species flux through two half cells. Coefficients contain
@@ -296,27 +307,15 @@ function interface_flux(
     cl,
     cr,
 ) where {N}
-    Ts=(dr*Tl+dl*Tr)/(dl+dr)
     if N==1 || (
         primal(cl.t)==0 &&
         primal(cr.t)==0 &&
         all(==(cl.K[1]), cl.K) &&
         all(==(cr.K[1]), cr.K)
     )
-        return _lumped_interface(
-            pl,
-            pr,
-            Tl,
-            Tr,
-            Ts,
-            dl,
-            dr,
-            cl.K[1],
-            cr.K[1],
-            cl.mob,
-            cr.mob,
-        )
+        return lumped_interface_flux(pl, pr, Tl, Tr, dl, dr, cl, cr)
     end
+    Ts=(dr*Tl+dl*Tr)/(dl+dr)
     # At complete vacuum the collective and viscous terms are second order.
     # The linear wall continuation carries the exact finite state Jacobian.
     if primal(sum(pl)+sum(pr))==0
