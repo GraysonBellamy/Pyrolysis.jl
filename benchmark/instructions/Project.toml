@@ -1,0 +1,5 @@
+[deps]
+LinuxPerf = "b4c46c6c-4fb0-484d-a11a-41bc3392d094"
+
+[compat]
+LinuxPerf = "0.4"
