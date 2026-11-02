@@ -140,7 +140,7 @@ accepts trailing keyword arguments either way.
 The reaction you get back holds its data in the fields `rxn.reactant` (an `Int`),
 `rxn.order` (a `Float64`), `rxn.products` (a `(component, yield)` tuple per
 product), `rxn.A`, `rxn.E`, `rxn.heat`, `rxn.T_min`, `rxn.T_max`, `rxn.gate_width`
-and `rxn.basis` (`NaN` when none was given).
+and `rxn.basis` (`nothing` when none was given).
 
 ---
 

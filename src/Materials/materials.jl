@@ -667,7 +667,7 @@ function lineage_graph(material::Material{NC}) where {NC}
             ),
         )
         ancestors[k] = _reachable(parents, a)
-        isnan(r.basis) || continue
+        r.basis === nothing || continue
         order, cycle = _children_first(children, ancestors[k])
         cycle === nothing || throw(
             ArgumentError(
@@ -683,7 +683,7 @@ function lineage_graph(material::Material{NC}) where {NC}
         condensed,
         [r.reactant for r in reactions],
         [r.order for r in reactions],
-        [r.basis for r in reactions],
+        [something(r.basis, NaN) for r in reactions],
         ancestors,
         reach,
     )

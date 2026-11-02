@@ -2484,7 +2484,7 @@ accepts trailing keyword arguments either way.
 The reaction you get back holds its data in the fields `rxn.reactant` (an `Int`),
 `rxn.order` (a `Float64`), `rxn.products` (a `(component, yield)` tuple per
 product), `rxn.A`, `rxn.E`, `rxn.heat`, `rxn.T_min`, `rxn.T_max`, `rxn.gate_width`
-and `rxn.basis` (`NaN` when none was given).
+and `rxn.basis` (`nothing` when none was given).
 
 ---
 
@@ -8356,8 +8356,8 @@ A few notes:
   read back from the old reaction:
   `old_rxn.reactant => map(first, old_rxn.products)` with
   `yields = map(last, old_rxn.products)`.
-- `old_rxn.basis` reads `NaN` when the reaction has none, which the constructor
-  refuses; pass a `basis` on only when it is finite.
+- Pass `basis = old_rxn.basis` on as it is; it reads `nothing` when the reaction
+  has none.
 - Mass balance is re-validated when the reaction is reconstructed, so a malformed
   point fails fast.
 

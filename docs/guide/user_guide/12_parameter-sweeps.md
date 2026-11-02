@@ -215,8 +215,8 @@ A few notes:
   read back from the old reaction:
   `old_rxn.reactant => map(first, old_rxn.products)` with
   `yields = map(last, old_rxn.products)`.
-- `old_rxn.basis` reads `NaN` when the reaction has none, which the constructor
-  refuses; pass a `basis` on only when it is finite.
+- Pass `basis = old_rxn.basis` on as it is; it reads `nothing` when the reaction
+  has none.
 - Mass balance is re-validated when the reaction is reconstructed, so a malformed
   point fails fast.
 

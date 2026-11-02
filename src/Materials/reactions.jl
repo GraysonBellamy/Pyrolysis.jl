@@ -152,9 +152,10 @@ widths approach the hard step at the cost of Jacobian stiffness near the gate.
 - `T_min::Float64`: Minimum temperature for reaction [K]
 - `T_max::Float64`: Maximum temperature for reaction [K]
 - `gate_width::Float64`: Width of the smooth tanh temperature gates [K]
-- `basis::Float64`: The reference as a fraction of the material point's initial
-  condensed mass, on the cells the reactant's lineage can reach, in place of
-  the lineage rules; `NaN` for the lineage rules. Only for orders other than one.
+- `basis::Union{Nothing,Float64}`: The reference as a fraction of the material
+  point's initial condensed mass, on the cells the reactant's lineage can reach, in
+  place of the lineage rules; `nothing` for the lineage rules. Only for orders other
+  than one.
 
 # Heat of Reaction Convention
 - `h > 0`: Endothermic (absorbs heat, cools material)
@@ -171,7 +172,7 @@ struct Reaction{NP,Ph<:AbstractPropertyFunction}
     T_min::Float64
     T_max::Float64
     gate_width::Float64
-    basis::Float64
+    basis::Union{Nothing,Float64}
 end
 
 # ============================================================================
@@ -343,7 +344,7 @@ function Reaction(
         Float64(T_min),
         Float64(T_max),
         Float64(gate_width),
-        basis === nothing ? NaN : Float64(basis),
+        basis === nothing ? nothing : Float64(basis),
     )
 end
 

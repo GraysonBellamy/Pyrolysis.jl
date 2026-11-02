@@ -347,7 +347,7 @@ end
 
     @testset "basis" begin
         kw = (A = 1.0, E = 0.0, h = 0.0)
-        @test isnan(rxn(2.0).basis)
+        @test rxn(2.0).basis === nothing
         @test Reaction(:r, 1 => 2; kw..., n = 2.0, basis = 0.5).basis == 0.5
         @test Reaction(:r, 1 => 2; kw..., n = 2.0, basis = 1).basis == 1.0
         @test Reaction(:r, 1 => (2, 3); kw..., yields = (0.5, 0.5), n = 2.0, basis = 0.5).basis ==

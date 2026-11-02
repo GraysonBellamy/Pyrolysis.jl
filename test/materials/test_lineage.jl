@@ -204,7 +204,7 @@ end
 @testset "external feed" begin
     # Gas forms the reactant: refused with or without a basis, and even when
     # the reactant is absent, since the gas can still form it.
-    for basis in (NaN, 1.0)
+    for basis in (nothing, 1.0)
         @test_throws "gas-consuming" _material(
             (_sol(:a), _gas()),
             (_step(:r, :a, (); basis), Reaction(:cond, 2 => 1; A = 1.0, E = 0.0, h = 0.0)),
@@ -234,7 +234,7 @@ end
         (Reaction(:r, 2 => 1; A = 1.0, E = 0.0, h = 0.0, n = 2.0),),
     )
     # External mass sources feed every condensed node, whatever its basis.
-    for basis in (NaN, 1.0)
+    for basis in (nothing, 1.0)
         m = _material((_sol(:a), _gas()), (_step(:r, :a, (); basis),))
         sources = VolumetricSources((x, t) -> (0.0, 0.0), nothing)
         @test_throws "sources add mass" _references(m, reshape([1.0, 0.0], 2, 1); sources)
@@ -314,8 +314,8 @@ end
             _step(:cg, :c, (); basis),
         ),
     )
-    @test_throws "cycle" cycle(NaN)
-    @test_throws "a → b → a" cycle(NaN)
+    @test_throws "cycle" cycle(nothing)
+    @test_throws "a → b → a" cycle(nothing)
     m = cycle(1.0)
     @test only(_references(m, reshape([1.0, 0.0, 0.0, 0.0], 4, 1))[4]) == 1.0
     # An all-first-order cyclic network is never validated.
