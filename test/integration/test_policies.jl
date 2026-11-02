@@ -734,6 +734,48 @@ end
     @test cache.cacheval.growths == 2
 end
 
+@testset "the structured KLU keeps one ordering as the union grows" begin
+    n = 6
+    rows = Int[]
+    cols = Int[]
+    for j = 1:n, i in (j - 1, j, j + 1)
+        1 <= i <= n && (push!(rows, i); push!(cols, j))
+    end
+    prototype = sparse(rows, cols, ones(length(rows)), n, n)
+    W(lower, upper) = sparse(
+        vcat(1:n, 2:n, 1:(n-1)),
+        vcat(1:n, 1:(n-1), 2:n),
+        vcat(fill(4.0, n), lower, upper),
+        n,
+        n,
+    )
+    b = collect(1.0:n)
+    cache = LinearSolve.init(LinearSolve.LinearProblem(copy(prototype), b), StructuredKLU())
+    c = cache.cacheval
+    order = copy(c.order)
+    @test sort(order) == 0:(n-1)
+    # Lower triangular, then upper, then both: each grows the union and takes its
+    # own block triangular form on the same ordering.
+    for (lower, upper, growths, blocks) in (
+        (fill(-1.0, n - 1), zeros(n - 1), 1, n),
+        (fill(-1.0, n - 1), vcat(-1.0, zeros(n - 2)), 2, n - 1),
+        (fill(-1.0, n - 1), fill(-1.0, n - 1), 3, 1),
+    )
+        A = W(lower, upper)
+        cache.A = A
+        @test LinearSolve.solve!(cache).u ≈ Matrix(A) \ b
+        @test c.growths == growths
+        @test c.order == order
+        @test c.inner.cacheval.symbolic.ordering == 2
+        @test c.inner.cacheval.symbolic.nblocks == blocks
+    end
+    # A zero on the diagonal takes its pivot from a block of two.
+    A = W(fill(-1.0, n - 1), fill(-1.0, n - 1))
+    A[1, 1] = 0.0
+    cache.A = A
+    @test LinearSolve.solve!(cache).u ≈ Matrix(A) \ b
+end
+
 @testset "the lumped mass forms W in place on the Jacobian's structure" begin
     n = 5
     J = sparse(

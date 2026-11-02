@@ -2,6 +2,8 @@
 # The linear solve of the integrator's W
 # ============================================================================
 
+const KLU = LinearSolve.KLU
+
 # The places of the diagonal entries of `mass`'s nonzero rows in `J`'s stored values.
 function _locate_diagonal!(mass::LumpedMass, J::SparseMatrixCSC)
     rows = rowvals(J)
@@ -43,11 +45,14 @@ never matter.
 The cache keeps the union of the prototype's entries that have been nonzero
 in this solve, with the diagonal, and copies each fresh `W` into a matrix of
 that structure, where the inner KLU refactors it numerically. A nonzero
-outside the union grows it, and the inner KLU analyses the grown structure
-afresh; the union only grows, so its size alone tells the inner KLU that the
-structure changed, and the analyses stop once every entry the solve reaches has
-appeared. A `W` on any other structure than the prototype's, which the
-integrator hands `init` as an all-ones `W`, is an error.
+outside the union grows it, and the grown structure is factored afresh, pivots
+included, on the solve's one ordering: AMD of the prototype's pattern, taken
+once, with KLU's block triangular form of each union. The ordering is symmetric
+and the union holds the diagonal, so it suits every union, and nothing is ordered
+again as the union grows. The union only grows, so its size alone tells the inner
+KLU that the structure changed, and the growths stop once every entry the solve
+reaches has appeared. A `W` on any other structure than the prototype's, which
+the integrator hands `init` as an all-ones `W`, is an error.
 """
 struct StructuredKLU <: LinearSolve.AbstractSparseFactorization
     inner::KLUFactorization
@@ -56,12 +61,14 @@ end
 StructuredKLU() = StructuredKLU(KLUFactorization(check_pattern = false))
 
 # The prototype's structure; which of its entries are in the union and where
-# each lies in the union's matrix (zero outside it); that matrix; the inner
-# KLU cache that factors it; and the number of times the union grew.
+# each lies in the union's matrix (zero outside it); the ordering of every
+# factorization, zero-based; that matrix; the inner KLU cache that factors it;
+# and the number of times the union grew.
 mutable struct StructuredKLUCache{C}
     const prototype::SparseMatrixCSC{Float64,Int}
     const in_union::BitVector
     const slot::Vector{Int}
+    const order::Vector{Int}
     union::SparseMatrixCSC{Float64,Int}
     const inner::C
     growths::Int
@@ -99,7 +106,31 @@ function LinearSolve.init_cacheval(
             nonstructural_zeros = LinearSolve.NonstructuralZeros.None,
         ),
     )
-    return StructuredKLUCache(prototype, in_union, slot, union, inner, 0)
+    return StructuredKLUCache(
+        prototype,
+        in_union,
+        slot,
+        _fill_reducing_order(prototype),
+        union,
+        inner,
+        0,
+    )
+end
+
+# AMD of the prototype's pattern, zero-based as KLU takes it.
+function _fill_reducing_order(prototype::SparseMatrixCSC{Float64,Int})
+    n = size(prototype, 2)
+    order = Vector{Int}(undef, n)
+    status = KLU.amd_l_order(
+        n,
+        prototype.colptr .- 1,
+        rowvals(prototype) .- 1,
+        order,
+        C_NULL,
+        C_NULL,
+    )
+    status >= 0 || error("StructuredKLU: AMD failed with status $status")
+    return order
 end
 
 # The matrix on the prototype's entries in the union, holding `values`, the
@@ -163,6 +194,18 @@ function _grow!(c::StructuredKLUCache, A::SparseMatrixCSC, first::Int)
     return c
 end
 
+# Factor the grown union on the solve's ordering, choosing pivots afresh, and hand
+# the factorization to the inner KLU, which refactors it from here on.
+function _factor_union!(c::StructuredKLUCache)
+    c.inner.A = c.union
+    K = KLU.KLUFactorization(c.union)
+    KLU.klu_analyze!(K, c.order, c.order)
+    KLU.klu_factor!(K; check = false)
+    c.inner.cacheval = K
+    c.inner.isfresh = false
+    return c
+end
+
 function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::StructuredKLU; kwargs...)
     c = cache.cacheval
     if cache.isfresh
@@ -170,8 +213,12 @@ function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::StructuredKLU; kw
         same_structure(A, c.prototype) ||
             error("StructuredKLU: W is not on the Jacobian prototype's structure")
         outside = _load!(c, A)
-        iszero(outside) || _grow!(c, A, outside)
-        c.inner.A = c.union
+        if iszero(outside)
+            c.inner.A = c.union
+        else
+            _grow!(c, A, outside)
+            _factor_union!(c)
+        end
         cache.isfresh = false
     end
     c.inner.b = cache.b
