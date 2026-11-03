@@ -1,10 +1,10 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
 30,"outcome :interior",1.0,1.0,0.0,0.5,true
 30,"deactivation events before the stop",0.0,0.0,0.0,0.5,true
-30,"maximum live-cell temperature up to the stop",693.3559515111843,NaN,693.3559515111843,1000.0,true
+30,"maximum live-cell temperature up to the stop",693.3559515190991,NaN,693.3559515190991,1000.0,true
 60,"outcome :interior",1.0,1.0,0.0,0.5,true
 60,"deactivation events before the stop",0.0,0.0,0.0,0.5,true
-60,"maximum live-cell temperature up to the stop",693.3791277540473,NaN,693.3791277540473,1000.0,true
+60,"maximum live-cell temperature up to the stop",693.3791277512429,NaN,693.3791277512429,1000.0,true
 120,"outcome :interior",1.0,1.0,0.0,0.5,true
 120,"deactivation events before the stop",0.0,0.0,0.0,0.5,true
-120,"maximum live-cell temperature up to the stop",693.3892347734915,NaN,693.3892347734915,1000.0,true
+120,"maximum live-cell temperature up to the stop",693.3892347687454,NaN,693.3892347687454,1000.0,true

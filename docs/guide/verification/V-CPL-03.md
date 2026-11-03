@@ -71,13 +71,13 @@ residual at fixed t_end grows ~1000×).
 | P3: final thickness ratio | 1 | 1 | 0 | 3e-06 | yes | path-independent endpoint of θ = Σⱼω̇ⱼ/ρⱼ (case header) |
 | P3: total mass conservation | 2 | 2 | 3.331e-16 | 2e-06 | yes | solid-only permutation; impermeable everywhere |
 | P4: final thickness ratio | 0.3 | 0.3 | 2.626e-07 | 3e-06 | yes | path-independent endpoint of θ = Σⱼω̇ⱼ/ρⱼ (case header) |
-| P4: total mass conservation | 2 | 2 | 4.441e-16 | 2e-06 | yes | held gas compresses with its cell under collapse; the sealed P4 corner anchors the dilation bookkeeping |
+| P4: total mass conservation | 2 | 2 | 7.772e-16 | 2e-06 | yes | held gas compresses with its cell under collapse; the sealed P4 corner anchors the dilation bookkeeping |
 | P4: final char mass (solid ledger) | 0.6 | 0.6 | 1.125e-07 | 2e-06 | yes | char endpoint is path-independent; complements the total-mass anchor |
 | P5: final thickness ratio | 1 | 1 | 0 | 3e-06 | yes | path-independent endpoint of θ = Σⱼω̇ⱼ/ρⱼ (case header) |
 | P5: total mass conservation | 2 | 2 | 2.22e-16 | 2e-06 | yes | held gas compresses with its cell under collapse; the sealed P4 corner anchors the dilation bookkeeping |
 | P5: final char mass (solid ledger) | 1 | 1 | 1.125e-07 | 2e-06 | yes | char endpoint is path-independent; complements the total-mass anchor |
 | P6: final thickness ratio | 1.333 | 1.333 | 3.746e-08 | 3e-06 | yes | path-independent endpoint of θ = Σⱼω̇ⱼ/ρⱼ (case header) |
-| P6: total mass conservation | 2 | 2 | 2.442e-15 | 2e-06 | yes | held gas compresses with its cell under collapse; the sealed P4 corner anchors the dilation bookkeeping |
+| P6: total mass conservation | 2 | 2 | 4.441e-16 | 2e-06 | yes | held gas compresses with its cell under collapse; the sealed P4 corner anchors the dilation bookkeeping |
 | P6: final char mass (solid ledger) | 1 | 1 | 1.125e-07 | 2e-06 | yes | char endpoint is path-independent; complements the total-mass anchor |
 | P6: final lateral area ratio A_f/A₀ = law(χ̄ = 1/2) | 0.75 | 0.75 | 3.751e-08 | 3e-06 | yes | χ̄_f = released dry-mass fraction = y_gas = 0.5 |
 

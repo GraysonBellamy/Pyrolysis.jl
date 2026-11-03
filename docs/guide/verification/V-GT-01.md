@@ -29,14 +29,14 @@ and the parameter-free variance growth law Var(t) = σ₀² + 2dt.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| isothermal invariant | 5.684e-14 | — | 5.684e-14 | 1e-08 | yes | sealed, source-free uniform-temperature state |
-| L∞ ξ-profile error / peak, t=2.0 s | 7.808e-05 | — | 7.808e-05 | 0.004 | yes | Gaussian stays Gaussian; n=160 uniform, σ₀ = 4Δz |
-| L∞ ξ-profile error / peak, t=4.0 s | 4.812e-05 | — | 4.812e-05 | 0.004 | yes | Gaussian stays Gaussian; n=160 uniform, σ₀ = 4Δz |
-| L∞ ξ-profile error / peak, t=8.0 s | 2.687e-05 | — | 2.687e-05 | 0.004 | yes | Gaussian stays Gaussian; n=160 uniform, σ₀ = 4Δz |
-| gas-mass conservation (sealed) | 2.595e-15 | — | 2.595e-15 | 1e-13 | yes | antisymmetric face fluxes telescope exactly |
-| variance growth, t=2.0 s | 5e-06 | 5e-06 | 2.563e-06 | 2e-05 | yes | Var(t) = σ₀² + 2dt; relative error reported |
-| variance growth, t=4.0 s | 9e-06 | 9e-06 | 3.654e-06 | 2e-05 | yes | Var(t) = σ₀² + 2dt; relative error reported |
-| variance growth, t=8.0 s | 1.7e-05 | 1.7e-05 | 5.196e-06 | 2e-05 | yes | Var(t) = σ₀² + 2dt; relative error reported |
+| isothermal invariant | 0 | — | 0 | 1e-08 | yes | sealed, source-free uniform-temperature state |
+| L∞ ξ-profile error / peak, t=2.0 s | 7.809e-05 | — | 7.809e-05 | 0.004 | yes | Gaussian stays Gaussian; n=160 uniform, σ₀ = 4Δz |
+| L∞ ξ-profile error / peak, t=4.0 s | 4.826e-05 | — | 4.826e-05 | 0.004 | yes | Gaussian stays Gaussian; n=160 uniform, σ₀ = 4Δz |
+| L∞ ξ-profile error / peak, t=8.0 s | 2.704e-05 | — | 2.704e-05 | 0.004 | yes | Gaussian stays Gaussian; n=160 uniform, σ₀ = 4Δz |
+| gas-mass conservation (sealed) | 3.244e-15 | — | 3.244e-15 | 1e-13 | yes | antisymmetric face fluxes telescope exactly |
+| variance growth, t=2.0 s | 5e-06 | 5e-06 | 8.809e-15 | 2e-05 | yes | Var(t) = σ₀² + 2dt; relative error reported |
+| variance growth, t=4.0 s | 9e-06 | 9e-06 | 1.012e-10 | 2e-05 | yes | Var(t) = σ₀² + 2dt; relative error reported |
+| variance growth, t=8.0 s | 1.7e-05 | 1.7e-05 | 4.597e-06 | 2e-05 | yes | Var(t) = σ₀² + 2dt; relative error reported |
 
 ![V-GT-01 xi_profiles](assets/V-GT-01/V-GT-01_xi_profiles.png)
 
@@ -70,11 +70,11 @@ Solution overlays including the other codes' points: [xi_profiles_vs_codes](asse
 | --- | --- | --- | --- | --- |
 | 40 | 0.025 | 0.00311 | 0.003984 | 0.01214 |
 | 80 | 0.0125 | 0.005935 | 0.0009693 | 0.003074 |
-| 160 | 0.00625 | 0.01189 | 0.0002408 | 0.0007707 |
-| 320 | 0.003125 | 0.02324 | 6.02e-05 | 0.0001928 |
-| 640 | 0.001563 | 0.0463 | 1.54e-05 | 4.812e-05 |
+| 160 | 0.00625 | 0.01189 | 0.0002408 | 0.0007709 |
+| 320 | 0.003125 | 0.02324 | 6.011e-05 | 0.000193 |
+| 640 | 0.001563 | 0.0463 | 1.502e-05 | 4.826e-05 |
 
-Observed order 2.004 (L2), expected 2.0.
+Observed order 2.011 (L2), expected 2.0.
 
 ### Solver configuration
 

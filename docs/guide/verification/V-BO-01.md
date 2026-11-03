@@ -33,7 +33,7 @@ on the trial clamp, since that Newton never warns.
 | --- | --- | --- | --- | --- | --- | --- |
 | complete burnout: live thickness at t_end is the substrate | 0.012 | 0.012 | 3.333e-06 | 1e-05 | yes | every PMMA cell deactivated; 12.0 ± 0.01 mm |
 | mass loss of the gasified PMMA layer | 69.92 | 69.91 | 0.005841 | 0.3 | yes | percent of the initial mass; exact = the layer's initial mass / m₀ |
-| mass ledger closure | 7.527e-12 | 0 | 7.527e-12 | 3e-05 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented |
+| mass ledger closure | 7.667e-12 | 0 | 7.667e-12 | 3e-05 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented |
 | clamped surface balances on accepted states | 0 | 0 | 0 | 0.5 | yes | boundary temperature solve converged inside the property bracket at every accepted step |
 | deactivation invocations for the PMMA layer (reported) | 1 | 1 | 0 | Inf | yes | 120 cells; largest merged fraction 0.0435 (4.35 ε_m); reported, not asserted |
 

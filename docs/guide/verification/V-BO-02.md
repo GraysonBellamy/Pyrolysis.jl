@@ -29,13 +29,13 @@ V-BO-01.
 | --- | --- | --- | --- | --- | --- | --- |
 | complete burnout: live thickness at t_end is the substrate | 0.012 | 0.012 | 3.333e-06 | 1e-05 | yes | every PMMA cell deactivated; 12.0 ± 0.01 mm |
 | mass loss of the gasified PMMA layer | 69.92 | 69.91 | 0.005836 | 0.3 | yes | percent of the initial mass; exact = the layer's initial mass / m₀ |
-| mass ledger closure | 3.594e-11 | 0 | 3.594e-11 | 0.0003 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented; gas-release transients are resolved at reltol 1e-9 and a 1e-4 Pa pressure budget (relative ledger defects below 1e-10 in both energy forms at 60 cells) |
+| mass ledger closure | 3.574e-11 | 0 | 3.574e-11 | 0.0003 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented; gas-release transients are resolved at reltol 1e-9 and a 1e-4 Pa pressure budget (relative ledger defects below 1e-10 in both energy forms at 60 cells) |
 | clamped surface balances on accepted states | 0 | 0 | 0 | 0.5 | yes | boundary temperature solve converged inside the property bracket at every accepted step |
 | deactivation events | 120 | 120 | 0 | 0.5 | yes | every PMMA cell deactivates as the top live cell, top down |
 | maximum live-cell temperature | 914.5 | — | 914.5 | 1000 | yes | K over every accepted step (observed 915); the surface cell is the hottest and empties first, so no interior void forms |
-| smallest accepted step | 2.321e-06 | 1e-08 | 0 | 0.001 | yes | s; lower work bound 1e-8, above dtmin=1e-12; gas transients can require steps shorter than the proposed restart step (minimum 4.87e-7 at 60 cells across the two energy forms) |
+| smallest accepted step | 3.454e-06 | 1e-08 | 0 | 0.001 | yes | s; lower work bound 1e-8, above dtmin=1e-12; gas transients can require steps shorter than the proposed restart step (minimum 4.87e-7 at 60 cells across the two energy forms) |
 | Newton failures | 0 | 0 | 0 | 100 | yes | budget at the CI resolution (60 PMMA cells); observed 0: the default integrator, Rodas5P, is a Rosenbrock method and solves no nonlinear system |
-| accepted steps | 2.569e+04 | 0 | 2.569e+04 | 5e+04 | yes | work budget at reltol 1e-9 and pressure tolerance 1e-4 Pa, scaled by cell count; 60-cell qualification: 15884 temperature steps, 21868 enthalpy steps |
+| accepted steps | 2.518e+04 | 0 | 2.518e+04 | 5e+04 | yes | work budget at reltol 1e-9 and pressure tolerance 1e-4 Pa, scaled by cell count; 60-cell qualification: 15884 temperature steps, 21868 enthalpy steps |
 
 ![V-BO-02 mlr_history](assets/V-BO-02/V-BO-02_mlr_history.png)
 

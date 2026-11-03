@@ -47,7 +47,7 @@ Timescales: pressure equilibrates in ≪ 0.1 s (gas inventory / production
 | P² profile error / overpressure² scale | 9.845e-05 | — | 9.845e-05 | 0.0025 | yes | steady gas-reservoir parabola in P²; n=80 uniform |
 | back-face pressure | 1.107e+05 | 1.107e+05 | 9.663e-05 | 0.0025 | yes | overpressure ≈ 9351.0 Pa (wood-pyrolysis magnitude) |
 | exit mass flux vs ġL | 0.05 | 0.05 | 7.248e-06 | 5e-05 | yes | parameter-free exact steady outflow |
-| steadiness of exit flux | 4.287e-12 | — | 4.287e-12 | 1e-06 | yes | fill timescale ≈ 0.07 s ≪ t_end = 1 s |
+| steadiness of exit flux | 4.763e-13 | — | 4.763e-13 | 1e-06 | yes | fill timescale ≈ 0.07 s ≪ t_end = 1 s |
 
 ![V-GT-02 P2_profile](assets/V-GT-02/V-GT-02_P2_profile.png)
 

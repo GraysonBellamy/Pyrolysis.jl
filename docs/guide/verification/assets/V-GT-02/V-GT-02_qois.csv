@@ -3,4 +3,4 @@
 "P² profile error / overpressure² scale",9.84509854589084e-5,NaN,9.84509854589084e-5,0.0025,true,"steady gas-reservoir parabola in P²; n=80 uniform"
 "back-face pressure",110675.05807037721,110675.9616595067,9.663061002639809e-5,0.0025,true,"overpressure ≈ 9351.0 Pa (wood-pyrolysis magnitude)"
 "exit mass flux vs ġL",0.04999963759982158,0.05,7.248003568438577e-6,5.0e-5,true,"parameter-free exact steady outflow"
-"steadiness of exit flux",4.2867098759558075e-12,NaN,4.2867098759558075e-12,1.0e-6,true,"fill timescale ≈ 0.07 s ≪ t_end = 1 s"
+"steadiness of exit flux",4.762856775641922e-13,NaN,4.762856775641922e-13,1.0e-6,true,"fill timescale ≈ 0.07 s ≪ t_end = 1 s"

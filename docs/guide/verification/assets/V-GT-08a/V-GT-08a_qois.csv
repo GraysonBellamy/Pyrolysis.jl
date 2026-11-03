@@ -3,5 +3,5 @@
 "prescribed signed inlet flux",-10.0,-10.0,0.0,1.0e-12,true,""
 "outlet flux vs imposed inflow",10.00000000000018,10.0,1.7985612998927536e-14,1.0e-8,true,"independent steady mass balance after pressure relaxation"
 "steady signed boundary balance",1.794120407794253e-13,NaN,1.794120407794253e-14,1.0e-8,true,""
-"gas inventory steadiness",1.7209540933467315e-16,NaN,1.7209540933467315e-16,1.0e-8,true,"relative inventory change between 0.5 and 1 s"
-"isothermal invariant",1.0800249583553523e-12,NaN,1.0800249583553523e-12,1.0e-8,true,""
+"gas inventory steadiness",0.0,NaN,0.0,1.0e-8,true,"relative inventory change between 0.5 and 1 s"
+"isothermal invariant",2.8421709430404007e-13,NaN,2.8421709430404007e-13,1.0e-8,true,""

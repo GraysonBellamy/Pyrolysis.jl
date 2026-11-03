@@ -34,8 +34,8 @@ _The steady mass-balance plot shows the saved samples at 0.5 and 1 s. Markers sh
 | prescribed signed inlet flux | -10 | -10 | 0 | 1e-12 | yes |  |
 | outlet flux vs imposed inflow | 10 | 10 | 1.799e-14 | 1e-08 | yes | independent steady mass balance after pressure relaxation |
 | steady signed boundary balance | 1.794e-13 | — | 1.794e-14 | 1e-08 | yes |  |
-| gas inventory steadiness | 1.721e-16 | — | 1.721e-16 | 1e-08 | yes | relative inventory change between 0.5 and 1 s |
-| isothermal invariant | 1.08e-12 | — | 1.08e-12 | 1e-08 | yes |  |
+| gas inventory steadiness | 0 | — | 0 | 1e-08 | yes | relative inventory change between 0.5 and 1 s |
+| isothermal invariant | 2.842e-13 | — | 2.842e-13 | 1e-08 | yes |  |
 
 ![V-GT-08a pressure](assets/V-GT-08a/V-GT-08a_pressure.png)
 
@@ -49,7 +49,7 @@ _The steady mass-balance plot shows the saved samples at 0.5 and 1 s. Markers sh
 
 ### Comparison with other codes
 
-See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
 
 Gpyro V2 (`bff0126c68f2`) uses 81 boundary-centered nodes (80 intervals) and Δt = 0.005 s, with temperature held at 300 K. Its molecular collision parameters match the Darcy coefficient νP = μRT/M used in this problem. Native gauge pressure is converted to absolute pressure, depth to z = L − depth, and boundary fluxes to outward-positive kg/(m² s). Both codes are compared with the same steady solution. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`.
 
@@ -92,10 +92,10 @@ _The steady mass-balance plot shows the saved samples at 0.5 and 1 s. Markers sh
 | --- | --- | --- | --- | --- | --- | --- |
 | linear P² profile / pressure-squared rise | 0.0008129 | — | 0.0008129 | 0.0025 | yes | Gpyro Eq. (4.5), μRT/M in place of α; n=80 observed 8.13e-4, ~3× margin |
 | prescribed signed inlet flux | -10 | -10 | 0 | 1e-12 | yes |  |
-| outlet flux vs imposed inflow | 10 | 10 | 1.976e-14 | 1e-08 | yes | independent steady mass balance after pressure relaxation |
-| steady signed boundary balance | 1.972e-13 | — | 1.972e-14 | 1e-08 | yes |  |
-| gas inventory steadiness | 0 | — | 0 | 1e-08 | yes | relative inventory change between 0.5 and 1 s |
-| isothermal invariant | 1.08e-12 | — | 1.08e-12 | 1e-08 | yes |  |
+| outlet flux vs imposed inflow | 10 | 10 | 1.843e-14 | 1e-08 | yes | independent steady mass balance after pressure relaxation |
+| steady signed boundary balance | 1.847e-13 | — | 1.847e-14 | 1e-08 | yes |  |
+| gas inventory steadiness | 1.721e-16 | — | 1.721e-16 | 1e-08 | yes | relative inventory change between 0.5 and 1 s |
+| isothermal invariant | 2.274e-13 | — | 2.274e-13 | 1e-08 | yes |  |
 
 ![V-GT-08b pressure](assets/V-GT-08b/V-GT-08b_pressure.png)
 
@@ -109,7 +109,7 @@ _The steady mass-balance plot shows the saved samples at 0.5 and 1 s. Markers sh
 
 ### Comparison with other codes
 
-See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
 
 Gpyro V2 (`bff0126c68f2`) uses 81 boundary-centered nodes (80 intervals) and Δt = 0.005 s, with temperature held at 300 K. Its molecular collision parameters match the Darcy coefficient νP = μRT/M used in this problem. Native gauge pressure is converted to absolute pressure, depth to z = L − depth, and boundary fluxes to outward-positive kg/(m² s). Both codes are compared with the same steady solution. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`.
 

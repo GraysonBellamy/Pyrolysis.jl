@@ -24,7 +24,7 @@ the invocations that deactivate the layer are reported.
 | --- | --- | --- | --- | --- | --- | --- |
 | complete burnout: live thickness at t_end is the substrate | 0.01198 | 0.01198 | 4.026e-10 | 1e-05 | yes | every PMMA cell deactivated; 11.98 ± 0.01 mm |
 | mass loss of the gasified PMMA layer | 69.95 | 69.95 | 4.775e-06 | 0.3 | yes | percent of the initial mass; exact = the layer's initial mass / m₀ |
-| mass ledger closure | 1.932e-11 | 0 | 1.932e-11 | 3e-05 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented |
+| mass ledger closure | 1.793e-11 | 0 | 1.793e-11 | 3e-05 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented |
 | clamped surface balances on accepted states | 0 | 0 | 0 | 0.5 | yes | boundary temperature solve converged inside the property bracket at every accepted step |
 | deactivation invocations for the PMMA layer (reported) | 1 | 1 | 0 | Inf | yes | 60 cells; largest merged fraction 0.0159 (1.59 ε_m); reported, not asserted |
 

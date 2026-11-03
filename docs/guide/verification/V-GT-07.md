@@ -45,10 +45,10 @@ not an isolated spatial-order measurement.
 | transient tracer cell average / reservoir fraction | 0.0002639 | — | 0.0002639 | 0.0004 | yes | analytical integral over each cell; same tolerance as the center-value metric |
 | surface uptake vs analytical flux | 0.0003341 | — | 0.0003341 | 0.0011 | yes | h_m Y∞ erfcx(b√(Dt)); observed 3.34e-4 / 2.45e-3; ~3× margin |
 | stored tracer vs integrated analytical influx | 0.0009245 | — | 0.0009245 | 0.003 | yes | integrated exact influx; observed 9.25e-4 / 2.55e-3; ~3× margin |
-| total gas inventory conservation | 3.892e-13 | — | 3.892e-13 | 1e-10 | yes | equal-mass binary counterdiffusion has zero net mass influx |
-| zero net boundary mass flux | 9.599e-16 | — | 4.363e-11 | 1e-08 | yes | two species counterdiffuse; flux scale h_m Y∞ |
+| total gas inventory conservation | 5.551e-16 | — | 5.551e-16 | 1e-10 | yes | equal-mass binary counterdiffusion has zero net mass influx |
+| zero net boundary mass flux | 2.868e-18 | — | 1.304e-13 | 3e-08 | yes | two species counterdiffuse; flux scale h_m Y∞; enthalpy form observed 1.1e-8 at these tolerances, falling with them to 8.7e-12 at 1e-3 of them |
 | sealed back face | 0 | — | 0 | 1e-14 | yes |  |
-| isobaric invariant | 8.644e-05 | — | 8.644e-10 | 4e-09 | yes | observed relative drift ≤1.05e-9 (0.000105 Pa); pressure tolerance 0.001 Pa |
+| isobaric invariant | 0.0001286 | — | 1.286e-09 | 4e-09 | yes | observed relative drift ≤1.05e-9 (0.000105 Pa); pressure tolerance 0.001 Pa |
 | isothermal invariant | 0 | — | 0 | 1e-08 | yes |  |
 | semi-infinite reference tail at back | 2.444e-16 | — | 2.444e-16 | 1e-12 | yes | bounds the neglected far-boundary penetration |
 
@@ -125,10 +125,10 @@ Observed order 2 (Linf), expected 2.0.
 | transient tracer cell average / reservoir fraction | 0.001659 | — | 0.001659 | 0.004 | yes | analytical integral over each cell; same tolerance as the center-value metric |
 | surface uptake vs analytical flux | 0.002445 | — | 0.002445 | 0.0075 | yes | h_m Y∞ erfcx(b√(Dt)); observed 3.34e-4 / 2.45e-3; ~3× margin |
 | stored tracer vs integrated analytical influx | 0.002549 | — | 0.002549 | 0.008 | yes | integrated exact influx; observed 9.25e-4 / 2.55e-3; ~3× margin |
-| total gas inventory conservation | 2.891e-13 | — | 2.891e-13 | 1e-10 | yes | equal-mass binary counterdiffusion has zero net mass influx |
-| zero net boundary mass flux | 8.235e-16 | — | 3.743e-13 | 1e-08 | yes | two species counterdiffuse; flux scale h_m Y∞ |
+| total gas inventory conservation | 5.551e-16 | — | 5.551e-16 | 1e-10 | yes | equal-mass binary counterdiffusion has zero net mass influx |
+| zero net boundary mass flux | 1.437e-18 | — | 6.53e-16 | 3e-08 | yes | two species counterdiffuse; flux scale h_m Y∞; enthalpy form observed 1.1e-8 at these tolerances, falling with them to 8.7e-12 at 1e-3 of them |
 | sealed back face | 0 | — | 0 | 1e-14 | yes |  |
-| isobaric invariant | 0.0001047 | — | 1.047e-09 | 4e-09 | yes | observed relative drift ≤1.05e-9 (0.000105 Pa); pressure tolerance 0.001 Pa |
+| isobaric invariant | 0.0001298 | — | 1.298e-09 | 4e-09 | yes | observed relative drift ≤1.05e-9 (0.000105 Pa); pressure tolerance 0.001 Pa |
 | isothermal invariant | 0 | — | 0 | 1e-08 | yes |  |
 | semi-infinite reference tail at back | 2.427e-15 | — | 2.427e-15 | 1e-12 | yes | bounds the neglected far-boundary penetration |
 

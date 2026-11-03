@@ -20,7 +20,7 @@ Thus A-Bx(z) is exponential and the flux follows by a logarithmic integral.
 | Graham wall-weighted flux ratio | -0.3162 | -0.3162 | 0 | 1e-07 | yes |  |
 | logarithmic binary flux | 0.1923 | 0.1922 | 0.0008259 | 0.015 | yes |  |
 | exponential composition profile | 2.22e-16 | — | 2.22e-16 | 0.005 | yes |  |
-| isobaric solution | 3.347e-10 | — | 3.347e-10 | 0.01 | yes |  |
+| isobaric solution | 3.492e-10 | — | 3.492e-10 | 0.01 | yes |  |
 | isothermal solution | 0 | — | 0 | 1e-08 | yes |  |
 
 ![V-GT-04 composition](assets/V-GT-04/V-GT-04_composition.png)

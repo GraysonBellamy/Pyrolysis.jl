@@ -1,13 +1,13 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
 30,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
-30,"transmitted flux reported (series peak above 1 % of the entering flux)",0.7770807744899427,1.0,0.0,0.5,true
-30,"peak transmitted fraction of the incident flux",0.7770807744899428,1.0,0.22291922551005716,0.3,true
-30,"mass loss (informational)",68.87915837247434,69.9147977671139,1.03563939463956,10.0,true
+30,"transmitted flux reported (series peak above 1 % of the entering flux)",0.7770807743456083,1.0,0.0,0.5,true
+30,"peak transmitted fraction of the incident flux",0.7770807743456085,1.0,0.22291922565439148,0.3,true
+30,"mass loss (informational)",68.87915837170684,69.9147977671139,1.0356393954070597,10.0,true
 60,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
-60,"transmitted flux reported (series peak above 1 % of the entering flux)",0.7769958539362426,1.0,0.0,0.5,true
-60,"peak transmitted fraction of the incident flux",0.7769958539362427,1.0,0.2230041460637573,0.3,true
-60,"mass loss (informational)",68.87870693066967,69.9147977671139,1.036090836444231,10.0,true
+60,"transmitted flux reported (series peak above 1 % of the entering flux)",0.7769958539266261,1.0,0.0,0.5,true
+60,"peak transmitted fraction of the incident flux",0.7769958539266263,1.0,0.2230041460733737,0.3,true
+60,"mass loss (informational)",68.87870693061863,69.9147977671139,1.0360908364952621,10.0,true
 120,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
-120,"transmitted flux reported (series peak above 1 % of the entering flux)",0.7769739533923636,1.0,0.0,0.5,true
-120,"peak transmitted fraction of the incident flux",0.7769739533923637,1.0,0.22302604660763625,0.3,true
-120,"mass loss (informational)",68.87859049810419,69.9147977671139,1.036207269009708,10.0,true
+120,"transmitted flux reported (series peak above 1 % of the entering flux)",0.7769739534148405,1.0,0.0,0.5,true
+120,"peak transmitted fraction of the incident flux",0.7769739534148407,1.0,0.22302604658515934,0.3,true
+120,"mass loss (informational)",68.87859049822387,69.9147977671139,1.0362072688900241,10.0,true

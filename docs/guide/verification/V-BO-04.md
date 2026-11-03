@@ -1,4 +1,4 @@
-# V-BO-04 — Uniform zero-order burnout: exact thickness through the deactivation event
+# V-BO-04 — Uniform burnout: exact thickness through the deactivation event
 
 **Tags:** `ale`, `burnout`, `depletion`, `kinetics`, `exact`
 
@@ -8,12 +8,13 @@
 
 ## Problem statement
 
-An adiabatic slab at uniform T₀ with one zero-order reaction solid → gas
+An adiabatic slab at uniform T₀ with one first-order reaction solid → gas
 and no heat of reaction. The temperature stays at T₀ exactly (no
-heat source, no gradient), so the volumetric rate r = A·exp(−E/RT₀) is a
-constant and every cell loses the same fraction r/ρ_s of its current
-volume per unit time. Under ALE the solid concentration stays at ρ_s
-(dilation removes volume, not concentration) and the exact thickness is
+heat source, no gradient), so k = A·exp(−E/RT₀) is a constant and at the
+concentration ρ_s the volumetric rate r = k ρ_s is one too: every cell loses
+the same fraction r/ρ_s of its current volume per unit time. Under ALE the
+solid concentration stays at ρ_s (dilation removes volume, not concentration)
+and the exact thickness is
 
   L(t) = L₀ · exp(−r t / ρ_s).
 
@@ -30,11 +31,11 @@ t = ln(1/ε_m) ρ_s/r, and ξ_s must stay at ρ_s to roundoff.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| thickness follows L₀ exp(−r t/ρ) through the event | 8.23e-05 | 8.23e-05 | 8.894e-10 | 1e-06 | yes | max relative error over all output times |
-| solid concentration stays at ρ_s (dilation removes volume only) | 1000 | 1000 | 8.499e-12 | 1e-08 | yes | max \|ξ_s − ρ_s\|/ρ_s over live cells and times |
-| isothermal: T stays at T₀ | 600 | 600 | 1.251e-12 | 1e-06 | yes | K; no heat of reaction, no gradient |
-| one invocation deactivates the column into one survivor | 1 | 1 | 0 | 0.5 | yes | 39 events in 1 invocation(s), outcome running |
-| the event is located at the exact crossing of ε_m | 460.5 | 460.5 | 1.872e-10 | 1e-06 | yes | relative distance of the event from the exact crossing time (ε_m = 1e-2) |
+| thickness follows L₀ exp(−r t/ρ) through the event | 8.23e-05 | 8.23e-05 | 8.897e-10 | 1e-06 | yes | max relative error over all output times |
+| solid concentration stays at ρ_s (dilation removes volume only) | 1000 | 1000 | 1.418e-11 | 1e-08 | yes | max \|ξ_s − ρ_s\|/ρ_s over live cells and times |
+| isothermal: T stays at T₀ | 600 | 600 | 1.592e-12 | 1e-06 | yes | K; no heat of reaction, no gradient |
+| one invocation deactivates the column into one survivor | 1 | 1 | 0 | 0.5 | yes | 39 events in 1 invocation(s), outcome none |
+| the event is located at the exact crossing of ε_m | 460.5 | 460.5 | 1.885e-10 | 1e-06 | yes | relative distance of the event from the exact crossing time (ε_m = 1e-2) |
 
 ![V-BO-04 thickness_history](assets/V-BO-04/V-BO-04_thickness_history.png)
 

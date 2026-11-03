@@ -1,0 +1,4 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+20,"x(t) of every cell",2.404743071338089e-13,0.0,2.404743071338089e-13,7.0e-13,true
+20,"the kernel's rate",9.547918011776346e-15,0.0,9.547918011776346e-15,3.2e-14,true
+20,"isothermal: T stays at 600 K",6.821210263296962e-13,0.0,6.821210263296962e-13,1.9e-11,true

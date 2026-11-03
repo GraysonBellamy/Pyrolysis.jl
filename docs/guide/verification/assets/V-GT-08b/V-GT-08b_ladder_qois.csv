@@ -1,19 +1,19 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
 20,"linear P² profile / pressure-squared rise",0.0031895574016197335,NaN,0.0031895574016197335,0.0025,false
 20,"prescribed signed inlet flux",-10.0,-10.0,0.0,1.0e-12,true
-20,"outlet flux vs imposed inflow",10.000000000000057,10.0,5.773159728050814e-15,1.0e-8,true
-20,"steady signed boundary balance",5.684341886080802e-14,NaN,5.684341886080802e-15,1.0e-8,true
+20,"outlet flux vs imposed inflow",9.999999999999886,10.0,1.1324274851176597e-14,1.0e-8,true
+20,"steady signed boundary balance",-1.1368683772161603e-13,NaN,1.1368683772161604e-14,1.0e-8,true
 20,"gas inventory steadiness",0.0,NaN,0.0,1.0e-8,true
-20,"isothermal invariant",3.979039320256561e-13,NaN,3.979039320256561e-13,1.0e-8,true
-40,"linear P² profile / pressure-squared rise",0.0016155087461572459,NaN,0.0016155087461572459,0.0025,true
+20,"isothermal invariant",5.684341886080802e-14,NaN,5.684341886080802e-14,1.0e-8,true
+40,"linear P² profile / pressure-squared rise",0.001615508746158909,NaN,0.001615508746158909,0.0025,true
 40,"prescribed signed inlet flux",-10.0,-10.0,0.0,1.0e-12,true
-40,"outlet flux vs imposed inflow",10.000000000000364,10.0,3.6415315207705135e-14,1.0e-8,true
-40,"steady signed boundary balance",3.6415315207705135e-13,NaN,3.6415315207705135e-14,1.0e-8,true
-40,"gas inventory steadiness",3.442282213416323e-16,NaN,3.442282213416323e-16,1.0e-8,true
-40,"isothermal invariant",4.547473508864641e-13,NaN,4.547473508864641e-13,1.0e-8,true
-80,"linear P² profile / pressure-squared rise",0.0008129388415221033,NaN,0.0008129388415221033,0.0025,true
+40,"outlet flux vs imposed inflow",10.000000000000716,10.0,7.149836278586008e-14,1.0e-8,true
+40,"steady signed boundary balance",7.158718062783009e-13,NaN,7.158718062783009e-14,1.0e-8,true
+40,"gas inventory steadiness",0.0,NaN,0.0,1.0e-8,true
+40,"isothermal invariant",3.410605131648481e-13,NaN,3.410605131648481e-13,1.0e-8,true
+80,"linear P² profile / pressure-squared rise",0.0008129388415215489,NaN,0.0008129388415215489,0.0025,true
 80,"prescribed signed inlet flux",-10.0,-10.0,0.0,1.0e-12,true
-80,"outlet flux vs imposed inflow",10.000000000000197,10.0,1.9761969838327786e-14,1.0e-8,true
-80,"steady signed boundary balance",1.971756091734278e-13,NaN,1.971756091734278e-14,1.0e-8,true
-80,"gas inventory steadiness",0.0,NaN,0.0,1.0e-8,true
-80,"isothermal invariant",1.0800249583553523e-12,NaN,1.0800249583553523e-12,1.0e-8,true
+80,"outlet flux vs imposed inflow",10.000000000000185,10.0,1.84297022087776e-14,1.0e-8,true
+80,"steady signed boundary balance",1.8474111129762605e-13,NaN,1.8474111129762605e-14,1.0e-8,true
+80,"gas inventory steadiness",1.7209540933467315e-16,NaN,1.7209540933467315e-16,1.0e-8,true
+80,"isothermal invariant",2.2737367544323206e-13,NaN,2.2737367544323206e-13,1.0e-8,true

@@ -42,7 +42,7 @@ report also retains the coarse meshes to show the approach to it.
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
 | L∞ T error on moving mesh, t=10.0 s | 6.456e-05 | — | 6.456e-05 | 0.25 | yes | manufactured T* on 30%-compressed mesh |
-| relative L∞ ξ_solid (uniform) error, t=10.0 s | 1.186e-12 | — | 1.186e-12 | 1e-10 | yes | uniform solid: verifies the relative flux of a uniform field under the moving mesh + source injection |
+| relative L∞ ξ_solid (uniform) error, t=10.0 s | 1.252e-12 | — | 1.252e-12 | 1e-10 | yes | uniform solid: verifies the relative flux of a uniform field under the moving mesh + source injection |
 | relative L∞ ξ_gas error, t=10.0 s | 3.14e-05 | — | 3.14e-05 | 0.006 | yes | gas: diffusive + relative flux on the moving mesh |
 
 ![V-MMS-03 T_profiles](assets/V-MMS-03/V-MMS-03_T_profiles.png)

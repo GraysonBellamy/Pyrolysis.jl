@@ -16,10 +16,10 @@ S₀ = |h|·A·e^(−E/RT₀).
 
 Realization: the volumetric heat source is a SELF-REGENERATING reaction
 A → A (order n = 0, h < 0) — product index = reactant index nets ξ̇ ≡ 0
-exactly (verified: drift 0.0) while depositing |h|·A·e^(−E/RT) per unit
+exactly (verified: drift 0.0) while depositing |h|·A·ρ·e^(−E/RT) per unit
 volume, i.e. a pure zero-order Arrhenius source with no reactant-depletion
-clock. The depletion limiter's tanh(ξ/1) factor is exactly 1.0 at
-ξ = 1000 kg/m³, and the default gates (T_min = 0) are exactly open, so the
+clock. The conversion stays at one, where the depletion limiter's onset is
+exactly 1.0, and the default gates (T_min = 0) are exactly open, so the
 kinetics are pure Arrhenius. A T_max gate at T₀ + 100 K caps the
 SUPERCRITICAL branch so the runaway saturates instead of chasing e^θ to
 integrator death; the subcritical branch (rise ≤ 15 K) never feels it.

@@ -1,0 +1,6 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"m/m₀ on the moving mesh",0.009999999966662641,0.009999999999999995,3.333735371091608e-9,1.0e-8,true,"max relative error over the saved times"
+"m/m₀ on the fixed mesh",0.009999999316828516,0.009999999999999995,6.83171479456957e-8,2.3e-7,true,"max relative error over the saved times"
+"L/L₀ on the moving mesh",0.009999999966662338,0.009999999999999995,3.3337657287524375e-9,1.0e-8,true,"max relative error over the saved times"
+"the two meshes agree",6.651914852273677e-10,0.0,6.651914852273677e-10,2.2e-9,true,"largest difference of m/m₀, moving against fixed"
+"isothermal: T stays at T₀",600.0,600.0,7.958078640513122e-13,1.4e-11,true,"K; no heat of reaction, no gradient"
