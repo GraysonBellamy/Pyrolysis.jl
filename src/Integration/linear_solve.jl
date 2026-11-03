@@ -25,9 +25,10 @@ function OrdinaryDiffEqDifferentiation.jacobian2W!(
     isempty(mass.shifted) && _locate_diagonal!(mass, J)
     values = nonzeros(W)
     copyto!(values, nonzeros(J))
+    rows = rowvals(J)
     shift = inv(dtgamma)
     @inbounds for k in mass.shifted
-        values[k] -= shift
+        values[k] -= mass.diagonal[rows[k]] * shift
     end
     return nothing
 end

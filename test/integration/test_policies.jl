@@ -916,6 +916,10 @@ end
     allocated(W, M, J) = @allocated form!(W, M, 0.5, J)
     allocated(W, M, J)
     @test allocated(W, M, J) == 0
+    # A mass other than one scales its row's shift.
+    scaled = [2.0, 0.0, 0.5, 1.0, 0.0]
+    form!(W, LinearAlgebra.Diagonal(Pyrolysis.States.LumpedMass(scaled, Int[])), 0.25, J)
+    @test W == J - LinearAlgebra.Diagonal(scaled) / 0.25
 end
 
 @testset "the time derivative of the right-hand side" begin
