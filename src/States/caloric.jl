@@ -302,18 +302,33 @@ end
     return C
 end
 
+# The capacity switch of a cell of capacity floor `f` and guaranteed capacity `C`.
+@inline function _capacity_switch(f, C)
+    C >= 2f && return zero(C)
+    s = 1 - C / (2f)
+    return f * s * s
+end
+
 """
 	regularization(ext, m, i)
 
 The capacity switch `κ` of cell `i` at masses `m`.
 """
-@inline function regularization(ext::CaloricExtension, m, i)
-    f = ext.floor[i]
-    C = _guaranteed_capacity(ext, m, i)
-    C >= 2f && return zero(C)
-    s = 1 - C / (2f)
-    return f * s * s
+@inline regularization(ext::CaloricExtension, m, i) =
+    _capacity_switch(ext.floor[i], _guaranteed_capacity(ext, m, i))
+
+# The positive parts of the masses `m` of cell `i`.
+@inline function _positive_parts(ext::CaloricExtension{NC}, m, i) where {NC}
+    δ = ext.δ[i]
+    return ntuple(j -> positive_part(m[j], δ), Val(NC))
 end
+
+# The extended relation at `T` and its slope, with the masses' positive parts `p`
+# and the capacity switch `κ` of the cell.
+@inline _extended_energy(laws::CaloricLaws, T, p, κ) =
+    sum_products(κ * (T - T_REF), p, component_enthalpies(laws, T))
+@inline _extended_capacity(laws::CaloricLaws, T, p, κ) =
+    sum_products(κ, p, component_enthalpy_slopes(laws, T))
 
 """
 	extended_energy(ext, laws, T, m, i)
@@ -327,13 +342,7 @@ The right-hand side of the extended caloric relation of cell `i`.
     m,
     i,
 ) where {NC}
-    h = component_enthalpies(laws, T)
-    δ = ext.δ[i]
-    E = regularization(ext, m, i) * (T - T_REF)
-    for j = 1:NC
-        E += positive_part(m[j], δ) * h[j]
-    end
-    return E
+    return _extended_energy(laws, T, _positive_parts(ext, m, i), regularization(ext, m, i))
 end
 
 """
@@ -349,10 +358,12 @@ least the cell's floor.
     m,
     i,
 ) where {NC}
-    c = component_enthalpy_slopes(laws, T)
-    δ = ext.δ[i]
-    p = ntuple(j -> positive_part(m[j], δ), Val(NC))
-    return sum_products(regularization(ext, m, i), p, c)
+    return _extended_capacity(
+        laws,
+        T,
+        _positive_parts(ext, m, i),
+        regularization(ext, m, i),
+    )
 end
 
 @inline _depth(x) = 0
@@ -428,20 +439,12 @@ function merged_temperature(ext, laws, H, m, i, T_start, T_lo, T_hi; maxiters::I
     error("the merged temperature of cell $i did not converge (H = $H, m = $m)")
 end
 
-# The extended relation at `T` and its slope, with the masses' positive parts `p`
-# and the capacity switch `κ` of the cell.
-@inline function _energy_and_capacity(laws::CaloricLaws, T, p, κ)
-    h = component_enthalpies(laws, T)
-    c = component_enthalpy_slopes(laws, T)
-    return sum_products(κ * (T - T_REF), p, h), sum_products(κ, p, c)
-end
-
 function _invert_primal(ext, laws, H::Float64, m, i, T_start, maxiters)
     isfinite(H) && all(isfinite, m) || return NaN, 0
-    δ = ext.δ[i]
-    p = map(x -> positive_part(x, δ), m)
-    κ = regularization(ext, m, i)
-    Cmin = _guaranteed_capacity(ext, m, i) + κ
+    p = _positive_parts(ext, m, i)
+    guaranteed = _guaranteed_capacity(ext, m, i)
+    κ = _capacity_switch(ext.floor[i], guaranteed)
+    Cmin = guaranteed + κ
     H == 0 && return T_REF, 0
     endpoint = T_REF + H / Cmin
     isfinite(endpoint) ||
@@ -449,11 +452,11 @@ function _invert_primal(ext, laws, H::Float64, m, i, T_start, maxiters)
     lo, hi = minmax(T_REF, endpoint)
     T =
         lo <= T_start <= hi ? T_start :
-        clamp(T_REF + H / extended_capacity(ext, laws, T_REF, m, i), lo, hi)
+        clamp(T_REF + H / _extended_capacity(laws, T_REF, p, κ), lo, hi)
     step = Inf
     for its = 1:maxiters
-        E, C = _energy_and_capacity(laws, T, p, κ)
-        r = E - H
+        C = _extended_capacity(laws, T, p, κ)
+        r = _extended_energy(laws, T, p, κ) - H
         # Converged when the residual is at the round-off of the inventory, or
         # of one kelvin's worth of it near the datum.
         abs(r) <= 4eps(Float64) * max(abs(H), C * abs(T - T_REF), C) && return T, its
