@@ -13,6 +13,7 @@ values must match. Reached through `Pyrolysis.ColoredJacobian` or
 ```@docs
 ColoredJacobian.jacobian_pattern
 ColoredJacobian.ColoredJacobianCache
+ColoredJacobian.ColoredPass
 ColoredJacobian.jacobian!
 ColoredJacobian.jac_prototype
 ColoredJacobian.dense_jacobian

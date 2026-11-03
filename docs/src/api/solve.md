@@ -19,6 +19,7 @@ setup
 integrate
 PreparedProblem
 parameter_sweep
+Integration.lineage_references
 ```
 
 ## Integrator policies and the linear solve

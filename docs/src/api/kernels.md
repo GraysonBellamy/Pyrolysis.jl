@@ -15,10 +15,12 @@ Reached through `Pyrolysis.Kernels` and `Pyrolysis.Closures` or
 ```@docs
 Kernels.ReactionKernel
 Kernels.ConductionKernel
+Kernels.gradient_support
 Kernels.GasTransportKernel
 Kernels.face_peclet
 Kernels.BeerLambertKernel
 Kernels.ThermalBoundaryKernel
+Kernels.boundary_conductivity
 Kernels.RelativeFluxKernel
 Kernels.BoundaryPatch
 Kernels.exposed_face
