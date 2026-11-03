@@ -13711,8 +13711,8 @@ the mesh connectivity (§15.11) with its columns colored (§15.7). There is one
 Jacobian and no option that selects another: every solve uses it, and the dense
 forward-mode Jacobian of §15.13 is the reference it is tested against.
 
-`ColoredJacobianCache(def, ws, u, t)` (`src/ColoredJacobian/colored.jl`), built
-once by `setup` at the initial state, holds
+`ColoredJacobianCache(def, ws)` (`src/ColoredJacobian/colored.jl`), built once
+by `setup`, holds
 
 - the residual as `f!(du, u, t)` (`ResidualFunction(def, ws)`), with the time a
   constant of the differentiation;

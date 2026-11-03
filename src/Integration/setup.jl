@@ -918,7 +918,7 @@ function setup(
         scale = reltol * threshold,
         time_scale = Float64(time_scale),
     )
-    cj = ColoredJacobianCache(def, ws, u0, t0)
+    cj = ColoredJacobianCache(def, ws)
     cp=PreparedProblem(problem, def, ws, u0, Float64(reltol), tol, cj, T0, m0, cells)
     derive!(ws.derived, u0, layout, state_setup)
     _report_support(find_kernel(ConductionKernel, kernels), ws.derived, topo)

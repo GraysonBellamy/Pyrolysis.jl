@@ -143,7 +143,7 @@ function _colored_passes(
 end
 
 """
-	ColoredJacobianCache(def, ws, u, t)
+	ColoredJacobianCache(def, ws)
 
 The residual's Jacobian by column-colored forward-mode automatic
 differentiation on the connectivity pattern of [`jacobian_pattern`](@ref):
@@ -173,12 +173,7 @@ struct ColoredJacobianCache{F,P,D}
     n_colors::Int
 end
 
-function ColoredJacobianCache(
-    def::ResidualDefinition,
-    ws::ResidualWorkspace,
-    u::AbstractVector,
-    t::Real,
-)
+function ColoredJacobianCache(def::ResidualDefinition, ws::ResidualWorkspace)
     pattern = jacobian_pattern(def)
     dense = dense_rows(def.layout)
     colored = _colored_pattern(pattern, dense)

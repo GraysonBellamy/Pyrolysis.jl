@@ -136,7 +136,7 @@ end
         def.sources,
     )
     ws = ResidualWorkspace(control, cp.T0)
-    cj = ColoredJacobianCache(control, ws, cp.u0, 0.0)
+    cj = ColoredJacobianCache(control, ws)
     cpc = PreparedProblem(
         cp.problem,
         control,
