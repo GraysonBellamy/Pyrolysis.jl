@@ -1014,6 +1014,19 @@ end
     rhs!(timed)(a, timed.u0, nothing, 10.0 - step)
     rhs!(timed)(b, timed.u0, nothing, 10.0)
     @test dT == (a .- b) ./ (-step)
+    # A function of the temperature is no reason to difference in time.
+    lawed = PyrolysisProblem(
+        mesh = uniform_mesh(0.01, 6),
+        material = _slab(6).material,
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = RadiativeBC(ε = T -> 0.9, T_inf = 900.0),
+                bottom = AdiabaticBC(),
+            ),
+        ),
+        tspan = (0.0, 10.0),
+    )
+    @test !Integration._reads_time(setup(lawed))
     # The right-hand sides the difference runs are in the statistics.
     free = Integration.solve(_problem(5e4)).statistics
     reading = Integration.solve(_problem(t -> 5e4)).statistics

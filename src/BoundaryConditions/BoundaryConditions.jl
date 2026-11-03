@@ -45,7 +45,7 @@ export NeumannPressureBC, ConvectivePressureBC
 export get_radiative_flux_bc
 
 # Type-stable boundary-condition container
-export BoundaryConditionSet
+export BoundaryConditionSet, reads_time
 
 # Surface energy balance of a boundary face and its diagnostics
 export BoundaryState

@@ -292,20 +292,13 @@ function integrate(
     )
 end
 
-# Whether `x`, part of a problem's conditions, holds a function: a function of
-# the time, or of the temperature, which is not told apart.
-_holds_function(::Function) = true
-_holds_function(::Union{Number,Symbol,Nothing,AbstractString}) = false
-_holds_function(x::Union{Tuple,NamedTuple,AbstractArray}) = any(_holds_function, x)
-_holds_function(x) = any(k -> _holds_function(getfield(x, k)), 1:fieldcount(typeof(x)))
-
 # Whether the residual of `cp` can read the time: through its boundary
 # conditions, its external sources or a prescribed mesh velocity.
 function _reads_time(cp::PreparedProblem)
     closure = cp.def.closure
     return !(cp.def.sources isa NoSources) ||
            (closure isa BalanceRowClosure && closure.correction isa PrescribedCorrection) ||
-           _holds_function(cp.problem.bc_set)
+           reads_time(cp.problem.bc_set)
 end
 
 # The step of the forward difference in time, relative to the time and at least

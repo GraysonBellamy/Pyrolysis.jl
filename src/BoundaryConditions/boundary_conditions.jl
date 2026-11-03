@@ -374,6 +374,38 @@ function BoundaryConditionSet(;
 end
 
 # ============================================================================
+# Time Dependence
+# ============================================================================
+
+_any_function(parameters...) = any(x -> x isa Function, parameters)
+
+"""
+	reads_time(bc) -> Bool
+
+Whether a boundary condition, or a [`BoundaryConditionSet`](@ref), can read the
+time: whether a parameter the residual evaluates at the time is a function. A
+function of the temperature, as `RadiativeBC`'s `ε` and a film's conductance are,
+does not count. A condition with no method of its own is taken to read it.
+"""
+reads_time(::Union{AbstractThermalBC,AbstractMassBC}) = true
+reads_time(::Union{AdiabaticBC,ImpermeableBC}) = false
+reads_time(bc::HeatFluxBC) = _any_function(bc.flux)
+reads_time(bc::ConvectiveBC) = _any_function(bc.h, bc.T_inf)
+reads_time(bc::RadiativeBC) = _any_function(bc.T_inf, bc.F)
+reads_time(bc::DirichletThermalBC) = _any_function(bc.T)
+reads_time(bc::RadiativeFluxBC) = _any_function(bc.flux, bc.absorptivity)
+reads_time(bc::CombinedThermalBC) = any(reads_time, bc.bcs)
+reads_time(res::GasReservoir) = _any_function(res.P, res.T, res.mole_fractions)
+reads_time(bc::AmbientGasBC) = reads_time(bc.reservoir)
+reads_time(bc::ConvectivePressureBC) =
+    reads_time(bc.reservoir) || _any_function(bc.resistance)
+reads_time(bc::NeumannPressureBC) = _any_function(bc.gradient, bc.T, bc.mole_fractions)
+reads_time(bc::MassFluxBC) =
+    _any_function(bc.fluxes...) || _any_function(bc.inflow_temperature...)
+reads_time(set::BoundaryConditionSet) =
+    any(reads_time, values(set.thermal)) || any(reads_time, values(set.mass))
+
+# ============================================================================
 # RadiativeFluxBC Evaluation Helpers
 # ============================================================================
 
