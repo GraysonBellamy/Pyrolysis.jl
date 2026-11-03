@@ -163,9 +163,9 @@ function integrate(
     policy = integrator_policy
 
     check = DomainCheck(cp)
-    rhs! = let def = def, ws = ws, check = check
+    rhs! = let check = check
         (du, u, p, t) -> begin
-            reuse!(du, check, u, t) || residual!(du, u, def, t, ws)
+            right_hand_side!(du, check, u, t)
             return nothing
         end
     end
@@ -267,7 +267,7 @@ function integrate(
     stats = SolverStatistics(
         accepted = s.naccept,
         rejected = s.nreject,
-        rhs_evaluations = s.nf,
+        rhs_evaluations = check.evaluations[],
         jacobians = s.njacs,
         linear_solves = s.nsolve,
         nonlinear_failures = s.nnonlinconvfail,

@@ -1014,6 +1014,11 @@ end
     rhs!(timed)(a, timed.u0, nothing, 10.0 - step)
     rhs!(timed)(b, timed.u0, nothing, 10.0)
     @test dT == (a .- b) ./ (-step)
+    # The right-hand sides the difference runs are in the statistics.
+    free = Integration.solve(_problem(5e4)).statistics
+    reading = Integration.solve(_problem(t -> 5e4)).statistics
+    @test reading.accepted == free.accepted
+    @test reading.rhs_evaluations - free.rhs_evaluations >= free.accepted
 end
 
 @testset "the domain test's residual serves the next step" begin
@@ -1032,6 +1037,16 @@ end
     @test !Integration.reuse!(du, check, moved, 1.0)
     Integration.forget!(check)
     @test !Integration.reuse!(du, check, u, 1.0)
+    # What it serves costs no evaluation; what it does not is one.
+    check = DomainCheck(cp)
+    Integration.evaluate!(check, u, 1.0)
+    @test check.evaluations[] == 1
+    @test Integration.right_hand_side!(du, check, u, 1.0) === du
+    @test check.evaluations[] == 1
+    Integration.right_hand_side!(du, check, u, 2.0)
+    @test check.evaluations[] == 2
+    residual!(fresh, u, cp.def, 2.0, cp.ws)
+    @test du == fresh
 end
 
 # The KLU factorization in Rosenbrock's linear cache, a new object exactly

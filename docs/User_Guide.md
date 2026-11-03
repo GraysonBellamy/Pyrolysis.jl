@@ -6341,7 +6341,8 @@ unique(e.invocation for e in solution.events)
 ### The solver statistics
 
 `solution.statistics` is a `SolverStatistics` with the fields `accepted`, `rejected`
-(steps), `rhs_evaluations`, `jacobians`, `linear_solves`, `nonlinear_failures`,
+(steps), `rhs_evaluations` (the residuals that ran for the integrator, its time
+derivative and the domain test), `jacobians`, `linear_solves`, `nonlinear_failures`,
 `domain_rejections` (proposals the domain test rejected), `largest_constraint_residual`
 (the largest scaled algebraic-row residual of the accepted states, one or below passing;
 zero for a fixed-step solve) and `invocations` (deactivation invocations that deactivated

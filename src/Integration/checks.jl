@@ -134,6 +134,7 @@ struct DomainCheck{D<:ResidualDefinition,W<:ResidualWorkspace}
     error_test::Base.RefValue{_ErrorTestWrapper}
     gas::Vector{Int}
     gas_masses::Vector{Float64}
+    evaluations::Base.RefValue{Int}
 end
 
 # The gas components' indices and molar masses. The components differ in type, so
@@ -173,6 +174,7 @@ function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
         Ref(_ErrorTestWrapper(() -> true)),
         gas,
         gas_masses,
+        Ref(0),
     )
 end
 
@@ -185,6 +187,7 @@ side the integrator asks for again, and a rejected step asks for it once more
 ([`reuse!`](@ref)).
 """
 function evaluate!(check::DomainCheck, u, t)
+    check.evaluations[] += 1
     residual!(check.du, u, check.def, t, check.ws)
     copyto!(check.state, u)
     check.time[] = t
@@ -201,6 +204,29 @@ Copy into `du` the residual [`evaluate!`](@ref) remembers, when it is that of
     (t == check.time[] && u == check.state) || return false
     copyto!(du, check.du)
     return true
+end
+
+"""
+	evaluate_right_hand_side!(du, check::DomainCheck, u, t) -> du
+
+The residual at `(u, t)` into `du`, evaluated and counted: the check's
+`evaluations` are the solve's right-hand sides, its own included.
+"""
+@inline function evaluate_right_hand_side!(du, check::DomainCheck, u, t)
+    check.evaluations[] += 1
+    residual!(du, u, check.def, t, check.ws)
+    return du
+end
+
+"""
+	right_hand_side!(du, check::DomainCheck, u, t) -> du
+
+The residual at `(u, t)` into `du`: the one [`evaluate!`](@ref) remembers when it
+can serve ([`reuse!`](@ref)), otherwise [`evaluate_right_hand_side!`](@ref).
+"""
+@inline function right_hand_side!(du, check::DomainCheck, u, t)
+    reuse!(du, check, u, t) && return du
+    return evaluate_right_hand_side!(du, check, u, t)
 end
 
 """
