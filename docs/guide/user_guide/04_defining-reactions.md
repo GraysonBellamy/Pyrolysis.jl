@@ -7,7 +7,7 @@ an optional temperature window. This chapter shows how to build reactions with
 the `Reaction` constructor, how to specify products and yields, how the heat-of-
 reaction sign convention works, how to model multi-step schemes (the single-
 reactant restriction), how the depletion limiter affects rates near zero
-concentration, and how to validate your stoichiometry. The physics and
+concentration, and what the constructor checks. The physics and
 derivations behind every formula here are in Technical Reference §6 (Reaction
 Kinetics and Stoichiometry).
 
@@ -18,23 +18,32 @@ the kinetics convention in the nomenclature.
 
 ## 4.1 The reaction rate law
 
-Every reaction in Pyrolysis.jl evaluates the same volumetric rate (kg·m⁻³·s⁻¹):
+Every reaction in Pyrolysis.jl evaluates the same volumetric rate (kg·m⁻³·s⁻¹).
+At first order it reads the reactant's concentration, and at any other order
+its conversion:
 
 ```
-r_i = A_i · exp(−E_i / (R_g · T)) · Π_j ξ_j^{n_{i,j}} · tanh(ξ_j/ξ_th) · gate(T)
+n = 1:  r_i = A_i · exp(−E_i / (R_g · T)) · b(ξ) · g(ξ/ξ_th) · gate(T)
+n ≠ 1:  r_i = A_i · exp(−E_i / (R_g · T)) · ξ_ref · b_x(x)^{n} · g(x/x_th) · gate(T),   x = ξ/ξ_ref
 ```
 
 where
 
-- `A_i` is the Arrhenius pre-exponential factor (units depend on order; see §4.4),
+- `A_i` is the Arrhenius pre-exponential factor, in s⁻¹ for every order (§4.4),
 - `E_i` is the activation energy (J·mol⁻¹),
-- `R_g = 8.314462618` J·mol⁻¹·K⁻¹ is the universal gas constant,
-- `T` is the absolute temperature (K),
-- `ξ_j` is the mass concentration of reactant `j` (kg·m⁻³) — note
+- `R_g = 8.31446261815324` J·mol⁻¹·K⁻¹ is the universal gas constant,
+- `T` is the cell's trial temperature (K): the cell temperature smoothly
+  clamped into the property bracket `[200, 3000]` K with 1 K transitions, which
+  is the cell temperature on every physical state,
+- `ξ` is the mass concentration of the reactant (kg·m⁻³) — note
   **mass concentration**, not mole fraction or mass fraction,
-- `n_{i,j}` is the reaction order with respect to reactant `j` (must be ≥ 0;
-  negative orders are rejected at construction),
-- `tanh(ξ_j/ξ_th)` is the smooth depletion roll-off of §4.10, and
+- `n` is the reaction order (must be ≥ 0; negative orders are rejected at
+  construction),
+- `ξ_ref` is the reactant's reference concentration, the condensed mass its
+  lineage started with at the material point over the cell volume (§4.5), and
+  `x` its conversion,
+- `b` and `b_x` are the finite power bases of the depletion limiter and `g` its
+  one-sided onset, exactly zero at and below zero mass (§4.10), and
 - `gate(T)` is a smooth temperature window built from `T_min` / `T_max` (§4.6).
 
 The rate is on a **mass-concentration** basis, which is what makes the species
@@ -45,9 +54,15 @@ Reference §6.1 for the derivation.
 
 ## 4.2 The `Reaction` constructor
 
-`Reaction` is exported by `using Pyrolysis`. There are four call forms,
-distinguished by whether you name components by **symbol** or by **integer index**,
-and whether the reaction has **one product** or **two products**.
+`Reaction` is exported by `using Pyrolysis`. It has one constructor:
+
+```
+Reaction(name, reactant => products; A, E, h, yields=(1.0,), n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, basis=nothing)
+```
+
+`reactant` is one component. `products` is one component or a tuple of any length,
+with one yield each. Components are indices on both sides of the pair or names on
+both sides.
 
 ### Symbolic vs. numeric component references
 
@@ -64,59 +79,68 @@ Reaction(:decomposition, :virgin => :MMA; A = 8.5e12, E = 188e3, h = 870e3)
 Reaction(:decomposition, 1 => 2; A = 8.5e12, E = 188e3, h = 870e3)
 ```
 
-The symbolic form returns a lightweight `PendingReaction`; `Material(...)`
-resolves the names to indices automatically using the `components` tuple, so you
-never construct a `PendingReaction` yourself. If a reaction references a name that
-is not in the components tuple, `Material(...)` raises a clear error. Prefer the
-**symbolic** form: it is self-documenting and immune to component reordering.
+A reaction given by component names is resolved by `Material(...)`, using the
+`components` tuple. If a reaction references a name that is not in the components
+tuple, `Material(...)` raises a clear error. Prefer the **symbolic** form: it is
+self-documenting and immune to component reordering.
 
-### Single-product form
+### One product
 
 ```
-Reaction(name, reactant => product; A, E, h, n=1.0, T_min=0.0, T_max=Inf, validate_mass=true)
+Reaction(name, reactant => product; A, E, h)
 ```
 
-The product receives the full mass yield of 1.0 automatically; you do not pass
-`yields`.
+The product receives the full mass yield of 1.0; you do not pass `yields`.
 
 ```julia
 # virgin PMMA fully volatilizes to MMA gas, endothermic.
 Reaction(:decomposition, :virgin => :MMA; A = 8.5e12, E = 188e3, h = 870e3, n = 1.0)
 ```
 
-### Two-product form
+### Several products
 
 ```
-Reaction(name, reactant => (product1, product2); A, E, h, yields, n=1.0, T_min=0.0, T_max=Inf, validate_mass=true)
+Reaction(name, reactant => (product1, product2, …); A, E, h, yields)
 ```
 
-Here `yields = (y1, y2)` gives the mass split between the two products and **must
-sum to 1.0** (see §4.3).
+Here `yields = (y1, y2, …)` gives the mass split between the products, one yield
+each, and **must sum to 1.0** (see §4.3). A reaction may have any number of
+products.
 
 ```julia
 # Charring: 1 kg virgin → 0.2 kg char + 0.8 kg gas, endothermic.
 Reaction(:charring, :virgin => (:char, :gas); A = 1e15, E = 200e3, h = 500e3,
          yields = (0.2, 0.8))
+
+# Three products: 1 kg virgin → 0.2 kg char + 0.5 kg tar + 0.3 kg gas.
+Reaction(:charring, :virgin => (:char, :tar, :gas); A = 1e15, E = 200e3, h = 500e3,
+         yields = (0.2, 0.5, 0.3))
 ```
 
 ### Keyword arguments and defaults
 
 | Keyword | Meaning | Units | Default |
 |---|---|---|---|
-| `A` | Arrhenius pre-exponential factor (required) | s⁻¹ (first order) | — |
+| `A` | Arrhenius pre-exponential factor (required) | s⁻¹ | — |
 | `E` | Activation energy (required) | J·mol⁻¹ | — |
 | `h` | Heat of reaction (required; number, `(a,b)` tuple, or property function) | J·kg⁻¹ | — |
-| `yields` | Mass split for the two-product form (required there) | – | — |
-| `n` | Reaction order w.r.t. the reactant | – | `1.0` |
+| `yields` | Mass yield of each product, summing to one | – | `(1.0,)` |
+| `n` | Reaction order w.r.t. the reactant, on its conversion when not 1 (§4.5) | – | `1.0` |
+| `basis` | The reference as a fraction of the initial condensed mass, in place of the lineage rules (§4.5) | – | `nothing` (lineage rules) |
 | `T_min` | Lower temperature gate | K | `0.0` |
 | `T_max` | Upper temperature gate | K | `Inf` |
-| `validate_mass` | Enforce mass balance at construction | – | `true` |
+| `gate_width` | Width of the tanh ramp of both gates (finite, > 0) | K | `1.0` |
 
 `A`, `E`, and `h` are **required** keyword arguments — there are no defaults, and
-omitting any of them is an error. `yields` is required only for the two-product
-form. All arguments after the component pair are keyword arguments (note the `;`
+omitting any of them is an error. `yields` is required for more than one product.
+All arguments after the component pair are keyword arguments (note the `;`
 in the signatures above), though the examples also work with `,` because Julia
 accepts trailing keyword arguments either way.
+
+The reaction you get back holds its data in the fields `rxn.reactant` (an `Int`),
+`rxn.order` (a `Float64`), `rxn.products` (a `(component, yield)` tuple per
+product), `rxn.A`, `rxn.E`, `rxn.heat`, `rxn.T_min`, `rxn.T_max`, `rxn.gate_width`
+and `rxn.basis` (`nothing` when none was given).
 
 ---
 
@@ -131,20 +155,18 @@ stoichiometries you supply. Mass is conserved when the product yields sum to one
 Σ_products ν_{i,j} = 1.0
 ```
 
-For the single-product form, the lone product automatically gets yield `1.0`, so
-mass balance is trivially satisfied. For the two-product form, your `yields`
-tuple must sum to `1.0`:
+A lone product takes the default `yields = (1.0,)`, so mass balance is trivially
+satisfied. With several products your `yields` tuple must sum to `1.0`:
 
 ```julia
-yields = (0.2, 0.8)   # 0.2 + 0.8 = 1.0  ✓  (mass conserved)
-yields = (0.2, 0.7)   # 0.2 + 0.7 = 0.9  ✗  (validate_mass throws an error)
+yields = (0.2, 0.8)        # 0.2 + 0.8 = 1.0        ✓  (mass conserved)
+yields = (0.2, 0.5, 0.3)   # 0.2 + 0.5 + 0.3 = 1.0  ✓  (three products)
+yields = (0.2, 0.7)        # 0.2 + 0.7 = 0.9        ✗  (ArgumentError)
 ```
 
-When `validate_mass = true` (the default), the constructor runs an internal
-stoichiometry check and **throws an error at construction time** if the masses do
-not balance. This catches typos before you ever solve. You can pass
-`validate_mass = false` to skip the check (not recommended — it lets mass
-conservation silently break).
+The constructor always checks the yields against the product count and the mass
+balance, and **raises an `ArgumentError` at construction time** on a violation.
+This catches typos before you ever solve.
 
 The species source assembled per cell is the stoichiometric sum
 `S_j = Σ_i ν_{i,j} r_i` (kg·m⁻³·s⁻¹), with the reactant carrying `−r_i` and each
@@ -157,11 +179,10 @@ product carrying `+yield · r_i`. See Technical Reference §6.5.
 - `A` (pre-exponential factor) and `E` (activation energy, J·mol⁻¹) are stored as
   plain scalars (`Float64`). They are **temperature-independent**: a
   temperature-dependent `A(T)` is not supported directly (see §4.14).
-- The units of `A` depend on the reaction order. For the standard first-order
-  case (`n = 1.0`) the rate constant `A·exp(−E/R_gT)` has units s⁻¹ and the rate
-  `r` comes out in kg·m⁻³·s⁻¹ because it is multiplied by a concentration. For a
-  bimolecular convention `A` would be m³·kg⁻¹·s⁻¹. **The constructor does not
-  check these units** — getting them right is your responsibility.
+- `A` is in s⁻¹ for every reaction order: the rate constant `A·exp(−E/R_gT)` has
+  units s⁻¹ and the rate `r` comes out in kg·m⁻³·s⁻¹ because it carries one
+  concentration, the reactant's at first order and its reference at any other.
+  A rate constant fitted to `dx/dt = −k xⁿ` is your `A` as it stands.
 
 ```julia
 Reaction(:pyrolysis, :virgin => (:char, :gas);
@@ -178,8 +199,7 @@ temperature and peak rate, FDS-style.
 
 ## 4.5 Reaction order `n`
 
-The keyword `n` sets the order with respect to the reactant concentration: the
-rate carries the factor `ξ_reactant^n`. The default is first order (`n = 1.0`),
+The keyword `n` sets the reaction order. The default is first order (`n = 1.0`),
 which is the usual choice for solid-state thermal decomposition. Non-integer
 orders are allowed.
 
@@ -187,6 +207,60 @@ orders are allowed.
 # Half-order decomposition
 Reaction(:decomp, :virgin => :gas; A = 1e12, E = 180e3, h = 500e3, n = 0.5)
 ```
+
+**An order other than one acts on the conversion.** A fit to thermogravimetric data
+defines the order on `x = m/m₀`, and that is how the solver evaluates it: the rate
+per cell is `k · M_ref · xⁿ`, with `M_ref` the reactant's **lineage inventory**, the
+condensed mass its lineage started with at the material point. On a mesh that
+moves with the solid a pure reactant's concentration stays at its bulk density
+while it burns, so an order on the concentration would behave as first order; on
+the conversion the law is the same on fixed and moving meshes, and `n = 0` burns a
+slab linearly, `L = L₀(1 − k t)`.
+
+**The lineage inventory.** A reactant present at the start is its own lineage. An
+intermediate's inventory is what its parents can yield: for the Douglas fir chain
+with 94.3 mg of wood and 5.7 mg of water in a 100 mg cell and yields 0.95, 0.80,
+0.37, 0.79, 0.74, the references are 94.3, 89.585, 71.668, 26.517, 20.949 and
+15.502 mg, and 5.7 mg for the water. The solver computes this from the reaction
+network and the initial fields at `setup`, cell by cell, and it stays a constant of
+the cell, so the state gains no row.
+
+**The supported network class.** A reaction of order other than one is refused,
+naming the reaction, when:
+
+- its reactant is a gas, or is formed from a gas (directly or further down a
+  chain), or the solve has external mass `sources`: such a lineage has no initial
+  inventory, and `basis` is no remedy;
+- the reactant's ancestors hold a cycle, or two competing channels of an ancestor
+  reach it with different yields, so the reference would depend on the rates:
+  give `basis`;
+- a cell holds the reactant and also an ancestor it can be formed from: give
+  `basis`;
+- a positive reference is below `1e-12` of the cell's condensed mass, or `basis` is
+  below `1e-6`;
+- the mesh has more than one dimension;
+- the solve has a `correction` (Technical Reference §6.10).
+
+A reaction whose reactant has no initial mass anywhere in its lineage is
+**inactive**: it never runs, and needs no row.
+
+**`basis`.** The keyword gives the reference directly, as a fraction of the initial
+condensed mass, on the cells the reactant's lineage can reach:
+
+```julia
+# Fitted against the total initial mass of a blend
+Reaction(:second, :b => :gas; A = 3e8, E = 150e3, h = 0.0, n = 2.0, basis = 1.0)
+```
+
+`basis` must lie in `(0, 1]` and is refused at first order, where the reference
+cancels. Use it for a fit normalised to something other than the lineage: an
+Aria/Sierra parallel or series member (normalised to the total initial mass,
+`basis = 1.0`) or a fit on wet mass of a dry-lineage reactant (`basis = 1.0`).
+
+**Prefer first-order steps.** Where a fit allows it, more first-order steps are
+the better choice over fewer steps of other orders: they need no reference, no
+extra state and no refusal, and they transfer between codes without a
+normalisation convention. See Technical Reference §6.4 and §6.5.5.
 
 The rate evaluation has a fast path for orders 0 and 1 (avoiding a general
 power), so first-order reactions are both the most common and the cheapest.
@@ -200,10 +274,12 @@ They are **not hard cutoffs**: instead of step functions, Pyrolysis.jl multiplie
 the rate by smooth `tanh` ramps,
 
 ```
-r ← r · ½(1 + tanh(T − T_min)) · ½(1 + tanh(T_max − T))
+r ← r · ½(1 + tanh((T − T_min)/w_gate)) · ½(1 + tanh((T_max − T)/w_gate))
 ```
 
-so the reaction turns on and off smoothly. The smoothness is deliberate — hard
+with `w_gate = gate_width` (default 1 K), so the reaction turns on and off
+smoothly. A narrower width approaches the hard step at the cost of a stiffer
+Jacobian near the gate. The smoothness is deliberate — hard
 steps create discontinuities in the Jacobian that break automatic differentiation
 and Newton convergence (Technical Reference §6.2).
 
@@ -219,9 +295,9 @@ Defaults are `T_min = 0.0` and `T_max = Inf`. The lower gate is applied only whe
 is finite; with the defaults, neither gate fires and the bare Arrhenius rate is
 used at all temperatures.
 
-> **Caveat — gate leakage.** Because the ramp uses `tanh(T − T_min)` (argument in
-> kelvin), the transition is sharp on the kelvin scale but not instantaneous: the
-> reaction is "weakly active" within roughly ±10 K of each bound. If you need a
+> **Caveat — gate leakage.** The ramp `tanh((T − T_min)/w_gate)` is sharp on the
+> scale of the gate width but not instantaneous: the reaction is "weakly active"
+> within roughly ±10 gate widths of each bound (±10 K at the default width). If you need a
 > hard kinetic threshold, the gates are an approximation; for the AD- and
 > Newton-stability reasons above, they are intentional. See Technical Reference
 > §6.2.
@@ -230,9 +306,12 @@ used at all temperatures.
 
 ## 4.7 The single-reactant restriction and multi-step schemes
 
-The current implementation supports **single-reactant reactions only**
-(`NRin == 1`). Each `Reaction` consumes exactly one component. Attempting to apply
-a multi-reactant reaction raises an error at evaluation. This means you cannot
+![Three-step wood scheme: virgin to two intermediates to char, with gas mass-yield branches and exothermic or endothermic heat signs at each step.](../../assets/figures/13_reaction_network.svg)
+
+**Figure 13. The three-step wood example (schematic).** This is the reaction tuple immediately below: each arrow consumes exactly one component and its two product yields sum to one. Yields are per kilogram of the current step’s reactant, so complete conversion gives 0.5624 kg of char and 0.4376 kg of gases per kilogram of virgin wood. The package convention is $h>0$ for endothermic consumption and $h<0$ for exothermic release. Intermediate components are explicit state inventories, not additional reactants to a single reaction.
+
+Each reaction has **one reactant** by construction: the pair `reactant => products`
+names exactly one component on its left. This is a modelling limit. You cannot
 write a bimolecular reaction such as `char + O₂ → ...` as a single `Reaction` with
 two reactants.
 
@@ -246,13 +325,13 @@ read identically):
 ```julia
 using Pyrolysis
 
-virgin = SolidComponent(:virgin, ρ = 530.0, c = 1500.0, k = 0.12)
-int1   = SolidComponent(:int1,   ρ = 400.0, c = 1400.0, k = 0.11)
-int2   = SolidComponent(:int2,   ρ = 250.0, c = 1300.0, k = 0.12)
-char   = SolidComponent(:char,   ρ = 130.0, c = 1100.0, k = 0.10, ε = 0.95)
-gas1   = GaseousComponent(:gas1, M = 0.030, c = 1500.0, k = 0.03, λ = 1e-5)
-gas2   = GaseousComponent(:gas2, M = 0.040, c = 1500.0, k = 0.03, λ = 1e-5)
-gas3   = GaseousComponent(:gas3, M = 0.050, c = 1500.0, k = 0.03, λ = 1e-5)
+virgin = SolidComponent(:virgin, ρ = 530.0, ρ_intrinsic=1500., c = 1500.0, k = 0.12, λ=2e-5)
+int1   = SolidComponent(:int1,   ρ = 400.0, ρ_intrinsic=1500., c = 1400.0, k = 0.11, λ=2e-5)
+int2   = SolidComponent(:int2,   ρ = 250.0, ρ_intrinsic=1500., c = 1300.0, k = 0.12, λ=2e-5)
+char   = SolidComponent(:char,   ρ = 130.0, ρ_intrinsic=1950., c = 1100.0, k = 0.10, ε = 0.95, λ=2e-5)
+gas1   = GaseousComponent(:gas1, M = 0.030, c = 1500.0, k = 0.03,)
+gas2   = GaseousComponent(:gas2, M = 0.040, c = 1500.0, k = 0.03,)
+gas3   = GaseousComponent(:gas3, M = 0.050, c = 1500.0, k = 0.03,)
 
 material = Material(
     name = :CharringWood,
@@ -295,9 +374,9 @@ into a source: an endothermic reaction (`h > 0`) gives `Q_rxn < 0` (cooling), an
 an exothermic reaction (`h < 0`) gives `Q_rxn > 0` (heating). See Technical
 Reference §6.6.
 
-> **Important — opposite to ThermaKin / Gpyro.** ThermaKin2Ds and Gpyro publish
-> heats of reaction with the *opposite* sign (in those codes `h > 0` is
-> exothermic). When you port parameters from a ThermaKin or Gpyro input file,
+> **Important — opposite to ThermaKin.** ThermaKin2Ds publishes heats of
+> reaction with the *opposite* sign (there `h > 0` is exothermic; Gpyro V2 and FDS
+> use the sign of this package). When you port parameters from a ThermaKin input file,
 > **flip the sign of every heat of reaction.** The shipped examples annotate this
 > conversion explicitly; e.g. a ThermaKin "+2.78E6 J/kg" (exothermic there)
 > becomes `h = -2.78e6` here (exothermic in this convention) — and a ThermaKin
@@ -336,12 +415,13 @@ kinetics evaluator automatically passes `ξ` when the heat is state-dependent.
 
 ```julia
 const MOISTURE_IDX = 7        # index of moisture in the components tuple
-const ρ_DRY_BASIS  = 530.0    # dry-wood density for the moisture-content ratio [kg/m³]
+const SOLID_IDX    = 1:6      # indices of the dry solids, the basis of the moisture content
 
 # HoS(MC) = 2450.4 + 875.6 * exp(-0.1122 * MC) [kJ/kg], MC = moisture content (% dry basis)
 heat_of_sorption = StateDependentProperty(
     (T, ξ) -> begin
-        MC = 100.0 * ξ[MOISTURE_IDX] / ρ_DRY_BASIS          # moisture content, % dry basis
+        MC = 100.0 * ξ[MOISTURE_IDX] /
+             max(sum(ξ[j] for j in SOLID_IDX), 1e-12)        # water over dry solid mass, %
         return (2450.420909987441 + 875.6441221735336 *
                 exp(-0.1121684273316275 * MC)) * 1e3          # J/kg (endothermic, h > 0)
     end,
@@ -351,8 +431,10 @@ Reaction(:moisture_evaporation, :moisture => :water_vapor;
          A = 2.997e5, E = 5.0e4, h = heat_of_sorption, n = 1.0)
 ```
 
-The closure indexes `ξ` by component position, so `MOISTURE_IDX` must match the
-moisture component's slot in the `components` tuple. Evaporation is endothermic,
+The closure indexes `ξ` by component position, so `MOISTURE_IDX` and `SOLID_IDX`
+must match the slots in the `components` tuple. The moisture content is the
+water's mass over the dry solids' mass, which holds as the cell shrinks; a
+fixed density in the denominator does not. Evaporation is endothermic,
 so the returned value is positive. See Technical Reference §6.6 and Chapter 3 for
 the property-function types.
 
@@ -363,16 +445,19 @@ the property-function types.
 A common practical task is fitting Arrhenius parameters to a single-step
 thermogravimetric analysis (TGA) curve. The FDS approach uses two readouts from a
 constant-heating-rate TGA run: the **peak-rate temperature** `T_p` (K, where the
-mass-loss rate is maximal) and the **peak reaction rate** `r_p` (s⁻¹, the maximum
-fractional mass-loss rate divided by the heating rate `β_h` in K·s⁻¹). For a
-first-order reaction the standard estimates are
+mass-loss rate is maximal) and the **peak reaction rate** `r_p` (s⁻¹, the
+maximum of the normalized mass-loss rate `−(1/m_0) dm/dt`; a curve reported per
+kelvin is multiplied by the heating rate `β_h` in K·s⁻¹). For a first-order
+reaction of a pure material the standard estimates are
 
 ```
-E ≈ e · r_p · R_g · T_p²
+E ≈ e · r_p · R_g · T_p² / β_h
 A ≈ e · r_p · exp(E / (R_g · T_p))
 ```
 
-where `e ≈ 2.71828` is Euler's number and `R_g = 8.314462618` J·mol⁻¹·K⁻¹. As a
+where `e ≈ 2.71828` is Euler's number and `R_g = 8.314462618` J·mol⁻¹·K⁻¹
+(Technical Reference §6.9.3 gives the general form with the initial mass
+fraction). As a
 runnable example, suppose the TGA peak is at `T_p = 640 K` with a heating rate of
 10 K·min⁻¹ and a peak fractional mass-loss rate of 0.012 K⁻¹:
 
@@ -383,16 +468,32 @@ const R_g = 8.314462618    # J/(mol·K)
 T_p = 640.0                # peak-rate temperature, K
 r_p = 0.012 * β_h          # peak reaction rate, s⁻¹  (0.012 K⁻¹ × β_h)
 
-E = exp(1) * r_p * R_g * T_p^2          # J/mol
-A = exp(1) * r_p * exp(E / (R_g * T_p)) # s⁻¹
+E = exp(1) * r_p * R_g * T_p^2 / β_h   # J/mol  (≈ 111.1 kJ/mol)
+A = exp(1) * r_p * exp(E / (R_g * T_p)) # s⁻¹    (≈ 6.3e6 s⁻¹)
 
 rxn = Reaction(:decomposition, :virgin => :gas; A = A, E = E, h = 500e3)
 ```
 
-These are first-pass estimates; for production fits, refine `A`, `E`, and `h`
+These are first-pass estimates (a first-order TGA integrated with these values
+peaks at 640 K with a peak rate about 9 % above `r_p`, the error of the
+approximation behind the formulas); for production fits, refine `A`, `E`, and `h`
 against the measured curve using the sensitivity / inverse-analysis tooling (User
 Guide Chapter 13). See Technical Reference §6.9 for the relationship to the FDS,
-ThermaKin, and Gpyro kinetic formulations.
+ThermaKin, and Gpyro V2 kinetic formulations.
+
+For a transferred reaction, also compare the rate over the relevant
+temperature and conversion range. ThermaKin2Ds reaction extent may require
+normalization; Gpyro V2 reaction order can depend on cumulative available
+mass; FDS rates can include oxygen and temperature factors absent here, and its
+order acts on the concentration, not the conversion.
+Technical Reference §6.9 gives the mappings and their limits. A matching
+`A` and `E` pair alone does not establish matching kinetics.
+
+For a published parameter set with `n ≠ 1`, use `A` unchanged from a Kinetics Neo
+or a single-step Gpyro fit, and give `basis = 1.0` for a fit normalised to the
+total initial mass (an Aria/Sierra parallel or series member). A Gpyro series
+scheme with `n ≠ 1` on an intermediate does not transfer: its cumulative mass
+accounting is a different convention.
 
 ---
 
@@ -400,64 +501,101 @@ ThermaKin, and Gpyro kinetic formulations.
 
 As a reactant concentration approaches zero, a bare Arrhenius rate can still try
 to react at a finite speed, which makes implicit solvers stiff — and for a
-zero-order fit it would keep consuming reactant straight through zero.
-Pyrolysis.jl rolls the rate off smoothly by multiplying it with a `tanh` factor
-per reactant:
+zero-order fit it would keep consuming reactant straight through zero. An
+implicit solver also evaluates trial states on which a concentration is
+slightly negative. Pyrolysis.jl therefore multiplies the rate, per reactant, by
+a one-sided factor and evaluates the order's power on a finite base:
 
 ```
-r *= tanh(ξ / threshold)
+first order:      r ∝ b(ξ) · g(ξ / threshold)
+any other order:  r ∝ ξ_ref · b(x)^n · g(x / conversion_threshold),   x = ξ/ξ_ref
+
+g(x) = 0                                   for x ≤ 0
+g(x) = (s − 2y) t³ + (3y − s) t²           for 0 < x < join,  t = x/join,
+                                           y = tanh(join), s = join·sech²(join)
+g(x) = tanh(x)                             for x ≥ join
+
+b(ξ) = base_scale · ln(1 + e^{ξ/base_scale})
 ```
 
-with negative concentrations clamped to zero first. The factor is smooth
-everywhere (no threshold branch): it is ≈ 1 well above `threshold` (within 4%
-at `2·threshold`, indistinguishable from 1 beyond `~20·threshold`) and drives
-the rate to zero with a bounded derivative as the reactant runs out — for every
-reaction order `n ≥ 0`, including zero-order. The limiter is configured by the
-`DepletionLimiter` type (top-level exported, and also exported by the `Physics`
-and `Materials` submodules):
+The onset `g` has zero value and zero slope at `x = 0` and matches `tanh` and
+its slope at `x = join`, so it is C¹ everywhere. The rate and every derivative
+of it are exactly zero at and below zero concentration, for every order
+`n ≥ 0`, including zero order: an absent or negative trial concentration is
+never consumed. The base `b(ξ)` equals `ξ` to within `base_scale · ln 2` and is
+finite for every real `ξ`, so the derivative of the power stays finite at
+depletion for fractional orders. Far above the threshold the factor rounds to
+one and the bare Arrhenius rate is recovered: the relative deficit is
+`2 e^{−2ξ/threshold}`, below 4 % at `2·threshold` and below 5e-9 at
+`10·threshold`, and the factor is exactly 1 from `20·threshold`.
+
+For a reaction of order other than one the same factor acts on the conversion, on
+the dimensionless scales `conversion_threshold` and `conversion_base`: a
+concentration scale would never engage on a moving mesh, where a pure reactant's
+concentration stays at its bulk density. The onset is exactly one for
+`x ≥ 20 conversion_threshold` at `join ≤ 20`.
+
+The limiter is configured by the `DepletionLimiter` type (exported at the top
+level, and by the `Physics` and `Materials` submodules):
 
 ```julia
-Base.@kwdef struct DepletionLimiter
-    threshold::Float64 = 1.0    # kg/m³ — rate roll-off scale
-    enabled::Bool      = true
-end
+DepletionLimiter(; threshold = 1.0, join = 1.0, base_scale = 1e-8, enabled = true,
+                 conversion_threshold = 1e-3, conversion_base = 1e-8)
 ```
 
 | Field | Meaning | Units | Default |
 |---|---|---|---|
-| `threshold` | Concentration scale of the rate roll-off | kg·m⁻³ | `1.0` |
-| `enabled` | Turn limiting on/off | – | `true` |
+| `threshold` | Concentration scale of the roll-off, first order | kg·m⁻³ | `1.0` |
+| `join` | Where the onset joins `tanh`, in units of its threshold | – | `1.0` |
+| `base_scale` | Scale of the finite power base, first order | kg·m⁻³ | `1e-8` |
+| `enabled` | Apply the onset factor | – | `true` |
+| `conversion_threshold` | Conversion scale of the roll-off, other orders | – | `1e-3` |
+| `conversion_base` | Conversion scale of the finite power base, other orders | – | `1e-8` |
 
-The default limiter (`threshold = 1.0`, `enabled = true`) is applied
-automatically during a solve. The limiter is a property of the **material**, not
-of individual reactions or of `solve`: pass a custom one with the `Material`
-constructor's `depletion_limiter` keyword,
+`threshold`, `join`, `base_scale`, `conversion_threshold` and `conversion_base`
+must be positive (an `ArgumentError` otherwise). With `enabled = false` the onset factor is one and only the finite
+base remains: an order-zero reaction then runs at its full rate at any
+concentration, and an absent reactant reacts at the rate of a `base_scale`
+concentration; the integrator's admissibility check is then the only guard.
+
+The limiter is a property of the **material**, not of individual reactions or
+of `solve`: the default `DepletionLimiter()` is applied to every rate the
+solver evaluates, and a custom one is passed with the `Material` constructor's
+`depletion_limiter` keyword,
 
 ```julia
 material = Material(name = …, components = …, reactions = …,
                     depletion_limiter = DepletionLimiter(threshold = 0.1))
 ```
 
-and the solver's kinetics path reads `material.depletion_limiter` for every rate
-evaluation. **When to tune:** the default `threshold = 1.0` kg·m⁻³ is appropriate for
-most condensed-phase materials whose concentrations are hundreds to thousands of
-kg·m⁻³. If you work with very dilute species (e.g. trace moisture at a few
-kg·m⁻³), the default threshold may damp them more than intended; conversely, if a
-solve is stiff or produces small negative concentrations near full conversion, a
-slightly larger threshold can help. See Technical Reference §6.3.
+The reaction kernel reads `material.depletion_limiter` for every rate
+evaluation, and with an enabled limiter it skips a cell in which every reaction
+lacks its reactant (that cell's rates and their derivatives are exactly zero).
+**When to tune:** the default `threshold = 1.0` kg·m⁻³ is appropriate for most
+condensed-phase materials, whose concentrations are hundreds to thousands of
+kg·m⁻³. A lower threshold keeps the kinetics closer to the bare rate law near
+depletion, which matters for genuinely dilute species (e.g. trace moisture at a
+few kg·m⁻³); a higher one damps the stiffness of a vanishing reactant. See
+Technical Reference §6.3.
 
-You can evaluate a single rate with a custom or disabled limiter for testing:
+You can evaluate a single rate with a custom or disabled limiter for testing,
+and the onset itself with `one_sided_factor`:
 
 ```julia
 using Pyrolysis
-using Pyrolysis.Physics: reaction_rate   # exported by Physics, not re-exported at the top level
+using Pyrolysis.Physics: reaction_rate, one_sided_factor   # exported by Physics only
 
-# Disable limiting (validation / verification only — may be stiff in a full
-# solve, and removes the only guard that stops zero-order reactions at ξ = 0).
-r_raw = reaction_rate(rxn, ξ_cell, T_cell; limiter = DepletionLimiter(enabled = false))
+rxn = Reaction(:decomp, 1 => 2; A = 1e10, E = 150e3, h = 5e5)
+r      = reaction_rate(rxn, (0.5, 0.0), 700.0)   # the default limiter
+r_bare = reaction_rate(rxn, (0.5, 0.0), 700.0; limiter = DepletionLimiter(enabled = false))
+one_sided_factor(2.0, 1.0)                        # g(2) = tanh(2) ≈ 0.964
 ```
 
-where `ξ_cell` is the concentration `NTuple` and `T_cell` the temperature.
+`reaction_rate(rxn, ξ, T; limiter)` takes a resolved (index-form) reaction, the
+concentration `NTuple` of the cell and its temperature; without `limiter` it
+uses `DepletionLimiter()`, not the material's. It refuses an order other than one,
+which needs a reference concentration: `reaction_rate(rxn, ξ, T, ξ_ref; limiter)`,
+with `ξ_ref` finite and positive.
 
 ---
 
@@ -474,9 +612,9 @@ using Pyrolysis
 material = Material(
     name = :PMMA,
     components = (
-        SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86),
-        SolidComponent(:char,   ρ = 5.0,  c = 1000, k = 0.10, ε = 0.95),
-        GaseousComponent(:MMA,  M = 0.10012, c = 1500, k = 0.02, λ = 1e-5),
+        SolidComponent(:virgin, ρ = 1190, φ=.01, c = 1420, k = 0.21, ε = 0.86, λ=1e-5),
+        SolidComponent(:char,   ρ = 5.0, φ=.01, c = 1000, k = 0.10, ε = 0.95, λ=1e-5),
+        GaseousComponent(:MMA,  M = 0.10012, c = 1500, k = 0.02,),
     ),
     reactions = (
         Reaction(:decomposition, :virgin => (:char, :MMA);
@@ -487,39 +625,33 @@ material = Material(
 ```
 
 A material can also have **no reactions** — pass `reactions = ()` (the default) for
-a pure heat-conduction problem. `Material(...)` resolves symbolic reactions (a
-name that matches no component throws) into `Reaction`s, whose constructor
-checks the mass balance; integer component indices are range-checked when
-`solve` validates the problem (§3.7). Chapter 3 covers the rest of the
-`Material` constructor (components, mixing rules, lateral-shrinkage law).
+a pure heat-conduction problem. `Material(...)` resolves a reaction given by
+component names (a name that matches no component throws); integer component
+indices are range-checked when `solve` validates the problem (§3.7). Chapter 3
+covers the rest of the `Material` constructor (components, mixing rules,
+lateral-shrinkage law).
 
 ---
 
 ## 4.12 Validating reactions
 
-One helper lets you check mass balance explicitly, beyond the automatic
-check at construction. It is **not** part of the top-level `Pyrolysis`
-exports — reach it through its submodule as
-`Pyrolysis.Materials.verify_stoichiometry`, or bring it into scope with
-`using Pyrolysis.Materials: verify_stoichiometry`.
+The constructor validates every reaction, whichever way its components are given,
+and raises an `ArgumentError` on any of:
 
-**`verify_stoichiometry(rxn; tol=1e-10) -> Bool`** confirms that a single
-reaction's product yields sum to 1.0 (within `tol`). It returns `true` when
-balanced and issues a warning and returns `false` otherwise:
+- a `yields` tuple whose length differs from the product count;
+- a negative yield, or yields that do not sum to 1.0 within `1e-10`;
+- a negative order `n`;
+- a `gate_width` that is not finite and positive;
+- a `basis` outside `(0, 1]`, or a `basis` at first order.
 
 ```julia
-using Pyrolysis.Materials: verify_stoichiometry
-
-rxn = Reaction(:charring, :virgin => (:char, :gas);
-               A = 1e15, E = 200e3, h = 500e3, yields = (0.25, 0.75))
-verify_stoichiometry(rxn)   # true: 0.25 + 0.75 = 1.0
-
-all(verify_stoichiometry, material.reactions)   # every reaction of a material
+Reaction(:charring, 1 => (2, 3); A = 1e15, E = 200e3, h = 500e3, yields = (0.25, 0.70))
+# ERROR: ArgumentError: Reaction :charring violates the mass balance: the yields sum to 0.95, not 1
 ```
 
-It is a diagnostic: mass conservation is enforced by the single-reactant
-construction convention (§4.3), not by a projection during the solve, so the
-check is for catching setup mistakes. See Technical Reference §6.8.
+Mass conservation is enforced by the single-reactant construction convention
+(§4.3), not by a projection during the solve, so the check is for catching setup
+mistakes. See Technical Reference §6.8.
 
 ---
 
@@ -533,32 +665,26 @@ using Pyrolysis
 # `reaction_rate` lives in the Physics submodule and is exported from it, but is
 # not re-exported at the top level — bring it into scope explicitly.
 using Pyrolysis.Physics: reaction_rate
-# `verify_stoichiometry` is not exported at all; reach it through the Materials
-# submodule.
-using Pyrolysis.Materials: verify_stoichiometry
 
 # Three components: virgin solid, char residue, gas product.
-virgin = SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86)
-char   = SolidComponent(:char,   ρ = 5.0,  c = 1000, k = 0.10, ε = 0.95)
-gas    = GaseousComponent(:MMA,  M = 0.10012, c = 1500, k = 0.02, λ = 1e-5)
+virgin = SolidComponent(:virgin, ρ = 1190, φ=.01, c = 1420, k = 0.21, ε = 0.86, λ=1e-5)
+char   = SolidComponent(:char,   ρ = 5.0, φ=.01, c = 1000, k = 0.10, ε = 0.95, λ=1e-5)
+gas    = GaseousComponent(:MMA,  M = 0.10012, c = 1500, k = 0.02,)
 
-rxn = Reaction(:decomposition, :virgin => (:char, :MMA);
+rxn_spec = Reaction(:decomposition, :virgin => (:char, :MMA);
                A = 1.5e14,     # s⁻¹
                E = 2.03e5,     # J/mol
                h = 820e3,      # J/kg  (positive ⇒ endothermic ⇒ cools)
                n = 1.0,
                yields = (0.002, 0.998))
 
-material = Material(name = :PMMA, components = (virgin, char, gas), reactions = (rxn,))
-
-# Verify mass balance.
-@assert verify_stoichiometry(rxn)                  # 0.002 + 0.998 = 1.0
-@assert all(verify_stoichiometry, material.reactions)
+material = Material(name = :PMMA, components = (virgin, char, gas), reactions = (rxn_spec,))
+rxn = material.reactions[1]                          # the resolved reaction
 
 # Evaluate the rate at one cell state (concentrations in kg/m³, T in K).
 T_cell = 700.0
 ξ_cell = (1000.0, 0.0, 0.0)                         # (virgin, char, MMA)
-r = reaction_rate(rxn, ξ_cell, T_cell)             # kg·m⁻³·s⁻¹
+r = reaction_rate(rxn, ξ_cell, T_cell; limiter = material.depletion_limiter)  # kg·m⁻³·s⁻¹ (≈ 106.7)
 
 Q_rxn = -rxn.heat(T_cell, ξ_cell) * r              # W·m⁻³  (= -h·r); endothermic ⇒ < 0
 S = (-r, 0.002 * r, 0.998 * r)                     # species sources (virgin, char, gas)
@@ -568,28 +694,41 @@ S = (-r, 0.002 * r, 0.998 * r)                     # species sources (virgin, ch
 `r` is the volumetric reaction rate, `Q_rxn = −h·r` is the volumetric heat source
 (negative here because the reaction is endothermic), and the species sources `S`
 conserve mass (the products' generation balances the reactant's consumption).
-This is exactly the per-cell computation the solver performs internally; see
-Technical Reference §6.7.
+The solver performs this computation in every cell with the material's
+limiter at the cell's trial temperature and multiplies the sources by the cell
+volume, since the component masses are the states; see Technical Reference §6.7.
 
 ---
 
 ## 4.14 Summary and limitations
 
-- A `Reaction` is `A·exp(−E/R_gT)·ξ^n` with smooth `T_min`/`T_max` gates and a
-  heat of reaction `h`.
-- Reference components by **symbol** (recommended) or integer index; product
-  `yields` must sum to **1.0**, enforced at construction unless
-  `validate_mass = false`.
+- A `Reaction` is `A·exp(−E/R_gT)·ξ` at first order and
+  `A·exp(−E/R_gT)·ξ_ref·xⁿ` on the conversion otherwise, `A` in s⁻¹ for every order,
+  times the limiter's onset, with smooth `T_min`/`T_max` gates of width
+  `gate_width` and a heat of reaction `h`.
+- Reference components by **symbol** (recommended) or integer index; a reaction
+  has any number of products, and its `yields`, one per product, must sum to
+  **1.0**, enforced at construction.
 - **Sign convention: `h > 0` is endothermic, `h < 0` is exothermic** — opposite
-  to ThermaKin/Gpyro; flip the sign when porting parameters.
+  to ThermaKin; flip the sign when porting ThermaKin parameters.
 - Only **single-reactant** reactions are supported; build multi-step schemes as
   chains of single-reactant reactions. Multi-reactant (e.g. O₂-dependent)
   kinetics, temperature-dependent `A`, and pressure-dependent rates are not
   supported (Technical Reference §6.10).
-- The **depletion limiter** (default `threshold = 1.0` kg·m⁻³) is applied
-  automatically and is rarely tuned; lower it only for genuinely dilute species
-  and raise it only to relieve stiffness near full conversion.
-- Re-check a reaction's mass balance with `verify_stoichiometry`.
+- The **depletion limiter** (default `threshold = 1.0` kg·m⁻³, and
+  `conversion_threshold = 1e-3` for orders other than one) is applied
+  automatically: each reactant's rate factor is exactly zero at and below zero
+  mass and joins `tanh` above it. It is rarely tuned; lower it only for genuinely
+  dilute species and raise it only to relieve stiffness near full conversion.
+- An order other than one reads one conversion per cell, so each cell must keep its
+  material. Besides gas reactants, gas-fed lineages, external mass sources and
+  multi-dimensional meshes (§4.5), such a solve refuses any correction. Deactivation
+  works on a line: below order one a cell empties in finite time, so turn it on for
+  a column that burns through. Its threshold then reads the reactive inventory, not
+  the total condensed mass, and defaults to a tenth of the limiter's
+  `conversion_threshold`; a cell that would keep 1 % or more of its volume, as a
+  char layer does, is not tested and stays (§7.3.3, §10.4, Technical Reference
+  §6.10). Without deactivation a cell that empties stalls the solve there.
 
 For the mathematics behind the rate law, the smooth gates, the depletion limiter,
 the stoichiometric sources, and the heat-source assembly, see Technical Reference

@@ -11,6 +11,7 @@ docs/build/
 docs/site/
 docs/refs/
 docs/src/guide/
+docs/src/assets/figures/
 docs/Manifest.toml
 
 # OS / editor
@@ -24,6 +25,8 @@ Thumbs.db
 # Local tooling
 .claude/
 .codex
+__pycache__/
+*.py[cod]
 
 # Generated output directories
 /output/
@@ -54,3 +57,37 @@ scripts/burnout/
 docs/Performance_Audit.md
 docs/performance_audit/
 scripts/performance_audit/
+
+# Local records: the mesh design, plans, gate and review documents, the gate
+# scripts' recorded measurements, the one-time selection and qualification
+# studies, and the prototyping harness
+docs/Mesh_Framework_*.md
+test/gates/measurements/
+test/gates/burnout_ladder.jl
+test/gates/burnout_pore_qualification.jl
+test/gates/finite_slab.jl
+test/gates/gas_transport_qualification.jl
+test/gates/heterogeneous_pore_qualification.jl
+test/gates/kinetics_threshold_ladder.jl
+scripts/mesh_phase0/
+
+# Local records: the heat-transport repair plan and its audit, investigation,
+# qualification and review scripts
+docs/Heat_Transport_Repair_Plan.md
+docs/Heat_Transport_Repair_Final_Gate.md
+docs/Tensor_Conduction_Repair_Review.md
+scripts/verification/audit_governing_equations.jl
+scripts/verification/benchmark_tensor_conduction_cost.jl
+scripts/verification/confirm_heat_transport_findings.jl
+scripts/verification/investigate_algebraic_tensor_limiter.jl
+scripts/verification/investigate_coercive_tensor_method.jl
+scripts/verification/investigate_general_tensor_method.jl
+scripts/verification/qualify_general_tensor_method.jl
+scripts/verification/review_heat_transport_plan.jl
+scripts/verification/review_layered_conduction_ladder.jl
+scripts/verification/review_reconstruction_support.jl
+scripts/verification/tensor_dissipation_fixture.jl
+
+# Local research notes and reports
+reports/
+research_notes/

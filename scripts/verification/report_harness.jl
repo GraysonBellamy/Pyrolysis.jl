@@ -56,9 +56,11 @@ report_expected_order(case::VerificationCase) =
     case.ci.convergence === nothing ? nothing : case.ci.convergence.expected_order
 
 """
-Other codes' wall times for a case, from `reference/timings.csv`
-(case,code,label,res,wall_s,note — plain commas, notes use semicolons; `res`
+Other codes' internal and process wall times, from `reference/timings.csv`
+(case,code,label,res,wall_s,process_wall_s,note — plain commas; `res`
 is the resolution text shown next to the code's label on the figure).
+`wall_s` includes setup and simulation; `process_wall_s` also includes launch
+and shutdown and is shown separately from the warmed Julia comparison.
 Empty when the file or the case's rows are absent.
 """
 function _reference_timings(case_id::AbstractString)
@@ -67,8 +69,8 @@ function _reference_timings(case_id::AbstractString)
     out = NamedTuple[]
     for ln in Iterators.drop(readlines(path), 1)
         isempty(strip(ln)) && continue
-        f = split(ln, ','; limit = 6)
-        length(f) == 6 || continue
+        f = split(ln, ','; limit = 7)
+        length(f) == 7 || error("expected seven reference timing fields: $ln")
         strip(f[1]) == case_id || continue
         push!(
             out,
@@ -77,7 +79,8 @@ function _reference_timings(case_id::AbstractString)
                 label = String(strip(f[3])),
                 res = String(strip(f[4])),
                 wall = parse(Float64, f[5]),
-                note = String(strip(f[6])),
+                process_wall = parse(Float64, f[6]),
+                note = String(strip(f[7])),
             ),
         )
     end
@@ -100,6 +103,7 @@ Base.@kwdef struct CaseReportResult
     observed_order::Union{Nothing,Float64}
     figures::Vector{Pair{Symbol,String}}   # kind => relative path
     solve_kwargs::NamedTuple
+    timings_recorded::Bool = true
 end
 
 _relfig(outdir, path) = relpath(path, outdir)
@@ -109,7 +113,13 @@ Run `case` through its report ladder and write every artifact under
 `<outdir>/assets/<id>/`. Returns a `CaseReportResult`, or `nothing` when the
 case opts out of report mode (`report = (;)`).
 """
-function run_case_report(case::VerificationCase, outdir::String)
+function run_case_report(
+    case::VerificationCase,
+    outdir::String;
+    timings::Bool = true,
+    historical_timings::Bool = false,
+    comparisons_only::Bool = false,
+)
     isempty(pairs(case.report)) && return nothing
     assets = joinpath(outdir, "assets", case.id)
     mkpath(assets)
@@ -123,9 +133,11 @@ function run_case_report(case::VerificationCase, outdir::String)
     # compilation for its concrete problem types, which would otherwise be
     # billed to the coarsest rung's wall time (and dwarf the solve-time
     # comparison). Errors are ignored here — the timed loop re-raises them.
-    try
-        _case_solve(case, case.build(ns[1]); skw...)
-    catch
+    if timings
+        try
+            _case_solve(case, case.build(ns[1]); skw...)
+        catch
+        end
     end
 
     walls = Float64[]
@@ -134,7 +146,12 @@ function run_case_report(case::VerificationCase, outdir::String)
     finest_sol = nothing
     for n in ns
         local sol
-        wall = @elapsed sol = _case_solve(case, case.build(n); skw...)
+        wall = if timings
+            @elapsed sol = _case_solve(case, case.build(n); skw...)
+        else
+            sol = _case_solve(case, case.build(n); skw...)
+            NaN
+        end
         sol.retcode == case.expected_retcode ||
             error("$(case.id): solve failed at n = $(n) (retcode $(sol.retcode))")
         push!(walls, wall)
@@ -159,6 +176,11 @@ function run_case_report(case::VerificationCase, outdir::String)
     # the base figures stay ours-vs-exact only (so our error is discernible),
     # the variants add the other codes' data as a muted context layer.
     curves = haskey(case.report, :curves) ? case.report.curves(finest_sol) : ReportCurve[]
+    if haskey(case.report, :resolution_curves)
+        append!(curves, case.report.resolution_curves(ns, qois_per_n))
+    end
+    add_matched_comparisons!(case.id, curves, apath("comparison_accuracy.csv"))
+    comparisons_only && filter!(c -> any(s -> s.crosscode, c.series), curves)
     for curve in curves
         p = render_overlay(curve, apath("$(curve.name).png"))
         push!(figures, curve.name => _relfig(outdir, p))
@@ -192,7 +214,9 @@ function run_case_report(case::VerificationCase, outdir::String)
 
     # Solve-time comparison, when other codes' reference runs exist for this
     # case (reference/timings.csv; provenance in reference/*/README.md).
-    ref_times = _reference_timings(case.id)
+    # Archive costs have no shared accuracy qualification. They must not be
+    # presented by default as a current cross-code performance comparison.
+    ref_times = timings && historical_timings ? _reference_timings(case.id) : NamedTuple[]
     if !isempty(ref_times)
         p = render_solve_time(case.id, ns, walls, ref_times, apath("solve_time.png"))
         push!(figures, :solve_time => _relfig(outdir, p))
@@ -211,10 +235,11 @@ function run_case_report(case::VerificationCase, outdir::String)
         norm_names = collect(keys(norms_per_n[1]))
         write_csv(
             apath("ladder.csv"),
-            vcat(["n_cells", "h", "wall_s"], string.(norm_names)),
+            vcat(["n_cells", "h"], timings ? ["wall_s"] : String[], string.(norm_names)),
             [
                 vcat(
-                    Any[ns[i], hs[i], walls[i]],
+                    Any[ns[i], hs[i]],
+                    timings ? Any[walls[i]] : Any[],
                     Any[getproperty(norms_per_n[i], nm) for nm in norm_names],
                 ) for i in eachindex(ns)
             ],
@@ -336,7 +361,11 @@ function run_case_report(case::VerificationCase, outdir::String)
         ["key", "value"],
         vcat(
             [
-                ("integrator", haskey(skw, :alg) ? string(skw.alg) : "KenCarp4 (default)"),
+                (
+                    "integrator",
+                    haskey(skw, :integrator_policy) ? string(skw.integrator_policy) :
+                    "Rodas5P (default)",
+                ),
                 ("julia", string(VERSION)),
                 ("Pyrolysis", pyro_version),
                 ("n_cells_ladder", join(ns, " ")),
@@ -354,5 +383,6 @@ function run_case_report(case::VerificationCase, outdir::String)
         observed_order = observed,
         figures = figures,
         solve_kwargs = skw,
+        timings_recorded = timings,
     )
 end

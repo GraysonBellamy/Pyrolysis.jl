@@ -2,7 +2,7 @@
 # Blowing models: how outgassing through a face changes its convective
 # coefficient. The model is a field of `ConvectiveBC` (default `NoBlowing()`),
 # so the physics is declared where the surface is. Evaluation lives in
-# `Discretization/blowing.jl`; this file holds the types, their constants and
+# `BoundaryConditions/blowing.jl`; this file holds the types, their constants and
 # the gas-property data they need.
 # ============================================================================
 
@@ -298,7 +298,11 @@ binary diffusivity of each gas component into the free stream
 package's Chapman–Enskog estimate from its molar mass. Lumped `volatiles` use
 their own `D`, else their diffusion volume, else the same estimate.
 """
-struct PoolingFilm{G<:GasSpecies,V<:Union{Nothing,GasSpecies},N} <: AbstractBlowingModel
+struct PoolingFilm{
+    G<:GasSpecies,
+    V<:Union{Nothing,GasSpecies},
+    D<:NamedTuple{<:Any,<:Tuple{Vararg{Float64}}},
+} <: AbstractBlowingModel
     free_stream::G
     volatiles::V
     n_Γ::Float64
@@ -306,7 +310,7 @@ struct PoolingFilm{G<:GasSpecies,V<:Union{Nothing,GasSpecies},N} <: AbstractBlow
     ψ0::Float64
     Λc::Float64
     Λw::Float64
-    diffusion_volume::NamedTuple{N,<:Tuple{Vararg{Float64}}}
+    diffusion_volume::D
 end
 
 function PoolingFilm(
@@ -347,7 +351,7 @@ end
 	FunctionBlowing(f)
 
 A user rule `χ = f(face, h, T_inf)`, where `face` is the
-`Discretization.BlowingFace` at the current surface iterate (outward species
+`BoundaryConditions.BlowingFace` at the current surface iterate (outward species
 mass fluxes `face.ṁ`, surface temperature `face.T_s`, the `face.material`),
 `h` the bare coefficient and `T_inf` the ambient temperature at this time.
 `f` must return 1 at zero outflow, be smooth in its arguments and accept

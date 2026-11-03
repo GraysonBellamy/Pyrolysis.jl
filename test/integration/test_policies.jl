@@ -1,0 +1,1182 @@
+using Test
+using Pyrolysis
+using Pyrolysis.Materials: DepletionLimiter, BEER_LAMBERT, SURFACE_ABSORPTION
+using Pyrolysis.States
+using Pyrolysis.Integration
+using Pyrolysis.Integration: setup, kencarp4_policy, rodas5p_policy, fbdf_policy
+using Pyrolysis.Integration: DomainCheck, NewtonCap, cap_step!, FAILURE_MEMORY_GROWTH
+using Pyrolysis.Integration: FAILURE_MEMORY_STEPS
+using Pyrolysis.Assembly: residual!
+import OrdinaryDiffEq
+using OrdinaryDiffEq: ODEProblem, DiscreteCallback, CallbackSet, init, step!
+using OrdinaryDiffEq: derivative_discontinuity!
+using OrdinaryDiffEqSDIRK: KenCarp4
+using OrdinaryDiffEq.SciMLBase: get_proposed_dt
+using LinearSolve: LinearSolve, KLUFactorization, UMFPACKFactorization
+using SparseArrays
+import LinearAlgebra
+
+# A decomposing slab whose char is lighter than the virgin solid (the mesh
+# moves), porous with intrinsic densities, permeable when `κ > 0`, and
+# absorbing in depth when `radiating`.
+function _slab(n; κ = 0.0, radiating = false)
+    virgin = SolidComponent(
+        :virgin,
+        ρ = 1100.0,
+        c = (900.0, 1.5),
+        k = (0.2, 2e-4),
+        ε = 0.8,
+        α = radiating ? 1.5 : 0.0,
+        λ = 3e-6,
+        ρ_intrinsic = 1400.0,
+    )
+    char = SolidComponent(
+        :char,
+        ρ = 300.0,
+        c = 1100.0,
+        k = 0.1,
+        ε = 0.95,
+        α = radiating ? 20.0 : 0.0,
+        λ = 3e-5,
+        κ = κ,
+        ρ_intrinsic = 1800.0,
+    )
+    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03)
+    mat = Material(
+        name = :slab,
+        mixing = MaterialMixing(κ = PARALLEL),
+        components = (virgin, char, gas),
+        reactions = (
+            Reaction(:pyro, 1 => (2, 3); A = 5e9, E = 1.4e5, h = 8e5, yields = (0.3, 0.7)),
+        ),
+        depletion_limiter = DepletionLimiter(threshold = 1.0),
+    )
+    top = radiating ? RadiativeFluxBC(3e4) : HeatFluxBC(3e4)
+    return PyrolysisProblem(
+        mesh = stretched_mesh(0.01, n, 1.15),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = top, bottom = DirichletThermalBC(500.0)),
+            mass = (
+                top = AmbientGasBC(
+                    GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (gas = 1.0,)),
+                ),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> 500.0 + 4e4 * z,
+        ξ_initial = [z -> 1100.0 * (1 - 30z), z -> 300.0 * 30z, z -> 0.5],
+        tspan = (0.0, 10.0),
+    )
+end
+
+# A domain rejection reaches FBDF between two accepted steps: the history it
+# keeps there must survive for the next proposal, which the floor on
+# OrdinaryDiffEqBDF guarantees.
+@testset "FBDF continues after a single domain rejection" begin
+    function f!(du, u, p, t)
+        du[1] = -50.0 * (u[1] - cos(t))
+        du[2] = -0.5 * (u[2] - sin(t)) + 0.1 * u[1]
+        return nothing
+    end
+    ode = ODEProblem(f!, [1.0, 0.0], (0.0, 20.0))
+    fired = Ref(false)
+    reject_once = (u, p, t) -> !fired[] && t > 5.0 ? (fired[] = true) : false
+    sol = OrdinaryDiffEq.solve(
+        ode,
+        fbdf_policy(LinearSolve.LUFactorization()).alg;
+        isoutofdomain = reject_once,
+        reltol = 1e-6,
+        abstol = 1e-8,
+    )
+    @test fired[]
+    @test OrdinaryDiffEq.SciMLBase.successful_retcode(sol)
+    @test sol.t[end] == 20.0
+end
+
+@testset "a policy names a known restart and flag rule" begin
+    alg = OrdinaryDiffEq.Rodas5P()
+    @test IntegratorPolicy(alg, :forced_dt, :keep, 1e-6).restart === :forced_dt
+    @test IntegratorPolicy(alg, :heuristic, :clear, 1e-6).restart === :heuristic
+    @test rodas5p_policy(KLUFactorization()).restart === :heuristic
+    @test default_policy(KLUFactorization()).restart === :heuristic
+    @test_throws ArgumentError IntegratorPolicy(alg, :immediate, :keep, 1e-6)
+    @test_throws ArgumentError IntegratorPolicy(alg, :solver_chosen, :raise, 1e-6)
+    @test_throws ArgumentError rodas5p_policy(KLUFactorization(); restart = :immediate)
+end
+
+@testset "domain check: admissibility, porosity and constraint residuals" begin
+    cp = setup(
+        _slab(6; κ = 1e-12, radiating = true);
+        use_ale = true,
+        radiation_model = BEER_LAMBERT,
+    )
+    layout = cp.def.layout
+    check = DomainCheck(cp; max_consecutive = 3)
+    m = check.monitor
+    @test !check(cp.u0, nothing, 0.0)
+    @test m.last <= 1e-3
+    # Crossed nodes.
+    u = copy(cp.u0)
+    u[position_index(layout, 3)] = u[position_index(layout, 2)]
+    @test check(u, nothing, 0.0)
+    @test m.rejections == 1
+    # A porosity below zero: more virgin solid than its intrinsic density fits.
+    u = copy(cp.u0)
+    V = cp.def.setup.reference.volume[2]
+    u[mass_index(layout, 2, 1)] = 1.2 * 1400.0 * V
+    @test check(u, nothing, 0.0)
+    # A velocity off its balance row, and an intensity off its attenuation row.
+    for row in (velocity_index(layout, 4), intensity_index(layout, 2))
+        u = copy(cp.u0)
+        u[row] += 1e3 * cp.abstol[row] / cp.reltol
+        @test check(u, nothing, 0.0)
+        @test m.last > 1
+        @test !check(cp.u0, nothing, 0.0)
+    end
+    # After `max_consecutive` constraint rejections the state is accepted and
+    # the monitor marked failed, for the observer to end the solve.
+    u = copy(cp.u0)
+    row = velocity_index(layout, 6)
+    u[row] += 1e3 * cp.abstol[row] / cp.reltol
+    @test all(_ -> check(u, nothing, 0.0), 1:3)
+    @test !check(u, nothing, 0.0)
+    @test m.failed
+    @test occursin("consecutive", m.message)
+end
+
+@testset "domain check: a proposal the error test rejects is left to it" begin
+    cp = setup(_slab(6; radiating = true); use_ale = true, radiation_model = BEER_LAMBERT)
+    layout = cp.def.layout
+    check = DomainCheck(cp)
+    u = copy(cp.u0)
+    u[position_index(layout, 3)] = u[position_index(layout, 2)]
+    ode = ODEProblem((du, x, p, t) -> fill!(du, 0.0), [0.0], (0.0, 1.0))
+    integrator = init(ode, OrdinaryDiffEq.Rodas5P())
+    Integration.bind_error_test!(check, integrator)
+    OrdinaryDiffEq.OrdinaryDiffEqCore.set_EEst!(integrator, 2.0)
+    @test !check(u, nothing, 0.0)
+    @test check.monitor.rejections == 0
+    OrdinaryDiffEq.OrdinaryDiffEqCore.set_EEst!(integrator, 0.5)
+    @test check(u, nothing, 0.0)
+    @test check.monitor.rejections == 1
+end
+
+@testset "the step observer ends the solve once the domain test gave up" begin
+    ode = ODEProblem((du, x, p, t) -> fill!(du, -1.0), [1.0], (0.0, 1.0))
+    integrator = init(ode, OrdinaryDiffEq.Rodas5P())
+    m = Integration.ConstraintMonitor()
+    m.failed = true
+    m.message = "a constraint residual stayed above its tolerance"
+    @test_logs (:warn, r"constraint residual stayed above") Integration._observe!(
+        integrator,
+        m,
+        NewtonCap(),
+        rodas5p_policy(KLUFactorization()),
+        u -> 0,
+    )
+    @test integrator.sol.retcode == OrdinaryDiffEq.ReturnCode.Failure
+end
+
+# A 1 mm inert slab losing 500 kW/m² through its top: its sensible energy is
+# gone at 0.6 s, and no physical state lies beyond.
+function _cooling_slab()
+    solid = SolidComponent(:solid; ρ = 1000.0, c = 1000.0, k = 1.0)
+    return PyrolysisProblem(
+        mesh = uniform_mesh(0.001, 1),
+        material = Material(name = :cooling, components = (solid,), reactions = ()),
+        bc_set = BoundaryConditionSet(
+            thermal = (top = HeatFluxBC(-5e5), bottom = AdiabaticBC()),
+        ),
+        T_initial = z -> 300.0,
+        ξ_initial = [z -> 1000.0],
+        tspan = (0.0, 1.0),
+        dt_initial = 0.01,
+        output_times = [0.0, 0.5, 1.0],
+    )
+end
+
+@testset "a cell at or below absolute zero is inadmissible: $(energy) form" for energy in (
+    :temperature,
+    :enthalpy,
+)
+    cp = setup(_cooling_slab(); energy_state = energy)
+    def, layout = cp.def, cp.def.layout
+    m = (cp.u0[mass_index(layout, 1, 1)],)
+    function at(T)
+        u = copy(cp.u0)
+        u[energy_index(layout, 1)] =
+            energy_state_value(energy_state(layout), def.setup, T, m, 1)
+        return u
+    end
+    @test below_absolute_zero(at(1.0), layout, def.setup) == 0
+    @test below_absolute_zero(at(0.0), layout, def.setup) == 1
+    @test inadmissible(at(-10.0), layout, def.setup, cp.abstol)
+    # The raw-state test agrees with the inversion, which the trial
+    # temperature keeps evaluable.
+    du = zeros(length(cp.u0))
+    residual!(du, at(-10.0), def, 0.0, cp.ws)
+    @test cp.ws.derived.T[1] ≈ -10.0 rtol = 1e-10
+    @test all(isfinite, du)
+    check = DomainCheck(cp)
+    @test check(at(-10.0), nothing, 0.0)
+    @test check.monitor.cold == 1
+    @test !check(cp.u0, nothing, 0.0)
+    @test check.monitor.cold == 0
+    @test_throws ArgumentError integrate(cp; u0 = at(-10.0))
+
+    # Adaptive steps stop where the energy runs out, and say why.
+    sol = @test_logs (:warn, r"absolute zero") match_mode = :any integrate(cp)
+    @test sol.retcode !== :Success
+    @test 0.55 < sol.t[end] <= 0.6 + 1e-9
+    @test minimum(sol.T) > 0
+    # A fixed step, which the domain test never sees, ends the solve at the
+    # first accepted state below zero.
+    sol = @test_logs (:warn, r"absolute zero") match_mode = :any integrate(
+        cp;
+        adaptive = false,
+        dt = 0.07,
+    )
+    @test sol.retcode === :Failure
+    @test sol.t[end] ≈ 0.63
+end
+
+# Stiff scalar relaxation towards 1: after the transient the controller grows
+# the step by the largest factor it allows. The first right-hand side past
+# `t_fail` returns NaN, which fails that stage's Newton once.
+function _relaxation_problem(; t_fail = Inf)
+    armed = Ref(isfinite(t_fail))
+    f(u, p, t) =
+        if armed[] && t > t_fail
+            armed[] = false
+            oftype(u, NaN)
+        else
+            -50.0 * (u - 1.0) * (1.0 + u^2)
+        end
+    return ODEProblem(f, 0.0, (0.0, 20.0))
+end
+
+_cap_callback(cap) = DiscreteCallback(
+    (u, t, integ) -> true,
+    integ -> (cap_step!(integ, cap); derivative_discontinuity!(integ, true));
+    save_positions = (false, false),
+)
+
+@testset "Newton-failure step cap" begin
+    g, M = FAILURE_MEMORY_GROWTH, FAILURE_MEMORY_STEPS
+    @test g == 1.25
+    @test M == 20
+    integ = init(
+        _relaxation_problem(t_fail = 0.2),
+        KenCarp4();
+        callback = _cap_callback(NewtonCap()),
+        abstol = 1e-8,
+        reltol = 1e-6,
+    )
+    rows = NamedTuple{(:dt, :proposed, :nlfail),Tuple{Float64,Float64,Int}}[]
+    while integ.t < 20.0 && length(rows) < 400
+        step!(integ)
+        push!(
+            rows,
+            (
+                dt = integ.t - integ.tprev,
+                proposed = get_proposed_dt(integ),
+                nlfail = integ.stats.nnonlinconvfail,
+            ),
+        )
+    end
+    i_fail = findfirst(r -> r.nlfail > 0, rows)
+    @test i_fail !== nothing
+    cap = g * rows[i_fail].dt
+    for i = i_fail:(i_fail+M-1)
+        @test rows[i].proposed <= cap * (1 + 1e-12)
+    end
+    @test any(i -> rows[i].proposed == cap, i_fail:(i_fail+M-1))
+    @test rows[i_fail+M].proposed > cap
+
+    # Without a failure the trajectory is the free one.
+    kw = (; abstol = 1e-8, reltol = 1e-6)
+    noop = DiscreteCallback(
+        (u, t, integ) -> true,
+        integ -> derivative_discontinuity!(integ, true);
+        save_positions = (false, false),
+    )
+    free = OrdinaryDiffEq.solve(_relaxation_problem(), KenCarp4(); callback = noop, kw...)
+    capped = OrdinaryDiffEq.solve(
+        _relaxation_problem(),
+        KenCarp4();
+        callback = _cap_callback(NewtonCap()),
+        kw...,
+    )
+    @test free.stats.nnonlinconvfail == 0
+    @test capped.t == free.t
+    @test capped.u == free.u
+end
+
+# A slab that converts at the same rate everywhere: isothermal, uniform, the
+# activation energy zero, so its thickness follows the conversion exactly.
+function _uniform_slab(n)
+    a = SolidComponent(:a, φ = 0.25, λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.5)
+    b = SolidComponent(:b, φ = 0.25, λ = 0.0, ρ = 400.0, c = 1000.0, k = 0.5)
+    g = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03)
+    mat = Material(
+        name = :uniform,
+        components = (a, b, g),
+        reactions = (
+            Reaction(:r, 1 => (2, 3); A = 0.5, E = 0.0, h = 0.0, yields = (0.5, 0.5)),
+        ),
+        depletion_limiter = DepletionLimiter(enabled = false),
+    )
+    return PyrolysisProblem(
+        mesh = stretched_mesh(0.02, n, 1.1),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = DirichletThermalBC(400.0), bottom = DirichletThermalBC(400.0)),
+        ),
+        T_initial = z -> 400.0,
+        ξ_initial = [z -> 1000.0, z -> 0.0, z -> 0.0],
+        tspan = (0.0, 4.0),
+    )
+end
+
+@testset "integrator policies: $name, $(energy) form" for (name, policy) in (
+        ("KenCarp4", kencarp4_policy(KLUFactorization())),
+        ("Rodas5P", rodas5p_policy(KLUFactorization())),
+        (
+            "Rodas5P, forced restart",
+            rodas5p_policy(KLUFactorization(); restart = :forced_dt),
+        ),
+        (
+            "Rodas5P, solver-chosen restart",
+            rodas5p_policy(KLUFactorization(); restart = :solver_chosen),
+        ),
+        ("FBDF", fbdf_policy(KLUFactorization())),
+    ),
+    energy in (:temperature, :enthalpy)
+
+    @test policy.restart in (:solver_chosen, :forced_dt, :heuristic)
+    sol = Integration.solve(
+        _uniform_slab(6);
+        energy_state = energy,
+        use_ale = true,
+        abstol = 1e-10,
+        reltol = 1e-9,
+        saveat = [0.0, 1.0, 2.0, 4.0],
+        integrator_policy = policy,
+    )
+    @test sol.retcode === :Success
+    L0 = sol.extras.thickness_history[1]
+    for (k, t) in enumerate(sol.t)
+        X = 1 - exp(-0.5t)
+        @test sol.extras.thickness_history[k] / L0 ≈ 1 + (0.5 * 1000 / 400 - 1) * X rtol =
+            1e-6
+    end
+    @test sol.statistics.largest_constraint_residual <= 1
+end
+
+# Two decks that differ in component count, property types, reactions,
+# boundary conditions, radiation model and gas transport.
+function _plain_deck()
+    mat = Material(
+        name = :plain_deck,
+        components = (
+            SolidComponent(
+                :resin,
+                φ = 0.3,
+                ρ = 1300.0,
+                c = 1700.0,
+                k = 0.20,
+                ε = 0.9,
+                λ = 2e-5,
+            ),
+            GaseousComponent(:vapor, M = 0.080, c = 1400.0, k = 0.03),
+        ),
+        reactions = (Reaction(:cure, 1 => 2, A = 1e12, E = 1.6e5, h = 300e3),),
+    )
+    return PyrolysisProblem(
+        mesh = uniform_mesh(5e-3, 8),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = HeatFluxBC(40e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
+                bottom = AdiabaticBC(),
+            ),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        tspan = (0.0, 5.0),
+        output_times = [0.0, 5.0],
+    )
+end
+
+function _rich_deck()
+    virgin = SolidComponent(
+        :virgin,
+        ρ = 500.0,
+        c = CallableProperty(T -> 1500.0 + 0.5 * (T - 300.0)),
+        k = CallableProperty(T -> 0.15 * (T / 300.0)^0.5),
+        ε = 0.9,
+        α = 5.0,
+        κ = 1e-14,
+        ρ_intrinsic = 1500.0,
+        λ = 1e-5,
+    )
+    char = SolidComponent(
+        :char,
+        ρ = 150.0,
+        c = 1100.0,
+        k = 0.08,
+        ε = 0.95,
+        α = 5.0,
+        κ = 1e-12,
+        ρ_intrinsic = 1500.0,
+        λ = 1e-5,
+    )
+    gas = GaseousComponent(:gas, M = 0.06, c = 1800.0, k = 0.03)
+    mat = Material(
+        name = :rich_deck,
+        components = (virgin, char, gas),
+        reactions = (
+            Reaction(
+                :pyrolysis,
+                1 => (2, 3);
+                A = 1e10,
+                E = 150e3,
+                h = 300e3,
+                yields = (0.25, 0.75),
+            ),
+        ),
+    )
+    return PyrolysisProblem(
+        mesh = uniform_mesh(0.01, 8),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = RadiativeFluxBC(50e3) +
+                      RadiativeBC(T_inf = 300.0) +
+                      ConvectiveBC(h = 10.0, T_inf = 300.0),
+                bottom = RadiativeBC(ε = 0.9, T_inf = 300.0),
+            ),
+            mass = (
+                top = AmbientGasBC(
+                    GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (gas = 1.0,)),
+                ),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        tspan = (0.0, 5.0),
+        output_times = [0.0, 5.0],
+    )
+end
+
+# The integrator's type at the first step; every solve gets a probe of the
+# same type.
+function _solve_types(problem; kw...)
+    seen = DataType[]
+    probe = DiscreteCallback(
+        (u, t, integrator) -> isempty(seen),
+        integrator -> push!(seen, typeof(integrator));
+        save_positions = (false, false),
+    )
+    sol = Integration.solve(problem; callback = probe, kw...)
+    @test sol.retcode === :Success
+    return only(seen), typeof(sol.raw_solution)
+end
+
+# On a fixed mesh in-depth radiation adds algebraic rows, and so a mass
+# matrix: a different solver configuration, compared with itself.
+@testset "the integrator's type does not depend on the problem: $name" for (
+    name,
+    plain,
+    rich,
+) in (
+    ("fixed mesh", (;), (radiation_model = SURFACE_ABSORPTION,)),
+    (
+        "fixed mesh with in-depth radiation",
+        (radiation_model = BEER_LAMBERT,),
+        (radiation_model = BEER_LAMBERT,),
+    ),
+    ("moving mesh", (use_ale = true,), (use_ale = true, radiation_model = BEER_LAMBERT)),
+    (
+        "moving mesh with deactivation",
+        (use_ale = true, deactivation = true),
+        (use_ale = true, radiation_model = BEER_LAMBERT, deactivation = true),
+    ),
+)
+    integrator_plain, solution_plain = _solve_types(_plain_deck(); plain...)
+    integrator_rich, solution_rich = _solve_types(_rich_deck(); rich...)
+    @test integrator_plain === integrator_rich
+    @test solution_plain === solution_rich
+end
+
+@testset "a read-only user callback leaves every policy's trajectory unchanged" begin
+    problem = _uniform_slab(12)
+    probe = DiscreteCallback(
+        (u, t, integrator) -> true,
+        integrator -> nothing;
+        save_positions = (false, false),
+    )
+    for policy in (
+        rodas5p_policy(KLUFactorization()),
+        kencarp4_policy(KLUFactorization()),
+        fbdf_policy(KLUFactorization()),
+    )
+        kwargs = (
+            use_ale = true,
+            integrator_policy = policy,
+            saveat = Float64[],
+            abstol = 1e-8,
+            reltol = 1e-6,
+        )
+        plain = Integration.solve(problem; kwargs...)
+        @test plain.retcode === :Success
+        for callback in (probe, CallbackSet(probe))
+            probed = Integration.solve(problem; kwargs..., callback)
+            @test probed.raw_solution.t == plain.raw_solution.t
+            @test probed.raw_solution.u == plain.raw_solution.u
+            @test probed.statistics.accepted == plain.statistics.accepted
+            @test probed.statistics.rhs_evaluations == plain.statistics.rhs_evaluations
+        end
+    end
+end
+
+@testset "repeated solves are bit-identical under each linear solver" begin
+    problem = _uniform_slab(12)
+    for linear_solver in (StructuredKLU(), KLUFactorization(), UMFPACKFactorization())
+        sols = [
+            Integration.solve(
+                problem;
+                use_ale = true,
+                integrator_policy = default_policy(linear_solver),
+                saveat = Float64[],
+                abstol = 1e-8,
+                reltol = 1e-6,
+            ) for _ = 1:2
+        ]
+        @test sols[1].retcode === :Success
+        @test sols[2].raw_solution.t == sols[1].raw_solution.t
+        @test sols[2].raw_solution.u == sols[1].raw_solution.u
+        @test sols[2].statistics.accepted == sols[1].statistics.accepted
+    end
+end
+
+# In-depth radiation adds the intensity rows, and on a fixed mesh a mass
+# matrix: a solver configuration of its own on each mesh.
+@testset "repeated solves with in-depth radiation are bit-identical under each linear solver: use_ale = $ale" for ale in
+                                                                                                                  (
+    false,
+    true,
+)
+    problem = _slab(12; radiating = true)
+    for linear_solver in (StructuredKLU(), KLUFactorization(), UMFPACKFactorization())
+        sols = [
+            Integration.solve(
+                problem;
+                use_ale = ale,
+                radiation_model = BEER_LAMBERT,
+                integrator_policy = default_policy(linear_solver),
+                saveat = Float64[],
+                abstol = 1e-8,
+                reltol = 1e-6,
+            ) for _ = 1:2
+        ]
+        @test sols[1].retcode === :Success
+        @test sols[2].raw_solution.t == sols[1].raw_solution.t
+        @test sols[2].raw_solution.u == sols[1].raw_solution.u
+        @test sols[2].statistics.accepted == sols[1].statistics.accepted
+    end
+end
+
+# An ablating solid heated at the top, its heat capacity rising with the
+# temperature so that the caloric inversion is nonlinear: its cells thin and
+# deactivate.
+function _ablating(n)
+    ρ, c, k = 1000.0, 1000.0, 1.0
+    R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
+    v = 2.0e-3
+    A = v^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (k / (ρ * c) * R * Tp^2)
+    mat = Material(
+        name = :ablator,
+        components = (
+            SolidComponent(
+                :solid,
+                φ = 0.3,
+                ρ = ρ,
+                c = PolynomialProperty((700.0, 0.8, -1e-4)),
+                k = k,
+                λ = 1e-6,
+            ),
+            GaseousComponent(:gas, M = 0.05, c = c, k = 0.02),
+        ),
+        reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
+    )
+    return PyrolysisProblem(
+        mesh = uniform_mesh(3e-3, n),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = HeatFluxBC(2.8e6), bottom = AdiabaticBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> T0 + 1e5 * z,
+        ξ_initial = [z -> ρ, z -> 0.0],
+        tspan = (0.0, 0.8),
+    )
+end
+
+@testset "every integration starts the caloric inversion from the set-up temperatures" begin
+    problem = _ablating(30)
+    kw = (energy_state = :enthalpy, use_ale = true, deactivation = true)
+    cp = setup(problem; kw...)
+    @test cp.ws.T_warm == cp.T0
+    once = integrate(cp; saveat = Float64[])
+    @test !isempty(once.events)
+    # An evaluation outside the integrator, at enthalpies 1 % above the initial
+    # ones, moves the inversion's starting point.
+    layout = cp.def.layout
+    v = copy(cp.u0)
+    for i in eachindex(cp.T0)
+        v[energy_index(layout, i)] *= 1.01
+    end
+    residual!(similar(v), v, cp.def, 0.0, cp.ws)
+    @test cp.ws.T_warm != cp.T0
+    again = integrate(cp; saveat = Float64[])
+    fresh = integrate(setup(problem; kw...); saveat = Float64[])
+    for sol in (again, fresh)
+        @test sol.raw_solution.t == once.raw_solution.t
+        @test sol.raw_solution.u == once.raw_solution.u
+    end
+end
+
+@testset "the structured KLU factors the union of W's nonzeros" begin
+    # A prototype with a full diagonal and two off-diagonal entries per column.
+    n = 6
+    rows = Int[]
+    cols = Int[]
+    for j = 1:n, i in (j - 1, j, j + 1)
+        1 <= i <= n && (push!(rows, i); push!(cols, j))
+    end
+    prototype = sparse(rows, cols, ones(length(rows)), n, n)
+    tridiagonal(lower, upper) = sparse(
+        vcat(1:n, 2:n, 1:(n-1)),
+        vcat(1:n, 1:(n-1), 2:n),
+        vcat(fill(4.0, n), lower, upper),
+        n,
+        n,
+    )
+    b = collect(1.0:n)
+    cache = LinearSolve.init(LinearSolve.LinearProblem(copy(prototype), b), StructuredKLU())
+    c = cache.cacheval
+    @test c isa Integration.StructuredKLUCache
+    @test nnz(c.union) == n
+    # The first W grows the union by its nonzeros; a stored zero stays out.
+    W1 = tridiagonal(fill(-1.0, n - 1), vcat(0.0, fill(-1.0, n - 2)))
+    cache.A = W1
+    @test LinearSolve.solve!(cache).u ≈ Matrix(W1) \ b
+    @test c.growths == 1
+    @test nnz(c.union) == nnz(dropzeros(W1))
+    # A W within the union refactors without growing it.
+    W2 = tridiagonal(fill(-0.5, n - 1), vcat(0.0, fill(-2.0, n - 2)))
+    cache.A = W2
+    @test LinearSolve.solve!(cache).u ≈ Matrix(W2) \ b
+    @test c.growths == 1
+    # A nonzero outside the union grows it once more, to the prototype here.
+    W3 = tridiagonal(fill(-1.0, n - 1), fill(-1.0, n - 1))
+    cache.A = W3
+    @test LinearSolve.solve!(cache).u ≈ Matrix(W3) \ b
+    @test c.growths == 2
+    @test nnz(c.union) == nnz(prototype)
+    # An entry outside the prototype is an error.
+    cache.A = sparse([1, n], [n, 1], [1.0, 1.0], n, n) + W3
+    @test_throws ErrorException LinearSolve.solve!(cache)
+end
+
+@testset "the structured KLU factors every W on the union as it stands" begin
+    # A union whose first W holds stored zeros, then a growth, then a W with as
+    # many nonzeros in other places: a reduction of the stored zeros inside the
+    # inner KLU would refactor that W on the structure of the one before.
+    n = 8
+    tridiagonal(diagonal, lower, upper) = sparse(
+        vcat(1:n, 2:n, 1:(n-1)),
+        vcat(1:n, 1:(n-1), 2:n),
+        vcat(diagonal, lower, upper),
+        n,
+        n,
+    )
+    prototype = tridiagonal(ones(n), ones(n - 1), ones(n - 1))
+    sequence = (
+        tridiagonal(
+            vcat(0.0, 0.0, fill(4.0, n - 2)),
+            vcat(1.0, zeros(n - 2)),
+            vcat(1.0, zeros(n - 2)),
+        ),
+        tridiagonal(
+            vcat(0.0, 0.0, fill(4.0, n - 2)),
+            vcat(1.0, zeros(n - 2)),
+            vcat(1.0, 0.0, -1.0, zeros(n - 4)),
+        ),
+        tridiagonal(
+            vcat(2.0, 2.0, fill(4.0, n - 2)),
+            zeros(n - 1),
+            vcat(0.0, 0.0, -1.0, zeros(n - 4)),
+        ),
+    )
+    b = collect(1.0:n)
+    cache = LinearSolve.init(LinearSolve.LinearProblem(copy(prototype), b), StructuredKLU())
+    for W in sequence
+        cache.A = W
+        @test LinearSolve.solve!(cache).u ≈ Matrix(W) \ b
+    end
+    @test cache.cacheval.growths == 2
+end
+
+@testset "the structured KLU keeps one ordering as the union grows" begin
+    n = 6
+    rows = Int[]
+    cols = Int[]
+    for j = 1:n, i in (j - 1, j, j + 1)
+        1 <= i <= n && (push!(rows, i); push!(cols, j))
+    end
+    prototype = sparse(rows, cols, ones(length(rows)), n, n)
+    W(lower, upper) = sparse(
+        vcat(1:n, 2:n, 1:(n-1)),
+        vcat(1:n, 1:(n-1), 2:n),
+        vcat(fill(4.0, n), lower, upper),
+        n,
+        n,
+    )
+    b = collect(1.0:n)
+    cache = LinearSolve.init(LinearSolve.LinearProblem(copy(prototype), b), StructuredKLU())
+    c = cache.cacheval
+    order = copy(c.order)
+    @test sort(order) == 0:(n-1)
+    # Lower triangular, then upper, then both: each grows the union and takes its
+    # own block triangular form on the same ordering.
+    for (lower, upper, growths, blocks) in (
+        (fill(-1.0, n - 1), zeros(n - 1), 1, n),
+        (fill(-1.0, n - 1), vcat(-1.0, zeros(n - 2)), 2, n - 1),
+        (fill(-1.0, n - 1), fill(-1.0, n - 1), 3, 1),
+    )
+        A = W(lower, upper)
+        cache.A = A
+        @test LinearSolve.solve!(cache).u ≈ Matrix(A) \ b
+        @test c.growths == growths
+        @test c.order == order
+        @test c.inner.cacheval.symbolic.ordering == 2
+        @test c.inner.cacheval.symbolic.nblocks == blocks
+    end
+    # A zero on the diagonal takes its pivot from a block of two.
+    A = W(fill(-1.0, n - 1), fill(-1.0, n - 1))
+    A[1, 1] = 0.0
+    cache.A = A
+    @test LinearSolve.solve!(cache).u ≈ Matrix(A) \ b
+end
+
+@testset "the structured KLU leaves out entries negligible to the solve" begin
+    n = 6
+    rows = Int[]
+    cols = Int[]
+    for j = 1:n, i in (j - 1, j, j + 1)
+        1 <= i <= n && (push!(rows, i); push!(cols, j))
+    end
+    prototype = sparse(rows, cols, ones(length(rows)), n, n)
+    # One entry w₂₁ on a diagonal of 4; the others of the prototype are stored zeros.
+    W(entry; diagonal = fill(4.0, n)) = sparse(
+        vcat(1:n, 2:n, 1:(n-1)),
+        vcat(1:n, 1:(n-1), 2:n),
+        vcat(diagonal, entry, zeros(n - 2), zeros(n - 1)),
+        n,
+        n,
+    )
+    b = collect(1.0:n)
+    bar = eps() * 4.0
+    fresh() =
+        LinearSolve.init(LinearSolve.LinearProblem(copy(prototype), b), StructuredKLU())
+    grown(cache, A) = (cache.A = A; LinearSolve.solve!(cache); cache.cacheval)
+
+    # Unbound, every nonzero counts, however small.
+    c = grown(fresh(), W(1e-3bar))
+    @test c.growths == 1
+    @test nnz(c.union) == n + 1
+
+    # Bound, an entry under the bar stays out and one over it grows the union.
+    cache = fresh()
+    c = cache.cacheval
+    c.tolerance = ones(n)
+    grown(cache, W(0.5bar))
+    @test c.growths == 0
+    @test nnz(c.union) == n
+    grown(cache, W(2bar))
+    @test c.growths == 1
+    @test nnz(c.union) == n + 1
+
+    # The test depends on neither the row's scale nor the unknowns' units: a row
+    # taken by `r` and an unknown taken by `s`, tolerance with it, change nothing.
+    for r in (1e-12, 1.0, 1e12),
+        s in (1e-12, 1.0, 1e12),
+        (entry, growths) in ((0.5bar, 0), (2bar, 1))
+
+        cache = fresh()
+        c = cache.cacheval
+        c.tolerance = ones(n)
+        c.tolerance[1] = s
+        d = fill(4.0, n)
+        d[1] *= 1 / s
+        d[2] *= r
+        grown(cache, W(entry * r / s; diagonal = d))
+        @test c.growths == growths
+    end
+
+    # A growth takes in what stands above the lower bar, and nothing under it.
+    cache = fresh()
+    c = cache.cacheval
+    c.tolerance = ones(n)
+    A = W(2bar)
+    A[3, 2] = 0.5bar
+    A[4, 3] = 1e-4bar
+    grown(cache, A)
+    @test c.growths == 1
+    @test nnz(c.union) == n + 2
+    @test LinearSolve.solve!(cache).u ≈ Matrix(A) \ b
+
+    # A zero diagonal gives no bar, and a NaN does not pass one.
+    cache = fresh()
+    c = cache.cacheval
+    c.tolerance = ones(n)
+    d = fill(4.0, n)
+    d[2] = 0.0
+    grown(cache, W(1e-30; diagonal = d))
+    @test c.growths == 1
+    cache = fresh()
+    c = cache.cacheval
+    c.tolerance = ones(n)
+    grown(cache, W(NaN))
+    @test c.growths == 1
+
+    # A tolerance that is not positive gives no scale, so it is not bound.
+    cache = fresh()
+    c = cache.cacheval
+    binder = (; cache = (; linsolve = cache))
+    Integration.bind_tolerances!(binder, zeros(n))
+    @test isempty(c.tolerance)
+    Integration.bind_tolerances!(binder, ones(n))
+    @test c.tolerance == ones(n)
+end
+
+@testset "a solve binds its tolerances to the structured KLU" begin
+    problem = _slab(6)
+    for policy in (default_policy(), fbdf_policy(), kencarp4_policy())
+        bound = Ref{Any}(nothing)
+        probe = DiscreteCallback(
+            (u, t, integrator) -> true,
+            integrator -> begin
+                bound[] = (
+                    Integration._structured_cache(integrator.cache),
+                    integrator.opts.abstol,
+                )
+            end;
+            save_positions = (false, false),
+        )
+        sol = Integration.solve(problem; integrator_policy = policy, callback = probe)
+        @test sol.retcode === :Success
+        c, abstol = bound[]
+        @test c isa Integration.StructuredKLUCache
+        @test c.tolerance === abstol
+    end
+    # Any other linear solver has no cache to bind.
+    @test Integration._structured_cache((; linsolve = (; cacheval = nothing))) === nothing
+    @test Integration._structured_cache((;)) === nothing
+end
+
+@testset "the lumped mass forms W in place on the Jacobian's structure" begin
+    n = 5
+    J = sparse(
+        vcat(1:n, 2:n, 1:(n-1)),
+        vcat(1:n, 1:(n-1), 2:n),
+        vcat(fill(2.0, n), fill(-1.0, n - 1), fill(0.5, n - 1)),
+        n,
+        n,
+    )
+    J[2, 1] = 0.0
+    d = [1.0, 0.0, 1.0, 1.0, 0.0]
+    M = LinearAlgebra.Diagonal(Pyrolysis.States.LumpedMass(d, Int[]))
+    @test M == LinearAlgebra.Diagonal(d)
+    @test M * ones(n) == d
+    W = copy(J)
+    fill!(nonzeros(W), 1.0)
+    form! = Integration.OrdinaryDiffEqDifferentiation.jacobian2W!
+    form!(W, M, 0.25, J)
+    @test M.diag.shifted == [J.colptr[j] + (j > 1) for j in findall(!iszero, d)]
+    @test W.colptr == J.colptr && W.rowval == J.rowval
+    @test W == J - LinearAlgebra.Diagonal(d) / 0.25
+    allocated(W, M, J) = @allocated form!(W, M, 0.5, J)
+    allocated(W, M, J)
+    @test allocated(W, M, J) == 0
+    # A mass other than one scales its row's shift.
+    scaled = [2.0, 0.0, 0.5, 1.0, 0.0]
+    form!(W, LinearAlgebra.Diagonal(Pyrolysis.States.LumpedMass(scaled, Int[])), 0.25, J)
+    @test W == J - LinearAlgebra.Diagonal(scaled) / 0.25
+end
+
+@testset "the structured KLU takes a W on part of the prototype" begin
+    n = 4
+    b = collect(1.0:n)
+    W = sparse([4.0 0.0 1.0 0.0; 0.0 3.0 0.0 0.0; 1.0 0.0 5.0 0.0; 0.0 2.0 0.0 6.0])
+    prototype = sparse(ones(n, n))
+    @test nnz(W) < nnz(prototype)
+    cache = LinearSolve.init(LinearSolve.LinearProblem(copy(prototype), b), StructuredKLU())
+    cache.A = W
+    @test LinearSolve.solve!(cache).u ≈ Matrix(W) \ b
+    @test cache.cacheval.growths == 1
+    # An entry outside the prototype, or another size, is an error.
+    diagonal = sparse(1.0LinearAlgebra.I, n, n)
+    cache = LinearSolve.init(LinearSolve.LinearProblem(copy(diagonal), b), StructuredKLU())
+    cache.A = W
+    @test_throws ErrorException LinearSolve.solve!(cache)
+    cache.A = sparse(1.0LinearAlgebra.I, n + 1, n + 1)
+    @test_throws ErrorException LinearSolve.solve!(cache)
+    # A plain diagonal mass matrix has no method of its own, so the integrator forms
+    # W by a sparse broadcast, which drops the stored zeros of a full prototype.
+    f!(du, u, p, t) = begin
+        du[1] = -u[1]
+        du[2] = u[1] - u[2]
+        du[3] = u[1] + u[2] + u[3] - 1.0
+        return nothing
+    end
+    jac!(J, u, p, t) = begin
+        fill!(nonzeros(J), 0.0)
+        J[1, 1] = -1.0
+        J[2, 1] = 1.0
+        J[2, 2] = -1.0
+        J[3, 1] = 1.0
+        J[3, 2] = 1.0
+        J[3, 3] = 1.0
+        return nothing
+    end
+    fun = OrdinaryDiffEq.ODEFunction(
+        f!;
+        mass_matrix = LinearAlgebra.Diagonal([1.0, 1.0, 0.0]),
+        jac = jac!,
+        jac_prototype = sparse(ones(3, 3)),
+    )
+    sol = OrdinaryDiffEq.solve(
+        ODEProblem(fun, [1.0, 0.0, 0.0], (0.0, 1.0)),
+        Integration.Rodas5P(
+            autodiff = OrdinaryDiffEq.AutoFiniteDiff(),
+            linsolve = StructuredKLU(),
+        );
+        reltol = 1e-8,
+        abstol = 1e-10,
+    )
+    @test sol.retcode == OrdinaryDiffEq.ReturnCode.Success
+    @test sol.u[end] ≈ [exp(-1.0), exp(-1.0), 1.0 - 2.0exp(-1.0)] rtol = 1e-6
+end
+
+@testset "the time derivative of the right-hand side" begin
+    _problem(q; tspan = (0.0, 10.0), dt_initial = 1e-4) = PyrolysisProblem(
+        mesh = uniform_mesh(0.01, 6),
+        material = _slab(6).material,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = RadiativeFluxBC(q), bottom = AdiabaticBC()),
+        ),
+        tspan = tspan,
+        dt_initial = dt_initial,
+    )
+    time_free = setup(_problem(5e4); use_ale = true)
+    timed = setup(_problem(t -> 5e4 + 1e3t); use_ale = true)
+    @test !Integration._reads_time(time_free)
+    @test Integration._reads_time(timed)
+    rhs!(cp) = (du, u, p, t) -> residual!(du, u, cp.def, t, cp.ws)
+    # Without a time in the residual, its value at two times is the same bits,
+    # so the zero the method reads is exact.
+    a, b = zero(time_free.u0), zero(time_free.u0)
+    rhs!(time_free)(a, time_free.u0, nothing, 1.0)
+    rhs!(time_free)(b, time_free.u0, nothing, 2.0)
+    @test a == b
+    dT = ones(length(time_free.u0))
+    Integration._time_derivative(rhs!(time_free), time_free)(dT, time_free.u0, nothing, 1.0)
+    @test iszero(dT)
+    # With one, the forward difference, and backward at the end of the span.
+    h = sqrt(eps(Float64))
+    dT = zero(timed.u0)
+    derivative! = Integration._time_derivative(rhs!(timed), timed)
+    a, b = zero(dT), zero(dT)
+    derivative!(dT, timed.u0, nothing, 1.0)
+    rhs!(timed)(a, timed.u0, nothing, 1.0 + h)
+    rhs!(timed)(b, timed.u0, nothing, 1.0)
+    @test dT == (a .- b) ./ h
+    @test any(!iszero, dT)
+    derivative!(dT, timed.u0, nothing, 10.0)
+    step = 10.0 * h
+    rhs!(timed)(a, timed.u0, nothing, 10.0 - step)
+    rhs!(timed)(b, timed.u0, nothing, 10.0)
+    @test dT == (a .- b) ./ (-step)
+    # The difference stays inside the span, whatever the size of the state.
+    @test Integration._time_step(1.0, 0.0, 10.0) == h
+    @test Integration._time_step(1e4 - 1e-4, 0.0, 1e4) == -(1e4 - 1e-4) * h
+    @test Integration._time_step(0.0, 0.0, 1e-3) == h
+    @test Integration._time_step(0.0, 0.0, 1e-9) == 1e-9
+    @test Integration._time_step(1e-9, 0.0, 1e-9) == -1e-9
+    for energy_state in (:temperature, :enthalpy), t_end in (1e-3, 1e-6)
+        seen = Float64[]
+        flux = t -> begin
+            push!(seen, t)
+            return 3e4 * sqrt(t)
+        end
+        short = _problem(flux; tspan = (0.0, t_end), dt_initial = t_end / 100)
+        sol = Integration.solve(short; energy_state)
+        @test sol.retcode === :Success
+        @test minimum(seen) >= 0.0
+        @test maximum(seen) <= t_end + 4eps(t_end)
+    end
+    # A function of the temperature is no reason to difference in time.
+    lawed = PyrolysisProblem(
+        mesh = uniform_mesh(0.01, 6),
+        material = _slab(6).material,
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = RadiativeBC(ε = T -> 0.9, T_inf = 900.0),
+                bottom = AdiabaticBC(),
+            ),
+        ),
+        tspan = (0.0, 10.0),
+    )
+    @test !Integration._reads_time(setup(lawed))
+    # The right-hand sides the difference runs are in the statistics.
+    free = Integration.solve(_problem(5e4)).statistics
+    reading = Integration.solve(_problem(t -> 5e4)).statistics
+    @test reading.accepted == free.accepted
+    @test reading.rhs_evaluations - free.rhs_evaluations >= free.accepted
+    # In the enthalpy form a difference of residuals from different warm starts
+    # would read round-off as a time derivative. A constant written as a function
+    # of the time is then the same solve, down to the bits, at a tight tolerance.
+    _conducting(q) = PyrolysisProblem(
+        mesh = uniform_mesh(0.01, 100),
+        material = Material(
+            name = :conducting,
+            components = (
+                SolidComponent(:solid, ρ = 1000.0, c = 1400.0, k = 0.2, α = 1.0),
+            ),
+            reactions = (),
+        ),
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = RadiativeFluxBC(q, absorptivity = 1.0) +
+                      ConvectiveBC(h = 20.0, T_inf = 300.0),
+                bottom = AdiabaticBC(),
+            ),
+        ),
+        T_initial = z -> 300.0,
+        ξ_initial = [z -> 1000.0],
+        tspan = (0.0, 180.0),
+    )
+    tight = (
+        energy_state = :enthalpy,
+        radiation_model = BEER_LAMBERT,
+        abstol = 1e-12,
+        reltol = 1e-10,
+    )
+    constant = Integration.solve(_conducting(25e3); tight...)
+    written = Integration.solve(_conducting(t -> 25e3); tight...)
+    @test written.statistics.accepted == constant.statistics.accepted
+    @test written.statistics.rejected == constant.statistics.rejected == 0
+    @test written.raw_solution.u[end] == constant.raw_solution.u[end]
+    # The difference leaves the warm start as it found it.
+    enthalpy = setup(_conducting(t -> 25e3); energy_state = :enthalpy)
+    enthalpy.ws.T_warm .+= 1e-9
+    warm = copy(enthalpy.ws.T_warm)
+    Integration._time_derivative(rhs!(enthalpy), enthalpy)(
+        zero(enthalpy.u0),
+        enthalpy.u0,
+        nothing,
+        1.0,
+    )
+    @test enthalpy.ws.T_warm == warm
+end
+
+@testset "the domain test's residual serves the next step" begin
+    cp = setup(_slab(6))
+    check = DomainCheck(cp)
+    u = copy(cp.u0)
+    du, fresh = zero(u), zero(u)
+    Integration.evaluate!(check, u, 1.0)
+    @test Integration.reuse!(du, check, u, 1.0)
+    residual!(fresh, u, cp.def, 1.0, cp.ws)
+    @test du == fresh
+    # Only at that state and time, and not once an event has dropped it.
+    @test !Integration.reuse!(du, check, u, 2.0)
+    moved = copy(u)
+    moved[1] += 1e-12
+    @test !Integration.reuse!(du, check, moved, 1.0)
+    Integration.forget!(check)
+    @test !Integration.reuse!(du, check, u, 1.0)
+    # What it serves costs no evaluation; what it does not is one.
+    check = DomainCheck(cp)
+    Integration.evaluate!(check, u, 1.0)
+    @test check.evaluations[] == 1
+    @test Integration.right_hand_side!(du, check, u, 1.0) === du
+    @test check.evaluations[] == 1
+    Integration.right_hand_side!(du, check, u, 2.0)
+    @test check.evaluations[] == 2
+    residual!(fresh, u, cp.def, 2.0, cp.ws)
+    @test du == fresh
+end
+
+# The KLU factorization in Rosenbrock's linear cache, a new object exactly
+# when KLU analyses afresh.
+_klu(cacheval) = cacheval
+_klu(cacheval::Integration.StructuredKLUCache) = cacheval.inner.cacheval
+
+@testset "one KLU analysis per growth of the union, use_ale = $ale" for ale in (true, false)
+    problem = _slab(12)
+    @test default_linear_solver() isa StructuredKLU
+    function factored(linear_solver)
+        factorizations = UInt[]
+        last = Ref{Any}(nothing)
+        probe = DiscreteCallback(
+            (u, t, integrator) -> true,
+            integrator -> begin
+                local cacheval = integrator.cache.linsolve.cacheval
+                push!(factorizations, objectid(_klu(cacheval)))
+                last[] = cacheval
+            end;
+            save_positions = (false, false),
+        )
+        sol = Integration.solve(
+            problem;
+            use_ale = ale,
+            integrator_policy = default_policy(linear_solver),
+            callback = probe,
+            # Adaptive step times can differ by roundoff across factorizations.
+            # Compare the trajectories at common physical times.
+            saveat = collect(range(problem.tspan...; length = 21)),
+            abstol = 1e-8,
+            reltol = 1e-6,
+        )
+        return sol, length(unique(factorizations)), last[]
+    end
+    structured, n_structured, c = factored(default_linear_solver())
+    plain, _, c_plain = factored(KLUFactorization())
+    umfpack, _, c_umfpack = factored(UMFPACKFactorization())
+    @test structured.retcode === :Success
+    @test structured.raw_solution.alg.linsolve isa StructuredKLU
+    @test c isa Integration.StructuredKLUCache
+    # An explicit linear solver is the one the integrator factors with.
+    @test plain.raw_solution.alg.linsolve isa KLUFactorization
+    @test !(c_plain isa Integration.StructuredKLUCache)
+    @test umfpack.retcode === :Success
+    @test umfpack.raw_solution.alg.linsolve isa UMFPACKFactorization
+    @test c_umfpack isa SparseArrays.UMFPACK.UmfpackLU
+    @test 1 <= n_structured <= c.growths
+    @test count(c.in_union) == nnz(c.union) < nnz(c.prototype)
+    @test all(j -> j in rowvals(c.union)[nzrange(c.union, j)], 1:size(c.union, 2))
+    @test structured.statistics.accepted == plain.statistics.accepted
+    @test structured.statistics.rejected == plain.statistics.rejected
+    @test structured.t == plain.t == umfpack.t
+    @test maximum(abs, structured.T .- plain.T) <= 1e-9
+    @test maximum(abs, structured.T .- umfpack.T) <= 1e-9
+end

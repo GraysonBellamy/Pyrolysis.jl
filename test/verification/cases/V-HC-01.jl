@@ -2,8 +2,9 @@
 # V-HC-01 — Semi-infinite solid, convective surface BC (Biot-coupled erfc)
 # =============================================================================
 #
-# The one verification case shared by all three reference codes
-# (FDS `ht3d_slab`, Gpyro §3.4.1, ThermaKin Eq. 25), in Gpyro's variant:
+# A semi-infinite conduction benchmark, using the parameters of
+# Lautenberger's dissertation §3.4.1 (ThermaKin Eq. 25 uses the same
+# analytical form with different parameters):
 # constant absorbed radiant flux q″ = 25 kW/m² plus convective exchange
 # h = 20 W/m²K with T∞ = T₀ = 300 K; k = 0.2 W/(m·K), ρ = 1000 kg/m³,
 # c = 1400 J/(kg·K), so profiles at t = 30/60/90/180 s are directly comparable
@@ -35,7 +36,7 @@ function _verification_case_vhc01()
     function build(n_cells)
         solid = SolidComponent(:solid, ρ = ρ, c = c, k = k)
         mat = Material(name = :VHC01, components = (solid,), reactions = ())
-        mesh = create_uniform_mesh(L, n_cells, Val(1); T_initial = T0, ξ_initial = (ρ,))
+        mesh = uniform_mesh(L, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (
                 top = HeatFluxBC(q_abs) + ConvectiveBC(h = h, T_inf = T0),
@@ -55,7 +56,7 @@ function _verification_case_vhc01()
 
     function qois(sol)
         out = QoIResult[]
-        z = get_cell_positions(sol)
+        z = sol.cell_centers[:, end]
         for (j, t) in enumerate(times)
             Tn = @view sol.T[:, j+1]  # output_times = [0; times]
             err = maximum(abs(Tn[i] - T_exact(L - z[i], t)) for i in eachindex(z))
@@ -103,7 +104,7 @@ function _verification_case_vhc01()
 
     # L2 error of the t = 60 s profile (output index 3) for the order check.
     function l2_error_t60(sol)
-        z = get_cell_positions(sol)
+        z = sol.cell_centers[:, end]
         Tn = @view sol.T[:, 3]
         Δz = L / length(z)
         return sqrt(sum((Tn[i] - T_exact(L - z[i], 60.0))^2 * Δz for i in eachindex(z)) / L)
@@ -135,13 +136,14 @@ function _verification_case_vhc01()
             ),
         ),
         report = (
+            comparison_note = "Gpyro V2 revision `bff0126c68f2` uses 501 boundary nodes (500 intervals, 0.1 mm spacing). The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements. ThermaKin2Ds 7 uses 500 uniform elements (0.1 mm) at a fixed dt = 0.1 s. It has no pure flux boundary, so the absorbed flux is incident radiation q″/ε on the exposed element with ε = 1e-8; re-radiation stays below 1e-3 W/m². Its surface temperature is the boundary-element center value, 0.05 mm below the face.",
             n_cells_ladder = [25, 50, 100, 133, 200, 400, 500],
             profile_times = times,
             qoi_curves = (:T_profiles, :surface_T_history),
             solve_kwargs = (abstol = 1e-12, reltol = 1e-10),
             curves = sol -> begin
-                x = L .- get_cell_positions(sol)
-                # FDS 6.11.0 overlay (reference/fds/custom/): our deck
+                x = L .- sol.cell_centers[:, end]
+                # FDS 6.11.1 overlay (reference/fds/custom/): our deck
                 # vhc01_semi_infinite.fds solves this exact case via the same
                 # Robin-BC equivalence (pure convection toward T∞_eff = 1550 K,
                 # ε = 0). devc depths from the exposed face; T in °C.
@@ -158,18 +160,18 @@ function _verification_case_vhc01()
                 fds_depths = [0.0, 0.005, 0.010, 0.015, 0.020, 0.030]
                 fds_T = [c .+ 273.15 for c in fds[2:end]]
                 fds_row(t) = argmin(abs.(fds[1] .- t))
-                # Gpyro 0.8200 overlay (reference/gpyro/): dissertation §3.4.1
+                # Gpyro V2 overlay (reference/gpyro/v2_migration/): dissertation §3.4.1
                 # deck (identical parameters — our case IS Gpyro's variant),
                 # Δz = 0.1 mm, dt = 0.1 s. Long-format (t, x, T) profiles.
                 gp_t, gp_x, gp_T = reference_columns(
-                    "gpyro/vhc01_result.csv",
+                    "gpyro/v2_migration/vhc01_result.csv",
                     "t_s",
                     "x_m",
                     "T_K";
                     header_rows = 1,
                 )
                 gp_ts, gp_Ts = reference_columns(
-                    "gpyro/vhc01_surfaceT.csv",
+                    "gpyro/v2_migration/vhc01_surfaceT.csv",
                     "t_s",
                     "T_surface_K";
                     header_rows = 1,
@@ -191,7 +193,7 @@ function _verification_case_vhc01()
                             ],
                             [
                                 CurveSeries(
-                                    label = "FDS 6.11.0, t = $(t) s",
+                                    label = "FDS 6.11.1, t = $(t) s",
                                     crosscode = true,
                                     x = fds_depths,
                                     y = [fds_T[i][fds_row(t)] for i = 1:6],
@@ -201,7 +203,7 @@ function _verification_case_vhc01()
                             [
                                 let rows = findall(τ -> abs(τ - t) < 1e-6, gp_t)
                                     CurveSeries(
-                                        label = "Gpyro 0.8200, t = $(t) s",
+                                        label = "Gpyro V2, t = $(t) s",
                                         crosscode = true,
                                         x = gp_x[rows],
                                         y = gp_T[rows],
@@ -225,14 +227,14 @@ function _verification_case_vhc01()
                             ),
                             # devc averages over the 0.2 s output interval
                             CurveSeries(
-                                label = "FDS 6.11.0",
+                                label = "FDS 6.11.1",
                                 crosscode = true,
                                 x = fds[1][2:end] .- 0.1,
                                 y = fds_T[1][2:end],
                                 exact = t -> T_exact(0.0, t),
                             ),
                             CurveSeries(
-                                label = "Gpyro 0.8200",
+                                label = "Gpyro V2",
                                 crosscode = true,
                                 x = gp_ts[2:end],
                                 y = gp_Ts[2:end],
@@ -243,7 +245,7 @@ function _verification_case_vhc01()
                 ]
             end,
             error_norms = sol -> begin
-                z = get_cell_positions(sol)
+                z = sol.cell_centers[:, end]
                 e = [sol.T[i, 3] - T_exact(L - z[i], 60.0) for i in eachindex(z)]
                 (L2 = sqrt(sum(abs2, e) / length(e)), Linf = maximum(abs, e))
             end,

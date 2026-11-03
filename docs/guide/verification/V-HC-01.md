@@ -10,8 +10,9 @@
 
 ## Problem statement
 
-The one verification case shared by all three reference codes
-(FDS `ht3d_slab`, Gpyro §3.4.1, ThermaKin Eq. 25), in Gpyro's variant:
+A semi-infinite conduction benchmark, using the parameters of
+Lautenberger's dissertation §3.4.1 (ThermaKin Eq. 25 uses the same
+analytical form with different parameters):
 constant absorbed radiant flux q″ = 25 kW/m² plus convective exchange
 h = 20 W/m²K with T∞ = T₀ = 300 K; k = 0.2 W/(m·K), ρ = 1000 kg/m³,
 c = 1400 J/(kg·K), so profiles at t = 30/60/90/180 s are directly comparable
@@ -33,15 +34,15 @@ tolerances; the back-face-rise QoI enforces this assumption explicitly.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| L∞ T-profile error, t=30.0 s | 0.009924 | — | 0.009924 | 0.75 | yes | observed 0.24/0.21/0.18/0.14 K at t=30/60/90/180 s |
+| L∞ T-profile error, t=30.0 s | 0.009925 | — | 0.009925 | 0.75 | yes | observed 0.24/0.21/0.18/0.14 K at t=30/60/90/180 s |
 | L∞ T-profile error, t=60.0 s | 0.008354 | — | 0.008354 | 0.75 | yes | observed 0.24/0.21/0.18/0.14 K at t=30/60/90/180 s |
 | L∞ T-profile error, t=90.0 s | 0.007341 | — | 0.007341 | 0.75 | yes | observed 0.24/0.21/0.18/0.14 K at t=30/60/90/180 s |
-| L∞ T-profile error, t=180.0 s | 0.005544 | — | 0.005544 | 0.75 | yes | observed 0.24/0.21/0.18/0.14 K at t=30/60/90/180 s |
+| L∞ T-profile error, t=180.0 s | 0.005543 | — | 0.005543 | 0.75 | yes | observed 0.24/0.21/0.18/0.14 K at t=30/60/90/180 s |
 | surface temperature, t=30.0 s | 545.8 | 545.7 | 0.02005 | 1.5 | yes | surface Newton solve vs exact θ_s = 1 − erfcx(h√(αt)/k); observed 0.50/0.26/0.16/0.06 K at t=30/60/90/180 s |
 | surface temperature, t=60.0 s | 625.5 | 625.5 | 0.01018 | 1.5 | yes | surface Newton solve vs exact θ_s = 1 − erfcx(h√(αt)/k); observed 0.50/0.26/0.16/0.06 K at t=30/60/90/180 s |
 | surface temperature, t=90.0 s | 679.9 | 679.9 | 0.006359 | 1.5 | yes | surface Newton solve vs exact θ_s = 1 − erfcx(h√(αt)/k); observed 0.50/0.26/0.16/0.06 K at t=30/60/90/180 s |
 | surface temperature, t=180.0 s | 784.9 | 784.9 | 0.002279 | 1.5 | yes | surface Newton solve vs exact θ_s = 1 − erfcx(h√(αt)/k); observed 0.50/0.26/0.16/0.06 K at t=30/60/90/180 s |
-| back-face rise (semi-infinite validity) | 7.188e-10 | 0 | 7.188e-10 | 1e-06 | yes | guards the semi-infinite assumption of the reference solution |
+| back-face rise (semi-infinite validity) | 7.191e-10 | 0 | 7.191e-10 | 1e-06 | yes | guards the semi-infinite assumption of the reference solution |
 
 ![V-HC-01 T_profiles](assets/V-HC-01/V-HC-01_T_profiles.png)
 
@@ -55,38 +56,33 @@ tolerances; the back-face-rise QoI enforces this assumption explicitly.
 
 ### Comparison with other codes
 
-The same case was solved with FDS 6.11.0 at 133 cells (Δx≈0.38 mm) and Gpyro 0.8200 at 500 nodes (Δz=0.1 mm); decks, outputs, and
-run provenance are committed under `test/verification/reference/`.
-Each code's error against the same exact solution is drawn below
-on a log scale, muted gray behind this solver's series — the
-signed linear-scale panel above shows where the error lives, this
-one compares magnitudes across codes.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-HC-01/V-HC-01_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
+
+Gpyro V2 revision `bff0126c68f2` uses 501 boundary nodes (500 intervals, 0.1 mm spacing). The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements. ThermaKin2Ds 7 uses 500 uniform elements (0.1 mm) at a fixed dt = 0.1 s. It has no pure flux boundary, so the absorbed flux is incident radiation q″/ε on the exposed element with ε = 1e-8; re-radiation stays below 1e-3 W/m². Its surface temperature is the boundary-element center value, 0.05 mm below the face.
+
+Accuracy comparison only; timing measurements are omitted.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
 
 ![V-HC-01 T_profiles_vs_codes_error](assets/V-HC-01/V-HC-01_T_profiles_vs_codes_error.png)
 
 ![V-HC-01 surface_T_history_vs_codes_error](assets/V-HC-01/V-HC-01_surface_T_history_vs_codes_error.png)
 
-Wall times at every ladder rung against the reference runs.
-Resolutions and simulated spans differ where noted (details in
-`reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark; rungs at a matched
-resolution are directly comparable.
-
-![V-HC-01 solve_time](assets/V-HC-01/V-HC-01_solve_time.png)
-
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-HC-01/V-HC-01_T_profiles_vs_codes.png), [surface_T_history_vs_codes](assets/V-HC-01/V-HC-01_surface_T_history_vs_codes.png).
 
 ### Convergence
 
-| n_cells | h | wall (s) | L2 | Linf |
-| --- | --- | --- | --- | --- |
-| 25 | 0.04 | 0.01071 | 0.7857 | 2.901 |
-| 50 | 0.02 | 0.02158 | 0.2003 | 0.8012 |
-| 100 | 0.01 | 0.04492 | 0.05027 | 0.2059 |
-| 133 | 0.007519 | 0.06127 | 0.02844 | 0.117 |
-| 200 | 0.005 | 0.09518 | 0.01258 | 0.05197 |
-| 400 | 0.0025 | 0.2046 | 0.003146 | 0.01304 |
-| 500 | 0.002 | 0.2612 | 0.002013 | 0.008354 |
+| n_cells | h | L2 | Linf |
+| --- | --- | --- | --- |
+| 25 | 0.04 | 0.7857 | 2.901 |
+| 50 | 0.02 | 0.2003 | 0.8012 |
+| 100 | 0.01 | 0.05027 | 0.2059 |
+| 133 | 0.007519 | 0.02844 | 0.117 |
+| 200 | 0.005 | 0.01258 | 0.05197 |
+| 400 | 0.0025 | 0.003146 | 0.01304 |
+| 500 | 0.002 | 0.002013 | 0.008354 |
 
 Observed order 1.993 (L2), expected 2.0.
 
@@ -94,7 +90,6 @@ Observed order 1.993 (L2), expected 2.0.
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-12 |
 | reltol | 1.0e-10 |
-

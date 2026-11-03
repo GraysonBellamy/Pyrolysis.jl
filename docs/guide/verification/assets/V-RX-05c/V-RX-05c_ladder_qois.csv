@@ -1,0 +1,6 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+1,"independent species histories",2.9656348488060756e-12,NaN,2.9656348488060756e-12,1.0e-10,true
+1,"adiabatic temperature history",1.1368683772161603e-13,NaN,1.1368683772161603e-13,1.0e-7,true
+1,"sensible enthalpy history / initial energy",3.95459898538221e-13,NaN,3.95459898538221e-13,2.0e-10,true
+1,"closed total mass",1.1102230246251565e-15,NaN,1.1102230246251565e-15,1.0e-12,true
+1,"sealed boundary mass flux",0.0,NaN,0.0,1.0e-14,true

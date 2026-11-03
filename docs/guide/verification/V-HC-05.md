@@ -32,7 +32,7 @@ a convergence check. Transient T-dependent {k,c} has no exact solution
 | --- | --- | --- | --- | --- | --- | --- |
 | L∞ Kirchhoff-profile error (z(T) map, /L) | 2.464e-06 | — | 2.464e-06 | 0.00012 | yes | implicit profile compared invert-free; n=80 uniform |
 | steady flux vs Kirchhoff-exact | 3.25e+04 | 3.25e+04 | 1.096e-06 | 6e-05 | yes | q = (k₀/L)[ΔT + βΔ(T²)/2] = 32500.0 W/m² |
-| steadiness (last half-interval drift) | 2.122e-05 | — | 2.122e-05 | 1e-06 | **no** | t_end = 10·L²/α_min |
+| steadiness (last half-interval drift) | 2.274e-13 | — | 2.274e-13 | 1e-06 | yes | t_end = 10·L²/α_min |
 
 ![V-HC-05 T_profile_steady](assets/V-HC-05/V-HC-05_T_profile_steady.png)
 
@@ -44,15 +44,29 @@ a convergence check. Transient T-dependent {k,c} has no exact solution
 
 ![V-HC-05 convergence](assets/V-HC-05/V-HC-05_convergence.png)
 
+### Comparison with other codes
+
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-HC-05/V-HC-05_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
+
+Accuracy comparison only; timing measurements are omitted.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
+
+![V-HC-05 T_profile_steady_vs_codes_error](assets/V-HC-05/V-HC-05_T_profile_steady_vs_codes_error.png)
+
+Solution overlays including the other codes' points: [T_profile_steady_vs_codes](assets/V-HC-05/V-HC-05_T_profile_steady_vs_codes.png).
+
 ### Convergence
 
 | n_cells | h | wall (s) | L2 | Linf |
 | --- | --- | --- | --- | --- |
-| 20 | 0.05 | 0.02364 | 0.0002818 | 0.0005775 |
-| 40 | 0.025 | 0.04668 | 7.051e-05 | 0.0001511 |
-| 80 | 0.0125 | 0.0926 | 1.763e-05 | 3.87e-05 |
-| 160 | 0.00625 | 0.1913 | 4.408e-06 | 9.794e-06 |
-| 320 | 0.003125 | 0.4101 | 1.102e-06 | 2.464e-06 |
+| 20 | 0.05 | 0.007311 | 0.0002818 | 0.0005775 |
+| 40 | 0.025 | 0.01518 | 7.051e-05 | 0.0001511 |
+| 80 | 0.0125 | 0.03185 | 1.763e-05 | 3.87e-05 |
+| 160 | 0.00625 | 0.06951 | 4.408e-06 | 9.794e-06 |
+| 320 | 0.003125 | 0.1494 | 1.102e-06 | 2.464e-06 |
 
 Observed order 2 (L2), expected 2.0.
 
@@ -60,7 +74,6 @@ Observed order 2 (L2), expected 2.0.
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-12 |
 | reltol | 1.0e-10 |
-

@@ -26,7 +26,7 @@ function _verification_case_vhc03()
     function build(n_cells)
         solid = SolidComponent(:solid, ρ = ρ, c = c, k = k)
         mat = Material(name = :VHC03, components = (solid,), reactions = ())
-        mesh = create_uniform_mesh(L, n_cells, Val(1); T_initial = T0, ξ_initial = (ρ,))
+        mesh = uniform_mesh(L, n_cells)
         bc_set =
             BoundaryConditionSet(thermal = (top = HeatFluxBC(q), bottom = AdiabaticBC()))
         return PyrolysisProblem(
@@ -42,7 +42,7 @@ function _verification_case_vhc03()
 
     function qois(sol)
         out = QoIResult[]
-        z = get_cell_positions(sol)
+        z = sol.cell_centers[:, end]
         n = length(z)
         for (j, Fo) in enumerate(Fos)
             Tn = @view sol.T[:, j+1]
@@ -97,7 +97,7 @@ function _verification_case_vhc03()
 
     # L2 profile error at Fo = 0.1 (output index 2), the most transient state.
     function l2_error_fo01(sol)
-        z = get_cell_positions(sol)
+        z = sol.cell_centers[:, end]
         Tn = @view sol.T[:, 2]
         Δz = L / length(z)
         return sqrt(sum((Tn[i] - T_exact(z[i] / L, 0.1))^2 * Δz for i in eachindex(z)) / L)
@@ -125,29 +125,30 @@ function _verification_case_vhc03()
             ),
         ),
         report = (
+            comparison_note = "Gpyro V2 revision `bff0126c68f2` uses 321 boundary nodes (320 intervals, 0.0625 mm spacing). The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements. ThermaKin2Ds 7 uses 320 uniform elements (0.0625 mm) at a fixed dt = 0.1 s; the absorbed flux is incident radiation q″/ε on the exposed element with ε = 1e-8.",
             n_cells_ladder = [20, 40, 80, 160, 200, 320],
             profile_times = times,
             qoi_curves = (:T_profiles, :front_back_dT_history, :mean_T_history),
             solve_kwargs = (abstol = 1e-12, reltol = 1e-10),
             curves = sol -> begin
-                z = get_cell_positions(sol)
+                z = sol.cell_centers[:, end]
                 n = length(z)
                 Fo_of_t(t) = α * t / L^2
-                # Gpyro 0.8200 overlay (reference/gpyro/): our vhc03 deck —
-                # FDS can't express a pure Neumann BC on its 1D solid (see
+                # Gpyro V2 overlay (reference/gpyro/v2_migration/): our vhc03 deck —
+                # FDS 6.11.0 rejects net-flux inputs with MATL_ID (see
                 # reference/fds/README.md), Gpyro can (surface-absorbed QE
-                # with RERADIATION off, h = 0). Δz = 0.1 mm; x_m is depth
+                # with RERADIATION off, h = 0). Δz = 0.0625 mm; x_m is depth
                 # from the heated face, so x̃ = 1 − x/L; Gpyro's front/back
                 # are true surface nodes (x̃ = 1/0), unlike our cell centers.
                 gp_t, gp_x, gp_T = reference_columns(
-                    "gpyro/vhc03_result.csv",
+                    "gpyro/v2_migration/vhc03_result.csv",
                     "t_s",
                     "x_m",
                     "T_K";
                     header_rows = 1,
                 )
                 gp_ht, gp_Tf, gp_Tb = reference_columns(
-                    "gpyro/vhc03_frontback.csv",
+                    "gpyro/v2_migration/vhc03_frontback.csv",
                     "t_s",
                     "T_front_K",
                     "T_back_K";
@@ -171,7 +172,7 @@ function _verification_case_vhc03()
                             [
                                 let rows = findall(τ -> abs(τ - Fo * L^2 / α) < 1e-6, gp_t)
                                     CurveSeries(
-                                        label = "Gpyro 0.8200, Fo = $(Fo)",
+                                        label = "Gpyro V2, Fo = $(Fo)",
                                         crosscode = true,
                                         x = 1.0 .- gp_x[rows] ./ L,
                                         y = gp_T[rows],
@@ -196,7 +197,7 @@ function _verification_case_vhc03()
                                     T_exact(z[1] / L, Fo_of_t(t)),
                             ),
                             CurveSeries(
-                                label = "Gpyro 0.8200 (surface nodes)",
+                                label = "Gpyro V2 (surface nodes)",
                                 crosscode = true,
                                 x = gp_ht[2:end],
                                 y = gp_Tf[2:end] .- gp_Tb[2:end],
@@ -222,7 +223,7 @@ function _verification_case_vhc03()
                 ]
             end,
             error_norms = sol -> begin
-                z = get_cell_positions(sol)
+                z = sol.cell_centers[:, end]
                 e = [sol.T[i, 2] - T_exact(z[i] / L, 0.1) for i in eachindex(z)]
                 (L2 = sqrt(sum(abs2, e) / length(e)), Linf = maximum(abs, e))
             end,

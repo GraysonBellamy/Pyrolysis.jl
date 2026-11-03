@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480" viewBox="0 0 1200 480" role="img" aria-labelledby="title desc">
+<title id="title">Figure 7. Radiation Absorption (Schematic)</title><desc id="desc">Matching slabs receive radiation from the right: surface absorption deposits it at the boundary, while Beer–Lambert attenuation distributes absorption through cells and transmits the remainder. The plotted intensity uses uniform optical depth alpha L equal to two.</desc>
+<defs>
+<marker id="ink" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#202020" stroke-width="1.3"/></marker>
+<marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#295674" stroke-width="1.3"/></marker>
+<marker id="teal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#365b58" stroke-width="1.3"/></marker>
+<marker id="orange" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#92512f" stroke-width="1.3"/></marker>
+<marker id="purple" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#675878" stroke-width="1.3"/></marker>
+</defs><rect width="100%" height="100%" fill="white"/><g font-family="Liberation Sans, Arial, sans-serif" fill="#202020">
+<text x="32.000" y="39.000" font-size="24" fill="#202020" text-anchor="start" font-weight="bold" >Figure 7. Radiation Absorption (Schematic)</text>
+<text x="65.000" y="95.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >Surface Absorption</text>
+<text x="65.000" y="260.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >Beer–Lambert Absorption</text>
+<rect x="90" y="140" width="100" height="60" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="190" y="140" width="100" height="60" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="290" y="140" width="100" height="60" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="390" y="140" width="100" height="60" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<circle cx="90" cy="200" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="190" cy="200" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="290" cy="200" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="390" cy="200" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="490" cy="200" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<line x1="600" y1="170" x2="502" y2="170" stroke="#92512f" stroke-width="2.5" stroke-dasharray="" marker-end="url(#orange)"/>
+<rect x="90" y="310" width="100" height="60" rx="0" fill="#f5f5f5" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="190" y="310" width="100" height="60" rx="0" fill="#ebebeb" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="290" y="310" width="100" height="60" rx="0" fill="#dddddd" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="390" y="310" width="100" height="60" rx="0" fill="#cccccc" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<circle cx="90" cy="370" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="190" cy="370" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="290" cy="370" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="390" cy="370" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="490" cy="370" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<line x1="600" y1="340" x2="502" y2="340" stroke="#92512f" stroke-width="2.5" stroke-dasharray="" marker-end="url(#orange)"/>
+<line x1="490" y1="130" x2="490" y2="210" stroke="#92512f" stroke-width="4" stroke-dasharray="" />
+<text x="550.000" y="135.000" font-size="20" fill="#92512f" text-anchor="middle" font-weight="normal" >a q<tspan baseline-shift="sub" font-size="75%">inc</tspan></text>
+<text x="490.000" y="296.000" font-size="18" fill="#92512f" text-anchor="middle" font-weight="normal" >I<tspan baseline-shift="sub" font-size="75%">0</tspan></text>
+<line x1="482" y1="340" x2="402" y2="340" stroke="#92512f" stroke-width="2.5" stroke-dasharray="" marker-end="url(#orange)"/>
+<text x="390.000" y="296.000" font-size="18" fill="#92512f" text-anchor="middle" font-weight="normal" >I<tspan baseline-shift="sub" font-size="75%">1</tspan></text>
+<line x1="382" y1="340" x2="302" y2="340" stroke="#92512f" stroke-width="2.0" stroke-dasharray="" marker-end="url(#orange)"/>
+<text x="290.000" y="296.000" font-size="18" fill="#92512f" text-anchor="middle" font-weight="normal" >I<tspan baseline-shift="sub" font-size="75%">2</tspan></text>
+<line x1="282" y1="340" x2="202" y2="340" stroke="#92512f" stroke-width="1.5" stroke-dasharray="" marker-end="url(#orange)"/>
+<text x="190.000" y="296.000" font-size="18" fill="#92512f" text-anchor="middle" font-weight="normal" >I<tspan baseline-shift="sub" font-size="75%">3</tspan></text>
+<line x1="182" y1="340" x2="102" y2="340" stroke="#92512f" stroke-width="1.0" stroke-dasharray="" marker-end="url(#orange)"/>
+<text x="90.000" y="296.000" font-size="18" fill="#92512f" text-anchor="middle" font-weight="normal" >I<tspan baseline-shift="sub" font-size="75%">4</tspan></text>
+<line x1="80" y1="340" x2="40" y2="340" stroke="#92512f" stroke-width="1.5" stroke-dasharray="" marker-end="url(#orange)"/>
+<text x="65.000" y="403.000" font-size="18" fill="#92512f" text-anchor="start" font-weight="normal" >Transmitted</text>
+<text x="315.000" y="403.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >Absorption per Area: I<tspan baseline-shift="sub" font-size="75%">in</tspan> − I<tspan baseline-shift="sub" font-size="75%">out</tspan></text>
+<line x1="200" y1="443" x2="470" y2="443" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<text x="185.000" y="450.000" font-size="18" fill="#202020" text-anchor="end" font-weight="normal" >z = 0</text>
+<text x="490.000" y="450.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >z = L</text>
+<line x1="810" y1="370.0" x2="1130" y2="370.0" stroke="#e5e5e5" stroke-width="0.7" stroke-dasharray="" />
+<text x="798.000" y="376.000" font-size="17" fill="#555555" text-anchor="end" font-weight="normal" >0</text>
+<line x1="810" y1="257.5" x2="1130" y2="257.5" stroke="#e5e5e5" stroke-width="0.7" stroke-dasharray="" />
+<text x="798.000" y="263.500" font-size="17" fill="#555555" text-anchor="end" font-weight="normal" >0.5</text>
+<line x1="810" y1="145.0" x2="1130" y2="145.0" stroke="#e5e5e5" stroke-width="0.7" stroke-dasharray="" />
+<text x="798.000" y="151.000" font-size="17" fill="#555555" text-anchor="end" font-weight="normal" >1</text>
+<line x1="810.0" y1="370" x2="810.0" y2="376" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<text x="810.000" y="397.000" font-size="17" fill="#555555" text-anchor="middle" font-weight="normal" >0</text>
+<line x1="970.0" y1="370" x2="970.0" y2="376" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<text x="970.000" y="397.000" font-size="17" fill="#555555" text-anchor="middle" font-weight="normal" >0.5</text>
+<line x1="1130.0" y1="370" x2="1130.0" y2="376" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<text x="1130.000" y="397.000" font-size="17" fill="#555555" text-anchor="middle" font-weight="normal" >1</text>
+<line x1="810" y1="145" x2="810" y2="370" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<line x1="810" y1="370" x2="1130" y2="370" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<text x="970.000" y="426.000" font-size="19" fill="#202020" text-anchor="middle" font-weight="normal" >Inward Depth (L − z)/L</text>
+<text x="754.000" y="257.500" font-size="19" fill="#202020" text-anchor="middle" font-weight="normal" transform="rotate(-90 754 257.5)">I / I₀</text>
+<path d=" M 810.000 145.000 L 813.200 149.455 L 816.400 153.822 L 819.600 158.103 L 822.800 162.299 L 826.000 166.412 L 829.200 170.443 L 832.400 174.394 L 835.600 178.268 L 838.800 182.064 L 842.000 185.786 L 845.200 189.433 L 848.400 193.009 L 851.600 196.513 L 854.800 199.949 L 858.000 203.316 L 861.200 206.616 L 864.400 209.852 L 867.600 213.023 L 870.800 216.131 L 874.000 219.178 L 877.200 222.164 L 880.400 225.092 L 883.600 227.961 L 886.800 230.774 L 890.000 233.531 L 893.200 236.233 L 896.400 238.882 L 899.600 241.478 L 902.800 244.023 L 906.000 246.517 L 909.200 248.963 L 912.400 251.359 L 915.600 253.708 L 918.800 256.011 L 922.000 258.268 L 925.200 260.481 L 928.400 262.649 L 931.600 264.775 L 934.800 266.859 L 938.000 268.901 L 941.200 270.903 L 944.400 272.865 L 947.600 274.789 L 950.800 276.674 L 954.000 278.522 L 957.200 280.333 L 960.400 282.109 L 963.600 283.849 L 966.800 285.555 L 970.000 287.227 L 973.200 288.866 L 976.400 290.473 L 979.600 292.047 L 982.800 293.591 L 986.000 295.104 L 989.200 296.587 L 992.400 298.041 L 995.600 299.466 L 998.800 300.862 L 1002.000 302.231 L 1005.200 303.573 L 1008.400 304.889 L 1011.600 306.178 L 1014.800 307.442 L 1018.000 308.680 L 1021.200 309.895 L 1024.400 311.085 L 1027.600 312.251 L 1030.800 313.395 L 1034.000 314.516 L 1037.200 315.614 L 1040.400 316.691 L 1043.600 317.747 L 1046.800 318.782 L 1050.000 319.796 L 1053.200 320.790 L 1056.400 321.764 L 1059.600 322.719 L 1062.800 323.656 L 1066.000 324.573 L 1069.200 325.473 L 1072.400 326.354 L 1075.600 327.219 L 1078.800 328.066 L 1082.000 328.896 L 1085.200 329.710 L 1088.400 330.508 L 1091.600 331.290 L 1094.800 332.056 L 1098.000 332.808 L 1101.200 333.544 L 1104.400 334.266 L 1107.600 334.974 L 1110.800 335.667 L 1114.000 336.347 L 1117.200 337.013 L 1120.400 337.667 L 1123.600 338.307 L 1126.800 338.934 L 1130.000 339.550" fill="none" stroke="#92512f" stroke-width="2.2" stroke-dasharray=""/>
+<circle cx="810.0" cy="145.0" r="4" fill="#92512f" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="890.0" cy="233.53060156465747" r="4" fill="#92512f" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="970.0" cy="287.2271257364255" r="4" fill="#92512f" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="1050.0" cy="319.7957139666033" r="4" fill="#92512f" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="1130.0" cy="339.5495612717621" r="4" fill="#92512f" stroke="#92512f" stroke-width="1.3"/>
+<text x="970.000" y="110.000" font-size="21" fill="#202020" text-anchor="middle" font-weight="normal" >αL = 2</text>
+</g></svg>

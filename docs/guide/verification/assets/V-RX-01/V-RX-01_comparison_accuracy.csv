@@ -1,0 +1,16 @@
+"code","curve","reference","resolution","samples","Linf","RMS"
+"ThermaKin2Ds 7 ξ_A","xi_histories","ξ_A","base",201,5.231603984157118e-5,1.5209114443047574e-5
+"ThermaKin2Ds 7 ξ_A","xi_histories","ξ_A","refined",201,4.965551981683802e-5,1.5100009136859063e-5
+"ThermaKin2Ds 7 ξ_A","xi_histories","ξ_A","time_half",201,4.965551981683802e-5,1.5100009136859063e-5
+"ThermaKin2Ds 7 ξ_A","xi_histories","ξ_A","time_quarter",201,4.965551981683802e-5,1.5098214615642319e-5
+"ThermaKin2Ds 7 ξ_A","xi_histories","ξ_A","space_half",201,4.965551981683802e-5,1.5098214615642319e-5
+"ThermaKin2Ds 7 ξ_B","xi_histories","ξ_B","base",201,5.586156680692511e-5,2.0517539534843476e-5
+"ThermaKin2Ds 7 ξ_B","xi_histories","ξ_B","refined",201,4.832007485333634e-5,2.0189733574373087e-5
+"ThermaKin2Ds 7 ξ_B","xi_histories","ξ_B","time_half",201,4.832007485333634e-5,2.0189733574373087e-5
+"ThermaKin2Ds 7 ξ_B","xi_histories","ξ_B","time_quarter",201,4.832007485333634e-5,2.0189733574373087e-5
+"ThermaKin2Ds 7 ξ_B","xi_histories","ξ_B","space_half",201,4.832007485333634e-5,2.0189733574373087e-5
+"ThermaKin2Ds 7 ξ_C","xi_histories","ξ_C","base",201,5.2807627525908174e-5,2.8080401755923524e-5
+"ThermaKin2Ds 7 ξ_C","xi_histories","ξ_C","refined",201,4.9333032166032353e-5,2.7968331125945667e-5
+"ThermaKin2Ds 7 ξ_C","xi_histories","ξ_C","time_half",201,4.9333032166032353e-5,2.7968331125945667e-5
+"ThermaKin2Ds 7 ξ_C","xi_histories","ξ_C","time_quarter",201,4.9333032166032353e-5,2.79672959996341e-5
+"ThermaKin2Ds 7 ξ_C","xi_histories","ξ_C","space_half",201,4.9333032166032353e-5,2.79672959996341e-5

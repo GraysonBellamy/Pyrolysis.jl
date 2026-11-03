@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="455" viewBox="0 0 1200 455" role="img" aria-labelledby="title desc">
+<title id="title">Figure 13. Three-Step Wood Decomposition (Schematic)</title><desc id="desc">Three single-reactant steps convert virgin wood through two intermediates to char. Each arrow labels a mass yield; gas branches and signed reaction heats identify the products and thermal effects.</desc>
+<defs>
+<marker id="ink" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#202020" stroke-width="1.3"/></marker>
+<marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#295674" stroke-width="1.3"/></marker>
+<marker id="teal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#365b58" stroke-width="1.3"/></marker>
+<marker id="orange" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#92512f" stroke-width="1.3"/></marker>
+<marker id="purple" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#675878" stroke-width="1.3"/></marker>
+</defs><rect width="100%" height="100%" fill="white"/><g font-family="Liberation Sans, Arial, sans-serif" fill="#202020">
+<text x="32.000" y="39.000" font-size="24" fill="#202020" text-anchor="start" font-weight="bold" >Figure 13. Three-Step Wood Decomposition (Schematic)</text>
+<text x="35.000" y="83.000" font-size="19" fill="#202020" text-anchor="start" font-weight="normal" >Mass Yields [kg/kg Reactant]</text>
+<rect x="35" y="120" width="200" height="60" rx="0" fill="white" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<text x="135.000" y="157.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="bold" >Virgin Wood</text>
+<rect x="340" y="120" width="200" height="60" rx="0" fill="white" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<text x="440.000" y="157.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="bold" >Intermediate 1</text>
+<rect x="645" y="120" width="200" height="60" rx="0" fill="white" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<text x="745.000" y="157.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="bold" >Intermediate 2</text>
+<rect x="950" y="120" width="200" height="60" rx="0" fill="white" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<text x="1050.000" y="157.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="bold" >Char</text>
+<line x1="240" y1="150" x2="330" y2="150" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<text x="285.000" y="130.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >0.95</text>
+<line x1="285" y1="155" x2="285" y2="275" stroke="#365b58" stroke-width="1.5" stroke-dasharray="" marker-end="url(#teal)"/>
+<text x="300.000" y="225.000" font-size="20" fill="#365b58" text-anchor="start" font-weight="normal" >0.05</text>
+<rect x="185" y="285" width="200" height="60" rx="0" fill="#ededed" stroke="#365b58" stroke-width="1.2" stroke-dasharray=""/>
+<text x="285.000" y="322.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="bold" >Gas 1</text>
+<text x="285.000" y="390.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="normal" >h<tspan baseline-shift="sub" font-size="75%">1</tspan> = −19.2 kJ/kg</text>
+<text x="285.000" y="425.000" font-size="19" fill="#675878" text-anchor="middle" font-weight="normal" >Exothermic</text>
+<line x1="545" y1="150" x2="635" y2="150" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<text x="590.000" y="130.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >0.80</text>
+<line x1="590" y1="155" x2="590" y2="275" stroke="#365b58" stroke-width="1.5" stroke-dasharray="" marker-end="url(#teal)"/>
+<text x="605.000" y="225.000" font-size="20" fill="#365b58" text-anchor="start" font-weight="normal" >0.20</text>
+<rect x="490" y="285" width="200" height="60" rx="0" fill="#ededed" stroke="#365b58" stroke-width="1.2" stroke-dasharray=""/>
+<text x="590.000" y="322.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="bold" >Gas 2</text>
+<text x="590.000" y="390.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="normal" >h<tspan baseline-shift="sub" font-size="75%">2</tspan> = +264 kJ/kg</text>
+<text x="590.000" y="425.000" font-size="19" fill="#92512f" text-anchor="middle" font-weight="normal" >Endothermic</text>
+<line x1="850" y1="150" x2="940" y2="150" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<text x="895.000" y="130.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >0.74</text>
+<line x1="895" y1="155" x2="895" y2="275" stroke="#365b58" stroke-width="1.5" stroke-dasharray="" marker-end="url(#teal)"/>
+<text x="910.000" y="225.000" font-size="20" fill="#365b58" text-anchor="start" font-weight="normal" >0.26</text>
+<rect x="795" y="285" width="200" height="60" rx="0" fill="#ededed" stroke="#365b58" stroke-width="1.2" stroke-dasharray=""/>
+<text x="895.000" y="322.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="bold" >Gas 3</text>
+<text x="895.000" y="390.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="normal" >h<tspan baseline-shift="sub" font-size="75%">3</tspan> = −0.33 kJ/kg</text>
+<text x="895.000" y="425.000" font-size="19" fill="#675878" text-anchor="middle" font-weight="normal" >Exothermic</text>
+</g></svg>

@@ -35,18 +35,32 @@ implementation's constant.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| max mean-T error vs implicit exact | 0.003893 | — | 0.003893 | 0.012 | yes | lumped T⁴ cooling; thin-limit bias ~7e-5 relative in flux |
+| max mean-T error vs implicit exact | 0.004182 | — | 0.004182 | 0.012 | yes | lumped T⁴ cooling; thin-limit bias ~7e-5 relative in flux |
 | internal ΔT (thin-limit validity) | 0.006854 | — | 0.006854 | 0.05 | yes | guards the lumped assumption of the reference solution |
 
 ![V-RX-04a T_history_vs_exact](assets/V-RX-04a/V-RX-04a_T_history_vs_exact.png)
 
 ![V-RX-04a T_history_vs_exact_error](assets/V-RX-04a/V-RX-04a_T_history_vs_exact_error.png)
 
+### Comparison with other codes
+
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-RX-04a/V-RX-04a_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
+
+Accuracy comparison only; timing measurements are omitted.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
+
+![V-RX-04a T_history_vs_exact_vs_codes_error](assets/V-RX-04a/V-RX-04a_T_history_vs_exact_vs_codes_error.png)
+
+Solution overlays including the other codes' points: [T_history_vs_exact_vs_codes](assets/V-RX-04a/V-RX-04a_T_history_vs_exact_vs_codes.png).
+
 ### Solver configuration
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-10 |
 | reltol | 1.0e-8 |
 
@@ -56,19 +70,32 @@ implementation's constant.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| steady surface temperature vs algebraic root | 732.8 | 732.8 | 3.748e-09 | 1e-06 | yes | surface-Newton residual check; Ts_exact ≈ 732.8 K |
-| steadiness (last half-interval drift) | 0.0001074 | — | 0.0001074 | 0.001 | yes | t_end ≈ 36 thermal time constants |
-| steady uniformity (adiabatic back) | 8.77e-10 | — | 8.77e-10 | 1e-07 | yes | zero steady flux ⇒ uniform slab at Ts |
+| steady surface temperature vs algebraic root | 732.8 | 732.8 | 5.191e-10 | 1e-06 | yes | surface-Newton residual check; Ts_exact ≈ 732.8 K |
+| steadiness (last half-interval drift) | 0.0001073 | — | 0.0001073 | 0.001 | yes | t_end ≈ 36 thermal time constants |
+| steady uniformity (adiabatic back) | 3.297e-12 | — | 3.297e-12 | 1e-07 | yes | zero steady flux ⇒ uniform slab at Ts |
 
 ![V-RX-04b surface_T_history](assets/V-RX-04b/V-RX-04b_surface_T_history.png)
 
 ![V-RX-04b surface_T_history_error](assets/V-RX-04b/V-RX-04b_surface_T_history_error.png)
 
+### Comparison with other codes
+
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-RX-04b/V-RX-04b_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
+
+Accuracy comparison only; timing measurements are omitted.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
+
+![V-RX-04b surface_T_history_vs_codes_error](assets/V-RX-04b/V-RX-04b_surface_T_history_vs_codes_error.png)
+
+Solution overlays including the other codes' points: [surface_T_history_vs_codes](assets/V-RX-04b/V-RX-04b_surface_T_history_vs_codes.png).
+
 ### Solver configuration
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-10 |
 | reltol | 1.0e-8 |
-

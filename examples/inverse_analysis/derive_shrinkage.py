@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 """
-Derivation of the White-Pine variable-cross-section (shrinkage) calibration —
-the VOLUME-grounded re-derivation that supersedes the area-only fit documented
-in the older `WP_SR2` block of wp_properties.jl.
+Derivation of the White-Pine variable-cross-section (shrinkage) calibration.
 
 WHY THIS EXISTS
 ---------------
-The previous calibration fit a single empirical *radial* area law
+The radial area law is
     A_f/A_0 = 1 - (1 - s_r^2) * chi_bar
-to three diameter anchors and declared the axial (thickness) change "out of
-scope." But the CAPA tests give mass, diameter AND thickness per flux, so we
+and the CAPA tests give mass, diameter AND thickness per flux, so we
 actually measure the full volume V = (pi/4) D^2 L and the residue bulk density
 rho = m/V. That turns shrinkage from one fitted area law into a closed,
 checkable system:
@@ -19,7 +16,7 @@ checkable system:
       So V_f is a PREDICTION we validate against m/rho, not a fit target.
     * The RADIAL share (A_f/A_0) is the only empirically fitted partition.
     * The AXIAL change is then EMERGENT: L_f/L_0 = (V_f/V_0) / (A_f/A_0).
-      It is not a separate model and not "out of scope"; it falls out of the
+      It is not a separate model; it falls out of the
       volume balance. Char that swells axially at high flux is simply the case
       where radial shrinkage outruns the (small) volume loss.
 

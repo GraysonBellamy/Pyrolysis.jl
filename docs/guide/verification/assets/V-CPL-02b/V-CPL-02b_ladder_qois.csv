@@ -1,0 +1,10 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+120,"steady energy balance: v vs Landau v_ss(measured T_s)",0.0018991836128847799,0.0018904173737033076,0.004637197744485016,0.002,false
+120,"regression consistency: thickness slope vs gas generation",0.0018991836128847799,0.0018995879088690977,0.00021283352164446604,0.0017,true
+120,"stationary far-field temperature",4.2155568280577427e-7,0.0,4.2155568280577427e-7,0.0001,true
+200,"steady energy balance: v vs Landau v_ss(measured T_s)",0.0019068208573332496,0.0019056359382975255,0.0006217971711756391,0.002,true
+200,"regression consistency: thickness slope vs gas generation",0.0019068208573332496,0.0019071924967028187,0.00019486201325330199,0.0017,true
+200,"stationary far-field temperature",3.657572165138845e-7,0.0,3.657572165138845e-7,0.0001,true
+320,"steady energy balance: v vs Landau v_ss(measured T_s)",0.0019110159860813072,0.0019104080654940069,0.0003182150443565618,0.002,true
+320,"regression consistency: thickness slope vs gas generation",0.0019110159860813072,0.0019102511119685904,0.00040040500849573667,0.0017,true
+320,"stationary far-field temperature",3.4808925875040586e-7,0.0,3.4808925875040586e-7,0.0001,true

@@ -38,13 +38,7 @@ function _verification_case_vrx01()
             reactions = (r1, r2),
             depletion_limiter = DepletionLimiter(enabled = false),
         )
-        mesh = create_uniform_mesh(
-            L,
-            n_cells,
-            Val(3);
-            T_initial = T_iso,
-            ξ_initial = (ξ0, 0.0, 0.0),
-        )
+        mesh = uniform_mesh(L, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(T_iso), bottom = DirichletThermalBC(T_iso)),
         )
@@ -118,10 +112,11 @@ function _verification_case_vrx01()
         qois = qois,
         ci = CIConfig(n_cells = 1, budget_s = 10.0),
         report = (
+            comparison_note = "Gpyro V2 revision `bff0126c68f2` uses one 0D isothermal unknown with unit condensed yields. The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements. ThermaKin2Ds 7 uses one insulated element at dt = 0.001 s with the same rate constants and E = 0.",
             qoi_curves = (:xi_histories,),
             heating = :isothermal,
             curves = sol -> begin
-                # FDS 6.11.0 overlay (reference/fds/custom/): the span-matched
+                # FDS 6.11.1 overlay (reference/fds/custom/): the span-matched
                 # re-run of two_step_solid_reaction (T_END = 20 s = our
                 # window; identical kinetics 0.389/0.262 s⁻¹, E = 0,
                 # isothermal — the same constants as Gpyro §3.4.4). FDS devc
@@ -136,11 +131,11 @@ function _verification_case_vrx01()
                     "Yc",
                 )
                 t_fds = fds[1][2:end] .- (fds[1][2] - fds[1][1]) / 2
-                # Gpyro 0.8200 overlay (reference/gpyro/): dissertation §3.4.4
+                # Gpyro V2 overlay (reference/gpyro/v2_migration/): dissertation §3.4.4
                 # 0D isothermal deck, identical constants, dt = 1 ms (Gpyro's
                 # species update is first-order in time).
                 gp = reference_columns(
-                    "gpyro/vrx01_result.csv",
+                    "gpyro/v2_migration/vrx01_result.csv",
                     "t_s",
                     "Y_A",
                     "Y_B",
@@ -165,7 +160,7 @@ function _verification_case_vrx01()
                             ],
                             [
                                 CurveSeries(
-                                    label = "FDS 6.11.0 ξ_$(species)",
+                                    label = "FDS 6.11.1 ξ_$(species)",
                                     crosscode = true,
                                     x = t_fds,
                                     y = ξ0 .* fds[1+idx][2:end],
@@ -175,7 +170,7 @@ function _verification_case_vrx01()
                             ],
                             [
                                 CurveSeries(
-                                    label = "Gpyro 0.8200 ξ_$(species)",
+                                    label = "Gpyro V2 ξ_$(species)",
                                     crosscode = true,
                                     x = gp[1],
                                     y = ξ0 .* gp[1+idx],

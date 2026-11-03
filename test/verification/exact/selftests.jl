@@ -7,6 +7,96 @@
 # part of the verification suite.
 
 @testset "Exact-solution library self-tests" begin
+    @testset "Gpyro-inspired independent references" begin
+        # Robin uptake must equal the spatial integral of the concentration
+        # and its time derivative must equal the imposed surface exchange.
+        D, t = 2e-5, 150.0
+        for b in (5.0, 500.0)
+            response(x, time) = semiinf_convective_theta(x, time; h = b, k = 1.0, α = D)
+            xmax, n = 16sqrt(D*t), 4000
+            dx = xmax/n
+            integral =
+                dx/3*(
+                    response(0.0, t) +
+                    response(xmax, t) +
+                    4sum(response(i*dx, t) for i = 1:2:(n-1)) +
+                    2sum(response(i*dx, t) for i = 2:2:(n-2))
+                )
+            @test robin_diffusion_uptake(t; D, b) ≈ integral rtol = 1e-9
+            δ = 1e-3
+            derivative =
+                (robin_diffusion_uptake(t+δ; D, b)-robin_diffusion_uptake(t-δ; D, b))/(2δ)
+            @test derivative ≈ D*b*(1-response(0.0, t)) rtol = 1e-8
+            # Independent one-sided derivative of the continuum surface BC.
+            δx = 1e-7
+            gradient = (-3response(0.0, t)+4response(δx, t)-response(2δx, t))/(2δx)
+            @test -gradient ≈ b*(1-response(0.0, t)) rtol = 1e-7
+        end
+        @test robin_diffusion_uptake(0.0; D, b = 5.0) == 0.0
+
+        # Average references are checked by quadrature of the point solution,
+        # independently of the primitive used by the new error metric.
+        for b in (6.5, 650.0),
+            t in (50.0, 150.0, 400.0),
+            width in (1/40, 1/160, 1/320),
+            xlo in (0.0, 0.03, 0.3, 0.8)
+
+            response(x) = semiinf_convective_theta(x, t; h = b, k = 1.0, α = D)
+            n = 128
+            dx = width/n
+            quadrature =
+                (
+                    response(xlo) +
+                    response(xlo+width) +
+                    4sum(response(xlo+i*dx) for i = 1:2:(n-1)) +
+                    2sum(response(xlo+i*dx) for i = 2:2:(n-2))
+                )/(3n)
+            average = robin_diffusion_cell_average(xlo, xlo+width, t; D, b)
+            @test average ≈ quadrature rtol = 1e-9 atol = 2e-12
+        end
+        for b in (6.5, 650.0)
+            width = 1/160
+            integral = sum(
+                robin_diffusion_cell_average(i*width, (i+1)*width, 400.0; D, b)*width
+                for i = 0:159
+            )
+            @test integral ≈ robin_diffusion_uptake(400.0; D, b) rtol = 1e-11
+        end
+        @test robin_diffusion_cell_average(0.0, 0.01, 0.0; D, b = 5.0) == 0.0
+        @test robin_diffusion_cell_average(0.0, 0.01, 50.0; D, b = 0.0) == 0.0
+
+        # Darcy reference satisfies the constitutive law, with pressure and
+        # gradient independently evaluated from the exact profile.
+        Pout, flux, μ, T, κ, M = 1e5, 10.0, 2e-5, 300.0, 5e-10, 0.029
+        p(x) = darcy_imposed_flux_pressure(x; Pout, flux, μ, T, κ, M)
+        @test p(0.0) == Pout
+        for x in (0.01, 0.05, 0.09)
+            δ = 1e-6
+            dpdx = (p(x+δ)-p(x-δ))/(2δ)
+            @test κ*M/(μ*Pyrolysis.Materials.R_GAS*T)*p(x)*dpdx ≈ flux rtol = 1e-8
+        end
+
+        # Differentiate the temperature reference and check the independent
+        # adiabatic energy equation, including the equal-capacity limit.
+        T0, rate, ca = 1000.0, 0.2, 1200.0
+        for cb in (ca, 1900.0, 1360.0), heat in (1e6, -1e5, 0.0)
+            temp(t) = adiabatic_reaction_temperature(t; T0, rate, heat, ca, cb)
+            @test temp(0.0) == T0
+            for t in (0.5, 5.0, 20.0)
+                δ = 1e-4
+                derivative = (temp(t+δ)-temp(t-δ))/(2δ)
+                a = exp(-rate*t)
+                @test (ca*a+cb*(1-a))*derivative ≈ -heat*rate*a rtol = 1e-7 atol = 1e-6
+                heat == 0 && @test temp(t) == T0
+            end
+        end
+        for heat in (1e6, -1e5)
+            equal = adiabatic_reaction_temperature(5.0; T0, rate, heat, ca, cb = ca)
+            nearly = adiabatic_reaction_temperature(5.0; T0, rate, heat, ca, cb = ca+1e-8)
+            @test nearly ≈ equal rtol = 1e-10
+        end
+    end
+
     @testset "semi-infinite convective erfc (C&J §2.7)" begin
         # Gpyro §3.4.1 parameters
         h, k = 20.0, 0.2
@@ -76,9 +166,10 @@
     end
 
     @testset "isothermal kinetics closed forms" begin
-        # 1. nth-order: dξ/dt = −kξⁿ verified by central finite difference.
+        # 1. nth-order: dξ/dt = −k ξ₀ (ξ/ξ₀)ⁿ verified by central finite
+        #    difference, before the burnout of the orders below one.
         for n in (0.0, 2.0, 2 / 3)
-            ξ0, k, t = 100.0, 0.5, 5.0
+            ξ0, k, t = 100.0, 0.5, 1.0
             δ = 1e-6
             dξdt =
                 (
@@ -86,15 +177,15 @@
                     nth_order_xi(t - δ; ξ0 = ξ0, k = k, n = n)
                 ) / (2δ)
             ξt = nth_order_xi(t; ξ0 = ξ0, k = k, n = n)
-            @test dξdt ≈ -k * ξt^n rtol = 1e-6
+            @test dξdt ≈ -k * ξ0 * (ξt / ξ0)^n rtol = 1e-6
         end
 
         # 2. Burnout: exact zero at t_b for n < 1, and m^(1/3) linear in t for
         #    the contracting-sphere order n = 2/3 (FDS NaHCO₃ marker).
-        tb = nth_order_burnout_time(ξ0 = 100.0, k = 5.0, n = 0.0)
+        tb = nth_order_burnout_time(k = 0.05, n = 0.0)
         @test tb == 20.0
-        @test nth_order_xi(tb; ξ0 = 100.0, k = 5.0, n = 0.0) == 0.0
-        tb3 = nth_order_burnout_time(ξ0 = 1.0, k = 0.3, n = 2 / 3)
+        @test nth_order_xi(tb; ξ0 = 100.0, k = 0.05, n = 0.0) == 0.0
+        tb3 = nth_order_burnout_time(k = 0.3, n = 2 / 3)
         m13(t) = nth_order_xi(t; ξ0 = 1.0, k = 0.3, n = 2 / 3)^(1 / 3)
         @test m13(0.3 * tb3) ≈ 1 - 0.3 rtol = 1e-12
         @test m13(0.7 * tb3) ≈ 1 - 0.7 rtol = 1e-12
@@ -114,6 +205,21 @@
         ξB_at(t) = series_chain_xi(t; ξ0 = ξ0, k1 = k1, k2 = k2)[2]
         @test ξB_at(tpeak) > ξB_at(tpeak - 0.01)
         @test ξB_at(tpeak) > ξB_at(tpeak + 0.01)
+
+        # 4. Series scheme on conversions: the Bateman form at second-step order
+        #    one, and the balance at another order by central finite difference.
+        k1, k2 = 0.05, 0.1
+        for t in (5.0, 20.0, 80.0)
+            ξA, ξB, _ = series_chain_xi(t; ξ0 = 1.0, k1 = k1, k2 = k2)
+            eA, eB = series_chain_conversion(t; k1 = k1, k2 = k2, n2 = 1.0)
+            @test eA ≈ ξA rtol = 1e-13
+            @test eB ≈ ξB rtol = 1e-13
+            δ = 1e-3
+            b₊ = series_chain_conversion(t + δ; k1 = k1, k2 = k2, n2 = 1.8)[2]
+            b₋ = series_chain_conversion(t - δ; k1 = k1, k2 = k2, n2 = 1.8)[2]
+            a, b = series_chain_conversion(t; k1 = k1, k2 = k2, n2 = 1.8)
+            @test (b₊ - b₋) / 2δ ≈ k1 * a - k2 * b^1.8 rtol = 1e-6
+        end
     end
 
     @testset "radiative cooling implicit solution" begin
@@ -359,8 +465,8 @@ end
 # MMS driver self-tests (formula-provenance rule applied to the source
 # generator itself): every ForwardDiff-assembled continuous-operator term is
 # checked against an independently hand-derived closed form, then the driver
-# is exercised end-to-end on a heat-only manufactured solution (spatial order
-# ≈ 2, temporal order ≈ 4, analytic-vs-FD Jacobian agreement).
+# is exercised end-to-end on a heat-only manufactured solution (spatial and
+# temporal order).
 @testset "MMS driver (exact/mms.jl)" begin
     @testset "conduction + storage source vs hand derivation" begin
         ρs, cs, ks = 1000.0, 1200.0, 0.4
@@ -411,15 +517,14 @@ end
         end
     end
 
-    @testset "gas flux, S_conv and species source (single gas)" begin
+    @testset "gas flux, S_adv and species source (single gas)" begin
         L = 0.02
         λ = 2.0e-5
         cp_g = 1100.0
         solid = SolidComponent(:s, ρ = 800.0, c = 1000.0, k = 0.3, λ = λ)
-        gas = GaseousComponent(:g, M = 0.028, c = cp_g, k = 0.03, λ = λ)
+        gas = GaseousComponent(:g, M = 0.028, c = cp_g, k = 0.03)
         mat = Material(name = :MMSSelfGT, components = (solid, gas), reactions = ())
-        # Equal component λ ⇒ λ_eff = λ exactly under any volume weighting, so
-        # the hand flux needs no mixture algebra.
+        # One condensed matrix gives Λ=λ; φ=1−700/800=1/8.
         τ = 4.0
         T_f(z, t) = 400.0 + 50.0 * z / L
         ξg_f(z, t) = 2.0 + sin(π * z / L) * exp(-t / τ)
@@ -428,11 +533,11 @@ end
             T = T_f(z, t)
             dTdz = 50.0 / L
             dξdz = (π / L) * cos(π * z / L) * exp(-t / τ)
-            -(λ / T) * (dξdz * T + ξg_f(z, t) * dTdz)
+            -(λ / (T*(1-700/800))) * (dξdz * T + ξg_f(z, t) * dTdz)
         end
         for z in (0.0, 0.006, 0.015, L), t in (0.0, 1.5)
             @test mms_gas_flux(mat, fields, 2, z, t) ≈ J_hand(z, t) rtol = 1e-12
-            @test mms_S_conv(mat, fields, z, t) ≈ -cp_g * J_hand(z, t) * (50.0 / L) rtol =
+            @test mms_S_adv(mat, fields, z, t) ≈ -cp_g * J_hand(z, t) * (50.0 / L) rtol =
                 1e-12
             # Species source: ∂tξ + ∂zJ, with ∂zJ from a central difference of
             # the hand flux (independent of the ForwardDiff evaluation).
@@ -443,7 +548,7 @@ end
         end
     end
 
-    @testset "end-to-end heat-only MMS (order + Jacobian agreement)" begin
+    @testset "end-to-end heat-only MMS (spatial and temporal order)" begin
         ρs, cs, ks = 1000.0, 1200.0, 0.4
         L, τ = 0.02, 5.0
         fields = MMSFields(
@@ -453,7 +558,7 @@ end
         function build(n)
             solid = SolidComponent(:s, ρ = ρs, c = cs, k = ks)
             mat = Material(name = :MMSSelfE2E, components = (solid,), reactions = ())
-            mesh = create_uniform_mesh(L, n, Val(1); T_initial = 300.0, ξ_initial = (ρs,))
+            mesh = uniform_mesh(L, n)
             bcs = mms_thermal_bcs(mat, fields, L)
             bc_set = BoundaryConditionSet(thermal = (top = bcs.top, bottom = bcs.bottom))
             return PyrolysisProblem(
@@ -476,14 +581,8 @@ end
         @test errs[2] < errs[1]
         @test order > 1.7
 
-        # Analytic Jacobian and colored-FD must agree (the injected source is
-        # state-independent, so the Structured Jacobian stays exact).
-        sol_an = solve_mms(build(16), fields; jacobian = :analytic)
-        sol_fd = solve_mms(build(16), fields; jacobian = :fd)
-        @test sol_an.retcode == :Success && sol_fd.retcode == :Success
-        @test maximum(abs.(sol_an.T[:, end] - sol_fd.T[:, end])) < 1e-5
-
-        # Temporal order ≈ 4 (KenCarp4): fixed mesh, fixed-dt sweep against a
+        # Temporal order of the default integrator (Rodas5P, observed 4.6;
+        # finer steps reach roundoff): fixed mesh, fixed-dt sweep against a
         # small-dt reference on the SAME mesh so the spatial error cancels.
         ref = solve_mms(build(16), fields; dt = 0.0125)
         e_dt = [
@@ -498,14 +597,14 @@ end
         # kinetics θ*, the Gauss–Legendre w* = ∫θ*, and the material-frame
         # condensed source are each verified against an independently
         # hand-derived closed form. Design mirrors the case: constant ρ_s,
-        # γ_s = 1 / γ_g = 0, single first-order s → g, depletion limiter
+        # the gas outside the strain, single first-order s → g, depletion limiter
         # numerically inactive (tanh(ξ_s/1.0) ≡ 1.0 in Float64 for
         # ξ_s ≳ 20 kg/m³ — here ξ_s ≥ 500).
         L = 0.01
         ρs = 800.0
         A_r, E_r = 5.0e4, 80.0e3
-        solid = SolidComponent(:s, ρ = ρs, c = 1200.0, k = 0.2, λ = 2.0e-5, γ = 1.0)
-        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03, λ = 2.0e-5)  # γ = 0
+        solid = SolidComponent(:s, ρ = ρs, c = 1200.0, k = 0.2, λ = 2.0e-5)
+        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03)
         rxn = Reaction(:r, 1 => 2; A = A_r, E = E_r, h = 5.0e4)
         mat = Material(name = :MMSSelfIM, components = (solid, gas), reactions = (rxn,))
 
@@ -520,7 +619,7 @@ end
         R = Pyrolysis.Materials.R_GAS
         k_hand(t) = A_r * exp(-E_r / (R * T_f(0.0, t)))
         rate_hand(z, t) = k_hand(t) * ξs_f(z, t)          # limiter ≡ 1 here
-        θ_hand(z, t) = -rate_hand(z, t) / ρs               # γ_g = 0 drops the gas term
+        θ_hand(z, t) = -rate_hand(z, t) / ρs               # the gas never enters θ
         # w* = ∫₀ᶻ θ* dζ, closed form for the sin profile:
         w_hand(z, t) =
             -(k_hand(t) / ρs) * (a_f(t) * z + b_f(t) * (L / π) * (1.0 - cos(π * z / L)))

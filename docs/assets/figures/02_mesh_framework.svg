@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="365" viewBox="0 0 1200 365" role="img" aria-labelledby="title desc">
+<title id="title">Figure 2. Mesh Framework (Schematic)</title><desc id="desc">Setup retains connectivity and the state layout. Each residual evaluation proceeds from evolving state and activity through geometry and derived fields, correction, kernels, closure and residual assembly.</desc>
+<defs>
+<marker id="ink" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#202020" stroke-width="1.3"/></marker>
+<marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#295674" stroke-width="1.3"/></marker>
+<marker id="teal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#365b58" stroke-width="1.3"/></marker>
+<marker id="orange" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#92512f" stroke-width="1.3"/></marker>
+<marker id="purple" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#675878" stroke-width="1.3"/></marker>
+</defs><rect width="100%" height="100%" fill="white"/><g font-family="Liberation Sans, Arial, sans-serif" fill="#202020">
+<text x="32.000" y="39.000" font-size="24" fill="#202020" text-anchor="start" font-weight="bold" >Figure 2. Mesh Framework (Schematic)</text>
+<rect x="45" y="85" width="1110" height="60" rx="0" fill="#f7f7f7" stroke="#555555" stroke-width="1.2" stroke-dasharray=""/>
+<text x="600.000" y="123.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="bold" >Setup: Fixed Connectivity and State Layout</text>
+<line x1="127" y1="145" x2="127" y2="201" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<rect x="45" y="215" width="165" height="108" rx="0" fill="white" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<text x="61.000" y="245.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >State</text>
+<text x="61.000" y="274.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >x, m, T/H, A</text>
+<text x="61.000" y="299.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >Live-cell mask</text>
+<line x1="214" y1="267" x2="230" y2="267" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<rect x="234" y="215" width="165" height="108" rx="0" fill="white" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<text x="250.000" y="245.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >Geometry</text>
+<text x="250.000" y="274.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >Volumes; faces</text>
+<text x="250.000" y="299.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >Fields: ξ, T, P</text>
+<line x1="403" y1="267" x2="419" y2="267" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<rect x="423" y="215" width="165" height="108" rx="0" fill="white" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<text x="439.000" y="245.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >Correction</text>
+<text x="439.000" y="274.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >c = w − vₛ</text>
+<line x1="592" y1="267" x2="608" y2="267" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<rect x="612" y="215" width="165" height="108" rx="0" fill="white" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<text x="628.000" y="245.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >Kernels</text>
+<text x="628.000" y="274.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >Fluxes; sources</text>
+<line x1="781" y1="267" x2="797" y2="267" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<rect x="801" y="215" width="165" height="108" rx="0" fill="white" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<text x="817.000" y="245.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >Closure</text>
+<text x="817.000" y="274.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >Volume; motion</text>
+<line x1="970" y1="267" x2="986" y2="267" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<rect x="990" y="215" width="165" height="108" rx="0" fill="white" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<text x="1006.000" y="245.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >Residual</text>
+<text x="1006.000" y="274.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >M u̇ = f(u, t)</text>
+</g></svg>

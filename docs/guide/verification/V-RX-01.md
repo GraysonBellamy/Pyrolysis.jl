@@ -14,7 +14,7 @@ constant rates k₁ = 0.389 s⁻¹, k₂ = 0.262 s⁻¹ (published values, so nu
 are cross-checkable against both codes), isothermal, exact Bateman solution
 in exact/kinetics.jl.
 
-Exercises multi-step ReactionSet coupling: intermediate B is produced by
+Exercises multi-step reaction coupling: intermediate B is produced by
 reaction 1 and consumed by reaction 2 SIMULTANEOUSLY (the existing
 isothermal test is single-step).
 
@@ -30,11 +30,11 @@ Setup notes (solver conventions that would corrupt the case):
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| max relative ξ_A error | 1.256e-09 | — | 1.256e-09 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
-| max relative ξ_B error | 2.781e-09 | — | 2.781e-09 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
-| max relative ξ_C error | 1.526e-09 | — | 1.526e-09 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
-| total-mass conservation (closed chain) | 2.274e-15 | — | 2.274e-15 | 1e-13 | yes | Σξ must equal ξ₀; unit yields |
-| isothermality drift | 5.684e-14 | — | 5.684e-14 | 1e-12 | yes | h = 0 both reactions; Dirichlet-pinned single cell |
+| max relative ξ_A error | 4.773e-13 | — | 4.773e-13 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
+| max relative ξ_B error | 1.207e-12 | — | 1.207e-12 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
+| max relative ξ_C error | 7.295e-13 | — | 7.295e-13 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
+| total-mass conservation (closed chain) | 1.251e-15 | — | 1.251e-15 | 1e-13 | yes | Σξ must equal ξ₀; unit yields |
+| isothermality drift | 0 | — | 0 | 1e-12 | yes | h = 0 both reactions; Dirichlet-pinned single cell |
 
 ![V-RX-01 xi_histories](assets/V-RX-01/V-RX-01_xi_histories.png)
 
@@ -42,22 +42,17 @@ Setup notes (solver conventions that would corrupt the case):
 
 ### Comparison with other codes
 
-The same case was solved with FDS 6.11.0 at 1 solid cell and Gpyro 0.8200 at 0D; decks, outputs, and
-run provenance are committed under `test/verification/reference/`.
-Each code's error against the same exact solution is drawn below
-on a log scale, muted gray behind this solver's series — the
-signed linear-scale panel above shows where the error lives, this
-one compares magnitudes across codes.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-RX-01/V-RX-01_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
+
+Gpyro V2 revision `bff0126c68f2` uses one 0D isothermal unknown with unit condensed yields. The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements. ThermaKin2Ds 7 uses one insulated element at dt = 0.001 s with the same rate constants and E = 0.
+
+Accuracy comparison only; timing measurements are omitted.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
 
 ![V-RX-01 xi_histories_vs_codes_error](assets/V-RX-01/V-RX-01_xi_histories_vs_codes_error.png)
-
-Wall times at every ladder rung against the reference runs.
-Resolutions and simulated spans differ where noted (details in
-`reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark; rungs at a matched
-resolution are directly comparable.
-
-![V-RX-01 solve_time](assets/V-RX-01/V-RX-01_solve_time.png)
 
 Solution overlays including the other codes' points: [xi_histories_vs_codes](assets/V-RX-01/V-RX-01_xi_histories_vs_codes.png).
 
@@ -65,7 +60,6 @@ Solution overlays including the other codes' points: [xi_histories_vs_codes](ass
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-12 |
 | reltol | 1.0e-10 |
-

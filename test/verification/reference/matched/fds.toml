@@ -1,0 +1,177 @@
+[[series]]
+case = "V-HC-04a"
+curve = "T_profile_steady"
+reference = "steady solver profile"
+label = "FDS 6.11.1"
+path = "fds/vhc04a.csv"
+index = 1
+
+[[series]]
+case = "V-HC-04b"
+curve = "T_profile_steady"
+reference = "steady solver profile"
+label = "FDS 6.11.1"
+path = "fds/vhc04b.csv"
+index = 1
+
+[[series]]
+case = "V-HC-04c"
+curve = "T_profile_steady"
+reference = "steady solver profile"
+label = "FDS 6.11.1"
+path = "fds/vhc04c.csv"
+index = 1
+
+[[series]]
+case = "V-HC-04d"
+curve = "T_profile_steady"
+reference = "steady solver profile"
+label = "FDS 6.11.1"
+path = "fds/vhc04c.csv"
+index = 1
+reuse_note = "Same physical problem as V-HC-04c; Julia aligns its mesh interface"
+
+[[series]]
+case = "V-HC-05"
+curve = "T_profile_steady"
+reference = "steady solver profile"
+label = "FDS 6.11.1"
+path = "fds/vhc05.csv"
+index = 1
+
+[[series]]
+case = "V-RX-02a"
+curve = "xi_histories"
+reference = "ξ_A (n = 0.0)"
+label = "FDS 6.11.1"
+path = "fds/vrx02a.csv"
+index = 1
+
+[[series]]
+case = "V-RX-02b"
+curve = "xi_histories"
+reference = "ξ_A (n = 2.0)"
+label = "FDS 6.11.1"
+path = "fds/vrx02b.csv"
+index = 1
+
+[[series]]
+case = "V-RX-02c"
+curve = "xi_histories"
+reference = "ξ_A (n = 0.6666666666666666)"
+label = "FDS 6.11.1"
+path = "fds/vrx02c.csv"
+index = 1
+
+[[series]]
+case = "V-RX-04a"
+curve = "T_history_vs_exact"
+reference = "slab mean temperature"
+label = "FDS 6.11.1"
+path = "fds/vrx04a.csv"
+index = 1
+
+[[series]]
+case = "V-RX-04b"
+curve = "surface_T_history"
+reference = "surface temperature"
+label = "FDS 6.11.1"
+path = "fds/vrx04b.csv"
+index = 1
+
+[[series]]
+case = "V-RX-05a"
+curve = "temperature"
+reference = "temperature"
+label = "FDS 6.11.1"
+path = "fds/vrx05a.csv"
+index = 1
+
+[[series]]
+case = "V-RX-05a"
+curve = "species"
+reference = "A"
+label = "FDS 6.11.1 A"
+path = "fds/vrx05a.csv"
+index = 2
+
+[[series]]
+case = "V-RX-05a"
+curve = "species"
+reference = "B"
+label = "FDS 6.11.1 B"
+path = "fds/vrx05a.csv"
+index = 3
+
+[[series]]
+case = "V-RX-05a"
+curve = "enthalpy"
+reference = "enthalpy"
+label = "FDS 6.11.1"
+path = "fds/vrx05a.csv"
+index = 4
+
+[[series]]
+case = "V-RX-05b"
+curve = "temperature"
+reference = "temperature"
+label = "FDS 6.11.1"
+path = "fds/vrx05b.csv"
+index = 1
+
+[[series]]
+case = "V-RX-05b"
+curve = "species"
+reference = "A"
+label = "FDS 6.11.1 A"
+path = "fds/vrx05b.csv"
+index = 2
+
+[[series]]
+case = "V-RX-05b"
+curve = "species"
+reference = "B"
+label = "FDS 6.11.1 B"
+path = "fds/vrx05b.csv"
+index = 3
+
+[[series]]
+case = "V-RX-05b"
+curve = "enthalpy"
+reference = "enthalpy"
+label = "FDS 6.11.1"
+path = "fds/vrx05b.csv"
+index = 4
+
+[[series]]
+case = "V-CPL-03"
+curve = "thickness_histories"
+reference = "P1"
+label = "FDS 6.11.1 P1"
+path = "fds/vcpl03p1.csv"
+index = 1
+
+[[series]]
+case = "V-CPL-03"
+curve = "thickness_histories"
+reference = "P2"
+label = "FDS 6.11.1 P2"
+path = "fds/vcpl03p2.csv"
+index = 1
+
+[[series]]
+case = "V-CPL-03"
+curve = "thickness_histories"
+reference = "P3"
+label = "FDS 6.11.1 P3"
+path = "fds/vcpl03p3.csv"
+index = 1
+
+[[series]]
+case = "V-CPL-04"
+curve = "steady_profiles"
+reference = "δ = 0.44 ≈ 0.50 δ_c"
+label = "FDS 6.11.1, δ = 0.44"
+path = "fds/vcpl04.csv"
+index = 1
+

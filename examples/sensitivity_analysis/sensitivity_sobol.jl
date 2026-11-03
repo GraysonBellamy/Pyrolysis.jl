@@ -44,7 +44,7 @@ Writes: results/sobol_group_indices.csv, results/sobol_bootstrap_ci.csv,
 		results/sobol_bar_<qoi>.png, results/pce_validation_<qoi>.png,
 		results/sobol_convergence_<qoi>.png
 
-Usage:  julia --threads=auto --project=. examples/sensitivity_analysis/sensitivity_sobol.jl
+Usage:  julia --threads=auto --project=examples examples/sensitivity_analysis/sensitivity_sobol.jl
 """
 
 using PolyChaos

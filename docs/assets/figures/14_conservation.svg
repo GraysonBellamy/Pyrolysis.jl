@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="525" viewBox="0 0 1200 525" role="img" aria-labelledby="title desc">
+<title id="title">Figure 14. Conservation of the Live Inventory (Schematic)</title><desc id="desc">Mass and sensible enthalpy are counted over live cells. Internal transfers cancel; boundary outflow and event losses leave the domain. The energy sources include reaction heat, radiation and sensible-enthalpy formation.</desc>
+<defs>
+<marker id="ink" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#202020" stroke-width="1.3"/></marker>
+<marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#295674" stroke-width="1.3"/></marker>
+<marker id="teal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#365b58" stroke-width="1.3"/></marker>
+<marker id="orange" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#92512f" stroke-width="1.3"/></marker>
+<marker id="purple" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#675878" stroke-width="1.3"/></marker>
+</defs><rect width="100%" height="100%" fill="white"/><g font-family="Liberation Sans, Arial, sans-serif" fill="#202020">
+<text x="32.000" y="39.000" font-size="24" fill="#202020" text-anchor="start" font-weight="bold" >Figure 14. Conservation of the Live Inventory (Schematic)</text>
+<line x1="35" y1="80" x2="565" y2="80" stroke="#555555" stroke-width="1" stroke-dasharray="" />
+<text x="53.000" y="110.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >(a) Mass [kg]</text>
+<line x1="615" y1="80" x2="1165" y2="80" stroke="#555555" stroke-width="1" stroke-dasharray="" />
+<text x="633.000" y="110.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >(b) Sensible Enthalpy [J]</text>
+<rect x="110" y="200" width="400" height="145" rx="0" fill="#f7f7f7" stroke="#555555" stroke-width="1.2" stroke-dasharray=""/>
+<text x="310.000" y="233.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="bold" >Live Inventory M</text>
+<line x1="310" y1="250" x2="310" y2="335" stroke="#555555" stroke-width="1.5" stroke-dasharray="4 4" />
+<line x1="210" y1="275" x2="410" y2="275" stroke="#365b58" stroke-width="1.5" stroke-dasharray="" marker-end="url(#teal)"/>
+<text x="210.000" y="319.000" font-size="21" fill="#365b58" text-anchor="middle" font-weight="normal" >−F<tspan baseline-shift="sub" font-size="75%">m</tspan> A</text>
+<text x="410.000" y="319.000" font-size="21" fill="#365b58" text-anchor="middle" font-weight="normal" >+F<tspan baseline-shift="sub" font-size="75%">m</tspan> A</text>
+<line x1="515" y1="265" x2="575" y2="265" stroke="#365b58" stroke-width="2" stroke-dasharray="" marker-end="url(#teal)"/>
+<text x="490.000" y="179.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >Boundary Outflow</text>
+<line x1="430" y1="350" x2="430" y2="423" stroke="#675878" stroke-width="2" stroke-dasharray="" marker-end="url(#purple)"/>
+<text x="430.000" y="454.000" font-size="20" fill="#675878" text-anchor="middle" font-weight="normal" >Event Loss</text>
+<rect x="700" y="200" width="400" height="145" rx="0" fill="#f7f7f7" stroke="#555555" stroke-width="1.2" stroke-dasharray=""/>
+<text x="900.000" y="233.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="bold" >Live Inventory H</text>
+<line x1="900" y1="250" x2="900" y2="335" stroke="#555555" stroke-width="1.5" stroke-dasharray="4 4" />
+<line x1="800" y1="275" x2="1000" y2="275" stroke="#92512f" stroke-width="1.5" stroke-dasharray="" marker-end="url(#orange)"/>
+<text x="800.000" y="319.000" font-size="21" fill="#92512f" text-anchor="middle" font-weight="normal" >−F<tspan baseline-shift="sub" font-size="75%">E</tspan> A</text>
+<text x="1000.000" y="319.000" font-size="21" fill="#92512f" text-anchor="middle" font-weight="normal" >+F<tspan baseline-shift="sub" font-size="75%">E</tspan> A</text>
+<line x1="1105" y1="265" x2="1165" y2="265" stroke="#92512f" stroke-width="2" stroke-dasharray="" marker-end="url(#orange)"/>
+<text x="1080.000" y="179.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >Boundary Outflow</text>
+<line x1="1020" y1="350" x2="1020" y2="423" stroke="#675878" stroke-width="2" stroke-dasharray="" marker-end="url(#purple)"/>
+<text x="1020.000" y="454.000" font-size="20" fill="#675878" text-anchor="middle" font-weight="normal" >Event Loss</text>
+<text x="235.000" y="395.000" font-size="21" fill="#202020" text-anchor="middle" font-weight="normal" >Σⱼ S<tspan baseline-shift="sub" font-size="75%">mass,ij</tspan> = 0</text>
+<text x="235.000" y="427.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >Mass-Balanced Reactions</text>
+<line x1="800" y1="420" x2="800" y2="350" stroke="#92512f" stroke-width="2" stroke-dasharray="" marker-end="url(#orange)"/>
+<text x="790.000" y="454.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >Reaction + Radiation</text>
+<text x="790.000" y="489.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >+ Sensible-Enthalpy Formation</text>
+</g></svg>

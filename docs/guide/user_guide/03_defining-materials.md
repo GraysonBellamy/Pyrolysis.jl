@@ -15,8 +15,9 @@ correctly.
 
 Throughout, the spatial coordinate is `z` (through-thickness): `z = 0` is the
 bottom/substrate, `z = L` is the top/exposed surface (see Technical Reference §1).
-The primary species state variable is the **mass concentration** `ξ_j` in kg·m⁻³
-(not mass fraction). All inputs are SI: densities in kg·m⁻³, heat capacities in
+Composition is specified and reported as the **mass concentration** `ξ_j`
+in kg·m⁻³; the integrator stores component cell masses `m_j` and derives
+`ξ_j = m_j/V`. All inputs are SI: densities in kg·m⁻³, heat capacities in
 J·kg⁻¹·K⁻¹, conductivities in W·m⁻¹·K⁻¹, activation energies in J·mol⁻¹.
 
 ---
@@ -54,23 +55,20 @@ package's top-level docstring and in Chapter 2; this chapter expands every optio
 > `Module.name` syntax resolves any name defined in the module:
 >
 > - From the `Materials` submodule: `Pyrolysis.Materials.n_components`,
->   `Pyrolysis.Materials.n_reactions`, `Pyrolysis.Materials.dry_pyrolysis_gas_indices`,
->   and `Pyrolysis.Materials.has_darcy_flow` are *exported* from `Materials`; the
->   stoichiometry helpers `Pyrolysis.Materials.verify_stoichiometry` and
->   `Pyrolysis.Materials.mass_balance_error` are *internal* (not exported, not part
->   of the stable public API) but are still callable through the same qualified
->   path.
+>   `Pyrolysis.Materials.n_reactions`, `Pyrolysis.Materials.dry_gas_flags`.
 > - From the `Properties` submodule: the effective-property functions
->   (`Pyrolysis.Properties.mixture_density`, etc.).
+>   (`Pyrolysis.Properties.effective_conductivity`,
+>   `mixture_emissivity`, `mixture_absorptivity`, `effective_permeability`,
+>   `skeletal_volume_fraction`, …; §3.5.4).
+> - From the `Physics` submodule: `reaction_rate` and `one_sided_factor`
+>   (Chapter 4).
 >
 > For convenience you may `using Pyrolysis.Internal`, which re-exports the union of
 > every submodule's *exports* and so brings the exported helpers
-> (`n_components`, `dry_pyrolysis_gas_indices`, `has_darcy_flow`, …) into scope
-> unqualified — but **not** the internal stoichiometry helpers above, which still
-> require the `Pyrolysis.Materials.` prefix. `Internal` is not the stable public
-> surface; prefer qualified access in production code. Material validation happens
-> at the problem level: build a `PyrolysisProblem` and let `solve` validate it (the
-> default, `validate = true`); see §3.7.
+> (`n_components`, `dry_gas_flags`, …) into scope
+> unqualified. `Internal` is not the stable public surface; prefer qualified
+> access in production code. Material validation happens at the problem level:
+> build a `PyrolysisProblem` and `solve` validates it; see §3.7.
 
 ---
 
@@ -78,219 +76,123 @@ package's top-level docstring and in Chapter 2; this chapter expands every optio
 
 ### 3.2.1 `SolidComponent`
 
-A solid is the canonical matrix-forming component. The keyword constructor is:
-
 ```julia
-SolidComponent(name::Symbol;
-               ρ, c, k,
-               ε = 0.9, absorptivity = nothing, α = 0.0, γ = 1.0,
-               λ = 0.0, κ = 0.0,
-               ρ_intrinsic = nothing, φ = nothing)
+virgin = SolidComponent(:virgin; ρ=530., ρ_intrinsic=1500.,
+    c=(1500.,1.), k=.12, ε=.88, λ=2e-5, κ=1e-15)
+char = SolidComponent(:char; ρ=150., ρ_intrinsic=1950.,
+    c=1000., k=.10, ε=.95, α=5., λ=2e-5, κ=1e-12)
 ```
 
-| Keyword | Symbol | Meaning | Units | Default |
-|---|---|---|---|---|
-| `name` | — | Component identifier (positional, a `Symbol`) | — | required |
-| `ρ` | `ρ_j` | **Bulk** (pure-phase) density | kg·m⁻³ | required |
-| `c` | `c_{p,j}` | Specific heat capacity | J·kg⁻¹·K⁻¹ | required |
-| `k` | `k_j` | Thermal conductivity | W·m⁻¹·K⁻¹ | required |
-| `ε` | `ε_j(T)` | Surface emissivity (number or property function of `T`) | – | `0.9` |
-| `absorptivity` | `a_j` | Surface absorptivity for incident radiation (`nothing` = Kirchhoff, `a_j = ε_j(T)`) | – | `nothing` |
-| `α` | `α_j` | Mass-basis absorption coefficient | m²·kg⁻¹ | `0.0` |
-| `γ` | `γ_j` | Swelling factor (volume-change participation) | – | `1.0` |
-| `λ` | `λ_j` | Gas-transfer (diffusion) coefficient contribution | m²·s⁻¹ | `0.0` |
-| `κ` | `κ_j` | Darcy permeability | m² | `0.0` |
-| `ρ_intrinsic` | `ρ_{i,j}` | Skeletal/intrinsic density (porosity only) | kg·m⁻³ | `= ρ` |
-| `φ` | — | Pure-phase porosity (alternative to `ρ_intrinsic`) | – | `nothing` |
+Bulk density `ρ`, heat capacity `c` and conductivity `k` are required.
+The constructor's `ρ` describes the pure material. Set its amount in a
+mixture through `ξ_initial` (§5.10). An FDS component density `ρ_{s,j}`
+corresponds to that concentration, while FDS's material density property
+is a separate input (§1.3; Technical Reference §4.8.3).
 
-```julia
-using Pyrolysis
+Every solid is part of the gas-transport matrix, so under `LumpedTransfer` it
+requires explicit superficial transfer `λ`. Zero `λ` closes wall transfer independently of `κ`; zero permeability closes
+Darcy flow. Neither coefficient is inferred from gas loading.
 
-# Virgin wood: temperature-rising heat capacity, opaque, tight matrix
-virgin = SolidComponent(:virgin,
-    ρ = 530.0,            # bulk density [kg/m³]
-    c = (1500.0, 1.0),    # LinearProperty: cp(T) = 1500 + 1.0·T  [J/(kg·K)]
-    k = 0.12,             # ConstantProperty 0.12 W/(m·K)
-    ε = 0.88,             # emissivity
-    λ = 2e-5,             # contributes to mixture gas-transfer coefficient
-    κ = 1e-15)            # very low permeability (tight cellular structure)
+`ε` accepts a temperature law; `absorptivity` sets a constant incident-radiation
+absorptivity, with `nothing` applying Kirchhoff's relation. `α` is mass-based
+in-depth absorption and is used under `BEER_LAMBERT`.
 
-# Char: lighter, more conductive, more emissive, absorbing, porous
-char = SolidComponent(:char,
-    ρ = 150.0, c = 1000.0, k = 0.10,
-    ε = 0.95,
-    α = 5.0,              # mass absorption coeff (used only by in-depth radiation)
-    λ = 2e-5,
-    κ = 1e-12)            # open, porous char conducts gas readily
-```
+Bulk density `ρ` sets the volume a condensed component holds: its bulk
+occupancy `ξ/ρ` drives the volume-change law and weights conductivity,
+emissivity and absorptivity. Specify intrinsic density or pure-phase porosity
+to describe its skeletal volume. Full signatures and units are in §16.2.1.
 
-Notes on the less-obvious fields:
+Conductivities are *apparent*: `k` is the conductivity of the component as a
+porous bulk at its own porosity, pore gas included, and a gas component's `k` is
+never mixed in while any condensed matrix remains (Technical Reference §5.5).
+Give a char the conductivity measured on char, not on carbon; give a wood its dry
+conductivity when moisture is a separate component, since the moisture conducts
+by its own volume share; and where radiation crosses the pores or passes through
+a semi-transparent solid, put it into `k` as a `T^3` term,
+`k = k₀(T) + 16 n² σ T³ / (3 β)`, rather than into a constant chosen at one
+temperature. Heat capacities `c` are sensible: reaction and latent heats go into
+the reactions, and a `c` law must stay physical over the temperatures a solve
+reaches, so continue a fit beyond its measured window at its low-temperature
+slope or hold it constant (Technical Reference §5.4).
 
-- **`ε` accepts the same forms as `k`** — a number, a `(p0, p1)` linear tuple, a
-  function of `T`, or a property function — and is evaluated at the cell
-  temperature in the mixing rule `ε_eff = Σ_j v_j ε_j(T)` (UG §3.7, TR §5.8). The
-  surface-emission and Beer–Lambert Jacobians carry the resulting `dε/dT`
-  automatically. `α` and `absorptivity` are plain constants.
-- **`absorptivity` decouples the absorbed heater flux from the emission.** Leave it
-  `nothing` for Kirchhoff's law (`a_j = ε_j(T)`); set the spectrum-specific value
-  when the heater's spectrum differs from a blackbody at the surface temperature
-  (integrating-sphere data typically give it). A `RadiativeFluxBC` with
-  `absorptivity = nothing` then absorbs `Σ_j v_j a_j · Φ` while the surface still
-  re-radiates at `ε_eff` — no need to split the incident flux into two BC terms.
-- **`α` (absorption) is ignored unless an in-depth radiation model is active.** With
-  `radiation_model = SURFACE_ABSORPTION` (or `NO_RADIATION`) the absorbed flux `α·Φ`
-  is applied at the surface through the boundary energy balance and the component `α`
-  values play no role — in
-  fact `solve` will emit a warning if you set non-zero `α` together with
-  `SURFACE_ABSORPTION`. Use `BEER_LAMBERT` (or P1, experimental) to make `α` matter.
-  See §3.6 and Technical Reference §8.
-- **`λ` on a solid** does not transport the solid (solids are stationary); it is the
-  solid's *contribution* to the effective mixture gas-transfer coefficient through
-  the mixing rule (see §3.5). ThermaKin-style setups typically use `λ ≈ 2e-5`.
-  Leaving it at the default `0.0` in a gas-producing material with Fickian
-  transport stops gas transport in every cell that holds no gas: the gas field
-  ends in a sharp front, and the implicit Newton fails on it again and again.
-  `solve` warns in that configuration; a small value such as `λ = 1e-6` removes
-  the degeneracy (Technical Reference §5.6).
-- **`κ = 0.0` (default) means impermeable.** Setting any solid/liquid component's
-  `κ > 0` switches the whole problem into Darcy–Fick (pressure-driven) gas transport
-  (§3.6.2 and Technical Reference §9).
-- **Swelling factor `γ`** is the fraction of the component's volume that counts as
-  bulk (matrix) volume, with **one meaning everywhere**: the dilation rate θ, the
-  mixture density, and the conductivity/emissivity volume weights all use the same
-  `γ_j·ξ_j/ρ_j` weighting. `γ = 1.0` (default for solids) means the solid shrinks as
-  it is consumed; `γ = 0.0` makes the component consistently *volumeless* — no volume
-  change, no volume in the bulk density, and **no weight in conductivity/emissivity
-  mixing** (use with care for a "rigid char"); intermediate values are for
-  intumescent/partial-expansion cases. Values outside [0, 1] are rejected at
-  construction. See Technical Reference §5.1–5.2 and §10.
+---
 
 ### 3.2.2 `LiquidComponent`
 
-Liquids are matrix-forming like solids (same field set) and are the standard way to
-represent **bound/free moisture** in hygroscopic materials. The defaults differ from
-solids: a liquid by default is strongly emissive (ε = 0.95, near water's ≈ 0.96),
-non-swelling, and blocks gas flow. (For the default γ = 0 the emissivity carries no
-weight in the mixture anyway — a γ = 0 liquid is volumeless in the emissivity mixing;
-the 0.95 matters as soon as you give the liquid γ > 0.)
+Liquids have the condensed component fields. Their defaults are `ε=.95`,
+`κ=0` and `λ=nothing`. A liquid moves with the skeleton like a solid: it holds
+the volume `ξ/ρ` in the volume-change law and conducts and emits by its volume
+share. It is part of the gas-transport matrix only if it declares `λ` or a
+nonzero `κ`, and then needs explicit `λ` under `LumpedTransfer`.
 
 ```julia
-LiquidComponent(name::Symbol;
-                ρ, c, k,
-                λ = 2e-5, κ = 0.0,
-                ε = 0.95, absorptivity = nothing, α = 0.0, γ = 0.0,
-                ρ_intrinsic = nothing, φ = nothing)
+moisture = LiquidComponent(:moisture; ρ=1000., c=4180., k=.60)
+melt = LiquidComponent(:melt; ρ=900., φ=.02, c=2000., k=.2,
+                       λ=1e-6, κ=0.)
 ```
 
-| Keyword | Meaning | Units | Default |
-|---|---|---|---|
-| `ρ`, `c`, `k` | bulk density, heat capacity, conductivity | (as solid) | required |
-| `λ` | gas-transfer contribution | m²·s⁻¹ | `2e-5` |
-| `κ` | permeability | m² | `0.0` (liquid blocks pores) |
-| `ε` | emissivity (number or `ε(T)`) | – | `0.95` (water ≈ 0.96) |
-| `absorptivity` | surface absorptivity for incident radiation (`nothing` = Kirchhoff) | – | `nothing` |
-| `α` | mass absorption | m²·kg⁻¹ | `0.0` |
-| `γ` | swelling factor | – | `0.0` |
-| `ρ_intrinsic` / `φ` | skeletal density / pure-phase porosity | kg·m⁻³ / – | `= ρ` / `nothing` |
+Bound moisture declares neither, so it carries no matrix transport weight; it
+shrinks the wood as it dries, conducts and emits by its volume share, occupies
+skeletal volume and stores heat. The melt declares `λ`, so it joins the
+transport matrix and its `λ` enters the gas-transfer mixture. The initialized
+sum of all condensed skeletal volumes must leave resolved positive gas pore
+volume.
+
+Bound water swells wood by about its own volume, so the dry wood and its water
+share the cell: their bulk occupancies sum to one. With `ρ` the wood's oven-dry
+density (oven-dry mass over oven-dry volume), `ρ_w` the water's and `MC` the
+dry-basis moisture content, initialize
 
 ```julia
-# Liquid water (moisture) in wood
-moisture = LiquidComponent(:moisture,
-    ρ = 1000.0, c = 4180.0, k = 0.60)   # λ defaults to 2e-5, κ=0 (blocks flow)
+ξ_wood  = ρ / (1 + MC * ρ / ρ_w)
+ξ_water = MC * ξ_wood
 ```
 
-The default `γ = 0.0` for liquids means moisture evaporation does **not** by itself
-drive bulk shrinkage; set `γ = 1.0` if you want liquid loss to shrink the matrix.
+Setting `ξ_wood = ρ` and adding the water on top overfills the cell: the slab
+holds more mass than its thickness admits, and it dries to a wood denser than
+`ρ`.
+
+---
 
 ### 3.2.3 `GaseousComponent`
 
-Gases flow *through* the matrix; they are the products of decomposition reactions.
-A gaseous component has **no permeability field** (`get_permeability` returns 0 for
-gases) and carries a **molar mass** instead, which feeds the ideal-gas density and
-the pore-pressure closure `P = Σ_g ξ_g R_g T/(M_g φ)`.
+```julia
+air = GaseousComponent(:air; M=0.02897, c=1006., k=0.026)
+product = GaseousComponent(:product; M=0.044, c=1200., k=0.03)
+```
+
+`M` is a positive molar mass [kg/mol]. Heat capacity `c`, conductivity `k`,
+emissivity `ε` and absorption `α` have their usual property-law
+meaning. Gases carry no matrix `λ` or `κ`. `LumpedTransfer` uses coefficients
+on the condensed matrix; `DustyGas` derives gas-specific Knudsen transport
+from molar mass and pore geometry. Gas loading does not enter matrix transport
+weights or the volume-change law. Bulk concentration is stored per total cell volume;
+the central pore EOS divides by skeletal porosity to obtain intrinsic density.
+
+---
+
+### 3.2.4 Bulk and intrinsic density, pore volume
+
+The condensed bulk density `ρ` defines volume-change and mixing data. The
+intrinsic density `ρ_intrinsic` defines skeletal occupancy. For constant bulk
+density, `φ` is a convenient alternative: `ρ_intrinsic=ρ/(1-φ)`.
 
 ```julia
-GaseousComponent(name::Symbol;
-                 M, c, k, λ,
-                 ε = 0.0, α = 0.0, γ = 0.0)
+matrix = SolidComponent(:matrix; ρ=500., ρ_intrinsic=1500.,
+    c=1500., k=.2, λ=1e-5, κ=1e-14)
 ```
 
-| Keyword | Symbol | Meaning | Units | Default |
-|---|---|---|---|---|
-| `M` | `M_j` | Molar mass | kg·mol⁻¹ | required |
-| `c` | `c_{p,j}` | Heat capacity | J·kg⁻¹·K⁻¹ | required |
-| `k` | `k_j` | Thermal conductivity | W·m⁻¹·K⁻¹ | required |
-| `λ` | `λ_j` | Gas-transfer (diffusion) coefficient | m²·s⁻¹ | required |
-| `ε` | `ε_j(T)` | Emissivity (number or property function; no `absorptivity` — gases always follow Kirchhoff) | – | `0.0` |
-| `α` | `α_j` | Mass absorption | m²·kg⁻¹ | `0.0` |
-| `γ` | `γ_j` | Swelling factor | – | `0.0` |
+For the actual initialized composition, pore volume is
+`φ = 1 - sum(ξ[j]/ρ_intrinsic[j](T) for condensed j)`. It must be resolved and
+positive in every gas-bearing cell, even for sealed gas and zero permeability.
+A missing intrinsic density defaults to bulk density; a partially filled cell
+can therefore still be admissible. A name search cannot determine admissibility.
+A liquid outside the transport matrix still counts in skeletal occupancy.
+For dense melts, an explicit nominal pore volume requires joint porosity,
+mesh and tolerance qualification (§7.5); the numerical divisor floor is not a
+physical porosity choice.
 
-```julia
-# Pyrolysis gas (modelled as a CO₂-like vapour) and water vapour
-gas   = GaseousComponent(:gas, M = 0.044, c = 1800.0, k = 0.03, λ = 1e-4)
-vapor = GaseousComponent(:H2O, M = 0.018, c = 2000.0, k = 0.025, λ = 2e-5)
-```
-
-**Density is automatic.** Unlike solids/liquids, you do *not* pass `ρ` to a gas. The
-constructor installs the ideal-gas law
-
-```
-ρ_g(T) = P_ref · M / (R_g · T)
-```
-
-with `P_ref = 101325 Pa` and `R_g = 8.31446261815324 J·mol⁻¹·K⁻¹`. For example a
-`M = 0.044` gas gives `ρ_g(300) ≈ 1.787 kg·m⁻³`. The ideal-gas default is correct for
-almost all pyrolysis applications. See Technical Reference §4.3.
-
-**Naming and water vapour.** Components named so that the name contains `H2O` or
-`water` (case-insensitive, e.g. `:H2O`, `:water_vapor`) are treated as *moisture*
-gases and are **excluded** from the dry-pyrolysis-gas set that drives lateral
-shrinkage `χ` (Technical Reference §10.3). Name your dry-pyrolysis gas anything else
-(`:gas`, `:MMA`, `:volatiles`). You can inspect the classification:
-
-```julia
-Pyrolysis.Materials.dry_pyrolysis_gas_indices(material)    # gas indices, excluding :H2O / :water*
-```
-
-### 3.2.4 Bulk vs. intrinsic density and porosity
-
-Two densities coexist, and getting them right matters for porous-media physics:
-
-- **Bulk density `ρ_j`** is the pure-phase density used by *mixing rules*, *mixture
-  density*, and *volume-change* kernels. This is what you pass as `ρ`.
-- **Intrinsic (skeletal) density `ρ_{i,j}`** is the density of the cell-wall
-  material itself, ignoring pores within that component. It is used **only** by the
-  porosity formula
-
-  ```
-  φ = clamp(1 − Σ_{j∈solid,liquid} ξ_j / ρ_{i,j}, 0, 1)
-  ```
-
-  and, through `φ`, by the gas-pressure closure `P = N/φ` and the Carman–Kozeny
-  permeability model (Technical Reference §5.3, §9.4).
-
-If you never supply an intrinsic density, it **defaults to the bulk density**, which
-makes the pure phase pore-free and gives `φ = 0` for a fully solid cell. To model a
-genuinely porous solid you must supply *either* `ρ_intrinsic` *or* `φ` (not both —
-passing both raises an `ArgumentError`):
-
-```julia
-# Option A: give the skeletal density directly
-porous_char = SolidComponent(:char, ρ = 150.0, c = 1000.0, k = 0.10,
-                             ρ_intrinsic = 1450.0)   # cell-wall density of carbon
-
-# Option B: give the pure-phase porosity (only valid with a constant bulk ρ)
-porous = SolidComponent(:porous, ρ = 400.0, c = 1000.0, k = 0.10, φ = 0.5)
-# → intrinsic_density = ρ / (1 − φ) = 400 / 0.5 = 800 kg/m³
-```
-
-The `φ` shortcut requires a **constant** bulk `ρ`; for a temperature-dependent bulk
-density you must pass `ρ_intrinsic` explicitly. `φ` must satisfy `0 ≤ φ < 1`.
-
-> **Practical implication.** If you intend to use Carman–Kozeny permeability or the
-> gas-pressure formula and you leave intrinsic density at its default, porosity will
-> be ~0 and those closures will behave degenerately. Always set `ρ_intrinsic`/`φ`
-> on the solids when porosity matters.
+---
 
 ### 3.2.5 Inspecting a component
 
@@ -307,6 +209,8 @@ molar_mass(gas)         # 0.044  (0.0 for solids/liquids)
 virgin.density(300.0)                                     # bulk ρ at T (property field)
 Pyrolysis.Materials.get_intrinsic_density(porous, 300.0)  # skeletal ρ
 Pyrolysis.Materials.get_permeability(char, 500.0)         # κ at T (0 for gases)
+Pyrolysis.Materials.get_emissivity(char, 800.0)           # ε_j(T)
+Pyrolysis.Materials.get_absorptivity(char, 800.0)         # a_j: absorptivity, else ε_j(T)
 ```
 
 ---
@@ -359,13 +263,17 @@ cp = PolynomialProperty((1000.0, 2.0, 0.001))   # 1000 + 2T + 0.001T²
 cp(300.0)   # = 1690.0
 ```
 
-**`ArrheniusProperty(A, E[, T_ref])`** — `p(T) = A · exp(−E / (R_g·T))`, `E` in
-J·mol⁻¹. `T_ref` defaults to 298.15 K. Mostly used for rate-constant-shaped
-properties; reaction kinetics themselves are specified on the `Reaction` (§3.4), not
-as an `ArrheniusProperty`.
+**`SutherlandProperty(μ_ref, T_ref, S)`** — Sutherland's law
+`μ_ref (T/T_ref)^{3/2} (T_ref + S)/(T + S)`; `SutherlandProperty()` is air
+(1.716e-5 Pa·s at 273.15 K, `S = 110.4` K, so `μ(300 K) ≈ 1.846e-5` Pa·s), the
+default pore-gas viscosity of a `Material` (§3.6.1).
+
+**`ArrheniusProperty(A, E)`** — `p(T) = A · exp(−E / (R_g·T))`, `E` in
+J·mol⁻¹. Mostly used for rate-constant-shaped properties; reaction kinetics
+themselves are specified on the `Reaction` (§3.4), not as an `ArrheniusProperty`.
 
 ```julia
-p = ArrheniusProperty(8.5e12, 188e3)   # T_ref defaults to T_REF = 298.15
+p = ArrheniusProperty(8.5e12, 188e3)
 ```
 
 **`TableProperty(temperatures, values)`** — tabulated `(Tᵢ, vᵢ)` with linear
@@ -409,23 +317,35 @@ passes `ξ` automatically. See §3.4.5 and Technical Reference §6.6.
 
 ### 3.3.3 Derivatives (for the implicit Jacobian)
 
-You never supply derivatives. The structured Jacobian differentiates each
-operator's stencil-local kernel with ForwardDiff (Chapter 11), so every property
-law is evaluated with dual-number arguments and its exact derivative comes out of
-the same evaluation: the slope of the piecewise-linear interpolant for a
+You never supply derivatives. The Jacobian is colored sparse forward-mode
+automatic differentiation of the residual (Chapter 11), so every property law is
+evaluated with dual-number arguments and its exact derivative comes out of the
+same evaluation: the slope of the piecewise-linear interpolant for a
 `TableProperty`, the derivative of your function for a `CallableProperty`, and
 both `dp/dT` and `∂p/∂ξ_j` for a `StateDependentProperty`. A callable must
 therefore be generic Julia code — do not restrict its arguments to `Float64`.
 Every law evaluates on the property bracket
 `[200, 3000]` K (its argument is clamped to it, so a nonphysical Newton trial
 temperature cannot reach a fractional power), and the derivatives are zero
-outside the bracket. See Technical Reference §4.4–§4.5.
+outside the bracket. The kernels hand the laws the cell's trial temperature, the
+cell temperature smoothly clamped into the bracket with 1 K transitions, which is
+the cell temperature itself on every physical state. See Technical Reference
+§4.4–§4.5.
+
+**Heat capacity and the sensible enthalpy.** The energy rows also use each
+component's sensible enthalpy `h_j(T) = ∫_{T_ref}^{T} c_{p,j} dT′`
+(`T_ref = 298.15` K): in the enthalpy carried by the gas flux and, with
+`energy_state = :enthalpy`, in the energy state itself. Constant, linear,
+polynomial and tabulated heat capacities are integrated in closed form; any other
+law (a function, an Arrhenius or Sutherland law) is integrated once when the
+problem is set up, on a 1 K grid over the bracket, and interpolated by cubic
+Hermite polynomials, so its derivative is exact to that interpolant.
 
 ---
 
 ## 3.4 Defining reactions
 
-Reactions convert one reactant component into one or two product components by
+Reactions convert one reactant component into one or more product components by
 Arrhenius kinetics. They are usually attached to a material when you build it. The
 full physics — smooth temperature gates, the depletion limiter, species sources — is
 in **Chapter 4** and Technical Reference §6; here we cover the constructor surface
@@ -433,29 +353,24 @@ enough to build a material.
 
 ### 3.4.1 Constructor forms
 
-There are four `Reaction` constructors. They differ only in how reactant/product are
-named (integer index vs. symbol) and whether there are one or two products.
+`Reaction` has one constructor:
 
 ```julia
-# (a) integer index, single product
-Reaction(name, reactant::Int => product::Int;
-         A, E, h, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
-         validate_mass = true)
+Reaction(name, reactant => products;
+         A, E, h, yields = (1.0,), n = 1.0, T_min = 0.0, T_max = Inf,
+         gate_width = 1.0, basis = nothing)
+```
 
-# (b) symbol, single product (resolved by Material)
-Reaction(name, :reactant => :product;
-         A, E, h, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
-         validate_mass = true)
+`products` is one component or a tuple of any length, with one yield each.
+Components are indices on both sides of the pair or names on both sides:
 
-# (c) integer index, two products
-Reaction(name, reactant::Int => (p1::Int, p2::Int);
-         A, E, h, yields, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
-         validate_mass = true)
-
-# (d) symbol, two products (resolved by Material)
-Reaction(name, :reactant => (:p1, :p2);
-         A, E, h, yields = (y1, y2), n = 1.0, T_min = 0.0, T_max = Inf,
-         gate_width = 1.0, validate_mass = true)
+```julia
+Reaction(:decomp, 1 => 2; A = 8.5e12, E = 188e3, h = 870e3)
+Reaction(:decomp, :virgin => :gas; A = 8.5e12, E = 188e3, h = 870e3)
+Reaction(:charring, 1 => (2, 3); A = 1e15, E = 200e3, h = 500e3,
+         yields = (0.2, 0.8))
+Reaction(:charring, :virgin => (:char, :tar, :gas); A = 1e15, E = 200e3, h = 500e3,
+         yields = (0.2, 0.5, 0.3))
 ```
 
 | Argument | Symbol | Meaning | Units | Default |
@@ -464,16 +379,16 @@ Reaction(name, :reactant => (:p1, :p2);
 | `A` | `A_i` | Arrhenius pre-exponential | s⁻¹ | required |
 | `E` | `E_i` | activation energy | J·mol⁻¹ | required |
 | `h` | `h` | heat of reaction (number or property fn) | J·kg⁻¹ | required |
-| `yields` | `ν_{i,j}` | per-product mass yields (two-product forms) | – | required for (c)/(d) |
+| `yields` | `ν_{i,j}` | mass yield of each product, summing to one | – | `(1.0,)` |
 | `n` | `n_{i,j}` | reaction order in the reactant (must be ≥ 0) | – | `1.0` |
 | `T_min` | `T_min,i` | lower temperature gate | K | `0.0` |
 | `T_max` | `T_max,i` | upper temperature gate | K | `Inf` |
 | `gate_width` | `w_gate` | tanh ramp width of both temperature gates (must be > 0 and finite) | K | `1.0` |
-| `validate_mass` | — | enforce `Σ yields = 1` at construction | – | `true` |
+| `basis` | — | the reference as a fraction of the initial condensed mass, at orders other than one (§4.5) | – | `nothing` |
 
-Yields must each be ≥ 0 and the order must satisfy `n ≥ 0` — both are enforced
-unconditionally at construction; `validate_mass = false` disables only the
-`Σ yields = 1` sum check.
+There must be one yield per product, each ≥ 0, summing to one, and the order must
+satisfy `n ≥ 0`. The constructor always checks these and raises an
+`ArgumentError` on a violation.
 
 The temperature gates are smooth tanh ramps,
 `0.5·(1 + tanh((T − T_min)/gate_width))` (mirrored for `T_max`), so the rate
@@ -486,10 +401,9 @@ the effective switching temperature — narrow the gate accordingly.
 
 ### 3.4.2 Symbolic vs. index references
 
-The **symbol** forms ((b), (d)) are the recommended style: you name components, and
-the `Material` constructor resolves the names to indices using the `components`
-tuple, so you never track integer positions by hand. Internally a symbolic reaction
-is stored as a `PendingReaction` until `Material(...)` resolves it.
+**Component names** are the recommended style: the `Material` constructor resolves
+the names to indices using the `components` tuple, so you never track integer
+positions by hand.
 
 ```julia
 pyrolysis = Reaction(:pyrolysis, :virgin => (:char, :gas),
@@ -498,8 +412,8 @@ pyrolysis = Reaction(:pyrolysis, :virgin => (:char, :gas),
                      T_min = 450.0)                    # gate below 450 K
 ```
 
-The **index** forms ((a), (c)) reference components by their 1-based position in the
-material's `components` tuple. They are handy in programmatically generated schemes:
+**Indices** reference components by their 1-based position in the material's
+`components` tuple. They are handy in programmatically generated schemes:
 
 ```julia
 rxn = Reaction(:decomp, 1 => 2, A = 8.5e12, E = 188e3, h = 870e3)
@@ -510,24 +424,31 @@ rxn = Reaction(:decomp, 1 => 2, A = 8.5e12, E = 188e3, h = 870e3)
 
 Pyrolysis.jl uses the **storage convention `h > 0 = endothermic`** (cools the
 material). The volumetric source is `Q_rxn = −Σ h_r r_r`, so an endothermic reaction
-produces `Q_rxn < 0`. This is the *opposite* of the ThermaKin/Gpyro publication
-convention (`h > 0 = exothermic`); when you transcribe literature parameters, flip
-the sign. Examples:
+produces `Q_rxn < 0`. This is the *opposite* of the ThermaKin publication
+convention (`h > 0 = exothermic`); when you transcribe ThermaKin parameters, flip
+the sign and normalize the reaction extent (Technical Reference §6.9.1).
+Gpyro V2 and FDS use the convention of this package but still require basis and
+unit checks. Examples:
 
 ```julia
 endo = Reaction(:pyrolysis, :virgin => :gas, A = 1e10, E = 140e3, h =  500e3)  # cools
 exo  = Reaction(:char_ox,   :char   => :ash, A = 1e6,  E = 120e3, h = -300e3)  # heats
 ```
 
+When transferring a Gpyro V2 reaction with `CONSTANT_DHVOL=.TRUE.`, combine
+its solid-product and volatile heats on a per-reactant basis; equal `DHS`
+and `DHV` are one simple case. The other setting adds a temperature-dependent
+sensible-enthalpy correction whose sign differs between the V2 user guide
+and source. Technical Reference §6.9.2 gives the implemented conversion.
+
 See the overload note H1 in the nomenclature and Technical Reference §6.6.
 
 ### 3.4.4 Yields and mass balance
 
-For single-product reactions the product yield is fixed at `1.0` (one unit of
-reactant → one unit of product). For two-product reactions you supply
-`yields = (y1, y2)`, and **mass conservation requires `y1 + y2 = 1.0`**. With the
-default `validate_mass = true`, the constructor enforces this and errors on a
-violation; you can bypass the check with `validate_mass = false` (not recommended).
+For a single product the default `yields = (1.0,)` applies (one unit of
+reactant → one unit of product). For several products you supply one yield each,
+`yields = (y1, y2, …)`, and **mass conservation requires them to sum to `1.0`**.
+The constructor enforces this and raises an `ArgumentError` on a violation.
 
 ```julia
 # Charring: 1 kg virgin → 0.20 kg char + 0.80 kg gas
@@ -556,19 +477,10 @@ drying = Reaction(:drying, :moisture => :H2O,
 
 ### 3.4.6 Verifying reactions
 
-The `Reaction` constructor already enforces mass balance (the product yields must
-sum to the reactant mass 1.0) and throws on an imbalance unless you pass
-`validate_mass = false`. To re-check a reaction after the fact, use the internal
-helper (not exported; qualify through `Materials`):
-
-```julia
-Pyrolysis.Materials.verify_stoichiometry(rxn)   # Bool, warns on failure
-```
-
-It compares the reactant mass (1.0) against the sum of product yields within a
-tolerance of `1e-10` and emits a warning (returning `false`) on imbalance.
-`validate_problem(problem; strict = true)` runs it on every reaction of the
-material (§3.7).
+The `Reaction` constructor checks every reaction it builds: the product yields must
+sum to the reactant mass 1.0 within a tolerance of `1e-10`, and an imbalance raises
+an `ArgumentError`. `validate_problem(problem)` checks that every reaction of the
+material names components the material has (§3.7).
 
 ---
 
@@ -577,7 +489,7 @@ material (§3.7).
 The solver integrates **effective** (homogenized) bulk properties, not individual
 component properties. Three properties are mixed per material — thermal conductivity
 `k`, gas-transfer coefficient `λ`, and permeability `κ` — and **each may use a
-different rule**. Heat capacity, mixture density, emissivity, and absorption are not
+different rule**. Heat capacity, emissivity, and absorption are not
 configurable: they always use fixed weighting rules (concentration- or
 volume-weighted; see Technical Reference §5).
 
@@ -592,6 +504,14 @@ The available rules are the `MixingRule` enum values (all exported):
 | `WEIGHTED` | `k = β·k_∥ + (1−β)·k_series` | k, λ, κ |
 | `BRUGGEMAN` | EMT: `Σ_j v_j (k_j−k)/(k_j+2k) = 0` | **k only** |
 | `CARMAN_KOZENY` | `κ = min(ℓ²φ³ / (180(1−φ)²), ℓ²)` (porosity-based) | **κ only** |
+
+For thermal conductivity, `v_j` is the normalized condensed volume weight
+`ξ_j/ρ_j` of the solids and liquids. For `λ` and component-based `κ`, replace
+it with the normalized bulk occupancy `a_j ∝ ξ_j/ρ_bulk,j` of the transport
+matrix (every solid, plus each liquid that declares `λ` or `κ`); gases do not
+contribute. Mixing within
+a cell is separate from matching total species flux through adjacent half cells
+(Technical Reference §9).
 
 A `MixingSpec` bundles a rule with its parameters:
 
@@ -614,9 +534,9 @@ MixingSpec(BRUGGEMAN)                            # EMT (k channel only)
 
 ### 3.5.2 `MaterialMixing`
 
-`MaterialMixing` builds the `(k, λ, κ)` NamedTuple that `Material` expects. Each
-channel accepts either a `MixingSpec` or a bare `MixingRule` (β defaults to 0.5 for
-the bare form). The **defaults** are:
+`MaterialMixing` holds the mixing rules of a `Material`, in the fields `k`, `λ`
+and `κ`. Each channel accepts either a `MixingSpec` or a bare `MixingRule` (β
+defaults to 0.5 for the bare form). The **defaults** are:
 
 ```julia
 MaterialMixing(; k = MixingSpec(WEIGHTED, 0.5),   # conductivity
@@ -643,7 +563,7 @@ If you omit `mixing` from `Material(...)`, the defaults above are used.
   the parallel upper bound and series lower bound) is a sensible neutral choice. Use
   `BRUGGEMAN` for char-forming materials where the microstructure is random/
   self-similar — it captures percolation-like drops as a continuous phase breaks up
-  (Technical Reference §5.5). `BRUGGEMAN` is solved by a warm-started Newton
+  (Technical Reference §5.5). `BRUGGEMAN` is solved by a Newton
   iteration and is valid **only for `k`**; requesting it for `λ` or `κ` raises an
   error at evaluation time.
 - **Gas transfer `λ`.** `PARALLEL` (the default) is appropriate; EMT (`BRUGGEMAN`)
@@ -657,56 +577,75 @@ If you omit `mixing` from `Material(...)`, the defaults above are used.
      (`φ ≳ 0.93`). This captures the steep rise in permeability as virgin → char
      raises porosity.
 
-> **Important caveat for Carman–Kozeny.** Whether the solver runs in Darcy–Fick
-> (pressure-driven) mode is decided by `has_darcy_flow(material)`, which checks
-> whether any *component* carries `κ > 0` — it does **not** look at the κ mixing
-> rule. So choosing `CARMAN_KOZENY` alone does **not** turn on Darcy transport: with
-> all component `κ = 0`, `has_darcy_flow` returns `false` and gas transport stays
-> Fickian. If you want pressure-driven flow *and* a Carman–Kozeny effective
-> permeability, set a non-zero component `κ` (to trip `has_darcy_flow`) while using
-> the `CARMAN_KOZENY` rule for the effective value, or use component-based κ mixing.
-> Also remember that Carman–Kozeny needs a real porosity, so set `ρ_intrinsic`/`φ`
-> on the solids (§3.2.4) — otherwise `φ ≈ 0` and `κ ≈ 0`.
+Carman–Kozeny directly supplies the effective permeability, including when
+all component permeabilities are zero. Both gas models use this permeability.
+The material still needs resolved physical porosity and a qualified matrix
+endpoint or termination domain (§7.5).
+
+When porting a material, inspect the effective properties at the initial
+state and at representative heated and reacted states. ThermaKin2Ds volume
+fractions depend on its swelling law; Gpyro V2 and FDS thermal mixing uses
+condensed volume fractions. Their per-length absorption coefficients also
+need conversion before use as our mass-specific `α` (Technical Reference
+§5.15). Matching conductivity or optical depth only at the initial state
+does not establish the same evolving material.
 
 ### 3.5.4 Inspecting effective properties
 
-The effective-property functions live in the `Properties` submodule (qualify them).
-They take `(ξ, T, material)` where `ξ` is the mass-concentration tuple:
+The effective-property functions live in the `Properties` submodule (qualify them,
+or `using Pyrolysis.Internal`). They take `(ξ, T, material)` where `ξ` is the
+mass-concentration tuple; `material` below is any three-component material
+(virgin, char, gas), such as the one of §3.6.2 without its moisture:
 
 ```julia
 using Pyrolysis
-P = Pyrolysis
+P = Pyrolysis.Properties
 
 ξ = (300.0, 50.0, 0.5)   # (virgin, char, gas) concentrations [kg/m³]
 T = 600.0
 
-P.Properties.mixture_density(ξ, T, material)         # ρ with swelling
-P.Properties.effective_heat_capacity(ξ, T, material) # ρc_p (every component)
-P.Properties.effective_conductivity(ξ, T, material)  # k_eff
-P.Properties.effective_gas_transfer(ξ, T, material)  # λ_eff
-P.Properties.effective_permeability(ξ, T, material)  # κ_eff
-P.Properties.effective_emissivity(ξ, T, material)    # ε_eff
-P.Properties.effective_absorption(ξ, material)       # α_eff (note: no T arg)
-P.Properties.porosity(ξ, T, material)                # φ
+sum(ξ)                                   # total bulk mass density
+P.effective_conductivity(ξ, T, material)   # k_eff
+P.effective_gas_transfer(ξ, T, material)   # λ_eff
+φ = 1 - P.skeletal_volume_fraction(ξ, T, material)   # pore fraction (porosity)
+P.effective_permeability(ξ, T, material, φ)          # κ_eff (CARMAN_KOZENY reads φ)
+P.mixture_emissivity(ξ, T, material)       # ε_eff
+P.mixture_absorptivity(ξ, T, material)     # a_eff (= ε_eff by Kirchhoff unless set)
+P.effective_absorption(ξ, material)        # α_eff [1/m] (note: no T argument)
+
+# Volumetric heat capacity ρc_p = Σ_j ξ_j c_p,j(T): every component, gas included
+sum(ξ[j] * material.components[j].heat_capacity(T) for j in eachindex(ξ))
 ```
+
+What the solver evaluates is the same functions, called by its state mapping at
+each cell's trial temperature and at the positive part of each concentration
+(a smooth one-sided guard that is exactly the concentration on physical states),
+with smooth floors where a trial state could make them vanish: the conductivity
+at 1e-6 W·m⁻¹·K⁻¹, the pore fraction at 1e-12, the gas viscosity at `MU_FLOOR`
+(§3.6.1), and the cell's heat capacity `Σ_j m_j c_{p,j}(T)` at `RHO_CP_FLOOR`
+(1e3 J·m⁻³·K⁻¹) times the cell's initial volume.
 
 Two physics notes worth remembering (both in Technical Reference §5):
 
-- **Heat capacity includes the pore gas.** `effective_heat_capacity` sums every
+- **Heat capacity includes the pore gas.** The cell's heat capacity sums every
   component: `ρc_p^eff = Σ_j ξ_j c_{p,j}(T)`. The gas is at the matrix
-  temperature and stores sensible heat like every other phase; the enthalpy
-  carried by its flux relative to the skeleton enters through the advective
-  source term `S_conv`.
-- **Conductivity and emissivity use the swelling-weighted (matrix) volume
-  fractions** — γ = 0 components (canonical gases) carry no weight in these
-  surface/matrix properties, matching the ThermaKin convention; as a cell's
+  temperature and stores sensible heat like every other phase; the enthalpy its
+  flux carries enters as the gas enthalpy flux `Σ_j J_j h_j` through each face
+  (Technical Reference §7).
+- **Conductivity and emissivity use the condensed volume fractions** — every
+  solid and liquid by `ξ_j/ρ_j`, so bound moisture conducts and emits by its
+  volume share, and gases carry no weight in these surface/matrix properties.
+  This agrees with ThermaKin at zero gas swelling (Technical Reference §5.15).
+  As a cell's
   matrix volume fraction drops through `1e-3 … 1e-4` the weights blend smoothly
   into the all-phase occupancy, so an emptied cell degrades to the gas-mixture
-  conductivity instead of 0. **Gas transfer uses the all-phase volume fractions**
-  (gas included) — diffusion happens through the pore space the matrix basis
-  excludes. Component-based permeability mixes on the matrix basis. Absorption uses
-  concentration weighting; mixture density uses mass fractions with the swelling
-  factor.
+  conductivity instead of 0. Transport uses a separate basis, the bulk
+  occupancy of the transport matrix: every solid, plus each liquid that
+  declares `λ` or `κ`. Both superficial transfer and component-based
+  permeability use those matrix weights, with an explicit endpoint and domain
+  when that matrix disappears. Skeletal pore occupancy includes every condensed
+  phase. Absorption retains concentration weighting.
+
 
 ---
 
@@ -721,7 +660,8 @@ Material(; name::Symbol,
            mixing = MaterialMixing(),
            lateral_shrinkage_law = nothing,
            depletion_limiter = DepletionLimiter(),
-           gas_viscosity = SutherlandProperty())
+           gas_viscosity = SutherlandProperty(),
+           gas_transport = LumpedTransfer())
 ```
 
 | Keyword | Meaning | Default |
@@ -729,22 +669,24 @@ Material(; name::Symbol,
 | `name` | material identifier (`Symbol`) | required |
 | `components` | tuple of components | required |
 | `reactions` | tuple of reactions (may be empty `()`) | `()` |
-| `mixing` | `(k, λ, κ)` NamedTuple from `MaterialMixing` | `MaterialMixing()` |
+| `mixing` | the `MaterialMixing`, with fields `k`, `λ`, `κ` | `MaterialMixing()` |
 | `lateral_shrinkage_law` | `A(t)/A_0 = law(χ̄)` or `nothing` (identity) | `nothing` |
-| `depletion_limiter` | `DepletionLimiter` applied to every reaction-rate evaluation (smooth `tanh(ξ/threshold)` roll-off near reactant depletion; §4.10) | `DepletionLimiter()` (`threshold = 1.0` kg·m⁻³, enabled) |
+| `depletion_limiter` | `DepletionLimiter` applied to every reaction-rate evaluation (a C¹ rate factor that is zero at and below zero concentration and joins `tanh(ξ/threshold)` above it; §4.10) | `DepletionLimiter()` (`threshold = 1.0` kg·m⁻³, `join = 1.0`, `base_scale = 1e-8` kg·m⁻³, enabled) |
+| `gas_transport` | declared pore-gas model and endpoint domain | `LumpedTransfer()` for gas-bearing materials |
 | `gas_viscosity` | pore-gas dynamic viscosity μ(T) [Pa·s]; number, `(p0, p1)` tuple, `Function`, or property function | `SutherlandProperty()` (air) |
 
 - **Component order defines the index space.** The first component is index 1, the
-  second is 2, etc. The state vector's species blocks follow this order, and integer
-  reaction references (§3.4.2) use it. Component names must be unique.
-- **Symbolic reactions are resolved here.** Any `PendingReaction` built with symbol
-  references is matched against the `components` tuple's name→index map. An unknown
-  symbol raises a clear error naming the offending reaction and component.
+  second is 2, etc. The per-cell component masses of the state follow this order,
+  and integer reaction references (§3.4.2) use it. Component names must be unique.
+- **Reactions given by component names are resolved here.** Each name is matched
+  against the `components` tuple's name→index map. An unknown name raises a clear
+  error naming the offending reaction and component.
 - **`lateral_shrinkage_law`** is the variable-cross-section (intumescence/shrink)
   hook; it must be a `Function` of the column-average pyrolysis progress `χ̄`, or
-  `nothing`. Most simulations leave it `nothing`. See Technical Reference §10.5 and
-  Chapter 7.
-- **`gas_viscosity`** matters only in Darcy–Fick mode, where it enters as the
+  `nothing`. Most simulations leave it `nothing`. A material that carries a law
+  must be solved on a moving mesh (`use_ale = true`) in planar coordinates; `setup`
+  refuses it otherwise. See Technical Reference §10.5 and Chapters 6 and 7.
+- **`gas_viscosity`** matters only in lumped gas transport mode, where it enters as the
   mobility `κ/μ` — so getting μ wrong by a factor is exactly the same as getting
   permeability wrong by the reciprocal factor. The default is air, which is fine
   for an N₂-swept pore space but overstates the viscosity of wood pyrolyzates by
@@ -760,14 +702,16 @@ Material(; name::Symbol,
   It is **one curve per material**, so it averages over the pore gas shifting
   from background air to volatiles as pyrolysis proceeds; it cannot resolve that
   transition. The constructor rejects a curve that is non-positive or non-finite
-  over 200–1800 K, and the solver floors μ at `MU_FLOOR` outside that range —
-  both because a μ that reaches zero reverses the gas velocity rather than merely
-  degrading it. See Technical Reference §5.9.
+  at any of 200, 300, 500, 800, 1200 and 1800 K, and the solver floors μ smoothly
+  at `Pyrolysis.Properties.MU_FLOOR` (1e-12 Pa·s) as the backstop for trial
+  states — both because a μ that reaches zero reverses the gas velocity rather
+  than merely degrading it. Like every property law it is evaluated at the
+  temperature clamped to `[200, 3000]` K. See Technical Reference §5.9.
 
 ### 3.6.2 Worked example: charring wood with moisture
 
 A wood with virgin solid, char solid, liquid moisture, a dry pyrolysis gas, and water
-vapour. The solids carry permeabilities, so the material will run in Darcy–Fick mode;
+vapour. The solids carry permeabilities, so the material will run in lumped gas transport mode;
 it uses `WEIGHTED` conductivity and `CARMAN_KOZENY` permeability, with porosity set
 on the solids via `φ`.
 
@@ -789,8 +733,8 @@ char = SolidComponent(:char,
 
 moisture = LiquidComponent(:moisture, ρ = 1000.0, c = 4180.0, k = 0.60)
 
-gas   = GaseousComponent(:gas, M = 0.044, c = 1800.0, k = 0.03, λ = 1e-4)
-vapor = GaseousComponent(:H2O, M = 0.018, c = 2000.0, k = 0.025, λ = 2e-5)
+gas   = GaseousComponent(:gas, M = 0.044, c = 1800.0, k = 0.03,)
+vapor = GaseousComponent(:H2O, M = 0.018, c = 2000.0, k = 0.025,)
 
 # --- Reactions ------------------------------------------------------------
 pyrolysis = Reaction(:pyrolysis, :virgin => (:char, :gas),
@@ -821,37 +765,24 @@ wood = Material(
 # All reached via the Materials submodule (none are top-level Pyrolysis exports).
 Pyrolysis.Materials.n_components(wood)              # 5
 Pyrolysis.Materials.n_reactions(wood)               # 2
-Pyrolysis.Materials.has_darcy_flow(wood)            # true (virgin/char κ > 0)
-Pyrolysis.Materials.dry_pyrolysis_gas_indices(wood) # (4,)  — :H2O (5) excluded
+
+Pyrolysis.Materials.dry_gas_flags(wood)  # (false, false, false, true, false)
+# :gas (4) descends from the solids; :H2O (5) is the moisture's vapour
 ```
 
-### 3.6.3 Worked example: a simple polymer (PMMA)
+### 3.6.3 A polymer with specified pore volume
 
-A non-charring polymer needs only a virgin solid and a single gas, one decomposition
-reaction, and no permeability (so transport stays Fickian). Note the positive `h`:
-PMMA depolymerization is endothermic (≈ 870 kJ·kg⁻¹ absorbed), so under the
-`h > 0 = endothermic` convention it takes a positive value.
+A gas-bearing polymer needs a physical pore volume even when the Darcy
+permeability is zero. The PMMA cone examples declare nominal porosity and
+lumped transfer separately from thermal and kinetic properties. Set
+`PYROLYSIS_PMMA_POROSITY` to vary their pore-volume input. The transport
+coefficient is superficial; changing porosity changes storage and the
+pressure potential. Qualify this input with mesh and pressure-tolerance
+refinement, rather than treating a trial divisor floor as a material property.
 
-```julia
-using Pyrolysis
-
-pmma = Material(
-    name = :PMMA,
-    components = (
-        SolidComponent(:virgin, ρ = 1190.0, c = 1420.0, k = 0.21, ε = 0.86),
-        GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5),
-    ),
-    reactions = (
-        Reaction(:depolymerization, :virgin => :MMA,
-                 A = 8.5e12, E = 188e3, h = 870e3),   # h > 0 = endothermic
-    ),
-    mixing = MaterialMixing(k = MixingSpec(WEIGHTED, 0.5)),
-)
-```
-
-With `κ = 0` on every component, `has_darcy_flow(pmma)` is `false` and gas leaves by
-Fickian diffusion only — the default transport mode. To make MMA absorb in depth you
-would set `α` on the solid and choose `radiation_model = BEER_LAMBERT` at solve time.
+A positive permeability adds Darcy flow to either gas model. `κ=0` retains
+a legal wall-only material; `λ=0, κ>0` is a legal Darcy-only lumped material.
+A closed material can set both to zero and still has a pore EOS.
 
 ---
 
@@ -861,9 +792,9 @@ A material is checked in two places: its components and reactions validate
 themselves when they are constructed, and the assembled material is validated as
 part of the problem.
 
-Each two-product `Reaction` constructor enforces `Σ yields = 1.0` at construction
-time (unless `validate_mass = false`), and a symbolic component reference that
-names no component of the material throws when the `Material` is built.
+The `Reaction` constructor enforces one yield per product and `Σ yields = 1.0` at
+construction time, and a symbolic component reference that names no component of
+the material throws when the `Material` is built.
 
 Property laws are checked when the **component** is built: every temperature-
 dependent `ρ`, `c`, `k`, `λ`, `κ` and `ε` is sampled on the property bracket
@@ -877,14 +808,17 @@ outside its measured range (`T -> law(clamp(T, T_lo, T_hi))`), or pass
 parameters and an unphysical value should reach the objective instead of
 throwing.
 
-The problem-level check runs when `solve` starts (`validate = true`, the default)
-or when you call `Pyrolysis.Problem.validate_problem(problem)` yourself. For the
-material it checks that there is at least one component and that every
-reaction's reactant/product indices are in range `1:NC`; it also warns when a
-gas-producing Fickian material has a condensed component with `λ = 0`.
-`validate_problem(problem; strict = true)` additionally re-checks every
-reaction's mass balance with `verify_stoichiometry`. Errors are collected and
-thrown together in one message; see §7.9 for the full list of problem checks.
+Component and material construction validate transport inputs, including explicit
+lumped matrix coefficients, named gas species and endpoint geometry. The
+problem check validates mesh geometry, boundary tags and complete reservoir
+states, initial-condition dimensions, the time span and initial step. Every
+gas-bearing initial state must leave positive skeletal pore volume, including
+sealed materials. Setup then checks the pore margin against the actual solver
+tolerances, reachable matrix support and endpoint assumptions. Proposed and
+post-event states undergo the same physical-domain checks. An explicitly zero
+transport channel is valid; an omitted required coefficient is an error.
+
+`validate_problem(problem)` collects its errors into one diagnostic.
 
 ---
 
@@ -897,15 +831,14 @@ thrown together in one message; see §7.9 for the full list of problem checks.
 | `ε` (emissivity) | `0.9` | `0.95` | `0.0` |
 | `absorptivity` (surface absorptivity) | `nothing` (Kirchhoff) | `nothing` (Kirchhoff) | n/a |
 | `α` (absorption) | `0.0` | `0.0` | `0.0` |
-| `γ` (swelling) | `1.0` | `0.0` | `0.0` |
-| `λ` (gas transfer) | `0.0` | `2e-5` | required |
+| `λ` (superficial matrix transfer) | explicit under lumped transport | `nothing`; declaring it (or `κ`) joins the transport matrix | not a gas input |
 | `κ` (permeability) | `0.0` | `0.0` | n/a (no field) |
 | `ρ_intrinsic` | `= ρ` | `= ρ` | n/a |
 | density | required `ρ` | required `ρ` | ideal gas from `M` |
 
-**Reaction defaults:** `n = 1.0`, `T_min = 0.0`, `T_max = Inf`,
-`validate_mass = true`; single-product yield fixed at `1.0`, two-product `yields`
-must sum to `1.0`. Sign: `h > 0` endothermic.
+**Reaction defaults:** `yields = (1.0,)`, `n = 1.0`, `T_min = 0.0`, `T_max = Inf`,
+`gate_width = 1.0` K, `basis = nothing`; the `yields` of several products must sum
+to `1.0`. Sign: `h > 0` endothermic.
 
 **Mixing defaults:** `k = WEIGHTED (β=0.5)`, `λ = PARALLEL (β=0.5)`,
 `κ = WEIGHTED (β=0.5)`. `BRUGGEMAN` is k-only; `CARMAN_KOZENY` is κ-only and requires
@@ -913,7 +846,13 @@ must sum to `1.0`. Sign: `h > 0` endothermic.
 
 **Physical constants used by the constructors:** `R_g = 8.31446261815324
 J·mol⁻¹·K⁻¹`, `P_ref = 101325 Pa`, `T_ref = 298.15 K`, `σ = 5.670374419e-8
-W·m⁻²·K⁻⁴` (all exported as `R_GAS`, `P_REF`, `T_REF`, `STEFAN_BOLTZMANN`).
+W·m⁻²·K⁻⁴`, exported by the `Materials` submodule as `R_GAS`, `P_REF`, `T_REF`,
+`STEFAN_BOLTZMANN` (with the property bracket `T_PROPERTY_MIN = 200` K,
+`T_PROPERTY_MAX = 3000` K): `Pyrolysis.Materials.R_GAS`, or unqualified after
+`using Pyrolysis.Internal`.
+
+**Limiter defaults:** `DepletionLimiter(threshold = 1.0, join = 1.0,
+base_scale = 1e-8, enabled = true)`.
 
 **Where to go next:** reactions in depth and TGA parameter recovery → Chapter 4;
 boundary and initial conditions → Chapter 5; meshes → Chapter 6; building and

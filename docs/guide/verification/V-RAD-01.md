@@ -21,7 +21,7 @@ temperature peak (the peak sits at the front face at t → 0⁺ and migrates
 toward the insulated back as t → ∞), which only the coupled problem shows.
 
 Configuration pitfalls encoded below:
-- `RadiativeFluxBC(flux = q₀, absorptivity = 1.0)`: the EXPLICIT
+- `RadiativeFluxBC(q₀, absorptivity = 1.0)`: the EXPLICIT
   absorptivity bypasses the Kirchhoff ε_eff rescaling at volumetric
   injection, so exactly q₀ enters the Beer–Lambert sweep.
 - Under BEER_LAMBERT the incident flux contributes zero to the surface
@@ -40,15 +40,15 @@ comparability of the dissertation figures (report mode).
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| L∞ T-profile error, t=30.0 s | 0.002864 | — | 0.002864 | 0.25 | yes | observed 0.044/0.057/0.065/0.080 K at t=30/60/90/180 s |
-| L∞ T-profile error, t=60.0 s | 0.003685 | — | 0.003685 | 0.25 | yes | observed 0.044/0.057/0.065/0.080 K at t=30/60/90/180 s |
-| L∞ T-profile error, t=90.0 s | 0.004193 | — | 0.004193 | 0.25 | yes | observed 0.044/0.057/0.065/0.080 K at t=30/60/90/180 s |
+| L∞ T-profile error, t=30.0 s | 0.002856 | — | 0.002856 | 0.25 | yes | observed 0.044/0.057/0.065/0.080 K at t=30/60/90/180 s |
+| L∞ T-profile error, t=60.0 s | 0.003682 | — | 0.003682 | 0.25 | yes | observed 0.044/0.057/0.065/0.080 K at t=30/60/90/180 s |
+| L∞ T-profile error, t=90.0 s | 0.004191 | — | 0.004191 | 0.25 | yes | observed 0.044/0.057/0.065/0.080 K at t=30/60/90/180 s |
 | L∞ T-profile error, t=180.0 s | 0.005112 | — | 0.005112 | 0.25 | yes | observed 0.044/0.057/0.065/0.080 K at t=30/60/90/180 s |
-| front-face temperature, t=30.0 s | 468.6 | 468.6 | 0.005034 | 0.25 | yes | convective-only surface balance under BEER_LAMBERT |
-| front-face temperature, t=60.0 s | 548.2 | 548.2 | 0.00485 | 0.25 | yes | convective-only surface balance under BEER_LAMBERT |
-| front-face temperature, t=90.0 s | 604.4 | 604.4 | 0.004632 | 0.25 | yes | convective-only surface balance under BEER_LAMBERT |
+| front-face temperature, t=30.0 s | 468.6 | 468.6 | 0.005042 | 0.25 | yes | convective-only surface balance under BEER_LAMBERT |
+| front-face temperature, t=60.0 s | 548.2 | 548.2 | 0.004853 | 0.25 | yes | convective-only surface balance under BEER_LAMBERT |
+| front-face temperature, t=90.0 s | 604.4 | 604.4 | 0.004634 | 0.25 | yes | convective-only surface balance under BEER_LAMBERT |
 | front-face temperature, t=180.0 s | 717.7 | 717.7 | 0.004051 | 0.25 | yes | convective-only surface balance under BEER_LAMBERT |
-| sub-surface peak value, t=90 s | 608.9 | 608.9 | 0.00153 | 0.05 | yes | the coupled-physics marker no uncoupled test checks |
+| sub-surface peak value, t=90 s | 608.9 | 608.9 | 0.001528 | 0.05 | yes | the coupled-physics marker no uncoupled test checks |
 | sub-surface peak location, t=90 s | 0.0003125 | 0.000319 | 6.5e-06 | 3.75e-05 | yes | peak must sit strictly below the surface |
 | peak strictly interior, t=90 s | 388 | — | 0 | 0.5 | yes | argmax at a boundary cell would mean no sub-surface peak |
 
@@ -68,45 +68,37 @@ comparability of the dissertation figures (report mode).
 
 ### Comparison with other codes
 
-The same case was solved with Gpyro 0.8200 at 101 nodes (Δz=0.1 mm); decks, outputs, and
-run provenance are committed under `test/verification/reference/`.
-Each code's error against the same exact solution is drawn below
-on a log scale, muted gray behind this solver's series — the
-signed linear-scale panel above shows where the error lives, this
-one compares magnitudes across codes.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
+
+Gpyro V2 revision `bff0126c68f2` uses 401 boundary nodes (400 intervals, 0.025 mm spacing). The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements.
+
+Accuracy comparison only; timing measurements are omitted.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
 
 ![V-RAD-01 T_profiles_vs_codes_error](assets/V-RAD-01/V-RAD-01_T_profiles_vs_codes_error.png)
 
 ![V-RAD-01 surface_T_history_vs_codes_error](assets/V-RAD-01/V-RAD-01_surface_T_history_vs_codes_error.png)
 
-Wall times at every ladder rung against the reference runs.
-Resolutions and simulated spans differ where noted (details in
-`reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark; rungs at a matched
-resolution are directly comparable.
-
-![V-RAD-01 solve_time](assets/V-RAD-01/V-RAD-01_solve_time.png)
-
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-RAD-01/V-RAD-01_T_profiles_vs_codes.png), [surface_T_history_vs_codes](assets/V-RAD-01/V-RAD-01_surface_T_history_vs_codes.png).
 
 ### Convergence
 
-| n_cells | h | wall (s) | L2 | Linf |
-| --- | --- | --- | --- | --- |
-| 25 | 0.04 | 0.01848 | 0.2555 | 0.9054 |
-| 50 | 0.02 | 0.03966 | 0.06456 | 0.248 |
-| 100 | 0.01 | 0.1096 | 0.01618 | 0.06485 |
-| 200 | 0.005 | 0.3643 | 0.00405 | 0.01658 |
-| 400 | 0.0025 | 4.467 | 0.001013 | 0.004193 |
+| n_cells | h | L2 | Linf |
+| --- | --- | --- | --- |
+| 25 | 0.04 | 0.2555 | 0.9054 |
+| 50 | 0.02 | 0.06456 | 0.248 |
+| 100 | 0.01 | 0.01618 | 0.06485 |
+| 200 | 0.005 | 0.004048 | 0.01658 |
+| 400 | 0.0025 | 0.001012 | 0.004191 |
 
-Observed order 1.995 (L2), expected 2.0.
+Observed order 1.996 (L2), expected 2.0.
 
 ### Solver configuration
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-12 |
 | reltol | 1.0e-10 |
 | radiation_model | BEER_LAMBERT |
-

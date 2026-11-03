@@ -1,0 +1,13 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+20,"integrated nonisothermal wall resistance",0.00014508720695805,NaN,0.00014508720695805,0.0001,false
+20,"logarithmic pressure profile",1.8322514815372415e-5,NaN,1.8322514815372415e-5,0.0001,true
+20,"linear thermal field",2.2737367544323206e-13,NaN,2.2737367544323206e-13,1.0e-8,true
+40,"integrated nonisothermal wall resistance",3.772576920324511e-5,NaN,3.772576920324511e-5,0.0001,true
+40,"logarithmic pressure profile",5.0875033583724875e-6,NaN,5.0875033583724875e-6,0.0001,true
+40,"linear thermal field",1.1368683772161603e-13,NaN,1.1368683772161603e-13,1.0e-8,true
+80,"integrated nonisothermal wall resistance",9.615725315104129e-6,NaN,9.615725315104129e-6,0.0001,true
+80,"logarithmic pressure profile",1.3405246133334004e-6,NaN,1.3405246133334004e-6,0.0001,true
+80,"linear thermal field",2.2737367544323206e-13,NaN,2.2737367544323206e-13,1.0e-8,true
+160,"integrated nonisothermal wall resistance",2.4271265407493914e-6,NaN,2.4271265407493914e-6,0.0001,true
+160,"logarithmic pressure profile",3.441090931301005e-7,NaN,3.441090931301005e-7,0.0001,true
+160,"linear thermal field",1.1368683772161603e-13,NaN,1.1368683772161603e-13,1.0e-8,true

@@ -30,7 +30,7 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
     function build(n_cells)
         solid = SolidComponent(:solid, ρ = ρ, c = c, k = k)
         mat = Material(name = :VHC02, components = (solid,), reactions = ())
-        mesh = create_uniform_mesh(L, n_cells, Val(1); T_initial = T_i, ξ_initial = (ρ,))
+        mesh = uniform_mesh(L, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (top = ConvectiveBC(h = h, T_inf = T_inf), bottom = AdiabaticBC()),
         )
@@ -47,7 +47,7 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
 
     function qois(sol)
         out = QoIResult[]
-        z = get_cell_positions(sol)
+        z = sol.cell_centers[:, end]
         for (j, Fo) in enumerate(Fos)
             Tn = @view sol.T[:, j+1]
             err = maximum(abs(Tn[i] - T_exact(z[i] / L, Fo)) for i in eachindex(z))
@@ -81,7 +81,7 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
 
     # L2 profile error at Fo = 0.2 (output index 4).
     function l2_error_fo02(sol)
-        z = get_cell_positions(sol)
+        z = sol.cell_centers[:, end]
         Tn = @view sol.T[:, 4]
         Δz = L / length(z)
         return sqrt(sum((Tn[i] - T_exact(z[i] / L, 0.2))^2 * Δz for i in eachindex(z)) / L)
@@ -121,9 +121,9 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
             qoi_curves = (:T_profiles, :surface_T_history, :back_T_history),
             solve_kwargs = (abstol = 1e-12, reltol = 1e-10),
             curves = sol -> begin
-                z = get_cell_positions(sol)
+                z = sol.cell_centers[:, end]
                 Fo_of_t(t) = α * t / L^2
-                # FDS 6.11.0 overlay (reference/fds/custom/): the shipped
+                # FDS 6.11.1 overlay (reference/fds/custom/): the shipped
                 # heat_conduction_{a..d} are the same nondimensional problem —
                 # FDS a/b/c/d = Bi 100/10/1/0.1 (labels reversed vs ours),
                 # 20→120 °C with α_FDS = 1e-6 m²/s, so θ and Fo map onto our
@@ -162,7 +162,7 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
                             ],
                             [
                                 CurveSeries(
-                                    label = "FDS 6.11.0, Fo = $(Fo)",
+                                    label = "FDS 6.11.1, Fo = $(Fo)",
                                     crosscode = true,
                                     x = fds_x̃,
                                     y = [fds_at(i, Fo * L^2 / α) for i = 1:6],
@@ -184,7 +184,7 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
                                 exact = t -> T_exact(1.0, Fo_of_t(t)),
                             ),
                             CurveSeries(
-                                label = "FDS 6.11.0",
+                                label = "FDS 6.11.1",
                                 crosscode = true,
                                 x = fds_t[2:end],
                                 y = fds_T[6][2:end],
@@ -205,7 +205,7 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
                                 exact = t -> T_exact(0.0, Fo_of_t(t)),
                             ),
                             CurveSeries(
-                                label = "FDS 6.11.0",
+                                label = "FDS 6.11.1",
                                 crosscode = true,
                                 x = fds_t[2:end],
                                 y = fds_T[1][2:end],
@@ -216,7 +216,7 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
                 ]
             end,
             error_norms = sol -> begin
-                z = get_cell_positions(sol)
+                z = sol.cell_centers[:, end]
                 e = [sol.T[i, 4] - T_exact(z[i] / L, 0.2) for i in eachindex(z)]
                 (L2 = sqrt(sum(abs2, e) / length(e)), Linf = maximum(abs, e))
             end,

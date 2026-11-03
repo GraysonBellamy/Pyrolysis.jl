@@ -23,7 +23,7 @@ Enumeration of property mixing rules for multi-component materials.
 - `CARMAN_KOZENY`: Porosity-based permeability closure (κ channel only):
   κ = ℓ²·φ³ / (180·(1-φ)²), with ℓ the characteristic particle/pore diameter
   supplied as `MixingSpec(CARMAN_KOZENY; length_scale = ℓ)`. This is the
-  EMT-replacement for permeability — `BRUGGEMAN` is not a valid κ closure.
+  permeability's effective-medium closure; `BRUGGEMAN` is not a valid one.
 """
 @enum MixingRule begin
     PARALLEL = 1
@@ -49,9 +49,7 @@ channel), where it is the characteristic particle/pore diameter [m] entering
 and ignored otherwise; the constructor fails fast if `CARMAN_KOZENY` is requested
 without it.
 
-Used by `Material.mixing` to bundle the mixing rule and its parameters for each
-of the three mixed properties: thermal conductivity (`k`), gas transfer
-coefficient (`λ`), and permeability (`κ`).
+Bundled per mixed property by [`MaterialMixing`](@ref).
 """
 struct MixingSpec
     rule::MixingRule
@@ -73,31 +71,33 @@ struct MixingSpec
 end
 
 """
-	MaterialMixing(; k = MixingSpec(WEIGHTED, 0.5),
-				    λ = MixingSpec(PARALLEL, 0.5),
-				    κ = MixingSpec(WEIGHTED, 0.5))
+	MaterialMixing(; k = MixingSpec(WEIGHTED), λ = MixingSpec(PARALLEL),
+	               κ = MixingSpec(WEIGHTED))
 
-Build the `mixing` NamedTuple expected by `Material`. `k`, `λ`, `κ` may be passed
-either as `MixingSpec` instances or as bare `MixingRule` enum values (β defaults
-to 0.5 in that case).
+The mixing rules of a `Material`, one per mixed property: thermal conductivity
+`k`, gas transfer coefficient `λ` and permeability `κ`. Each is a `MixingSpec`
+or a bare `MixingRule`.
 """
-function MaterialMixing(;
-    k::Union{MixingSpec,MixingRule} = MixingSpec(WEIGHTED, 0.5),
-    λ::Union{MixingSpec,MixingRule} = MixingSpec(PARALLEL, 0.5),
-    κ::Union{MixingSpec,MixingRule} = MixingSpec(WEIGHTED, 0.5),
-)
-    k_spec = k isa MixingSpec ? k : MixingSpec(k, 0.5)
-    λ_spec = λ isa MixingSpec ? λ : MixingSpec(λ, 0.5)
-    κ_spec = κ isa MixingSpec ? κ : MixingSpec(κ, 0.5)
-    return (k = k_spec, λ = λ_spec, κ = κ_spec)
+struct MaterialMixing
+    k::MixingSpec
+    λ::MixingSpec
+    κ::MixingSpec
 end
+
+MaterialMixing(;
+    k::Union{MixingSpec,MixingRule} = MixingSpec(WEIGHTED),
+    λ::Union{MixingSpec,MixingRule} = MixingSpec(PARALLEL),
+    κ::Union{MixingSpec,MixingRule} = MixingSpec(WEIGHTED),
+) = MaterialMixing(MixingSpec(k), MixingSpec(λ), MixingSpec(κ))
+
+MixingSpec(spec::MixingSpec) = spec
 
 # ============================================================================
 # Material Type
 # ============================================================================
 
 """
-	Material{NC,NR,C,RT,LSL,Pμ} <: AbstractMaterial
+	Material{NC,NR,C,RT,LSL,Pμ,GT}
 
 A complete material definition with components, reactions, mixing rules, and gas transport.
 
@@ -116,9 +116,8 @@ A complete material definition with components, reactions, mixing rules, and gas
 - `name::Symbol`: Material identifier
 - `components::C`: Material components tuple
 - `reactions::RT`: Decomposition reactions tuple
-- `mixing::NamedTuple{(:k,:λ,:κ),Tuple{MixingSpec,MixingSpec,MixingSpec}}`:
-  Mixing rules (and per-rule β) for thermal conductivity (`k`), gas transfer
-  coefficient (`λ`), and permeability (`κ`).
+- `mixing::MaterialMixing`: Mixing rules (and per-rule β) for thermal
+  conductivity (`k`), gas transfer coefficient (`λ`), and permeability (`κ`).
 - `lateral_shrinkage_law::LSL`: Optional A(t)/A_0 = law(χ̄). `nothing` ⇒ identity.
 - `gas_viscosity::Pμ`: Dynamic viscosity μ(T) of the pore gas [Pa·s]. Accepts
   anything `to_property` understands — a number, a `(p0, p1)` tuple, a
@@ -149,18 +148,20 @@ the material is expected to produce; it cannot resolve the pore gas shifting
 from background air to volatiles as pyrolysis proceeds.
 
 # Gas Transport
-Darcy-Fick gas transport is enabled when any solid/liquid component has κ > 0.
-The effective permeability is computed from component values via mixing rules,
-similar to thermal conductivity and gas transfer coefficient.
+`gas_transport=LumpedTransfer()` selects the superficial partial-pressure law.
+`DustyGas` selects coupled molecular/Knudsen friction. Both include independent
+Darcy permeability and use the same physical pore EOS. Participating lumped
+matrices require explicit condensed λ. Gas-bearing initial states require
+resolved pore volume. See the model constructors for endpoint closures.
 
 Specify κ on each component:
 ```julia
 charring = Material(
 	name = :CharringWood,
 	components = (
-		SolidComponent(:virgin, ρ=530, c=2000, k=0.12, κ=1e-15),  # tight structure
-		SolidComponent(:char, ρ=150, c=1500, k=0.20, κ=1e-12),    # porous char
-		GaseousComponent(:gas, M=0.044, c=1800, k=0.03, λ=1e-4),
+		SolidComponent(:virgin, ρ=530, φ=.6, c=2000, k=0.12, λ=1e-5, κ=1e-15),  # tight structure
+		SolidComponent(:char, ρ=150, φ=.85, c=1500, k=0.20, λ=1e-5, κ=1e-12),    # porous char
+		GaseousComponent(:gas, M=0.044, c=1800, k=0.03,),
 	),
 	reactions = (...),
 	mixing = MaterialMixing(κ = MixingSpec(WEIGHTED, 0.5)),
@@ -174,7 +175,7 @@ pmma = Material(
 	name = :PMMA,
 	components = (
 		SolidComponent(:virgin, ρ=1190, c=1420, k=0.21, ε=0.86),
-		GaseousComponent(:MMA, M=0.100, c=1500, k=0.02, λ=1e-5)
+		GaseousComponent(:MMA, M=0.100, c=1500, k=0.02,)
 	),
 	reactions = (
 		Reaction(:decomposition, 1 => 2, A=8.5e12, E=188e3, h=870e3),  # h > 0 = endothermic
@@ -183,14 +184,13 @@ pmma = Material(
 )
 ```
 """
-struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ} <: AbstractMaterial
+struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,GT<:GasTransport}
     name::Symbol
     components::C
     reactions::RT  # Full tuple type to preserve heterogeneous reaction types
 
-    # Bundled mixing specs for the three mixed channels (k, λ, κ). NamedTuple
-    # field order is fixed so accessors compile down to direct field reads.
-    mixing::NamedTuple{(:k, :λ, :κ),Tuple{MixingSpec,MixingSpec,MixingSpec}}
+    # Bundled mixing specs for the three mixed channels (k, λ, κ).
+    mixing::MaterialMixing
 
     # Variable cross-section: optional law A(t)/A_0 = law(χ̄). `nothing` ⇒ identity.
     # LSL is parameterized on the concrete law type so calls specialize (no
@@ -198,7 +198,7 @@ struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ} <: AbstractMaterial
     lateral_shrinkage_law::LSL
 
     # Depletion limiter applied to every reaction-rate evaluation for this
-    # material (smooth tanh(ξ/threshold) roll-off; see DepletionLimiter).
+    # material (see DepletionLimiter).
     depletion_limiter::DepletionLimiter
 
     # Dynamic viscosity of the pore gas, μ(T) [Pa·s]. Enters the model only as
@@ -206,17 +206,19 @@ struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ} <: AbstractMaterial
     # than a per-component property: it describes the gas mixture this material
     # actually produces. Defaults to `SutherlandProperty()` (air).
     gas_viscosity::Pμ
+    gas_transport::GT
 
     # Inner constructor with validation
-    function Material{NC,NR,C,RT,LSL,Pμ}(
+    function Material{NC,NR,C,RT,LSL,Pμ,GT}(
         name::Symbol,
         components::C,
         reactions::RT,
-        mixing::NamedTuple{(:k, :λ, :κ),Tuple{MixingSpec,MixingSpec,MixingSpec}},
+        mixing::MaterialMixing,
         lateral_shrinkage_law::LSL,
         depletion_limiter::DepletionLimiter,
         gas_viscosity::Pμ,
-    ) where {NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ}
+        gas_transport::GT,
+    ) where {NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,GT<:GasTransport}
         # Validate component count matches
         length(components) == NC || throw(ArgumentError("Component count mismatch"))
         length(reactions) == NR || throw(ArgumentError("Reaction count mismatch"))
@@ -224,7 +226,8 @@ struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ} <: AbstractMaterial
             LSL <: Function ||
             throw(ArgumentError("lateral_shrinkage_law must be a Function or nothing"))
         _validate_gas_viscosity(gas_viscosity, name)
-        new{NC,NR,C,RT,LSL,Pμ}(
+        _validate_transport_inputs(components, gas_transport, mixing)
+        new{NC,NR,C,RT,LSL,Pμ,GT}(
             name,
             components,
             reactions,
@@ -232,6 +235,7 @@ struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ} <: AbstractMaterial
             lateral_shrinkage_law,
             depletion_limiter,
             gas_viscosity,
+            gas_transport,
         )
     end
 end
@@ -243,8 +247,8 @@ end
 # exactly that on extrapolation. Fail at construction, in the spirit of
 # `MixingSpec`'s CARMAN_KOZENY/`length_scale` check, rather than at hour three of
 # a solve. The probe spans the pyrolysis range plus generous margin; the runtime
-# floor in `Properties.effective_gas_viscosity` remains the backstop for Newton
-# trial states that wander outside it.
+# floor `Properties.MU_FLOOR`, which the state mapping applies, remains the
+# backstop for Newton trial states that wander outside it.
 function _validate_gas_viscosity(gas_viscosity, name::Symbol)
     for T in (200.0, 300.0, 500.0, 800.0, 1200.0, 1800.0)
         μ = gas_viscosity(T)
@@ -269,7 +273,9 @@ end
 	Material(; name, components, reactions=(),
 			  mixing = MaterialMixing(),
 			  lateral_shrinkage_law = nothing,
-			  depletion_limiter = DepletionLimiter())
+			  depletion_limiter = DepletionLimiter(),
+			  gas_viscosity = SutherlandProperty(),
+			  gas_transport = LumpedTransfer())
 
 Create a material with keyword arguments.
 
@@ -277,14 +283,21 @@ Create a material with keyword arguments.
 - `name::Symbol`: Material identifier
 - `components`: Tuple of components
 - `reactions`: Tuple of reactions (can be empty tuple `()`)
-- `mixing`: A `NamedTuple{(:k,:λ,:κ),Tuple{MixingSpec,MixingSpec,MixingSpec}}`,
-  typically built via [`MaterialMixing`](@ref). Defaults: k = `WEIGHTED, β=0.5`,
-  λ = `PARALLEL, β=0.5` (gas transfer; `BRUGGEMAN` is rejected at evaluation
-  time as physically unjustified for this channel), κ = `WEIGHTED, β=0.5`.
+- `mixing`: A [`MaterialMixing`](@ref). Defaults: k = `WEIGHTED, β=0.5`,
+  λ = `PARALLEL, β=0.5` (superficial matrix transfer), κ = `WEIGHTED, β=0.5`.
+  `BRUGGEMAN` is rejected for both transport coefficients at construction.
 - `lateral_shrinkage_law`: optional A(t)/A_0 = law(χ̄). `nothing` ⇒ identity.
-- `depletion_limiter`: [`DepletionLimiter`](@ref) applied to every
-  reaction-rate evaluation for this material (smooth `tanh(ξ/threshold)`
-  roll-off near reactant depletion). Default: `threshold = 1.0` kg/m³, enabled.
+- `depletion_limiter`: the [`DepletionLimiter`](@ref) applied to every
+  reaction-rate evaluation for this material: a roll-off near reactant depletion
+  that is zero at and below zero concentration, by default at
+  `threshold = 1.0` kg/m³.
+- `gas_transport`: [`LumpedTransfer`](@ref) or [`DustyGas`](@ref), including
+  the explicit endpoint and its domain when needed. Gas-free materials bind
+  the internal no-gas specialization.
+- `gas_viscosity`: dynamic viscosity μ(T) of the pore gas [Pa·s], a number or
+  a property function of temperature, used only in the Darcy mobility κ/μ.
+  Default: [`SutherlandProperty`](@ref) (air). It must be positive and finite
+  from 200 K to 1800 K.
 
 # Example
 ```julia
@@ -302,19 +315,18 @@ function Material(;
     name::Symbol,
     components::C,
     reactions::Tuple = (),
-    mixing::NamedTuple{(:k, :λ, :κ),Tuple{MixingSpec,MixingSpec,MixingSpec}} = MaterialMixing(),
+    mixing::MaterialMixing = MaterialMixing(),
     lateral_shrinkage_law::Union{Function,Nothing} = nothing,
     depletion_limiter::DepletionLimiter = DepletionLimiter(),
     gas_viscosity = SutherlandProperty(),
+    gas_transport::GasTransport = LumpedTransfer(),
 ) where {C<:Tuple}
-    # Resolve any PendingReactions (symbolic component names → integer indices)
-    # against the components tuple's name → index map.
     resolved = _resolve_reactions(reactions, components)
     # Function barrier: constructing through a helper whose `LSL` is bound by the
     # argument type makes the `Material{…,LSL}` apply_type monomorphic in each
     # branch, instead of a `Union{Function,Nothing}` split JET flags as a possible
     # no-matching-method on the inner constructor.
-    return _construct_material(
+    material = _construct_material(
         name,
         components,
         resolved,
@@ -322,7 +334,10 @@ function Material(;
         lateral_shrinkage_law,
         depletion_limiter,
         to_property(gas_viscosity),
+        gas_transport,
     )
+    needs_lineage(material) && lineage_graph(material)
+    return material
 end
 
 function _construct_material(
@@ -333,8 +348,9 @@ function _construct_material(
     lateral_shrinkage_law::LSL,
     depletion_limiter::DepletionLimiter,
     gas_viscosity::Pμ,
-) where {C<:Tuple,RT<:Tuple,LSL,Pμ}
-    Material{length(components),length(resolved),C,RT,LSL,Pμ}(
+    gas_transport::GT,
+) where {C<:Tuple,RT<:Tuple,LSL,Pμ,GT<:GasTransport}
+    Material{length(components),length(resolved),C,RT,LSL,Pμ,GT}(
         name,
         components,
         resolved,
@@ -342,29 +358,17 @@ function _construct_material(
         lateral_shrinkage_law,
         depletion_limiter,
         gas_viscosity,
+        gas_transport,
     )
 end
 
-# Walk the reactions tuple, resolve every PendingReaction to a Reaction. The
-# `name → index` map is built once per Material(...) call.
+# The reactions with their component names resolved against `components`.
 function _resolve_reactions(reactions::Tuple, components::Tuple)
-    # Detect whether resolution is needed before building the map (avoids the
-    # Dict allocation in the common no-symbolic-reactions case).
-    needs_resolution = false
-    for rxn in reactions
-        if rxn isa PendingReaction
-            needs_resolution = true
-            break
-        end
-    end
-    needs_resolution || return reactions
-    name_to_index = Dict{Symbol,Int}()
-    for (i, c) in enumerate(components)
-        haskey(name_to_index, c.name) &&
-            error("Duplicate component name :$(c.name) in components tuple")
-        name_to_index[c.name] = i
-    end
-    return map(rxn -> resolve_reaction(rxn, name_to_index), reactions)
+    any(r -> r isa PendingReaction, reactions) || return reactions
+    names = map(c -> c.name, components)
+    allunique(names) ||
+        throw(ArgumentError("the component names of a material must differ"))
+    return map(r -> resolve_reaction(r, names), reactions)
 end
 
 # ============================================================================
@@ -384,29 +388,6 @@ n_components(::Material{NC}) where {NC} = NC
 Get the number of reactions in a material.
 """
 n_reactions(::Material{NC,NR}) where {NC,NR} = NR
-
-"""
-	has_darcy_flow(m::Material) -> Bool
-
-Check if material uses Darcy-Fick gas transport.
-
-Returns true if any solid/liquid component has non-zero permeability (κ > 0).
-
-The component-based approach: define κ on each solid component,
-and the effective permeability will be computed via mixing rules.
-"""
-function has_darcy_flow(m::Material)
-    # Check component-based permeability
-    for comp in m.components
-        if has_permeability(comp)
-            # Check if κ > 0 at a reference temperature
-            if get_permeability(comp, 500.0) > 0.0
-                return true
-            end
-        end
-    end
-    return false
-end
 
 """
 	component_index(m::Material, name::Symbol)
@@ -454,203 +435,256 @@ function Base.show(io::IO, ::MIME"text/plain", m::Material{NC,NR}) where {NC,NR}
 end
 
 # ============================================================================
-# Generated Functions for Type-Stable Iteration over Heterogeneous Components
-# ============================================================================
-#
-# These functions use @generated to unroll loops at compile time, avoiding
-# the type instability that occurs when indexing heterogeneous tuples at runtime.
-# This is critical for performance in hot paths like RHS evaluation.
-
-"""
-	dry_pyrolysis_gas_indices(material::Material{NC}) where NC
-
-Return a tuple of indices of gas components representing dry-pyrolysis gases —
-i.e. all GAS-phase components except water vapor / moisture-derived gases.
-
-Used by the variable cross-section model: only dry-pyrolysis-gas mass efflux
-drives the radial shrinkage progress variable χ_i. Moisture loss does not
-contribute to χ.
-
-Recognized water-vapor names (case-insensitive substring match): `:water_vapor`,
-`:WATER_VAPOR`, `:H2O`, anything containing `H2O` or `water`.
-"""
-@generated function dry_pyrolysis_gas_indices(material::Material{NC}) where {NC}
-    return quote
-        _collect_dry_pyrolysis_gas_indices(material.components)
-    end
-end
-
-# Compile-time recursive collector for dry-pyrolysis-gas indices.
-# Phase check is type-level via `is_gas`; the water-vapor name filter remains runtime.
-@inline _collect_dry_pyrolysis_gas_indices(::Tuple{}) = ()
-@inline function _collect_dry_pyrolysis_gas_indices(comps::Tuple)
-    first_comp = comps[1]
-    rest = Base.tail(comps)
-    rest_indices = _collect_dry_pyrolysis_gas_indices(rest)
-    if is_gas(first_comp) && !_is_water_vapor_name(first_comp.name)
-        return (1, map(x -> x + 1, rest_indices)...)
-    else
-        return map(x -> x + 1, rest_indices)
-    end
-end
-
-@inline function _is_water_vapor_name(name::Symbol)
-    s = String(name)
-    if occursin("H2O", s)
-        return true
-    end
-    ls = lowercase(s)
-    return occursin("water", ls) || ls == "h2o"
-end
-
-# ============================================================================
-# Unrolled Component Loops for Hot Paths
+# Dry pyrolysis gases
 # ============================================================================
 
 """
-	compute_gas_fluxes_unrolled!(J, f, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR, material::Material{NC})
+	dry_gas_flags(material::Material{NC}) -> NTuple{NC,Bool}
 
-Compute gas fluxes for all components at face f, using compile-time unrolling.
+Flag the dry pyrolysis gases: the gases the solids give off through the
+reaction graph. The lineage starts with every solid component and takes in,
+until nothing changes, the products (yield > 0) of every reaction with a
+reactant in it; its gases are the dry gases. Water released by decomposition
+is dry gas, the vapour a liquid evaporates into is not, and a gas no reaction
+produces is not.
 
-Uses the volume fraction gradient formulation where λ_face is the harmonic mean of λ:
-	J = -(λ_face / T_face) × (ξ_R × T_R - ξ_L × T_L) / d_LR
+A lineage gas that a reaction without a reactant in the lineage also produces
+has no single origin, and the function throws an `ArgumentError` naming the
+gas and the reactions; model it as two species, one per lineage.
 """
-@generated function compute_gas_fluxes_unrolled!(
-    J::Matrix,
-    f::Int,
-    ξ_L::NTuple{NC},
-    ξ_R::NTuple{NC},
-    λ_face,
-    T_L,
-    T_R,
-    d_LR,
-    material::Material{NC},
-) where {NC}
-
-    exprs = Expr[]
-    for j = 1:NC
-        push!(
-            exprs,
-            quote
-                @inbounds if is_gas(material.components[$j])
-                    ξ_L_j = ξ_L[$j]
-                    ξ_R_j = ξ_R[$j]
-                    # Volume fraction gradient: J = -(λ/T_face) × Δ(ξT) / d
-                    T_face = 0.5 * (T_L + T_R)
-                    J[$j, f] = -λ_face * (ξ_R_j * T_R - ξ_L_j * T_L) / (T_face * d_LR)
+function dry_gas_flags(material::Material{NC}) where {NC}
+    comps = material.components
+    rxns = material.reactions
+    lineage = Set(j for j = 1:NC if is_solid(comps[j]))
+    from_lineage(r) = r.reactant in lineage
+    produces(r, j) = any(p -> first(p) == j && last(p) > 0, r.products)
+    grown = true
+    while grown
+        grown = false
+        for r in rxns
+            from_lineage(r) || continue
+            for (j, y) in r.products
+                if y > 0 && !(j in lineage)
+                    push!(lineage, j)
+                    grown = true
                 end
-            end,
+            end
+        end
+    end
+    for j = 1:NC
+        (is_gas(comps[j]) && j in lineage) || continue
+        outside = [r.name for r in rxns if !from_lineage(r) && produces(r, j)]
+        isempty(outside) && continue
+        inside = [r.name for r in rxns if from_lineage(r) && produces(r, j)]
+        throw(
+            ArgumentError(
+                "gas :$(comps[j].name) is produced from the solids (reactions " *
+                "$(join(repr.(inside), ", "))) and from outside their lineage " *
+                "(reactions $(join(repr.(outside), ", "))), so whether it is dry " *
+                "pyrolysis gas is ambiguous; split it into one species per lineage",
+            ),
         )
     end
-    return Expr(:block, exprs...)
+    return ntuple(j -> is_gas(comps[j]) && j in lineage, Val(NC))
 end
 
+# ============================================================================
+# Reaction lineages
+# ============================================================================
 
 """
-	compute_gas_fluxes_darcy_fick_unrolled!(J::Matrix, f::Int, v_g::Float64,
-		ξ_L::NTuple{NC}, ξ_R::NTuple{NC}, φ_L, φ_R, λ_face, T_L, T_R, d_LR,
-		material::Material{NC})
+	needs_lineage(material) -> Bool
 
-Compile-time unrolled Darcy-Fick flux computation for type stability.
-
-Computes J = J_adv + J_diff for each gas component:
-- J_adv = v_g × ξ_upwind / φ_face (first-order upwind; ξ is per bulk volume,
-  v_g is superficial, so the advected scalar is the intrinsic density ξ/φ with
-  φ_face = (φ_L + φ_R)/2 floored at 1e-12 like the pressure closure)
-- J_diff = -(λ_face/T_face) × (ξ_R×T_R - ξ_L×T_L) / d_LR (volume fraction gradient)
+Whether some reaction of `material` has an order other than one, which is
+evaluated on the conversion of its reactant against the reactant's lineage
+inventory. Every first-order reaction is evaluated on its concentration, and a
+material with no other order carries no reference.
 """
-@generated function compute_gas_fluxes_darcy_fick_unrolled!(
-    J::Matrix,
-    f::Int,
-    v_g,
-    ξ_L::NTuple{NC},
-    ξ_R::NTuple{NC},
-    φ_L,
-    φ_R,
-    λ_face,
-    T_L,
-    T_R,
-    d_LR,
-    material::Material{NC},
-) where {NC}
+needs_lineage(material::Material) = any(r -> r.order != 1, material.reactions)
 
-    exprs = Expr[:(inv_φ_face = 1.0 / max(0.5 * (φ_L + φ_R), 1e-12))]
-    for j = 1:NC
+"""
+	LineageGraph
+
+What the reaction network alone fixes of the reference of each reaction, per
+reaction in the material's order: `reactant`, the reactant's component index;
+`order`, its order; `basis`, the reaction's `basis` (`NaN` for the lineage
+rules); `ancestors`, per component whether the reactant can be formed from it,
+the reactant itself included (empty for a first-order reaction); `reach`, per
+component the mass of the reactant one unit of its inventory can become (empty
+for a first-order reaction and under a `basis`). `condensed` flags the
+condensed components.
+"""
+struct LineageGraph
+    names::Vector{Symbol}
+    components::Vector{Symbol}
+    condensed::Vector{Bool}
+    reactant::Vector{Int}
+    order::Vector{Float64}
+    basis::Vector{Float64}
+    ancestors::Vector{Vector{Bool}}
+    reach::Vector{Vector{Float64}}
+end
+
+# The channels of every condensed component: per reaction it consumes, the
+# condensed products other than itself at positive yield with their weights,
+# the yields renormalised by what the reaction consumes. A reaction that
+# returns its whole reactant consumes nothing and is no channel.
+function _lineage_channels(material::Material{NC}, condensed) where {NC}
+    channels = [Vector{Pair{Int,Float64}}[] for _ = 1:NC]
+    for r in material.reactions
+        a = r.reactant
+        condensed[a] || continue
+        consumed = 1.0 - sum(y for (p, y) in r.products if p == a; init = 0.0)
+        consumed > 0 || continue
         push!(
-            exprs,
-            quote
-                @inbounds if is_gas(material.components[$j])
-                    ξ_L_j = ξ_L[$j]
-                    ξ_R_j = ξ_R[$j]
-
-                    # Diffusive flux (volume fraction gradient)
-                    T_face = 0.5 * (T_L + T_R)
-                    J_diff = -λ_face * (ξ_R_j * T_R - ξ_L_j * T_L) / (T_face * d_LR)
-
-                    # Advective flux: intrinsic density upwinded (first-order)
-                    ξ_upwind = v_g >= 0.0 ? ξ_L_j : ξ_R_j
-                    J_adv = v_g * ξ_upwind * inv_φ_face
-
-                    # Combined Darcy-Fick flux
-                    J[$j, f] = J_adv + J_diff
-                end
-            end,
+            channels[a],
+            [p => y / consumed for (p, y) in r.products if p != a && y > 0 && condensed[p]],
         )
     end
-    return Expr(:block, exprs...)
+    return channels
+end
+
+# The nodes reachable from `seeds` along `next`, the seeds included.
+function _reachable(next::Vector{Vector{Int}}, seeds)
+    seen = falses(length(next))
+    front = Int[seeds...]
+    seen[front] .= true
+    while !isempty(front)
+        v = pop!(front)
+        for p in next[v]
+            seen[p] && continue
+            seen[p] = true
+            push!(front, p)
+        end
+    end
+    return Vector{Bool}(seen)
+end
+
+# The nodes of `member` children first, and the cycle among them along
+# `children`, `nothing` when there is none.
+function _children_first(children::Vector{Vector{Int}}, member::Vector{Bool})
+    state = zeros(Int8, length(children))
+    order, path = Int[], Int[]
+    function visit(v)
+        state[v] = 1
+        push!(path, v)
+        for p in children[v]
+            member[p] || continue
+            state[p] == 1 && return path[findfirst(==(p), path):end]
+            if state[p] == 0
+                cycle = visit(p)
+                cycle === nothing || return cycle
+            end
+        end
+        pop!(path)
+        state[v] = 2
+        push!(order, v)
+        return nothing
+    end
+    for v in eachindex(member)
+        (member[v] && state[v] == 0) || continue
+        cycle = visit(v)
+        cycle === nothing || return order, cycle
+    end
+    return order, nothing
+end
+
+# The reach of the reactant `a` over its ancestors, visited children first:
+# one unit of a node's inventory becomes the common value of its channels
+# that reach `a`, a channel producing nothing toward `a` being ignored.
+function _reach(channels, ancestors, order, a::Int, rxn::Symbol, names)
+    Φ = zeros(length(ancestors))
+    Φ[a] = 1.0
+    for v in order
+        v == a && continue
+        value = NaN
+        for channel in channels[v]
+            any(e -> ancestors[first(e)], channel) || continue
+            φ = sum(y * Φ[p] for (p, y) in channel; init = 0.0)
+            if isnan(value)
+                value = φ
+            elseif abs(φ - value) > 1e-12 * max(abs(φ), abs(value))
+                throw(
+                    ArgumentError(
+                        "reaction :$rxn: competing channels of :$(names[v]) reach " *
+                        ":$(names[a]) with different yields ($value and $φ), so the " *
+                        "reference depends on the rates: give `basis`",
+                    ),
+                )
+            end
+        end
+        Φ[v] = value
+    end
+    return Φ
 end
 
 """
-	set_boundary_advective_flux_unrolled!(J::Matrix, f::Int, v_over_φ,
-		ξ_int::NTuple{NC}, material::Material{NC})
+	lineage_graph(material) -> LineageGraph
 
-Write the boundary-face advective venting flux `J[j, f] = v_over_φ · ξ_int[j]`
-for every gas component (solids untouched). `v_over_φ = v_b/φ_int` is the
-interstitial boundary Darcy velocity; the caller has already applied the
-outflow-only upwind gate (the ambient ghost carries no tracked gas).
+The graph rules of the reference of every reaction of order other than one, in
+order: its reactant is condensed and not fed from outside the condensed
+inventory (a condensed product of a gas-consuming reaction is fed, and so is
+every node reachable from it along positive-yield edges), whatever its
+`basis`; without a `basis`, the reactant's ancestors hold no cycle, and the
+channels of each ancestor that reach it agree on the reach, the mass of the
+reactant one unit of the ancestor's inventory can become. A reaction that
+returns its whole reactant is no edge, and the yields of one that returns part
+of it are renormalised by what it consumes. Throws an `ArgumentError` naming
+the reaction otherwise, with `basis` as the remedy where there is one.
 """
-@generated function set_boundary_advective_flux_unrolled!(
-    J::Matrix,
-    f::Int,
-    v_over_φ,
-    ξ_int::NTuple{NC},
-    material::Material{NC},
-) where {NC}
-    exprs = Expr[]
-    for j = 1:NC
-        push!(exprs, quote
-            @inbounds if is_gas(material.components[$j])
-                J[$j, f] = v_over_φ * ξ_int[$j]
-            end
-        end)
+function lineage_graph(material::Material{NC}) where {NC}
+    for r in material.reactions
+        all(j -> 1 <= j <= NC, (r.reactant, first.(r.products)...)) ||
+            throw(ArgumentError("reaction :$(r.name) references a component outside 1:$NC"))
     end
-    return Expr(:block, exprs...)
-end
+    names = [c.name for c in material.components]
+    condensed = [!is_gas(c) for c in material.components]
+    channels = _lineage_channels(material, condensed)
+    children = [unique(first(e) for channel in channels[v] for e in channel) for v = 1:NC]
+    parents = [[v for v = 1:NC if p in children[v]] for p = 1:NC]
+    gas_products = Int[
+        p for r in material.reactions if !condensed[r.reactant] for
+        (p, y) in r.products if y > 0 && condensed[p]
+    ]
+    fed = _reachable(children, gas_products)
 
-
-"""
-	apply_species_residual_unrolled!(dξ::Matrix, i::Int, div_J::Matrix, dξ_rxn::Matrix, material::Material{NC})
-
-Apply species residual: for gases dξ = -div_J + dξ_rxn, for solids dξ = dξ_rxn.
-Uses compile-time unrolling for type stability.
-"""
-@generated function apply_species_residual_unrolled!(
-    dξ::Matrix,
-    i::Int,
-    div_J::Matrix,
-    dξ_rxn::Matrix,
-    material::Material{NC},
-) where {NC}
-
-    exprs = Expr[]
-    for j = 1:NC
-        push!(exprs, quote
-            @inbounds if is_gas(material.components[$j])
-                dξ[$j, i] = -div_J[$j, i] + dξ_rxn[$j, i]
-            else
-                dξ[$j, i] = dξ_rxn[$j, i]
-            end
-        end)
+    reactions = collect(material.reactions)
+    ancestors = [Bool[] for _ in reactions]
+    reach = [Float64[] for _ in reactions]
+    for (k, r) in enumerate(reactions)
+        a, n = r.reactant, r.order
+        n == 1 && continue
+        condensed[a] || throw(
+            ArgumentError(
+                "reaction :$(r.name) has the gas reactant :$(names[a]) at order $n: " *
+                "an order other than one needs a condensed reactant",
+            ),
+        )
+        fed[a] && throw(
+            ArgumentError(
+                "reaction :$(r.name): :$(names[a]) is fed by a gas-consuming reaction, " *
+                "so its lineage has no initial inventory; no `basis` repairs this",
+            ),
+        )
+        ancestors[k] = _reachable(parents, a)
+        r.basis === nothing || continue
+        order, cycle = _children_first(children, ancestors[k])
+        cycle === nothing || throw(
+            ArgumentError(
+                "reaction :$(r.name): the ancestors of :$(names[a]) hold the cycle " *
+                "$(join((names[v] for v in (cycle..., first(cycle))), " → ")): give `basis`",
+            ),
+        )
+        reach[k] = _reach(channels, ancestors[k], order, a, r.name, names)
     end
-    return Expr(:block, exprs...)
+    return LineageGraph(
+        [r.name for r in reactions],
+        names,
+        condensed,
+        [r.reactant for r in reactions],
+        [r.order for r in reactions],
+        [something(r.basis, NaN) for r in reactions],
+        ancestors,
+        reach,
+    )
 end

@@ -1,0 +1,601 @@
+[[series]]
+case = "V-HC-01"
+curve = "T_profiles"
+reference = "t = 30.0 s"
+label = "ThermaKin2Ds 7, t = 30.0 s"
+path = "thermakin/vhc01.csv"
+index = 1
+
+[[series]]
+case = "V-HC-01"
+curve = "T_profiles"
+reference = "t = 60.0 s"
+label = "ThermaKin2Ds 7, t = 60.0 s"
+path = "thermakin/vhc01.csv"
+index = 2
+
+[[series]]
+case = "V-HC-01"
+curve = "T_profiles"
+reference = "t = 90.0 s"
+label = "ThermaKin2Ds 7, t = 90.0 s"
+path = "thermakin/vhc01.csv"
+index = 3
+
+[[series]]
+case = "V-HC-01"
+curve = "T_profiles"
+reference = "t = 180.0 s"
+label = "ThermaKin2Ds 7, t = 180.0 s"
+path = "thermakin/vhc01.csv"
+index = 4
+
+[[series]]
+case = "V-HC-01"
+curve = "surface_T_history"
+reference = "surface Newton solve"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vhc01.csv"
+index = 5
+
+[[series]]
+case = "V-HC-02a"
+curve = "T_profiles"
+reference = "Fo = 0.05"
+label = "ThermaKin2Ds 7, Fo = 0.05"
+path = "thermakin/vhc02a.csv"
+index = 1
+
+[[series]]
+case = "V-HC-02a"
+curve = "T_profiles"
+reference = "Fo = 0.1"
+label = "ThermaKin2Ds 7, Fo = 0.1"
+path = "thermakin/vhc02a.csv"
+index = 2
+
+[[series]]
+case = "V-HC-02a"
+curve = "T_profiles"
+reference = "Fo = 0.2"
+label = "ThermaKin2Ds 7, Fo = 0.2"
+path = "thermakin/vhc02a.csv"
+index = 3
+
+[[series]]
+case = "V-HC-02a"
+curve = "T_profiles"
+reference = "Fo = 0.5"
+label = "ThermaKin2Ds 7, Fo = 0.5"
+path = "thermakin/vhc02a.csv"
+index = 4
+
+[[series]]
+case = "V-HC-02a"
+curve = "surface_T_history"
+reference = "front face"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vhc02a.csv"
+index = 5
+
+[[series]]
+case = "V-HC-02a"
+curve = "back_T_history"
+reference = "adiabatic back face"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vhc02a.csv"
+index = 6
+
+[[series]]
+case = "V-HC-02b"
+curve = "T_profiles"
+reference = "Fo = 0.05"
+label = "ThermaKin2Ds 7, Fo = 0.05"
+path = "thermakin/vhc02b.csv"
+index = 1
+
+[[series]]
+case = "V-HC-02b"
+curve = "T_profiles"
+reference = "Fo = 0.1"
+label = "ThermaKin2Ds 7, Fo = 0.1"
+path = "thermakin/vhc02b.csv"
+index = 2
+
+[[series]]
+case = "V-HC-02b"
+curve = "T_profiles"
+reference = "Fo = 0.2"
+label = "ThermaKin2Ds 7, Fo = 0.2"
+path = "thermakin/vhc02b.csv"
+index = 3
+
+[[series]]
+case = "V-HC-02b"
+curve = "T_profiles"
+reference = "Fo = 0.5"
+label = "ThermaKin2Ds 7, Fo = 0.5"
+path = "thermakin/vhc02b.csv"
+index = 4
+
+[[series]]
+case = "V-HC-02b"
+curve = "surface_T_history"
+reference = "front face"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vhc02b.csv"
+index = 5
+
+[[series]]
+case = "V-HC-02b"
+curve = "back_T_history"
+reference = "adiabatic back face"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vhc02b.csv"
+index = 6
+
+[[series]]
+case = "V-HC-02c"
+curve = "T_profiles"
+reference = "Fo = 0.05"
+label = "ThermaKin2Ds 7, Fo = 0.05"
+path = "thermakin/vhc02c.csv"
+index = 1
+
+[[series]]
+case = "V-HC-02c"
+curve = "T_profiles"
+reference = "Fo = 0.1"
+label = "ThermaKin2Ds 7, Fo = 0.1"
+path = "thermakin/vhc02c.csv"
+index = 2
+
+[[series]]
+case = "V-HC-02c"
+curve = "T_profiles"
+reference = "Fo = 0.2"
+label = "ThermaKin2Ds 7, Fo = 0.2"
+path = "thermakin/vhc02c.csv"
+index = 3
+
+[[series]]
+case = "V-HC-02c"
+curve = "T_profiles"
+reference = "Fo = 0.5"
+label = "ThermaKin2Ds 7, Fo = 0.5"
+path = "thermakin/vhc02c.csv"
+index = 4
+
+[[series]]
+case = "V-HC-02c"
+curve = "surface_T_history"
+reference = "front face"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vhc02c.csv"
+index = 5
+
+[[series]]
+case = "V-HC-02c"
+curve = "back_T_history"
+reference = "adiabatic back face"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vhc02c.csv"
+index = 6
+
+[[series]]
+case = "V-HC-02d"
+curve = "T_profiles"
+reference = "Fo = 0.05"
+label = "ThermaKin2Ds 7, Fo = 0.05"
+path = "thermakin/vhc02d.csv"
+index = 1
+
+[[series]]
+case = "V-HC-02d"
+curve = "T_profiles"
+reference = "Fo = 0.1"
+label = "ThermaKin2Ds 7, Fo = 0.1"
+path = "thermakin/vhc02d.csv"
+index = 2
+
+[[series]]
+case = "V-HC-02d"
+curve = "T_profiles"
+reference = "Fo = 0.2"
+label = "ThermaKin2Ds 7, Fo = 0.2"
+path = "thermakin/vhc02d.csv"
+index = 3
+
+[[series]]
+case = "V-HC-02d"
+curve = "T_profiles"
+reference = "Fo = 0.5"
+label = "ThermaKin2Ds 7, Fo = 0.5"
+path = "thermakin/vhc02d.csv"
+index = 4
+
+[[series]]
+case = "V-HC-02d"
+curve = "surface_T_history"
+reference = "front face"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vhc02d.csv"
+index = 5
+
+[[series]]
+case = "V-HC-02d"
+curve = "back_T_history"
+reference = "adiabatic back face"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vhc02d.csv"
+index = 6
+
+[[series]]
+case = "V-HC-03"
+curve = "T_profiles"
+reference = "Fo = 0.1"
+label = "ThermaKin2Ds 7, Fo = 0.1"
+path = "thermakin/vhc03.csv"
+index = 1
+
+[[series]]
+case = "V-HC-03"
+curve = "T_profiles"
+reference = "Fo = 0.5"
+label = "ThermaKin2Ds 7, Fo = 0.5"
+path = "thermakin/vhc03.csv"
+index = 2
+
+[[series]]
+case = "V-HC-03"
+curve = "T_profiles"
+reference = "Fo = 1.5"
+label = "ThermaKin2Ds 7, Fo = 1.5"
+path = "thermakin/vhc03.csv"
+index = 3
+
+[[series]]
+case = "V-HC-03"
+curve = "mean_T_history"
+reference = "volume mean"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vhc03.csv"
+index = 4
+
+[[series]]
+case = "V-HC-04a"
+curve = "T_profile_steady"
+reference = "steady solver profile"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vhc04a.csv"
+index = 1
+
+[[series]]
+case = "V-HC-04b"
+curve = "T_profile_steady"
+reference = "steady solver profile"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vhc04b.csv"
+index = 1
+
+[[series]]
+case = "V-HC-04c"
+curve = "T_profile_steady"
+reference = "steady solver profile"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vhc04c.csv"
+index = 1
+
+[[series]]
+case = "V-HC-04d"
+curve = "T_profile_steady"
+reference = "steady solver profile"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vhc04c.csv"
+index = 1
+reuse_note = "Same physical problem as V-HC-04c; Julia aligns its mesh interface"
+
+[[series]]
+case = "V-HC-05"
+curve = "T_profile_steady"
+reference = "steady solver profile"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vhc05.csv"
+index = 1
+
+[[series]]
+case = "V-RX-01"
+curve = "xi_histories"
+reference = "ξ_A"
+label = "ThermaKin2Ds 7 ξ_A"
+path = "thermakin/vrx01.csv"
+index = 1
+
+[[series]]
+case = "V-RX-01"
+curve = "xi_histories"
+reference = "ξ_B"
+label = "ThermaKin2Ds 7 ξ_B"
+path = "thermakin/vrx01.csv"
+index = 2
+
+[[series]]
+case = "V-RX-01"
+curve = "xi_histories"
+reference = "ξ_C"
+label = "ThermaKin2Ds 7 ξ_C"
+path = "thermakin/vrx01.csv"
+index = 3
+
+[[series]]
+case = "V-RX-02b"
+curve = "xi_histories"
+reference = "ξ_A (n = 2.0)"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vrx02b.csv"
+index = 1
+
+[[series]]
+case = "V-RX-04a"
+curve = "T_history_vs_exact"
+reference = "slab mean temperature"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vrx04a.csv"
+index = 1
+
+[[series]]
+case = "V-RX-04b"
+curve = "surface_T_history"
+reference = "surface temperature"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vrx04b.csv"
+index = 1
+
+[[series]]
+case = "V-RX-05a"
+curve = "temperature"
+reference = "temperature"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vrx05a.csv"
+index = 1
+
+[[series]]
+case = "V-RX-05a"
+curve = "species"
+reference = "A"
+label = "ThermaKin2Ds 7 A"
+path = "thermakin/vrx05a.csv"
+index = 2
+
+[[series]]
+case = "V-RX-05a"
+curve = "species"
+reference = "B"
+label = "ThermaKin2Ds 7 B"
+path = "thermakin/vrx05a.csv"
+index = 3
+
+[[series]]
+case = "V-RX-05a"
+curve = "enthalpy"
+reference = "enthalpy"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vrx05a.csv"
+index = 4
+
+[[series]]
+case = "V-RX-05b"
+curve = "temperature"
+reference = "temperature"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vrx05b.csv"
+index = 1
+
+[[series]]
+case = "V-RX-05b"
+curve = "species"
+reference = "A"
+label = "ThermaKin2Ds 7 A"
+path = "thermakin/vrx05b.csv"
+index = 2
+
+[[series]]
+case = "V-RX-05b"
+curve = "species"
+reference = "B"
+label = "ThermaKin2Ds 7 B"
+path = "thermakin/vrx05b.csv"
+index = 3
+
+[[series]]
+case = "V-RX-05b"
+curve = "enthalpy"
+reference = "enthalpy"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vrx05b.csv"
+index = 4
+
+[[series]]
+case = "V-RX-05c"
+curve = "temperature"
+reference = "temperature"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vrx05c.csv"
+index = 1
+
+[[series]]
+case = "V-RX-05c"
+curve = "species"
+reference = "A"
+label = "ThermaKin2Ds 7 A"
+path = "thermakin/vrx05c.csv"
+index = 2
+
+[[series]]
+case = "V-RX-05c"
+curve = "species"
+reference = "B"
+label = "ThermaKin2Ds 7 B"
+path = "thermakin/vrx05c.csv"
+index = 3
+
+[[series]]
+case = "V-RX-05c"
+curve = "species"
+reference = "G"
+label = "ThermaKin2Ds 7 G"
+path = "thermakin/vrx05c.csv"
+index = 4
+
+[[series]]
+case = "V-RX-05c"
+curve = "enthalpy"
+reference = "enthalpy"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vrx05c.csv"
+index = 5
+
+[[series]]
+case = "V-CPL-03"
+curve = "thickness_histories"
+reference = "P1"
+label = "ThermaKin2Ds 7 P1"
+path = "thermakin/vcpl03p1.csv"
+index = 1
+
+[[series]]
+case = "V-CPL-03"
+curve = "thickness_histories"
+reference = "P2"
+label = "ThermaKin2Ds 7 P2"
+path = "thermakin/vcpl03p2.csv"
+index = 1
+
+[[series]]
+case = "V-CPL-03"
+curve = "thickness_histories"
+reference = "P3"
+label = "ThermaKin2Ds 7 P3"
+path = "thermakin/vcpl03p3.csv"
+index = 1
+
+[[series]]
+case = "V-CPL-04"
+curve = "steady_profiles"
+reference = "δ = 0.44 ≈ 0.50 δ_c"
+label = "ThermaKin2Ds 7, δ = 0.44"
+path = "thermakin/vcpl04.csv"
+index = 1
+
+[[series]]
+case = "V-GT-01"
+curve = "xi_profiles"
+reference = "t = 2.0 s"
+label = "ThermaKin2Ds 7, t = 2.0 s"
+path = "thermakin/vgt01.csv"
+index = 1
+
+[[series]]
+case = "V-GT-01"
+curve = "xi_profiles"
+reference = "t = 4.0 s"
+label = "ThermaKin2Ds 7, t = 4.0 s"
+path = "thermakin/vgt01.csv"
+index = 2
+
+[[series]]
+case = "V-GT-01"
+curve = "xi_profiles"
+reference = "t = 8.0 s"
+label = "ThermaKin2Ds 7, t = 8.0 s"
+path = "thermakin/vgt01.csv"
+index = 3
+
+[[series]]
+case = "V-GT-01"
+curve = "variance_history"
+reference = "discrete second moment"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vgt01.csv"
+index = 4
+
+[[series]]
+case = "V-GT-07a"
+curve = "profiles"
+reference = "t = 50.0 s"
+label = "ThermaKin2Ds 7, t = 50.0 s"
+path = "thermakin/vgt07a.csv"
+index = 1
+
+[[series]]
+case = "V-GT-07a"
+curve = "profiles"
+reference = "t = 150.0 s"
+label = "ThermaKin2Ds 7, t = 150.0 s"
+path = "thermakin/vgt07a.csv"
+index = 2
+
+[[series]]
+case = "V-GT-07a"
+curve = "profiles"
+reference = "t = 400.0 s"
+label = "ThermaKin2Ds 7, t = 400.0 s"
+path = "thermakin/vgt07a.csv"
+index = 3
+
+[[series]]
+case = "V-GT-07a"
+curve = "uptake"
+reference = "surface influx"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vgt07a.csv"
+index = 4
+
+[[series]]
+case = "V-GT-07a"
+curve = "inventory"
+reference = "stored tracer"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vgt07a.csv"
+index = 5
+
+[[series]]
+case = "V-GT-07b"
+curve = "profiles"
+reference = "t = 50.0 s"
+label = "ThermaKin2Ds 7, t = 50.0 s"
+path = "thermakin/vgt07b.csv"
+index = 1
+
+[[series]]
+case = "V-GT-07b"
+curve = "profiles"
+reference = "t = 150.0 s"
+label = "ThermaKin2Ds 7, t = 150.0 s"
+path = "thermakin/vgt07b.csv"
+index = 2
+
+[[series]]
+case = "V-GT-07b"
+curve = "profiles"
+reference = "t = 400.0 s"
+label = "ThermaKin2Ds 7, t = 400.0 s"
+path = "thermakin/vgt07b.csv"
+index = 3
+
+[[series]]
+case = "V-GT-07b"
+curve = "uptake"
+reference = "surface influx"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vgt07b.csv"
+index = 4
+
+[[series]]
+case = "V-GT-07b"
+curve = "inventory"
+reference = "stored tracer"
+label = "ThermaKin2Ds 7"
+path = "thermakin/vgt07b.csv"
+index = 5
+

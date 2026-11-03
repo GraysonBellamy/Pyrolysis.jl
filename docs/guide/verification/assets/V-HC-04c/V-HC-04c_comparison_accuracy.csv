@@ -1,0 +1,16 @@
+"code","curve","reference","resolution","samples","Linf","RMS"
+"FDS 6.11.1","T_profile_steady","steady solver profile","base",80,3.0129390324873384e-6,1.0002081676801493e-6
+"FDS 6.11.1","T_profile_steady","steady solver profile","refined",160,4.5286506633601675e-6,1.1395438423917617e-6
+"FDS 6.11.1","T_profile_steady","steady solver profile","time_half",80,3.0129390324873384e-6,1.0002081676801493e-6
+"FDS 6.11.1","T_profile_steady","steady solver profile","time_quarter",80,3.0129390324873384e-6,1.0002081676801493e-6
+"FDS 6.11.1","T_profile_steady","steady solver profile","space_half",160,4.5286506633601675e-6,1.1395438423917617e-6
+"Gpyro V2","T_profile_steady","steady solver profile","base",81,1.4745421301293504,0.60531073671237
+"Gpyro V2","T_profile_steady","steady solver profile","refined",161,0.5586669301293341,0.22792766414859916
+"Gpyro V2","T_profile_steady","steady solver profile","time_half",81,1.4745421301293504,0.60531073671237
+"Gpyro V2","T_profile_steady","steady solver profile","time_quarter",81,1.4745421301293504,0.60531073671237
+"Gpyro V2","T_profile_steady","steady solver profile","space_half",161,0.5586669301293341,0.22792766414859916
+"ThermaKin2Ds 7","T_profile_steady","steady solver profile","base",80,1.155268022181133,0.47670593930521826
+"ThermaKin2Ds 7","T_profile_steady","steady solver profile","refined",160,0.5777340110905698,0.2371350005790162
+"ThermaKin2Ds 7","T_profile_steady","steady solver profile","time_half",80,1.155268022181133,0.47670593930521826
+"ThermaKin2Ds 7","T_profile_steady","steady solver profile","time_quarter",80,1.155268022181133,0.47670593930521826
+"ThermaKin2Ds 7","T_profile_steady","steady solver profile","space_half",160,0.5777340110905698,0.2371350005790162

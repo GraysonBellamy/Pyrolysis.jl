@@ -1,0 +1,41 @@
+"code","curve","reference","resolution","samples","Linf","RMS"
+"FDS 6.11.1","temperature","temperature","base",41,0.0013775179388630931,0.0007857423626434384
+"FDS 6.11.1","temperature","temperature","refined",41,0.0006875179387861863,0.00039248609371913585
+"FDS 6.11.1","temperature","temperature","time_half",41,0.0006875179387861863,0.00039248609371913585
+"FDS 6.11.1","temperature","temperature","time_quarter",41,0.00034751793873510906,0.000196349321793739
+"FDS 6.11.1","temperature","temperature","space_half",41,0.00034751793873510906,0.000196349321793739
+"FDS 6.11.1 A","species","A","base",41,0.03679117144235988,0.024536825547465013
+"FDS 6.11.1 A","species","A","refined",41,0.018395066661128112,0.012268581899468885
+"FDS 6.11.1 A","species","A","time_half",41,0.018395066661128112,0.012268581899468885
+"FDS 6.11.1 A","species","A","time_quarter",41,0.009201171442327905,0.006134931343779721
+"FDS 6.11.1 A","species","A","space_half",41,0.009201171442327905,0.006134931343779721
+"FDS 6.11.1 B","species","B","base",41,0.036791171442246196,0.02453684656970135
+"FDS 6.11.1 B","species","B","refined",41,0.018395066661128112,0.01226858044729334
+"FDS 6.11.1 B","species","B","time_half",41,0.018395066661128112,0.01226858044729334
+"FDS 6.11.1 B","species","B","time_quarter",41,0.009201171442327905,0.006134766731019491
+"FDS 6.11.1 B","species","B","space_half",41,0.009201171442327905,0.006134766731019491
+"FDS 6.11.1","enthalpy","enthalpy","base",41,20.26224534609355,12.885100377064438
+"FDS 6.11.1","enthalpy","enthalpy","refined",41,10.138336837058887,6.442951341906888
+"FDS 6.11.1","enthalpy","enthalpy","time_half",41,10.138336837058887,6.442951341906888
+"FDS 6.11.1","enthalpy","enthalpy","time_quarter",41,5.069415342295542,3.221783325565514
+"FDS 6.11.1","enthalpy","enthalpy","space_half",41,5.069415342295542,3.221783325565514
+"ThermaKin2Ds 7","temperature","temperature","base",41,0.0004876740379131661,0.00026615227913798185
+"ThermaKin2Ds 7","temperature","temperature","refined",41,0.0004876740379131661,0.00026615227913798185
+"ThermaKin2Ds 7","temperature","temperature","time_half",41,0.0004876740379131661,0.00026615227913798185
+"ThermaKin2Ds 7","temperature","temperature","time_quarter",41,0.0004876740379131661,0.00026615227913798185
+"ThermaKin2Ds 7","temperature","temperature","space_half",41,0.0004876740379131661,0.00026615227913798185
+"ThermaKin2Ds 7 A","species","A","base",41,4.692201821399067e-5,2.326708032084112e-5
+"ThermaKin2Ds 7 A","species","A","refined",41,4.692201821399067e-5,2.326708032084112e-5
+"ThermaKin2Ds 7 A","species","A","time_half",41,4.692201821399067e-5,2.326708032084112e-5
+"ThermaKin2Ds 7 A","species","A","time_quarter",41,4.692201821399067e-5,2.326708032084112e-5
+"ThermaKin2Ds 7 A","species","A","space_half",41,4.692201821399067e-5,2.326708032084112e-5
+"ThermaKin2Ds 7 B","species","B","base",41,4.692201815714725e-5,2.8498103213236122e-5
+"ThermaKin2Ds 7 B","species","B","refined",41,4.692201815714725e-5,2.8498103213236122e-5
+"ThermaKin2Ds 7 B","species","B","time_half",41,4.692201815714725e-5,2.8498103213236122e-5
+"ThermaKin2Ds 7 B","species","B","time_quarter",41,4.692201815714725e-5,2.8498103213236122e-5
+"ThermaKin2Ds 7 B","species","B","space_half",41,4.692201815714725e-5,2.8498103213236122e-5
+"ThermaKin2Ds 7","enthalpy","enthalpy","base",41,0.8697290723212063,0.46682721989142406
+"ThermaKin2Ds 7","enthalpy","enthalpy","refined",41,0.8697290723212063,0.46682721989142406
+"ThermaKin2Ds 7","enthalpy","enthalpy","time_half",41,0.8697290723212063,0.46682721989142406
+"ThermaKin2Ds 7","enthalpy","enthalpy","time_quarter",41,0.8697290723212063,0.46682721989142406
+"ThermaKin2Ds 7","enthalpy","enthalpy","space_half",41,0.8697290723212063,0.46682721989142406

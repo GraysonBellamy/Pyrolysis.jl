@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="465" viewBox="0 0 1200 465" role="img" aria-labelledby="title desc">
+<title id="title">Figure 4. Layer Equidistribution (Schematic)</title><desc id="desc">Nonuniform reacting cells relax toward equal widths while correction is zero in the substrate and at layer boundaries. The adjacent computed activation curve rises as remaining thickness falls.</desc>
+<defs>
+<marker id="ink" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#202020" stroke-width="1.3"/></marker>
+<marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#295674" stroke-width="1.3"/></marker>
+<marker id="teal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#365b58" stroke-width="1.3"/></marker>
+<marker id="orange" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#92512f" stroke-width="1.3"/></marker>
+<marker id="purple" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#675878" stroke-width="1.3"/></marker>
+</defs><rect width="100%" height="100%" fill="white"/><g font-family="Liberation Sans, Arial, sans-serif" fill="#202020">
+<text x="32.000" y="39.000" font-size="24" fill="#202020" text-anchor="start" font-weight="bold" >Figure 4. Layer Equidistribution (Schematic)</text>
+<text x="70.000" y="100.000" font-size="19" fill="#202020" text-anchor="start" font-weight="normal" >Inert Substrate</text>
+<text x="325.000" y="100.000" font-size="19" fill="#365b58" text-anchor="start" font-weight="normal" >Reacting Layer</text>
+<rect x="70" y="145" width="95" height="55" rx="0" fill="#d9d9d9" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="165" y="145" width="85" height="55" rx="0" fill="#d9d9d9" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="250" y="145" width="25" height="55" rx="0" fill="#ededed" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="275" y="145" width="45" height="55" rx="0" fill="#ededed" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="320" y="145" width="75" height="55" rx="0" fill="#ededed" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="395" y="145" width="145" height="55" rx="0" fill="#ededed" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<circle cx="70" cy="200" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="165" cy="200" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="250" cy="200" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="275" cy="200" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="320" cy="200" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="395" cy="200" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="540" cy="200" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<rect x="70.0" y="300" width="95.0" height="55" rx="0" fill="#d9d9d9" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="165.0" y="300" width="85.0" height="55" rx="0" fill="#d9d9d9" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="250.0" y="300" width="72.5" height="55" rx="0" fill="#ededed" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="322.5" y="300" width="72.5" height="55" rx="0" fill="#ededed" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="395.0" y="300" width="72.5" height="55" rx="0" fill="#ededed" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="467.5" y="300" width="72.5" height="55" rx="0" fill="#ededed" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<circle cx="70.0" cy="355" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="165.0" cy="355" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="250.0" cy="355" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="322.5" cy="355" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="395.0" cy="355" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="467.5" cy="355" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="540.0" cy="355" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<line x1="275" y1="213" x2="322.5" y2="287" stroke="#365b58" stroke-width="1.5" stroke-dasharray="" marker-end="url(#teal)"/>
+<line x1="320" y1="213" x2="395" y2="287" stroke="#365b58" stroke-width="1.5" stroke-dasharray="" marker-end="url(#teal)"/>
+<line x1="395" y1="213" x2="467.5" y2="287" stroke="#365b58" stroke-width="1.5" stroke-dasharray="" marker-end="url(#teal)"/>
+<line x1="70" y1="130" x2="70" y2="365" stroke="#555555" stroke-width="1.5" stroke-dasharray="4 4" />
+<line x1="250" y1="130" x2="250" y2="365" stroke="#555555" stroke-width="1.5" stroke-dasharray="4 4" />
+<line x1="540" y1="130" x2="540" y2="365" stroke="#555555" stroke-width="1.5" stroke-dasharray="4 4" />
+<text x="160.000" y="390.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="normal" >c = 0</text>
+<text x="395.000" y="390.000" font-size="20" fill="#365b58" text-anchor="middle" font-weight="normal" >Equal Cell Widths</text>
+<text x="305.000" y="438.000" font-size="19" fill="#202020" text-anchor="middle" font-weight="normal" >Layer Boundaries: c = 0, w = vₛ</text>
+<line x1="770" y1="355.0" x2="1130" y2="355.0" stroke="#e5e5e5" stroke-width="0.7" stroke-dasharray="" />
+<text x="758.000" y="361.000" font-size="17" fill="#555555" text-anchor="end" font-weight="normal" >0</text>
+<line x1="770" y1="250.0" x2="1130" y2="250.0" stroke="#e5e5e5" stroke-width="0.7" stroke-dasharray="" />
+<text x="758.000" y="256.000" font-size="17" fill="#555555" text-anchor="end" font-weight="normal" >0.5</text>
+<line x1="770" y1="145.0" x2="1130" y2="145.0" stroke="#e5e5e5" stroke-width="0.7" stroke-dasharray="" />
+<text x="758.000" y="151.000" font-size="17" fill="#555555" text-anchor="end" font-weight="normal" >1</text>
+<line x1="770.0" y1="355" x2="770.0" y2="361" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<text x="770.000" y="382.000" font-size="17" fill="#555555" text-anchor="middle" font-weight="normal" >0</text>
+<line x1="842.0" y1="355" x2="842.0" y2="361" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<text x="842.000" y="382.000" font-size="17" fill="#555555" text-anchor="middle" font-weight="normal" >0.1</text>
+<line x1="986.0" y1="355" x2="986.0" y2="361" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<text x="986.000" y="382.000" font-size="17" fill="#555555" text-anchor="middle" font-weight="normal" >0.3</text>
+<line x1="1130.0" y1="355" x2="1130.0" y2="361" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<text x="1130.000" y="382.000" font-size="17" fill="#555555" text-anchor="middle" font-weight="normal" >0.5</text>
+<line x1="770" y1="145" x2="770" y2="355" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<line x1="770" y1="355" x2="1130" y2="355" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<text x="950.000" y="411.000" font-size="19" fill="#202020" text-anchor="middle" font-weight="normal" >Remaining Thickness hᵢ / hᵢ(0)</text>
+<text x="714.000" y="250.000" font-size="19" fill="#202020" text-anchor="middle" font-weight="normal" transform="rotate(-90 714 250.0)">Activation aᵢ</text>
+<path d=" M 770.000 145.000 L 771.800 145.000 L 773.600 145.000 L 775.400 145.000 L 777.200 145.000 L 779.000 145.000 L 780.800 145.000 L 782.600 145.000 L 784.400 145.000 L 786.200 145.000 L 788.000 145.000 L 789.800 145.000 L 791.600 145.000 L 793.400 145.000 L 795.200 145.000 L 797.000 145.000 L 798.800 145.000 L 800.600 145.000 L 802.400 145.000 L 804.200 145.000 L 806.000 145.000 L 807.800 145.000 L 809.600 145.000 L 811.400 145.000 L 813.200 145.000 L 815.000 145.000 L 816.800 145.000 L 818.600 145.000 L 820.400 145.000 L 822.200 145.000 L 824.000 145.000 L 825.800 145.000 L 827.600 145.000 L 829.400 145.000 L 831.200 145.000 L 833.000 145.000 L 834.800 145.000 L 836.600 145.000 L 838.400 145.000 L 840.200 145.000 L 842.000 145.000 L 843.800 145.313 L 845.600 146.206 L 847.400 147.610 L 849.200 149.467 L 851.000 151.724 L 852.800 154.331 L 854.600 157.247 L 856.400 160.431 L 858.200 163.850 L 860.000 167.471 L 861.800 171.267 L 863.600 175.210 L 865.400 179.278 L 867.200 183.450 L 869.000 187.706 L 870.800 192.029 L 872.600 196.404 L 874.400 200.815 L 876.200 205.251 L 878.000 209.700 L 879.800 214.150 L 881.600 218.593 L 883.400 223.019 L 885.200 227.420 L 887.000 231.790 L 888.800 236.121 L 890.600 240.409 L 892.400 244.647 L 894.200 248.830 L 896.000 252.956 L 897.800 257.018 L 899.600 261.015 L 901.400 264.943 L 903.200 268.799 L 905.000 272.580 L 906.800 276.285 L 908.600 279.911 L 910.400 283.456 L 912.200 286.920 L 914.000 290.300 L 915.800 293.596 L 917.600 296.807 L 919.400 299.931 L 921.200 302.968 L 923.000 305.918 L 924.800 308.780 L 926.600 311.553 L 928.400 314.238 L 930.200 316.835 L 932.000 319.342 L 933.800 321.761 L 935.600 324.091 L 937.400 326.333 L 939.200 328.486 L 941.000 330.551 L 942.800 332.529 L 944.600 334.419 L 946.400 336.222 L 948.200 337.938 L 950.000 339.569 L 951.800 341.113 L 953.600 342.573 L 955.400 343.948 L 957.200 345.239 L 959.000 346.447 L 960.800 347.572 L 962.600 348.615 L 964.400 349.576 L 966.200 350.457 L 968.000 351.257 L 969.800 351.978 L 971.600 352.619 L 973.400 353.183 L 975.200 353.669 L 977.000 354.079 L 978.800 354.412 L 980.600 354.671 L 982.400 354.854 L 984.200 354.964 L 986.000 355.000 L 987.800 355.000 L 989.600 355.000 L 991.400 355.000 L 993.200 355.000 L 995.000 355.000 L 996.800 355.000 L 998.600 355.000 L 1000.400 355.000 L 1002.200 355.000 L 1004.000 355.000 L 1005.800 355.000 L 1007.600 355.000 L 1009.400 355.000 L 1011.200 355.000 L 1013.000 355.000 L 1014.800 355.000 L 1016.600 355.000 L 1018.400 355.000 L 1020.200 355.000 L 1022.000 355.000 L 1023.800 355.000 L 1025.600 355.000 L 1027.400 355.000 L 1029.200 355.000 L 1031.000 355.000 L 1032.800 355.000 L 1034.600 355.000 L 1036.400 355.000 L 1038.200 355.000 L 1040.000 355.000 L 1041.800 355.000 L 1043.600 355.000 L 1045.400 355.000 L 1047.200 355.000 L 1049.000 355.000 L 1050.800 355.000 L 1052.600 355.000 L 1054.400 355.000 L 1056.200 355.000 L 1058.000 355.000 L 1059.800 355.000 L 1061.600 355.000 L 1063.400 355.000 L 1065.200 355.000 L 1067.000 355.000 L 1068.800 355.000 L 1070.600 355.000 L 1072.400 355.000 L 1074.200 355.000 L 1076.000 355.000 L 1077.800 355.000 L 1079.600 355.000 L 1081.400 355.000 L 1083.200 355.000 L 1085.000 355.000 L 1086.800 355.000 L 1088.600 355.000 L 1090.400 355.000 L 1092.200 355.000 L 1094.000 355.000 L 1095.800 355.000 L 1097.600 355.000 L 1099.400 355.000 L 1101.200 355.000 L 1103.000 355.000 L 1104.800 355.000 L 1106.600 355.000 L 1108.400 355.000 L 1110.200 355.000 L 1112.000 355.000 L 1113.800 355.000 L 1115.600 355.000 L 1117.400 355.000 L 1119.200 355.000 L 1121.000 355.000 L 1122.800 355.000 L 1124.600 355.000 L 1126.400 355.000 L 1128.200 355.000 L 1130.000 355.000" fill="none" stroke="#365b58" stroke-width="2.2" stroke-dasharray=""/>
+</g></svg>

@@ -1,0 +1,6 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"independent species histories",2.9656348488060756e-12,NaN,2.9656348488060756e-12,1.0e-10,true,"exact first-order conversion; observed ≤3e-12 in temperature form, integration margin"
+"adiabatic temperature history",1.1368683772161603e-13,NaN,1.1368683772161603e-13,1.0e-7,true,"logarithmic exact solution; observed ≤3.17e-8 K in temperature form, ~3× margin"
+"sensible enthalpy history / initial energy",3.95459898538221e-13,NaN,3.95459898538221e-13,2.0e-10,true,"independent Σ m_j c_j (T-T_REF); observed ≤6.19e-11 relative, ~3× margin"
+"closed total mass",1.1102230246251565e-15,NaN,1.1102230246251565e-15,1.0e-12,true,""
+"sealed boundary mass flux",0.0,NaN,0.0,1.0e-14,true,""

@@ -1,0 +1,8 @@
+"key","value"
+"integrator","Rodas5P (default)"
+"julia","1.13.0"
+"Pyrolysis","0.1.0"
+"n_cells_ladder","20 40 80 160"
+"reltol","1.0e-10"
+"abstol","1.0e-12"
+"pressure_tolerance","0.0001"

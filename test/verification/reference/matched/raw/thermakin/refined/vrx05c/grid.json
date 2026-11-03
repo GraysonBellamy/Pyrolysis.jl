@@ -1,0 +1,15 @@
+{
+  "coordinates_m": [
+    0.0,
+    0.0005,
+    0.001
+  ],
+  "layer_indices": [],
+  "coordinate_convention": "uniform element-centered unknowns; faces from ELEMENT SIZE, verified against printed centers; boundary conditions act on boundary-element centers",
+  "spatial_unknowns": 2,
+  "intervals": 2,
+  "spacing_min_m": 0.0005,
+  "spacing_max_m": 0.0005,
+  "declared_domain_m": 0.001,
+  "coordinates_span_domain": true
+}

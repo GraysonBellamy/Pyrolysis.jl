@@ -1,0 +1,17 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+20,"continuum pressure profile",0.00031773171194363385,NaN,0.00031773171194363385,0.01,true
+20,"integrated continuum species flux",-0.005971090887526717,-0.005968677350183726,0.00040436719919467734,0.015,true
+20,"steady signed boundary balance",2.0556473190325164e-16,NaN,3.444058370769933e-14,1.0e-7,true
+20,"isothermal invariant",0.0,NaN,0.0,1.0e-8,true
+40,"continuum pressure profile",0.00016336912585276879,NaN,0.00016336912585276879,0.01,true
+40,"integrated continuum species flux",-0.005969886506461132,-0.005968677350183726,0.00020258362221059478,0.015,true
+40,"steady signed boundary balance",4.9439619065339e-17,NaN,8.283178360079586e-15,1.0e-7,true
+40,"isothermal invariant",5.684341886080802e-14,NaN,5.684341886080802e-14,1.0e-8,true
+80,"continuum pressure profile",8.281376296974486e-5,NaN,8.281376296974486e-5,0.01,true
+80,"integrated continuum species flux",-0.005969282527275196,-0.005968677350183726,0.00010139216043425492,0.015,true
+80,"steady signed boundary balance",2.1684043449710089e-16,NaN,3.6329729649471865e-14,1.0e-7,true
+80,"isothermal invariant",0.0,NaN,0.0,1.0e-8,true
+160,"continuum pressure profile",4.168960600189166e-5,NaN,4.168960600189166e-5,0.01,true
+160,"integrated continuum species flux",-0.005968980088724723,-0.005968677350183726,5.07212106193311e-5,0.015,true
+160,"steady signed boundary balance",5.082739784612045e-16,NaN,8.515688629836206e-14,1.0e-7,true
+160,"isothermal invariant",5.684341886080802e-14,NaN,5.684341886080802e-14,1.0e-8,true

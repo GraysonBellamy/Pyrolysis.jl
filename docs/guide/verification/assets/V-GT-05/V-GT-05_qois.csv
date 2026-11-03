@@ -1,0 +1,4 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"integrated nonisothermal wall resistance",2.4271265407493914e-6,NaN,2.4271265407493914e-6,0.0001,true,""
+"logarithmic pressure profile",3.441090931301005e-7,NaN,3.441090931301005e-7,0.0001,true,""
+"linear thermal field",1.1368683772161603e-13,NaN,1.1368683772161603e-13,1.0e-8,true,""

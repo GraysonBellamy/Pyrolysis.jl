@@ -1,0 +1,16 @@
+V-HC-01  t=  30.00 s: Linf |Gpyro - exact erfc| = 0.031 K (T_s gpyro 545.73 K, exact 545.75 K)
+V-HC-01  t=  60.00 s: Linf |Gpyro - exact erfc| = 0.020 K (T_s gpyro 625.50 K, exact 625.50 K)
+V-HC-01  t=  90.00 s: Linf |Gpyro - exact erfc| = 0.016 K (T_s gpyro 679.92 K, exact 679.91 K)
+V-HC-01  t= 180.00 s: Linf |Gpyro - exact erfc| = 0.011 K (T_s gpyro 784.92 K, exact 784.91 K)
+V-RAD-01 t=  30.00 s: Linf |Gpyro - exact eigenfn| = 0.020 K (peak 470.12 K at x=0.17 mm; exact T(0)=468.62 K, gpyro 468.62 K)
+V-RAD-01 t=  60.00 s: Linf |Gpyro - exact eigenfn| = 0.021 K (peak 551.29 K at x=0.25 mm; exact T(0)=548.20 K, gpyro 548.21 K)
+V-RAD-01 t=  90.00 s: Linf |Gpyro - exact eigenfn| = 0.025 K (peak 608.94 K at x=0.33 mm; exact T(0)=604.37 K, gpyro 604.38 K)
+V-RAD-01 t= 180.00 s: Linf |Gpyro - exact eigenfn| = 0.018 K (peak 726.26 K at x=0.45 mm; exact T(0)=717.67 K, gpyro 717.69 K)
+V-CPL-01 eigenvalue lambda = 0.2317 (dissertation: 0.2317)
+V-CPL-01 t= 100.00 s: front 1.772 mm vs exact 1.675 mm (+5.76%); |dT| at 0.5/1/1.5/2 mm = 0.017/0.033/0.082/0.059 K
+V-CPL-01 t= 200.00 s: front 2.474 mm vs exact 2.369 mm (+4.41%); |dT| at 0.5/1/1.5/2 mm = 0.011/0.023/0.034/0.007 K
+V-CPL-01 t= 299.00 s: front 3.007 mm vs exact 2.897 mm (+3.80%); |dT| at 0.5/1/1.5/2 mm = 0.009/0.018/0.027/0.036 K
+V-HC-03  t=  80.00 s (Fo=0.10): Linf |Gpyro - exact series| = 0.006 K; mean T (trap) 320.000 K vs exact 320.000 K; front-back dT 69.778 K (exact 69.788, plateau 100)
+V-HC-03  t= 400.00 s (Fo=0.50): Linf |Gpyro - exact series| = 0.001 K; mean T (trap) 400.000 K vs exact 400.000 K; front-back dT 99.416 K (exact 99.417, plateau 100)
+V-HC-03  t=1200.00 s (Fo=1.50): Linf |Gpyro - exact series| = 0.000 K; mean T (trap) 600.000 K vs exact 600.000 K; front-back dT 100.000 K (exact 100.000, plateau 100)
+V-RX-01  max |Y - Bateman| A/B/C = 3.58e-05/4.83e-05/2.32e-05; max |M/M0 - 1| = 0.0e+00; max |T - 400 K| = 0.0e+00 K

@@ -39,7 +39,7 @@
 # the per-QoI verdicts, and the overall verdict with justification.
 #
 # Usage:
-#   julia --threads=auto --project=. examples/sensitivity_analysis/compare_degrees.jl
+#   julia --threads=auto --project=examples examples/sensitivity_analysis/compare_degrees.jl
 #
 
 using DelimitedFiles

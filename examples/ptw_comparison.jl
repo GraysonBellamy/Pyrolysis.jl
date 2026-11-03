@@ -5,7 +5,7 @@ Parses ThermaKin output (PTW_Cone_output.txt) and Julia results (ptw_results_50k
 and generates comparison plots for key quantities of interest.
 
 Usage:
-  julia --project=. examples/ptw_comparison.jl
+  julia --project=examples examples/ptw_comparison.jl
 """
 
 using Plots
@@ -143,13 +143,11 @@ function parse_thermakin_output(filepath::String)
 
             if !isempty(cell_temps)
                 push!(surface_temp, cell_temps[1])          # first cell = surface (from top)
-                # Back temp = last material cell (exclude INERT substrate)
-                # INERT cell is the last one — use second-to-last for back temp
-                if length(cell_temps) >= 2
-                    push!(back_temp, cell_temps[end-1])
-                else
-                    push!(back_temp, cell_temps[1])
-                end
+                # The profile prints every 100th element and the last one, the
+                # thin INERT layer, which is isothermal with the back face. The
+                # row before it is an interior element whose depth changes as
+                # ThermaKin merges elements, so it is not the back face.
+                push!(back_temp, cell_temps[end])
             end
 
             # Parse Total thickness and Total mass
@@ -206,7 +204,7 @@ end
 # ============================================================================
 
 # File paths
-tk_file = joinpath(@__DIR__, "..", "docs", "PTW_Cone_output.txt")
+tk_file = joinpath(@__DIR__, "thermakin", "PTW_Cone_output.txt")
 julia_file = joinpath(@__DIR__, "..", "ptw_results_50kWm2.csv")
 
 println("Parsing ThermaKin output...")

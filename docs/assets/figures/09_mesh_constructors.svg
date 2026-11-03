@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+<title id="title">Figure 9. Mesh Constructor Comparison</title><desc id="desc">Actual node coordinates for uniform, surface-refined, back-refined and layered meshes over 7 millimetres. The layered mesh has a node exactly on the 6 millimetre material interface.</desc>
+<defs>
+<marker id="ink" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#202020" stroke-width="1.3"/></marker>
+<marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#295674" stroke-width="1.3"/></marker>
+<marker id="teal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#365b58" stroke-width="1.3"/></marker>
+<marker id="orange" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#92512f" stroke-width="1.3"/></marker>
+<marker id="purple" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#675878" stroke-width="1.3"/></marker>
+</defs><rect width="100%" height="100%" fill="white"/><g font-family="Liberation Sans, Arial, sans-serif" fill="#202020">
+<text x="32.000" y="39.000" font-size="24" fill="#202020" text-anchor="start" font-weight="bold" >Figure 9. Mesh Constructor Comparison</text>
+<text x="35.000" y="148.000" font-size="20" fill="#202020" text-anchor="start" font-weight="normal" >Uniform</text>
+<rect x="360.0" y="118" width="63.333333333333314" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="423.3333333333333" y="118" width="63.33333333333337" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="486.6666666666667" y="118" width="63.333333333333314" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="550.0" y="118" width="63.33333333333337" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="613.3333333333334" y="118" width="63.33333333333337" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="676.6666666666667" y="118" width="63.33333333333326" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="740.0" y="118" width="63.33333333333337" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="803.3333333333334" y="118" width="63.33333333333337" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="866.6666666666667" y="118" width="63.33333333333326" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="930.0" y="118" width="63.33333333333337" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="993.3333333333334" y="118" width="63.33333333333337" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="1056.6666666666667" y="118" width="63.33333333333326" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<circle cx="360.0" cy="170" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="423.3333333333333" cy="170" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="486.6666666666667" cy="170" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="550.0" cy="170" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="613.3333333333334" cy="170" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="676.6666666666667" cy="170" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="740.0" cy="170" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="803.3333333333334" cy="170" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="866.6666666666667" cy="170" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="930.0" cy="170" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="993.3333333333334" cy="170" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="1056.6666666666667" cy="170" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="1120.0" cy="170" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<text x="35.000" y="256.000" font-size="20" fill="#202020" text-anchor="start" font-weight="normal" >Surface-Refined</text>
+<rect x="360.0" y="226" width="142.6678111057285" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="502.6678111057285" y="226" width="118.88984258810711" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="621.5576536938356" y="226" width="99.07486882342255" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="720.6325225172582" y="226" width="82.56239068618561" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="803.1949132034438" y="226" width="68.80199223848786" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="871.9969054419316" y="226" width="57.33499353207333" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="929.331898974005" y="226" width="47.77916127672768" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="977.1110602507326" y="226" width="39.8159677306063" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="1016.9270279813389" y="226" width="33.17997310883868" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="1050.1070010901776" y="226" width="27.64997759069911" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="1077.7569786808767" y="226" width="23.04164799224918" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="1100.798626673126" y="226" width="19.20137332687409" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<circle cx="360.0" cy="278" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="502.6678111057285" cy="278" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="621.5576536938356" cy="278" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="720.6325225172582" cy="278" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="803.1949132034438" cy="278" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="871.9969054419316" cy="278" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="929.331898974005" cy="278" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="977.1110602507326" cy="278" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="1016.9270279813389" cy="278" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="1050.1070010901776" cy="278" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="1077.7569786808767" cy="278" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="1100.798626673126" cy="278" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="1120.0" cy="278" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<text x="35.000" y="364.000" font-size="20" fill="#202020" text-anchor="start" font-weight="normal" >Back-Refined</text>
+<rect x="360.0" y="334" width="19.20137332687426" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="379.20137332687426" y="334" width="23.041647992249068" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="402.24302131912333" y="334" width="27.64997759069894" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="429.89299890982227" y="334" width="33.17997310883868" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="463.07297201866095" y="334" width="39.815967730606474" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="502.8889397492674" y="334" width="47.779161276727734" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="550.6681010259952" y="334" width="57.33499353207321" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="608.0030945580684" y="334" width="68.80199223848786" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="676.8050867965562" y="334" width="82.56239068618561" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="759.3674774827418" y="334" width="99.07486882342255" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="858.4423463061644" y="334" width="118.88984258810706" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="977.3321888942714" y="334" width="142.66781110572856" height="52" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<circle cx="360.0" cy="386" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="379.20137332687426" cy="386" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="402.24302131912333" cy="386" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="429.89299890982227" cy="386" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="463.07297201866095" cy="386" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="502.8889397492674" cy="386" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="550.6681010259952" cy="386" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="608.0030945580684" cy="386" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="676.8050867965562" cy="386" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="759.3674774827418" cy="386" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="858.4423463061644" cy="386" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="977.3321888942714" cy="386" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="1120.0" cy="386" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<text x="35.000" y="472.000" font-size="20" fill="#202020" text-anchor="start" font-weight="normal" >Layered</text>
+<rect x="360.0" y="442" width="81.42857142857144" height="52" rx="0" fill="#d9d9d9" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="441.42857142857144" y="442" width="81.42857142857144" height="52" rx="0" fill="#d9d9d9" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="522.8571428571429" y="442" width="81.42857142857133" height="52" rx="0" fill="#d9d9d9" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="604.2857142857142" y="442" width="81.42857142857156" height="52" rx="0" fill="#d9d9d9" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="685.7142857142858" y="442" width="81.42857142857133" height="52" rx="0" fill="#d9d9d9" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="767.1428571428571" y="442" width="81.42857142857144" height="52" rx="0" fill="#d9d9d9" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="848.5714285714286" y="442" width="81.42857142857144" height="52" rx="0" fill="#d9d9d9" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="930.0" y="442" width="81.42857142857144" height="52" rx="0" fill="#d9d9d9" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="1011.4285714285714" y="442" width="27.142857142856997" height="52" rx="0" fill="#ededed" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="1038.5714285714284" y="442" width="27.142857142857338" height="52" rx="0" fill="#ededed" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="1065.7142857142858" y="442" width="27.142857142856883" height="52" rx="0" fill="#ededed" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="1092.8571428571427" y="442" width="27.142857142857338" height="52" rx="0" fill="#ededed" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<circle cx="360.0" cy="494" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="441.42857142857144" cy="494" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="522.8571428571429" cy="494" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="604.2857142857142" cy="494" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="685.7142857142858" cy="494" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="767.1428571428571" cy="494" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="848.5714285714286" cy="494" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="930.0" cy="494" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="1011.4285714285714" cy="494" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="1038.5714285714284" cy="494" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="1065.7142857142858" cy="494" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="1092.8571428571427" cy="494" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="1120.0" cy="494" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<line x1="1011.4285714285714" y1="428" x2="1011.4285714285714" y2="511" stroke="#365b58" stroke-width="3" stroke-dasharray="" />
+<text x="1011.429" y="421.000" font-size="18" fill="#365b58" text-anchor="middle" font-weight="normal" >Material Interface: 6 mm</text>
+<line x1="360" y1="530" x2="1120" y2="530" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<line x1="360.0" y1="525" x2="360.0" y2="537" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<text x="360.000" y="559.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >0</text>
+<line x1="468.57142857142856" y1="525" x2="468.57142857142856" y2="537" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<text x="468.571" y="559.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >1</text>
+<line x1="577.1428571428571" y1="525" x2="577.1428571428571" y2="537" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<text x="577.143" y="559.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >2</text>
+<line x1="685.7142857142858" y1="525" x2="685.7142857142858" y2="537" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<text x="685.714" y="559.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >3</text>
+<line x1="794.2857142857142" y1="525" x2="794.2857142857142" y2="537" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<text x="794.286" y="559.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >4</text>
+<line x1="902.8571428571429" y1="525" x2="902.8571428571429" y2="537" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<text x="902.857" y="559.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >5</text>
+<line x1="1011.4285714285714" y1="525" x2="1011.4285714285714" y2="537" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<text x="1011.429" y="559.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >6</text>
+<line x1="1120.0" y1="525" x2="1120.0" y2="537" stroke="#555555" stroke-width="1.5" stroke-dasharray="" />
+<text x="1120.000" y="559.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >7</text>
+<text x="740.000" y="591.000" font-size="19" fill="#202020" text-anchor="middle" font-weight="normal" >Coordinate z [mm]</text>
+</g></svg>

@@ -1,0 +1,216 @@
+[[targets]]
+case = "V-CPL-01"
+n_cells = 800
+variant = ""
+spatial_status = "spacing matched"
+
+[[targets]]
+case = "V-CPL-03"
+n_cells = 8
+variant = "P1"
+spatial_status = "homogeneous ODE; count is not work equivalence"
+
+[[targets]]
+case = "V-CPL-03"
+n_cells = 8
+variant = "P2"
+spatial_status = "homogeneous ODE; count is not work equivalence"
+
+[[targets]]
+case = "V-CPL-03"
+n_cells = 8
+variant = "P3"
+spatial_status = "homogeneous ODE; count is not work equivalence"
+
+[[targets]]
+case = "V-CPL-04"
+n_cells = 80
+variant = ""
+spatial_status = "mesh mismatch"
+
+[[targets]]
+case = "V-GT-01"
+n_cells = 160
+variant = ""
+spatial_status = "mesh mismatch"
+
+[[targets]]
+case = "V-GT-07a"
+n_cells = 160
+variant = ""
+spatial_status = "spacing matched"
+
+[[targets]]
+case = "V-GT-07b"
+n_cells = 160
+variant = ""
+spatial_status = "spacing matched"
+
+[[targets]]
+case = "V-GT-08a"
+n_cells = 80
+variant = ""
+spatial_status = "spacing matched"
+
+[[targets]]
+case = "V-GT-08b"
+n_cells = 80
+variant = ""
+spatial_status = "spacing matched"
+
+[[targets]]
+case = "V-HC-01"
+n_cells = 133
+variant = ""
+spatial_status = "mesh mismatch"
+
+[[targets]]
+case = "V-HC-01"
+n_cells = 500
+variant = ""
+spatial_status = "spacing matched"
+
+[[targets]]
+case = "V-HC-02a"
+n_cells = 80
+variant = ""
+spatial_status = "mesh mismatch"
+
+[[targets]]
+case = "V-HC-02a"
+n_cells = 101
+variant = ""
+spatial_status = "mesh mismatch"
+
+[[targets]]
+case = "V-HC-02b"
+n_cells = 80
+variant = ""
+spatial_status = "mesh mismatch"
+
+[[targets]]
+case = "V-HC-02b"
+n_cells = 101
+variant = ""
+spatial_status = "mesh mismatch"
+
+[[targets]]
+case = "V-HC-02c"
+n_cells = 80
+variant = ""
+spatial_status = "mesh mismatch"
+
+[[targets]]
+case = "V-HC-02c"
+n_cells = 101
+variant = ""
+spatial_status = "mesh mismatch"
+
+[[targets]]
+case = "V-HC-02d"
+n_cells = 80
+variant = ""
+spatial_status = "mesh mismatch"
+
+[[targets]]
+case = "V-HC-02d"
+n_cells = 101
+variant = ""
+spatial_status = "mesh mismatch"
+
+[[targets]]
+case = "V-HC-03"
+n_cells = 320
+variant = ""
+spatial_status = "spacing matched"
+
+[[targets]]
+case = "V-HC-04a"
+n_cells = 80
+variant = ""
+spatial_status = "mesh mismatch"
+
+[[targets]]
+case = "V-HC-04b"
+n_cells = 80
+variant = ""
+spatial_status = "mesh mismatch"
+
+[[targets]]
+case = "V-HC-04c"
+n_cells = 80
+variant = ""
+spatial_status = "interface representation must be audited separately"
+
+[[targets]]
+case = "V-HC-04d"
+n_cells = 80
+variant = ""
+spatial_status = "interface representation must be audited separately"
+
+[[targets]]
+case = "V-HC-05"
+n_cells = 80
+variant = ""
+spatial_status = "mesh mismatch"
+
+[[targets]]
+case = "V-RAD-01"
+n_cells = 400
+variant = ""
+spatial_status = "spacing matched"
+
+[[targets]]
+case = "V-RX-01"
+n_cells = 1
+variant = ""
+spatial_status = "homogeneous ODE; count is not work equivalence"
+
+[[targets]]
+case = "V-RX-02a"
+n_cells = 1
+variant = ""
+spatial_status = "homogeneous ODE; count is not work equivalence"
+
+[[targets]]
+case = "V-RX-02b"
+n_cells = 1
+variant = ""
+spatial_status = "homogeneous ODE; count is not work equivalence"
+
+[[targets]]
+case = "V-RX-02c"
+n_cells = 1
+variant = ""
+spatial_status = "homogeneous ODE; count is not work equivalence"
+
+[[targets]]
+case = "V-RX-04a"
+n_cells = 4
+variant = ""
+spatial_status = "spacing matched"
+
+[[targets]]
+case = "V-RX-04b"
+n_cells = 20
+variant = ""
+spatial_status = "spacing matched"
+
+[[targets]]
+case = "V-RX-05a"
+n_cells = 1
+variant = ""
+spatial_status = "homogeneous ODE; count is not work equivalence"
+
+[[targets]]
+case = "V-RX-05b"
+n_cells = 1
+variant = ""
+spatial_status = "homogeneous ODE; count is not work equivalence"
+
+[[targets]]
+case = "V-RX-05c"
+n_cells = 1
+variant = ""
+spatial_status = "homogeneous ODE; count is not work equivalence"
+

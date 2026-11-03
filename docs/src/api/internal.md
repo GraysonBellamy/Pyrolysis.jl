@@ -4,39 +4,20 @@ CurrentModule = Pyrolysis
 
 # Internals
 
-`Pyrolysis.Internal` is an umbrella module that re-exports the public surface
-of every submodule except `Experimental` for advanced users:
-
-```julia
-using Pyrolysis
-using Pyrolysis.Internal   # brings in Geometry accessors, Solver helpers, …
+```@docs
+Internal
 ```
 
-These names are **not** part of the stable public API and may change between
-releases. The User Guide's
+The User Guide's
 [import cheat-sheet](../guide/user_guide/16_api-reference.md) maps common
-tasks to the right imports.
+tasks to the right imports, and its
+[custom-loop section](../guide/user_guide/11_solver-jacobian-config.md)
+uses [`setup`](@ref) and the residual and Jacobian it builds.
 
-## Solution post-processing (`Pyrolysis.Solver`)
+## Submodule exports
 
-```@docs
-Solver.get_profile
-Solver.get_cell_positions
-Solver.interpolate_solution
-```
-
-## Boundary temperatures (`Pyrolysis.Discretization`)
-
-```@docs
-Discretization.get_surface_temperature
-Discretization.get_back_face_temperature
-```
-
-## Solver callbacks and iterative solvers (`Pyrolysis.Solver`)
-
-```@docs
-Solver.create_thickness_termination_callback
-Solver.create_depletion_callback
-Solver.ILUGMRESFactorization
-Solver.ILUBiCGSTABFactorization
+```@autodocs
+Modules = [Pyrolysis, Pyrolysis.Assembly, Pyrolysis.BoundaryConditions, Pyrolysis.Closures, Pyrolysis.ColoredJacobian, Pyrolysis.Deactivation, Pyrolysis.Integration, Pyrolysis.Kernels, Pyrolysis.Materials, Pyrolysis.Meshes, Pyrolysis.Outputs, Pyrolysis.Physics, Pyrolysis.Problem, Pyrolysis.Properties, Pyrolysis.States]
+Private = false
+Filter = t -> !(t in Main.API_DOCUMENTED)
 ```

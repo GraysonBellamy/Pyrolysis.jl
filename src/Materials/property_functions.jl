@@ -72,24 +72,21 @@ Primarily used for reaction rate constants.
 # Fields
 - `A::T`: Pre-exponential factor
 - `E::T`: Activation energy [J/mol]
-- `T_ref::T`: Reference temperature (for normalization, optional)
 
 # Example
 ```julia
-k = ArrheniusProperty(8.5e12, 188e3, 298.15)
+k = ArrheniusProperty(8.5e12, 188e3)
 k(600.0)  # Returns 8.5e12 * exp(-188000 / (8.314 * 600))
 ```
 """
 struct ArrheniusProperty{T<:Real} <: AbstractPropertyFunction
     A::T       # pre-exponential factor
     E::T       # activation energy [J/mol]
-    T_ref::T   # reference temperature
 end
 
-# Convenience constructors: promote mixed numeric types to a common float type
-# (so e.g. `ArrheniusProperty(8.5e12, 188_000)` with an integer E works).
-ArrheniusProperty(A::Real, E::Real, T_ref::Real = T_REF) =
-    ArrheniusProperty(promote(float(A), float(E), float(T_ref))...)
+# Promote mixed numeric types to a common float type (so e.g.
+# `ArrheniusProperty(8.5e12, 188_000)` with an integer E works).
+ArrheniusProperty(A::Real, E::Real) = ArrheniusProperty(promote(float(A), float(E))...)
 
 """
 	TableProperty{N,T<:Real}
@@ -161,8 +158,8 @@ Fluid Flow*), giving μ(300 K) = 1.846e-5 Pa·s. This is the default carried by
 Like every property law, it evaluates at `property_temperature(T)`, the
 temperature clamped to `[T_PROPERTY_MIN, T_PROPERTY_MAX]`, so a diverging
 Newton trial state cannot reach `T^1.5` at a negative temperature. The
-viscosity floor `MU_FLOOR` is applied separately, in
-`Properties.effective_gas_viscosity(T, material)`.
+viscosity floor `MU_FLOOR` is applied separately, where the state mapping
+forms the Darcy mobility.
 
 # Example
 ```julia
@@ -242,13 +239,7 @@ end
     linear_interpolate(p.temperatures, p.values, property_temperature(Tq))
 
 # Temperature and state evaluation (state ignored for non-state-dependent properties)
-@inline (p::ConstantProperty)(T, ξ) = p.value
-@inline (p::LinearProperty)(T, ξ) = p(T)
-@inline (p::PolynomialProperty)(T, ξ) = p(T)
-@inline (p::ArrheniusProperty)(T, ξ) = p(T)
-@inline (p::CallableProperty)(T, ξ) = p(T)
-@inline (p::SutherlandProperty)(T, ξ) = p(T)
-@inline (p::TableProperty{N,T})(Tq::Real, ξ) where {N,T} = p(Tq)
+@inline (p::AbstractPropertyFunction)(T, ξ) = p(T)
 
 # StateDependentProperty requires both T and ξ
 @inline (p::StateDependentProperty)(T, ξ) = p.func(property_temperature(T), ξ)
@@ -259,6 +250,22 @@ end
     )
 end
 
+"""
+	identically_zero(p::AbstractPropertyFunction) -> Bool
+
+Whether the law is zero at every temperature, read from its structure rather
+than from samples: a zero constant, zero coefficients, a zero pre-exponential
+factor or reference value, or a table of zeros (linear between its points and
+constant beyond them). A law given by a function is never taken to vanish.
+"""
+identically_zero(p::ConstantProperty) = iszero(p.value)
+identically_zero(p::LinearProperty) = iszero(p.a) && iszero(p.b)
+identically_zero(p::PolynomialProperty) = all(iszero, p.coeffs)
+identically_zero(p::ArrheniusProperty) = iszero(p.A)
+identically_zero(p::TableProperty) = all(iszero, p.values)
+identically_zero(p::SutherlandProperty) = iszero(p.μ_ref)
+identically_zero(::AbstractPropertyFunction) = false
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
@@ -266,11 +273,9 @@ end
 """
 	linear_interpolate(xs, ys, x)
 
-Perform linear interpolation in a sorted table.
-Extrapolates using the nearest segment if x is outside the table range.
+Perform linear interpolation in a sorted table, holding the end values outside it.
 """
 @inline function linear_interpolate(xs::NTuple{N,T}, ys::NTuple{N,T}, x::Real) where {N,T}
-    # Handle extrapolation
     if x <= xs[1]
         return ys[1]
     elseif x >= xs[N]

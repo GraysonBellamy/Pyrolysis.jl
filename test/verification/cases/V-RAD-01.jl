@@ -14,7 +14,7 @@
 # toward the insulated back as t → ∞), which only the coupled problem shows.
 #
 # Configuration pitfalls encoded below:
-# - `RadiativeFluxBC(flux = q₀, absorptivity = 1.0)`: the EXPLICIT
+# - `RadiativeFluxBC(q₀, absorptivity = 1.0)`: the EXPLICIT
 #   absorptivity bypasses the Kirchhoff ε_eff rescaling at volumetric
 #   injection, so exactly q₀ enters the Beer–Lambert sweep.
 # - Under BEER_LAMBERT the incident flux contributes zero to the surface
@@ -42,10 +42,10 @@ function _verification_case_vrad01()
     function build(n_cells)
         solid = SolidComponent(:solid, ρ = ρ, c = c, k = k, α = κ / ρ)
         mat = Material(name = :VRAD01, components = (solid,), reactions = ())
-        mesh = create_uniform_mesh(δ, n_cells, Val(1); T_initial = T0, ξ_initial = (ρ,))
+        mesh = uniform_mesh(δ, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(flux = q0, absorptivity = 1.0) +
+                top = RadiativeFluxBC(q0, absorptivity = 1.0) +
                       ConvectiveBC(h = h, T_inf = T0),
                 bottom = AdiabaticBC(),
             ),
@@ -63,7 +63,7 @@ function _verification_case_vrad01()
 
     function qois(sol)
         out = QoIResult[]
-        z = get_cell_positions(sol)
+        z = sol.cell_centers[:, end]
         for (j, t) in enumerate(times)
             Tn = @view sol.T[:, j+1]
             err = maximum(abs(Tn[i] - ex.T_exact(δ - z[i], t)) for i in eachindex(z))
@@ -142,7 +142,7 @@ function _verification_case_vrad01()
     end
 
     function l2_error_t90(sol)
-        z = get_cell_positions(sol)
+        z = sol.cell_centers[:, end]
         Tn = @view sol.T[:, 4]
         Δz = δ / length(z)
         return sqrt(
@@ -179,27 +179,28 @@ function _verification_case_vrad01()
             ),
         ),
         report = (
+            comparison_note = "Gpyro V2 revision `bff0126c68f2` uses 401 boundary nodes (400 intervals, 0.025 mm spacing). The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements.",
             n_cells_ladder = [25, 50, 100, 200, 400],
             profile_times = times,
             qoi_curves = (:T_profiles, :surface_T_history, :peak_trajectory),
             solve_kwargs = (abstol = 1e-12, reltol = 1e-10, radiation_model = BEER_LAMBERT),
             curves = sol -> begin
-                z = get_cell_positions(sol)
+                z = sol.cell_centers[:, end]
                 xs_fine = range(0.0, δ, length = 2001)
                 peak_depth_exact(t) =
                     xs_fine[argmax([ex.T_exact(x, t) for x in xs_fine])]
-                # Gpyro 0.8200 overlay (reference/gpyro/): dissertation §3.4.2
+                # Gpyro V2 overlay (reference/gpyro/v2_migration/): dissertation §3.4.2
                 # deck (identical parameters — the same eigenfunction case),
-                # in-depth Beer–Lambert via KAPPA, Δz = 0.1 mm, dt = 0.1 s.
+                # in-depth Beer–Lambert via KAPPA, Δz = 0.025 mm, dt = 0.1 s.
                 gp_t, gp_x, gp_T = reference_columns(
-                    "gpyro/vrad01_result.csv",
+                    "gpyro/v2_migration/vrad01_result.csv",
                     "t_s",
                     "x_m",
                     "T_K";
                     header_rows = 1,
                 )
                 gp_ts, gp_Ts = reference_columns(
-                    "gpyro/vrad01_surfaceT.csv",
+                    "gpyro/v2_migration/vrad01_surfaceT.csv",
                     "t_s",
                     "T_front_K";
                     header_rows = 1,
@@ -222,7 +223,7 @@ function _verification_case_vrad01()
                             [
                                 let rows = findall(τ -> abs(τ - t) < 1e-6, gp_t)
                                     CurveSeries(
-                                        label = "Gpyro 0.8200, t = $(t) s",
+                                        label = "Gpyro V2, t = $(t) s",
                                         crosscode = true,
                                         x = gp_x[rows],
                                         y = gp_T[rows],
@@ -245,7 +246,7 @@ function _verification_case_vrad01()
                                 exact = t -> ex.T_exact(0.0, t),
                             ),
                             CurveSeries(
-                                label = "Gpyro 0.8200",
+                                label = "Gpyro V2",
                                 crosscode = true,
                                 x = gp_ts[2:end],
                                 y = gp_Ts[2:end],
@@ -270,7 +271,7 @@ function _verification_case_vrad01()
                 ]
             end,
             error_norms = sol -> begin
-                z = get_cell_positions(sol)
+                z = sol.cell_centers[:, end]
                 e = [sol.T[i, 4] - ex.T_exact(δ - z[i], 90.0) for i in eachindex(z)]
                 (L2 = sqrt(sum(abs2, e) / length(e)), Linf = maximum(abs, e))
             end,
