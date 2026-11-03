@@ -122,6 +122,22 @@ const _boundary_sets = (
     end
 end
 
+@testset "the colored Jacobian refuses a matrix or a state off its pattern" begin
+    cp = setup(_slab(6))
+    cj = cp.jacobian
+    u = cp.u0
+    J = jacobian!(jac_prototype(cj), cj, u, 0.0)
+    moved = copy(J)
+    col = findfirst(axes(moved, 2)) do c
+        range = nzrange(moved, c)
+        length(range) >= 2 && moved.rowval[last(range)] < size(moved, 1)
+    end
+    moved.rowval[last(nzrange(moved, col))] += 1
+    @test_throws ErrorException jacobian!(moved, cj, u, 0.0)
+    @test_throws ErrorException jacobian!(dropzeros(J), cj, u, 0.0)
+    @test_throws DimensionMismatch jacobian!(J, cj, u[1:(end-1)], 0.0)
+end
+
 @testset "row assembly conserves mass and scatters fluxes antisymmetrically" begin
     cp = setup(
         _slab(7; top = AdiabaticBC(), bottom = AdiabaticBC());

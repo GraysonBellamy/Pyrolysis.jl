@@ -170,12 +170,8 @@ function integrate(
         end
     end
     J0 = jac_prototype(cj)
-    pattern = cj.pattern
-    jac! = let cj = cj, pattern = pattern
+    jac! = let cj = cj
         (J, u, p, t) -> begin
-            same_structure(J, pattern) || error(
-                "the integrator's Jacobian lost the colored pattern's structure",
-            )
             jacobian!(J, cj, u, t)
             return nothing
         end

@@ -158,9 +158,8 @@ The [`dense_rows`](@ref) of a variable cross section are colored by their
 diagonal alone, the colored result is scattered into the full pattern, and
 [`LateralRows`](@ref) writes them afterwards.
 
-The stored values are written in the pattern's order and only their count is
-checked, so the integrator's Jacobian must be allocated from
-[`jac_prototype`](@ref).
+The stored values are written in the pattern's order, so [`jacobian!`](@ref)
+takes a `J` of exactly that structure, which [`jac_prototype`](@ref) allocates.
 """
 struct ColoredJacobianCache{F,P,D}
     f!::F
@@ -219,7 +218,9 @@ end
 """
 	jacobian!(J, cj, u, t) -> J
 
-Write the Jacobian at `(u, t)` into `J`, whose structure must be the pattern's.
+Write the Jacobian at `(u, t)` into `J`. A `J` that does not hold exactly the
+pattern's structure, or a `u` that is not one of its columns' length, is an error:
+the passes write and read through stored places, unchecked.
 """
 function jacobian!(
     J::SparseMatrixCSC{Float64,Int},
@@ -227,6 +228,11 @@ function jacobian!(
     u::AbstractVector,
     t::Real,
 )
+    same_structure(J, cj.pattern) ||
+        error("jacobian!: J does not hold the colored pattern's structure")
+    length(u) == size(J, 2) || throw(
+        DimensionMismatch("jacobian!: u has $(length(u)) entries, J $(size(J, 2)) columns"),
+    )
     _jacobian!(J, cj, cj.dense, u, t)
     return J
 end
