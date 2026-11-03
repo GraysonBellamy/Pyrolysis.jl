@@ -977,13 +977,14 @@ end
 end
 
 @testset "the time derivative of the right-hand side" begin
-    _problem(q) = PyrolysisProblem(
+    _problem(q; tspan = (0.0, 10.0), dt_initial = 1e-4) = PyrolysisProblem(
         mesh = uniform_mesh(0.01, 6),
         material = _slab(6).material,
         bc_set = BoundaryConditionSet(
             thermal = (top = RadiativeFluxBC(q), bottom = AdiabaticBC()),
         ),
-        tspan = (0.0, 10.0),
+        tspan = tspan,
+        dt_initial = dt_initial,
     )
     time_free = setup(_problem(5e4); use_ale = true)
     timed = setup(_problem(t -> 5e4 + 1e3t); use_ale = true)
@@ -1014,6 +1015,24 @@ end
     rhs!(timed)(a, timed.u0, nothing, 10.0 - step)
     rhs!(timed)(b, timed.u0, nothing, 10.0)
     @test dT == (a .- b) ./ (-step)
+    # The difference stays inside the span, whatever the size of the state.
+    @test Integration._time_step(1.0, 0.0, 10.0) == h
+    @test Integration._time_step(1e4 - 1e-4, 0.0, 1e4) == -(1e4 - 1e-4) * h
+    @test Integration._time_step(0.0, 0.0, 1e-3) == h
+    @test Integration._time_step(0.0, 0.0, 1e-9) == 1e-9
+    @test Integration._time_step(1e-9, 0.0, 1e-9) == -1e-9
+    for energy_state in (:temperature, :enthalpy), t_end in (1e-3, 1e-6)
+        seen = Float64[]
+        flux = t -> begin
+            push!(seen, t)
+            return 3e4 * sqrt(t)
+        end
+        short = _problem(flux; tspan = (0.0, t_end), dt_initial = t_end / 100)
+        sol = Integration.solve(short; energy_state)
+        @test sol.retcode === :Success
+        @test minimum(seen) >= 0.0
+        @test maximum(seen) <= t_end + 4eps(t_end)
+    end
     # A function of the temperature is no reason to difference in time.
     lawed = PyrolysisProblem(
         mesh = uniform_mesh(0.01, 6),
@@ -1032,6 +1051,51 @@ end
     reading = Integration.solve(_problem(t -> 5e4)).statistics
     @test reading.accepted == free.accepted
     @test reading.rhs_evaluations - free.rhs_evaluations >= free.accepted
+    # In the enthalpy form a difference of residuals from different warm starts
+    # would read round-off as a time derivative. A constant written as a function
+    # of the time is then the same solve, down to the bits, at a tight tolerance.
+    _conducting(q) = PyrolysisProblem(
+        mesh = uniform_mesh(0.01, 100),
+        material = Material(
+            name = :conducting,
+            components = (
+                SolidComponent(:solid, ρ = 1000.0, c = 1400.0, k = 0.2, α = 1.0),
+            ),
+            reactions = (),
+        ),
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = RadiativeFluxBC(q, absorptivity = 1.0) +
+                      ConvectiveBC(h = 20.0, T_inf = 300.0),
+                bottom = AdiabaticBC(),
+            ),
+        ),
+        T_initial = z -> 300.0,
+        ξ_initial = [z -> 1000.0],
+        tspan = (0.0, 180.0),
+    )
+    tight = (
+        energy_state = :enthalpy,
+        radiation_model = BEER_LAMBERT,
+        abstol = 1e-12,
+        reltol = 1e-10,
+    )
+    constant = Integration.solve(_conducting(25e3); tight...)
+    written = Integration.solve(_conducting(t -> 25e3); tight...)
+    @test written.statistics.accepted == constant.statistics.accepted
+    @test written.statistics.rejected == constant.statistics.rejected == 0
+    @test written.raw_solution.u[end] == constant.raw_solution.u[end]
+    # The difference leaves the warm start as it found it.
+    enthalpy = setup(_conducting(t -> 25e3); energy_state = :enthalpy)
+    enthalpy.ws.T_warm .+= 1e-9
+    warm = copy(enthalpy.ws.T_warm)
+    Integration._time_derivative(rhs!(enthalpy), enthalpy)(
+        zero(enthalpy.u0),
+        enthalpy.u0,
+        nothing,
+        1.0,
+    )
+    @test enthalpy.ws.T_warm == warm
 end
 
 @testset "the domain test's residual serves the next step" begin

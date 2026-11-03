@@ -169,6 +169,12 @@ function integrate(
             return nothing
         end
     end
+    evaluated! = let check = check
+        (du, u, p, t) -> begin
+            evaluate_right_hand_side!(du, check, u, t)
+            return nothing
+        end
+    end
     J0 = jac_prototype(cj)
     jac! = let cj = cj
         (J, u, p, t) -> begin
@@ -177,11 +183,12 @@ function integrate(
         end
     end
     M = all(is_differential(layout)) ? I : mass_matrix(layout)
+    enthalpy = energy_state(layout) isa EnthalpyState
     f = ODEFunction{true,FullSpecialize}(
         ErasedRHS(rhs!);
         mass_matrix = M,
         jac = ErasedJacobian{typeof(J0)}(jac!),
-        tgrad = ErasedRHS(_time_derivative(rhs!, cp)),
+        tgrad = ErasedRHS(_time_derivative(enthalpy ? evaluated! : rhs!, cp)),
         jac_prototype = J0,
     )
     ode = ODEProblem(f, Vector{Float64}(u0), cp.problem.tspan)
@@ -301,26 +308,41 @@ function _reads_time(cp::PreparedProblem)
            reads_time(cp.problem.bc_set)
 end
 
-# The step of the forward difference in time, relative to the time and at least
-# itself.
+# The step of the difference in time, relative to the time and at least itself.
 const TIME_STEP = sqrt(eps(Float64))
+
+# The signed step of the difference at `t`, inside the time span: forward, backward
+# where the forward point lies beyond the span's end, and to the farther end of a
+# span too short for either.
+function _time_step(t, t_start, t_end)
+    step = max(TIME_STEP * abs(t), TIME_STEP)
+    t + step <= t_end && return step
+    t - step >= t_start && return -step
+    return t_end - t >= t - t_start ? t_end - t : t_start - t
+end
 
 # The derivative of `rhs!` in time, which a Rosenbrock method reads on every
 # step. A residual that does not read the time has exactly zero; any other takes
-# the forward difference, backward within the state's resolution of the end of
-# the time span, where the forward point lies beyond it.
+# the difference of [`_time_step`](@ref). The caloric inversion's result depends by
+# a few ulps on the temperatures it starts from, and that round-off over the step
+# would read as a time derivative, so both residuals start from the same
+# temperatures and leave them as they were. In the enthalpy form `rhs!` must
+# evaluate: a residual the domain test remembers started from others.
 function _time_derivative(rhs!, cp::PreparedProblem)
     _reads_time(cp) || return (dT, u, p, t) -> begin
         fill!(dT, 0.0)
         return nothing
     end
     ahead, here = zeros(length(cp.u0)), zeros(length(cp.u0))
-    t_end = Float64(cp.problem.tspan[2])
+    t_start, t_end = cp.problem.tspan
+    warm_start, saved = cp.ws.T_warm, copy(cp.ws.T_warm)
     return (dT, u, p, t) -> begin
-        backward = t > t_end - maximum(abs, u) * TIME_STEP
-        h = max(TIME_STEP * abs(t), TIME_STEP) * (backward ? -1 : 1)
+        h = _time_step(t, t_start, t_end)
+        copyto!(saved, warm_start)
         rhs!(ahead, u, p, t + h)
+        copyto!(warm_start, saved)
         rhs!(here, u, p, t)
+        copyto!(warm_start, saved)
         @. dT = (ahead - here) / h
         return nothing
     end
