@@ -161,6 +161,21 @@ append!(
     ],
 )
 
+# The objects the API pages' @docs blocks show. The internals page indexes
+# every other docstring the submodules export, which checkdocs = :exports
+# requires, without showing any docstring twice.
+const API_DOCUMENTED = let objects = Set{Any}()
+    for f in readdir(joinpath(@__DIR__, "src", "api"); join = true)
+        for block in eachmatch(r"```@docs\n(.*?)```"s, read(f, String))
+            for line in split(block[1], '\n'; keepempty = false)
+                name = first(split(strip(line), '('))
+                push!(objects, Core.eval(Pyrolysis, Meta.parse(name)))
+            end
+        end
+    end
+    objects
+end
+
 makedocs(
     sitename = "Pyrolysis.jl",
     authors = "Grayson Bellamy",

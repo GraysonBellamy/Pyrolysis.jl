@@ -480,7 +480,7 @@ end
 The Newton-failure step cap, applied after an accepted step: when the step's
 nonlinear solves needed retries, the proposed step is held at or below
 [`FAILURE_MEMORY_GROWTH`](@ref) times that step for the next
-[`FAILURE_MEMORY_STEPS`](@ref) accepted steps, then released.
+[`FAILURE_MEMORY_STEPS`](@ref FAILURE_MEMORY_GROWTH) accepted steps, then released.
 """
 function cap_step!(integrator, cap::NewtonCap)
     failures = integrator.stats.nnonlinconvfail

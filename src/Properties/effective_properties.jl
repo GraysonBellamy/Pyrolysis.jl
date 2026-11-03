@@ -508,9 +508,9 @@ end
 """
 	surface_properties_of_fractions(v, T, material) -> (ε, a)
 
-[`mixture_emissivity`](@ref) and [`mixture_absorptivity`](@ref) at the mixing
-volume fractions `v`. Under Kirchhoff's law for every component the two sums
-are the same operations, so the second is the first.
+[`mixture_emissivity`](@ref) and [`mixture_absorptivity`](@ref mixture_emissivity)
+at the mixing volume fractions `v`. Under Kirchhoff's law for every component
+the two sums are the same operations, so the second is the first.
 """
 @inline function surface_properties_of_fractions(
     v::NTuple{NC,<:Real},
