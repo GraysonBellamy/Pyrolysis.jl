@@ -922,6 +922,60 @@ end
     @test W == J - LinearAlgebra.Diagonal(scaled) / 0.25
 end
 
+@testset "the structured KLU takes a W on part of the prototype" begin
+    n = 4
+    b = collect(1.0:n)
+    W = sparse([4.0 0.0 1.0 0.0; 0.0 3.0 0.0 0.0; 1.0 0.0 5.0 0.0; 0.0 2.0 0.0 6.0])
+    prototype = sparse(ones(n, n))
+    @test nnz(W) < nnz(prototype)
+    cache = LinearSolve.init(LinearSolve.LinearProblem(copy(prototype), b), StructuredKLU())
+    cache.A = W
+    @test LinearSolve.solve!(cache).u ≈ Matrix(W) \ b
+    @test cache.cacheval.growths == 1
+    # An entry outside the prototype, or another size, is an error.
+    diagonal = sparse(1.0LinearAlgebra.I, n, n)
+    cache = LinearSolve.init(LinearSolve.LinearProblem(copy(diagonal), b), StructuredKLU())
+    cache.A = W
+    @test_throws ErrorException LinearSolve.solve!(cache)
+    cache.A = sparse(1.0LinearAlgebra.I, n + 1, n + 1)
+    @test_throws ErrorException LinearSolve.solve!(cache)
+    # A plain diagonal mass matrix has no method of its own, so the integrator forms
+    # W by a sparse broadcast, which drops the stored zeros of a full prototype.
+    f!(du, u, p, t) = begin
+        du[1] = -u[1]
+        du[2] = u[1] - u[2]
+        du[3] = u[1] + u[2] + u[3] - 1.0
+        return nothing
+    end
+    jac!(J, u, p, t) = begin
+        fill!(nonzeros(J), 0.0)
+        J[1, 1] = -1.0
+        J[2, 1] = 1.0
+        J[2, 2] = -1.0
+        J[3, 1] = 1.0
+        J[3, 2] = 1.0
+        J[3, 3] = 1.0
+        return nothing
+    end
+    fun = OrdinaryDiffEq.ODEFunction(
+        f!;
+        mass_matrix = LinearAlgebra.Diagonal([1.0, 1.0, 0.0]),
+        jac = jac!,
+        jac_prototype = sparse(ones(3, 3)),
+    )
+    sol = OrdinaryDiffEq.solve(
+        ODEProblem(fun, [1.0, 0.0, 0.0], (0.0, 1.0)),
+        Integration.Rodas5P(
+            autodiff = OrdinaryDiffEq.AutoFiniteDiff(),
+            linsolve = StructuredKLU(),
+        );
+        reltol = 1e-8,
+        abstol = 1e-10,
+    )
+    @test sol.retcode == OrdinaryDiffEq.ReturnCode.Success
+    @test sol.u[end] ≈ [exp(-1.0), exp(-1.0), 1.0 - 2.0exp(-1.0)] rtol = 1e-6
+end
+
 @testset "the time derivative of the right-hand side" begin
     _problem(q) = PyrolysisProblem(
         mesh = uniform_mesh(0.01, 6),

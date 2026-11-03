@@ -368,7 +368,7 @@ function _part(frame)
         occursin("klu_l_factor", f) ||
         occursin("klu_l_analyze", f) ||
         occursin("klu_l_rgrowth", f) ||
-        f in ("klu!", "lu!", "_load!", "_grow!", "_walk", "_union_matrix!")
+        f in ("klu!", "lu!", "_prototype_values!", "_load!", "_grow!", "_union_matrix!")
     ) && return :factorization
     (occursin("klu_l_solve", f) || f == "ldiv!") && return :linsolve
     any(d -> occursin(d, file), _RHS_DIRS) && return :rhs

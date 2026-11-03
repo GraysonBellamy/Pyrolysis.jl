@@ -52,8 +52,10 @@ once, with KLU's block triangular form of each union. The ordering is symmetric
 and the union holds the diagonal, so it suits every union, and nothing is ordered
 again as the union grows. The union only grows, so its size alone tells the inner
 KLU that the structure changed, and the growths stop once every entry that counts
-has appeared. A `W` on any other structure than the prototype's, which the
-integrator hands `init` as an all-ones `W`, is an error.
+has appeared. `W` holds the prototype's structure, which the integrator hands
+`init` as an all-ones `W`, or part of it: for a mass matrix without a method of its
+own the integrator forms `W` by a sparse broadcast that stores only the entries
+that compute to nonzero. An entry outside the prototype is an error.
 
 Every nonzero counts until `integrate` binds the solve's per-row `abstol` `τ`.
 From then on an entry stays out while `|w_ij| τ_j ≤ ε |w_ii| τ_i`, with `ε` the
@@ -72,9 +74,10 @@ StructuredKLU() = StructuredKLU(KLUFactorization(check_pattern = false))
 # The prototype's structure; which of its entries are in the union and where
 # each lies in the union's matrix (zero outside it); the ordering of every
 # factorization, zero-based; each entry's column and each row's diagonal entry in
-# the prototype's stored order (zero if not stored); that matrix; the inner KLU
-# cache that factors it; the per-row tolerances, empty until bound; and the number
-# of times the union grew.
+# the prototype's stored order (zero if not stored); the stored values of a `W`
+# that holds part of the prototype, spread over it; that matrix; the inner KLU cache
+# that factors it; the per-row tolerances, empty until bound; and the number of times
+# the union grew.
 mutable struct StructuredKLUCache{C}
     const prototype::SparseMatrixCSC{Float64,Int}
     const in_union::BitVector
@@ -82,6 +85,7 @@ mutable struct StructuredKLUCache{C}
     const order::Vector{Int}
     const column::Vector{Int}
     const diagonal::Vector{Int}
+    const spread::Vector{Float64}
     union::SparseMatrixCSC{Float64,Int}
     const inner::C
     tolerance::Vector{Float64}
@@ -137,6 +141,7 @@ function LinearSolve.init_cacheval(
         _fill_reducing_order(prototype),
         column,
         diagonal,
+        zeros(nnz(prototype)),
         union,
         inner,
         Float64[],
@@ -204,11 +209,33 @@ end
     end
 end
 
-# Copy `A` into the union's matrix; false when an entry of `A` outside the union
-# counts.
-function _load!(c::StructuredKLUCache, A::SparseMatrixCSC)
+# The stored values of `A` on the prototype's structure.
+function _prototype_values!(c::StructuredKLUCache, A::SparseMatrixCSC)
+    prototype = c.prototype
+    same_structure(A, prototype) && return nonzeros(A)
+    size(A) == size(prototype) ||
+        error("StructuredKLU: W is not the size of the Jacobian's prototype")
+    rows, stored, values, spread = rowvals(prototype), rowvals(A), nonzeros(A), c.spread
+    fill!(spread, 0.0)
+    @inbounds for col = 1:size(A, 2)
+        k, last = first(nzrange(prototype, col)), prototype.colptr[col+1] - 1
+        for j in nzrange(A, col)
+            r = stored[j]
+            while k <= last && rows[k] < r
+                k += 1
+            end
+            (k > last || rows[k] != r) &&
+                error("StructuredKLU: W has an entry outside the Jacobian's prototype")
+            spread[k] = values[j]
+        end
+    end
+    return spread
+end
+
+# Copy `from`, stored values on the prototype's structure, into the union's matrix;
+# false when an entry outside the union counts.
+function _load!(c::StructuredKLUCache, from::Vector{Float64})
     vals = nonzeros(c.union)
-    from = nonzeros(A)
     slot = c.slot
     @inbounds for k in eachindex(from)
         s = slot[k]
@@ -221,11 +248,10 @@ function _load!(c::StructuredKLUCache, A::SparseMatrixCSC)
     return true
 end
 
-# Take `A`'s entries above the lower bar into the union and rebuild its matrix with
-# `A`'s values.
-function _grow!(c::StructuredKLUCache, A::SparseMatrixCSC)
+# Take the entries of `from` above the lower bar into the union and rebuild its
+# matrix with `from`'s values.
+function _grow!(c::StructuredKLUCache, from::Vector{Float64})
     in_union = c.in_union
-    from = nonzeros(A)
     @inbounds for k in eachindex(from)
         if !in_union[k] && !iszero(from[k]) && _counts(c, from, k, _TAKEN_IN)
             in_union[k] = true
@@ -251,13 +277,11 @@ end
 function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::StructuredKLU; kwargs...)
     c = cache.cacheval
     if cache.isfresh
-        A = cache.A
-        same_structure(A, c.prototype) ||
-            error("StructuredKLU: W is not on the Jacobian prototype's structure")
-        if _load!(c, A)
+        from = _prototype_values!(c, cache.A)
+        if _load!(c, from)
             c.inner.A = c.union
         else
-            _grow!(c, A)
+            _grow!(c, from)
             _factor_union!(c)
         end
         cache.isfresh = false
