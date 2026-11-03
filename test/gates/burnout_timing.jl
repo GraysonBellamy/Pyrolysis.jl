@@ -411,14 +411,16 @@ unit_time(f; samples = 101) = (f(); median([@elapsed(f()) for _ = 1:samples]))
 
 # One right-hand side and one Jacobian of the integrator's functions at the
 # final state of a solve that ends at `UNIT_TIME` (the cells deactivated by
-# then are those of its layout).
+# then are those of its layout). The right-hand side is taken one representable
+# time later: at the final time the domain test's memory serves it, which copies
+# a buffer and evaluates nothing.
 function unit_costs(sol)
     raw = sol.raw_solution
     f = raw.prob.f
     u, t = copy(raw.u[end]), raw.t[end]
     du = similar(u)
     J = copy(f.jac_prototype)
-    rhs = unit_time(() -> f(du, u, raw.prob.p, t))
+    rhs = unit_time(() -> f(du, u, raw.prob.p, nextfloat(t)))
     jac = unit_time(() -> f.jac(J, u, raw.prob.p, t))
     return (; rhs, jac, states = length(u), nnz = nnz(J))
 end
