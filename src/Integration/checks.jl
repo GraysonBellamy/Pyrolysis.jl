@@ -136,6 +136,15 @@ struct DomainCheck{D<:ResidualDefinition,W<:ResidualWorkspace}
     gas_masses::Vector{Float64}
 end
 
+# The gas components' indices and molar masses. The components differ in type, so
+# the per-cell loops read these plain vectors: indexing the tuple at run time would
+# dispatch at every cell.
+function _gas_data(material)
+    comps = material.components
+    gas = collect(Int, gas_component_indices(comps))
+    return gas, Float64[molar_mass(comps[j]) for j in gas]
+end
+
 function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
     def = cp.def
     layout = def.layout
@@ -148,10 +157,7 @@ function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
     end
     I_scale =
         has_intensities(layout) ? cp.abstol[intensity_index(layout, 1)] / cp.reltol : 1.0
-    # The components differ in type, so the per-cell loop reads these plain
-    # vectors: indexing the tuple at run time would dispatch at every cell.
-    comps = def.setup.material.components
-    gas = collect(Int, gas_component_indices(comps))
+    gas, gas_masses = _gas_data(def.setup.material)
     return DomainCheck(
         def,
         cp.ws,
@@ -166,7 +172,7 @@ function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
         ConstraintMonitor(),
         Ref(_ErrorTestWrapper(() -> true)),
         gas,
-        Float64[molar_mass(comps[j]) for j in gas],
+        gas_masses,
     )
 end
 

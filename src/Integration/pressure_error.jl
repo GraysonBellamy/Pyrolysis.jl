@@ -35,11 +35,7 @@ function PressureErrorNorm(cp)
     u=PressureErrorDual.(cp.u0)
     x=PressureErrorDual.(ref.positions)
     g=MeshGeometry{PressureErrorDual}(d.setup.topology)
-    # The components differ in type, so the per-cell loop reads these plain
-    # vectors: indexing the tuple at run time would dispatch at every cell.
-    comps=d.setup.material.components
-    gas=collect(Int, gas_component_indices(comps))
-    masses=Float64[molar_mass(comps[j]) for j in gas]
+    gas, masses=_gas_data(d.setup.material)
     return PressureErrorNorm(
         cp,
         u,
