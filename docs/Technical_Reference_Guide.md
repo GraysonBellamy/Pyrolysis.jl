@@ -7908,6 +7908,15 @@ corrections smaller than Float64 can resolve; that case is diagnosed rather
 than accepted as converged. These checks establish a regular local solution,
 not global uniqueness for arbitrary constitutive data.
 
+The stages of an implicit step evaluate the residual at states the step only
+passes through, which can lie far from any accepted state. A failure there, or
+at the step's proposed end state, rejects the step: the residual is returned as
+not finite, the step's error estimate becomes infinite, and the controller
+retries with its smallest step reduction. Every accepted state has had its
+residual evaluated without failure. The solution's statistics count these
+rejections (`transport_rejections`); a solve that stops after one reports the
+failure.
+
 The derivatives used by the global Jacobian follow from the converged local
 equations. If $F(p^*,u)=0$ describes an interface system depending on surrounding
 state $u$, then

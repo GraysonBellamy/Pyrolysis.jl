@@ -286,6 +286,19 @@ function SciMLBase.solve!(cache::LinearSolve.LinearCache, alg::StructuredKLU; kw
         end
         cache.isfresh = false
     end
+    # A right-hand side that is not finite comes from a stage whose transport
+    # solve failed (`evaluate_right_hand_side!`): its solution is not finite
+    # either, and the factorization is not asked to explain it.
+    if !all(isfinite, cache.b)
+        fill!(cache.u, NaN)
+        return SciMLBase.build_linear_solution(
+            alg,
+            cache.u,
+            nothing,
+            cache;
+            retcode = ReturnCode.Infeasible,
+        )
+    end
     c.inner.b = cache.b
     sol = SciMLBase.solve!(c.inner)
     copyto!(cache.u, sol.u)

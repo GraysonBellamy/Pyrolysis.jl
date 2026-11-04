@@ -10835,8 +10835,10 @@ and `gas_species_audit(sol,recorder)` to separate generation, escape, ingress
 and vented species. Do not rebuild boundary fluxes from initial cell widths.
 
 A local `TransportFailure` identifies an unresolved interface or surface root.
-Check coefficient support, complete reservoir data, physical pore volume and
-the reported failure reason. Very strong nearly isobaric coupling may exceed
+Raised on a step's intermediate states, it rejects the step, which is retried
+smaller; `sol.statistics.transport_rejections` counts these. A solve that stops
+after one warns with the failure reason. Check coefficient support, complete
+reservoir data, physical pore volume and the reported failure reason. Very strong nearly isobaric coupling may exceed
 Float64 pressure resolution. A failed root is not an accepted boundary flux.
 Pressure-aware error control tracks proposed temperature and pore geometry;
 validate solution accuracy against a tighter solve, particularly during shrinkage.

@@ -79,6 +79,10 @@ function bind_pressure_norm!(norm::PressureErrorNorm, integrator)
         (x, t)->begin
             base=_rms_error(x, t)
             x===integrator.cache.atmp || return base
+            # A stage whose right-hand side failed leaves a non-finite error;
+            # as infinite it rejects the step by the controller's smallest
+            # factor, where NaN would make the next step size NaN.
+            isfinite(base) || return Inf
             norm.evaluations[]+=1
             return max(
                 base,

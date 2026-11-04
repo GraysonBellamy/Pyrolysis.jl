@@ -67,7 +67,9 @@ steps it rejected on admissibility or on a constraint (`rejections`), the
 current run of consecutive constraint rejections, the live cell at or below
 absolute zero in the last proposal if it was rejected for one (`cold`, zero
 otherwise) and its time, and, once the solve cannot go on, the diagnostic the
-step observer ends it with.
+step observer ends it with. `transport` counts the residual evaluations of step
+proposals that raised a `TransportFailure`, each of which rejected its step;
+`transport_message` and `transport_t` describe the last of them.
 """
 mutable struct ConstraintMonitor
     last::Float64
@@ -79,9 +81,21 @@ mutable struct ConstraintMonitor
     failed::Bool
     message::String
     outcome::Symbol
+    transport::Int
+    transport_message::String
+    transport_t::Float64
 end
 
-ConstraintMonitor() = ConstraintMonitor(0.0, 0.0, 0, 0, 0, NaN, false, "", :none)
+ConstraintMonitor() =
+    ConstraintMonitor(0.0, 0.0, 0, 0, 0, NaN, false, "", :none, 0, "", NaN)
+
+# A residual evaluation of a step proposal raised a transport failure.
+function _transport_failed!(m::ConstraintMonitor, failure::TransportFailure, t)
+    m.transport += 1
+    m.transport_message = sprint(showerror, failure)
+    m.transport_t = Float64(t)
+    return m
+end
 
 """
 	MAX_CONSTRAINT_REJECTIONS
@@ -210,11 +224,21 @@ end
 	evaluate_right_hand_side!(du, check::DomainCheck, u, t) -> du
 
 The residual at `(u, t)` into `du`, evaluated and counted: the check's
-`evaluations` are the solve's right-hand sides, its own included.
+`evaluations` are the solve's right-hand sides, its own included. A stage of a
+step can reach a state where a face's transport solve has no qualified root;
+that `TransportFailure` is recorded and `du` filled with NaN, so the step's
+error estimate is not finite and the step is rejected (`bind_pressure_norm!`).
+No flux of a failed solve is assembled.
 """
 @inline function evaluate_right_hand_side!(du, check::DomainCheck, u, t)
     check.evaluations[] += 1
-    residual!(du, u, check.def, t, check.ws)
+    try
+        residual!(du, u, check.def, t, check.ws)
+    catch failure
+        failure isa TransportFailure || rethrow()
+        _transport_failed!(check.monitor, failure, t)
+        fill!(du, NaN)
+    end
     return du
 end
 
@@ -260,7 +284,15 @@ function (check::DomainCheck)(u, p, t)
         return _reject!(m)
     end
     m.cold = 0
-    evaluate!(check, u, t)
+    try
+        evaluate!(check, u, t)
+    catch failure
+        failure isa TransportFailure || rethrow()
+        # The buffer holds part of this state's residual, not the remembered one.
+        forget!(check)
+        _transport_failed!(m, failure, t)
+        return _reject!(m)
+    end
     ds, c = check.ws.derived, check.ws.contributions
     if _porosity_out(check, ds, setup.gas)
         m.consecutive+=1
