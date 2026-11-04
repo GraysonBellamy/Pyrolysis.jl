@@ -416,7 +416,15 @@ with $x=(-\sqrt{3/5},\,0,\,\sqrt{3/5})$ and $w=(5/9,\,8/9,\,5/9)$, and the
 outflow likewise. Each rate evaluation is one residual evaluation at the
 interpolated state in the recorder's own workspace. The rule is exact for
 polynomials of degree five in $t$, so the accumulated integral carries the
-interpolant's error, which the integrator's tolerance controls.
+interpolant's error, which the integrator's tolerance controls. Under KenCarp4
+the interpolant is the cubic Hermite of the step's ends and their derivatives
+on the differential rows, started from the method's own derivative at $t_n$
+(the previous step's end derivative, $M\mathbf z_s/\Delta t$) rather than from
+$\mathbf f(\mathbf u_n)$ re-evaluated there, whose fast components carry the
+stage solve's residual amplified by $|\lambda\,\Delta t|$; the algebraic rows
+of each interpolated state, which the integrator interpolates linearly, are
+taken from their constraints (UG §11.3.2). The saved states take the same
+interpolant, except on a step an event ends or modifies.
 
 **Steps that an event ends early.** A located event ends a step at the first
 root of its condition (§14, §15). The recorder reads every step's end before

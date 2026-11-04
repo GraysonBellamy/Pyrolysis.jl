@@ -434,32 +434,44 @@ function _intensity_scale(kernels::Tuple, ds, tspan)
     return max(1.0, maximum(t -> abs(incident_intensity(kernel, ds, t)), times))
 end
 
-# The closure's unknowns, and under a variable cross section the area and its
-# lateral rate, that satisfy their algebraic rows at time `t`: one kernel pass
-# for the strain rates and history rates, the lateral rows from the column
-# sums, a second pass at the consistent lateral rate, then the closure's
-# unknowns. Returns `nothing`, or the residual and scale of a closure row left
-# above round-off.
-function _consistent_motion!(u, def::ResidualDefinition, ws::ResidualWorkspace, t)
-    cl = def.closure
-    cl === nothing && return nothing
+# The area and its lateral rate under a variable cross section: one kernel
+# pass for the history rates, the lateral rows from the column sums, then a
+# second pass at them. `du` and the workspace hold the last pass.
+function _consistent_lateral!(du, u, def::ResidualDefinition, ws::ResidualWorkspace, t)
     layout = def.layout
-    du = similar(u)
     residual!(du, u, def, t, ws)
-    if has_chi(layout)
-        ΣG, ΣM, ΣĠ, ΣṀ = 0.0, 0.0, 0.0, 0.0
-        for i = 1:n_cells(layout)
-            kG, kM = history_index(layout, i, 1), history_index(layout, i, 2)
-            ΣG += u[kG]
-            ΣM += u[kM]
-            ΣĠ += du[kG]
-            ΣṀ += du[kM]
-        end
-        A, θ_A = consistent_lateral(cl.lateral, ΣG, ΣM, ΣĠ, ΣṀ)
-        u[area_index(layout)] = A
-        u[lateral_rate_index(layout)] = θ_A
-        residual!(du, u, def, t, ws)
+    ΣG, ΣM, ΣĠ, ΣṀ = 0.0, 0.0, 0.0, 0.0
+    for i = 1:n_cells(layout)
+        kG, kM = history_index(layout, i, 1), history_index(layout, i, 2)
+        ΣG += u[kG]
+        ΣM += u[kM]
+        ΣĠ += du[kG]
+        ΣṀ += du[kM]
     end
+    A, θ_A = consistent_lateral(def.closure.lateral, ΣG, ΣM, ΣĠ, ΣṀ)
+    u[area_index(layout)] = A
+    u[lateral_rate_index(layout)] = θ_A
+    residual!(du, u, def, t, ws)
+    return du
+end
+
+# The algebraic unknowns of `u` that satisfy their rows at time `t`, given its
+# differential unknowns, in the order the rows read each other: under a
+# variable cross section its rows first, twice, since the face intensities'
+# optical depths and the history rates the lateral rate reads both read the
+# concentrations at the area; then the face intensities; then one kernel pass
+# for the strain rates and the closure's unknowns. Returns `nothing`, or the
+# residual and scale of a closure row left above round-off.
+function _consistent_algebraic!(u, def::ResidualDefinition, ws::ResidualWorkspace, t)
+    cl = def.closure
+    du = similar(u)
+    if has_chi(def.layout)
+        _consistent_lateral!(du, u, def, ws, t)
+        _consistent_lateral!(du, u, def, ws, t)
+    end
+    _consistent_intensities!(u, def, ws, t)
+    cl === nothing && return nothing
+    residual!(du, u, def, t, ws)
     return _consistent_unknowns!(u, du, cl, def, ws, t)
 end
 
@@ -530,8 +542,10 @@ end
 	consistent_state!(u, def, ws, t) -> u
 
 Overwrite the algebraic unknowns of `u` with the values that satisfy their
-rows at time `t`, given its differential unknowns: the face intensities by
-the attenuation recurrence from the exposed face, then the cross section and
+rows at time `t`, given its differential unknowns: under a variable cross
+section the area and its lateral rate first, since the intensities' optical
+depths and the history rates read the concentrations at the area; then the
+face intensities by the attenuation recurrence from the exposed face; then
 the node velocities or the cells' multipliers by the mesh closure. The
 integrator starts from such a state; a closure row left above round-off is
 an error.
@@ -542,8 +556,7 @@ function consistent_state!(
     ws::ResidualWorkspace,
     t,
 )
-    _consistent_intensities!(u, def, ws, t)
-    left = _consistent_motion!(u, def, ws, t)
+    left = _consistent_algebraic!(u, def, ws, t)
     left === nothing || error(
         "the closure's consistent unknowns leave a row at $(left[1]) (scale $(left[2]))",
     )

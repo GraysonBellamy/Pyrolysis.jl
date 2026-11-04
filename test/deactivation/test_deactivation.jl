@@ -1100,9 +1100,9 @@ end
 @testset "the consistent sweep reports a velocity row it cannot satisfy" begin
     cp = setup(_ablator(4); use_ale = true)
     u = copy(cp.u0)
-    @test Integration._consistent_motion!(u, cp.def, cp.ws, 0.0) === nothing
+    @test Integration._consistent_algebraic!(u, cp.def, cp.ws, 0.0) === nothing
     u[mass_index(cp.def.layout, 2, 1)] = NaN
-    @test Integration._consistent_motion!(u, cp.def, cp.ws, 0.0) isa Tuple
+    @test Integration._consistent_algebraic!(u, cp.def, cp.ws, 0.0) isa Tuple
     @test_throws ErrorException consistent_state!(u, cp.def, cp.ws, 0.0)
 end
 

@@ -222,15 +222,19 @@ function integrate(
     recs, callback = _split_recorders(callback)
     bound = [_BoundRecorder(r, cp, _crossings(cp, min_thickness)) for r in recs]
     # The last accepted state, after every callback of its step; then the
-    # conservation recorders' commits.
+    # conservation recorders' commits and the step's saved states read again
+    # (`_resave_step!`).
     accepted = AcceptedState(copy(ode.u0), Float64(cp.problem.tspan[1]))
+    start = MethodDerivative(ode.u0, _algebraic_rows(def, cp.T0))
+    deactivations = cells === nothing ? DeactivationEvent[] : cells.events
     recorder = DiscreteCallback(
         (u, t, integrator) -> true,
-        integrator -> _record!(integrator, accepted, policy, bound);
+        integrator ->
+            _record!(integrator, accepted, policy, bound, start, deactivations);
         save_positions = (false, false),
     )
     observers = (
-        map(_reader, bound)...,
+        map(b -> _reader(b, start), bound)...,
         (progress ? (_progress_observer(policy, cp.problem.tspan),) : ())...,
         (callback === nothing ? () : (_observing(callback, policy),))...,
     )
@@ -378,12 +382,20 @@ mutable struct AcceptedState
     t::Float64
 end
 
-function _record!(integrator, accepted::AcceptedState, policy, bound)
+function _record!(
+    integrator,
+    accepted::AcceptedState,
+    policy,
+    bound,
+    start::MethodDerivative,
+    deactivations::Vector{DeactivationEvent},
+)
     copyto!(accepted.u, integrator.u)
     accepted.t = integrator.t
     for b in bound
         _commit_step!(b, integrator)
     end
+    _resave_step!(integrator, start, length(deactivations))
     apply_observer_flag!(integrator, policy)
     return nothing
 end
@@ -562,8 +574,7 @@ function _deactivation_callback(cp::PreparedProblem, check::DomainCheck, policy)
             status === :transferred ||
                 (status === :interior && length(cells.events) > made) ||
                 return status
-            _consistent_intensities!(u, def, ws, t)
-            _consistent_motion!(u, def, ws, t) === nothing || return :inconsistent
+            _consistent_algebraic!(u, def, ws, t) === nothing || return :inconsistent
             inadmissible(u, layout, def.setup, check.abstol) && return :inadmissible
             _porosity_out(check, _derived(check, u, t), def.setup.gas) &&
                 return :inadmissible

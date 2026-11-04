@@ -8643,7 +8643,7 @@ which is (10.3): the area carries the lateral part of the strain and the node mo
 
 The area, the lateral rate and the node velocities are algebraic unknowns; the masses, the energy states, the node positions and the history pairs are differential ones. Every row is evaluated in one residual pass at one state: the state mapping reads $A$ from the state and computes the cell volumes and face areas with it; the kernels run; `closure_rows!` computes the strain rates, the history sources and the velocity rows with the $\theta_A$ of the state; the row assembly writes the history rows and then the two cross-section rows from the column sums. No channel is computed from another in sequence: the integrator advances all rows together as one semi-explicit DAE with the mass matrix zero on the algebraic rows (the default `Rodas5P`, a Rosenbrock method, linearizes them in each stage with the colored Jacobian; Chapter 15). The DAE is of index one: given the differential unknowns, the cross-section rows are solved explicitly by $A=A_0\,\mathrm{law}(\bar\chi_c)$ and the lateral rate, and the balance rows by one sweep from the pinned node.
 
-The integrator starts from a state whose algebraic rows hold. `consistent_state!` (through `_consistent_motion!`, `src/Integration/setup.jl`) makes one residual pass for the strain and history rates at the initial state, sets $A$ and $\theta_A$ from the column sums (`consistent_lateral`), makes a second pass at the consistent lateral rate, and sweeps the balance rows once from the pinned node (`consistent_velocities!`); a velocity row left above $10^{-10}$ of its scale is an error at setup. A deactivation event repeats these steps after its transfer (§14.3.5). On every proposal its error test accepts, the integrator's domain test (§15.5.4) rejects a non-positive area and requires the residuals of the area row and the lateral-rate row to lie within $r_{\mathrm{tol}}|A|$ and $r_{\mathrm{tol}}(|\theta_A|+\bar{|\theta|})$ plus their absolute tolerances, with $\bar{|\theta|}$ the volume-weighted mean of $|\theta_i|$.
+The integrator starts from a state whose algebraic rows hold. `consistent_state!` (through `_consistent_algebraic!`, `src/Integration/setup.jl`) makes one residual pass for the history rates at the initial state, sets $A$ and $\theta_A$ from the column sums (`consistent_lateral`), and repeats both at the new area, since the history rates read the concentrations there; it then sets the face intensities at that area (§8), makes a pass for the strain rates, and sweeps the balance rows once from the pinned node (`consistent_velocities!`); a velocity row left above $10^{-10}$ of its scale is an error at setup. A deactivation event repeats these steps after its transfer (§14.3.5). On every proposal its error test accepts, the integrator's domain test (§15.5.4) rejects a non-positive area and requires the residuals of the area row and the lateral-rate row to lie within $r_{\mathrm{tol}}|A|$ and $r_{\mathrm{tol}}(|\theta_A|+\bar{|\theta|})$ plus their absolute tolerances, with $\bar{|\theta|}$ the volume-weighted mean of $|\theta_i|$.
 
 ---
 
@@ -10616,8 +10616,8 @@ $m_{j,i}(0) = \xi_{j,i}(0)\,V_i(0)$ from the reference cell volumes and the ener
 state from $T_i(0)$ (the temperature, or the inventory $H_i=\sum_j m_{j,i}h_j(T_i)$
 under `energy_state = :enthalpy`), writes the history pair under a lateral law
 (§12.8.3) and the node positions on a moving mesh, and then sets the algebraic
-unknowns consistent with them (`consistent_state!`: the face intensities, the area
-and lateral rate, the node velocities; §15.4). For example:
+unknowns consistent with them (`consistent_state!`: the area and lateral rate,
+the face intensities, the node velocities; §15.4). For example:
 
 ```julia
 using Pyrolysis
@@ -12736,13 +12736,16 @@ alone, so a thin, nearly spent skin reads as spent.
 After a pass that transferred inventories, the event restores the algebraic
 rows and checks the result:
 
-1. the face intensities by the attenuation recurrence from the exposed face
-   (`_consistent_intensities!`), which writes zero on the faces upstream of the
-   first live cell;
-2. the cross-section area and lateral rate, then the node velocities by one
-   sweep of the balance rows from the pinned node (`_consistent_motion!`,
-   §15.4); a velocity row left above round-off returns `:inconsistent`;
-3. admissibility (`inadmissible`, §15.5.4) with every live cell, the receiver
+1. under a variable cross section the area and its lateral rate, in two
+   passes, since the history rates the lateral rate reads depend on the
+   concentrations at the area;
+2. the face intensities by the attenuation recurrence from the exposed face
+   (`_consistent_intensities!`), at that area, which writes zero on the faces
+   upstream of the first live cell;
+3. the node velocities by one sweep of the balance rows from the pinned node
+   (`_consistent_algebraic!`, §15.4); a velocity row left above round-off
+   returns `:inconsistent`;
+4. admissibility (`inadmissible`, §15.5.4) with every live cell, the receiver
    included, held to its own mass tolerances, which are those the domain test
    applies to every later proposal, and under gas transport a porosity in
    $[0,1]$ within the skeletal volume of the mass tolerances; a failure returns
@@ -14612,7 +14615,15 @@ with $x=(-\sqrt{3/5},\,0,\,\sqrt{3/5})$ and $w=(5/9,\,8/9,\,5/9)$, and the
 outflow likewise. Each rate evaluation is one residual evaluation at the
 interpolated state in the recorder's own workspace. The rule is exact for
 polynomials of degree five in $t$, so the accumulated integral carries the
-interpolant's error, which the integrator's tolerance controls.
+interpolant's error, which the integrator's tolerance controls. Under KenCarp4
+the interpolant is the cubic Hermite of the step's ends and their derivatives
+on the differential rows, started from the method's own derivative at $t_n$
+(the previous step's end derivative, $M\mathbf z_s/\Delta t$) rather than from
+$\mathbf f(\mathbf u_n)$ re-evaluated there, whose fast components carry the
+stage solve's residual amplified by $|\lambda\,\Delta t|$; the algebraic rows
+of each interpolated state, which the integrator interpolates linearly, are
+taken from their constraints (UG §11.3.2). The saved states take the same
+interpolant, except on a step an event ends or modifies.
 
 **Steps that an event ends early.** A located event ends a step at the first
 root of its condition (§14, §15). The recorder reads every step's end before
