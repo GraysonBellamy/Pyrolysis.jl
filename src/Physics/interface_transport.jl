@@ -54,7 +54,9 @@ end
     if primal(den)==0
         # A closed downstream channel fixes P*=Pl; its undetermined
         # composition is selected by the upstream state. State flux is zero.
-        return (n = zero(pl+pr), p = pl, iterations = 0, residual = 0.0)
+        # The pressures take the flux's type, as on every other branch.
+        closed=zero(pl+pr)
+        return (n = closed, p = convert(typeof(closed), pl), iterations = 0, residual = 0.0)
     end
     ps=((al+ul) .* pl+ar .* pr)/den
     # Elimination evaluates transmitted species flux without subtracting two
@@ -83,9 +85,6 @@ struct LocalTransportTag end
 end
 
 # Equilibrate equations and unknowns before solving or estimating condition.
-# A trace-species flux can be many orders smaller than its derivative with
-# respect to pressure. Dividing its equation by that flux is a useful residual
-# test, but the resulting row magnitude is not physical ill-conditioning.
 # J δ = r becomes A y = r/rows, with δ = y/columns. No state or composition
 # is changed, and the same transformation is used for implicit derivatives.
 @inline function _equilibrated_jacobian(J::StaticMatrix{N,N}) where {N}
@@ -107,10 +106,17 @@ end
     return (matrix = row_scaled ./ transpose(columns), rows = rows, columns = columns)
 end
 
-"""
-    bounded_transport_root(f, x0; tolerance=5e-13, maxiters=60)
+# The stopping and merit norm. Row equilibration divides any equation scale
+# out of the Newton step, so a scale only says how closely each equation must
+# hold; inside the residual it would multiply its Jacobian row as well.
+@inline _residual_norm(r, ::Nothing) = maximum(abs, r)
+@inline _residual_norm(r, scale) = maximum(abs, r ./ scale)
 
-Newton solve of a dimensionless local residual on the nonnegative orthant.
+"""
+    bounded_transport_root(f, x0; tolerance=5e-13, maxiters=60, scale=nothing)
+
+Newton solve of a local residual on the nonnegative orthant. The residual,
+divided by `scale` when one is given, is dimensionless.
 A merit-function line search and a relative trust bound keep trials in the
 physical root domain. A converged residual and nonsingular local Jacobian
 are required; exhaustion raises `TransportFailure`. This is a local root
@@ -123,11 +129,12 @@ function bounded_transport_root(
     maxiters = 60,
     lower = zero(x0),
     admissible::A = x->true,
+    scale = nothing,
 ) where {F,S<:StaticVector,A}
     x::S=x0
     for iter = 0:maxiters
         r=f(x)
-        e=maximum(abs, r)
+        e=_residual_norm(r, scale)
         isfinite(e) || throw(
             TransportFailure(:nonfinite_local_residual, "local residual is not finite"),
         )
@@ -179,7 +186,7 @@ function bounded_transport_root(
         for backtrack = 1:40
             candidate=x-α*step
             if all(candidate .>= lower) && admissible(candidate)
-                er=maximum(abs, f(candidate))
+                er=_residual_norm(f(candidate), scale)
                 if er<=tolerance || er<(1-1e-4α)*e
                     x=candidate
                     accepted=true
@@ -227,8 +234,8 @@ end
         cl.t,
         cl.mob,
         (pl-base)-offset,
-        _pressure_difference(pl, base)-_accurate_sum(offset),
-    ).n
+        _pressure_difference(pl, base, -offset),
+    )
     right=_pore_half_flux(
         ps,
         pr,
@@ -240,10 +247,13 @@ end
         cr.t,
         cr.mob,
         (base-pr)+offset,
-        _pressure_difference(base, pr)+_accurate_sum(offset),
-    ).n
+        _pressure_difference(base, pr, offset),
+    )
     return left, right
 end
+
+@inline _blocked_species(cl, cr, j) =
+    primal(cl.K[j])==0 && primal(cr.K[j])==0 && primal(cl.mob)==0 && primal(cr.mob)==0
 
 function _interface_residual(
     offset::StaticVector{N},
@@ -257,22 +267,17 @@ function _interface_residual(
     dr,
     cl,
     cr,
-    scale,
     pressure_scale,
 ) where {N}
     left, right=_interface_halves(offset, base, pl, pr, Tl, Tr, Ts, dl, dr, cl, cr)
     # A blocked species has no continuity equation. The base pressure is the
-    # distance-weighted state; zero offset pins its unobservable value.
+    # distance-weighted state; zero offset pins its unobservable value. Both
+    # rows take the mismatch's type, which carries any state derivative.
     return SVector{N}(
         ntuple(Val(N)) do j
-            if primal(cl.K[j])==0 &&
-               primal(cr.K[j])==0 &&
-               primal(cl.mob)==0 &&
-               primal(cr.mob)==0
-                offset[j]/pressure_scale
-            else
-                (left[j]-right[j])/scale[j]
-            end
+            mismatch=left.n[j]-right.n[j]
+            _blocked_species(cl, cr, j) ? offset[j]/pressure_scale+zero(mismatch) :
+            mismatch
         end,
     )
 end
@@ -349,7 +354,7 @@ function interface_flux(
     initialL, initialR=_interface_halves(guess, base, l, r, tl, tr, ts, dL, dR, cL, cR)
     # Scaling tracks transmitted flux, rather than K*P, at strong isobaric
     # coupling. Offsets retain small pressure jumps without adding them to P.
-    initialscales=_interface_flux_scales(initialL, initialR)
+    initialscales=_interface_flux_scales(initialL.gross, initialR.gross, cL, cR)
     firstroot=_solve_interface_at_scale(
         base,
         l,
@@ -378,7 +383,7 @@ function interface_flux(
         cL,
         cR,
     )
-    scales=_interface_flux_scales(matchedL, matchedR)
+    scales=_interface_flux_scales(matchedL.gross, matchedR.gross, cL, cR)
     root=_solve_interface_at_scale(
         base,
         l,
@@ -394,24 +399,11 @@ function interface_flux(
         pscale,
         firstroot.x,
     )
-    f=z->_interface_residual(
-        z*pscale,
-        base,
-        pl,
-        pr,
-        Tl,
-        Tr,
-        Ts,
-        dl,
-        dr,
-        cl,
-        cr,
-        scales,
-        pscale,
-    )
+    f=z->_interface_residual(z*pscale, base, pl, pr, Tl, Tr, Ts, dl, dr, cl, cr, pscale)
     offset=implicit_transport_root(f, root)*pscale
     ps=base+offset
-    nl, nr=_interface_halves(offset, base, pl, pr, Tl, Tr, Ts, dl, dr, cl, cr)
+    left, right=_interface_halves(offset, base, pl, pr, Tl, Tr, Ts, dl, dr, cl, cr)
+    nl, nr=left.n, right.n
     mismatch=maximum(abs, map(primal, nl-nr))
     fluxscale=max(maximum(abs, map(primal, nl)), maximum(abs, map(primal, nr)))
     mismatch<=1e-8*fluxscale || throw(
@@ -423,10 +415,25 @@ function interface_flux(
     return (n = (nl+nr)/2, p = ps, iterations = root.iterations, residual = root.residual)
 end
 
-@inline function _interface_flux_scales(left, right)
-    raw=max.(abs.(left), abs.(right))
+# How closely each continuity equation must hold: to the solve's tolerance
+# times the gross size of its species flux, the sum of the magnitudes of its
+# wall, collective and advective terms. The matched fluxes are then exact for
+# terms perturbed by that fraction. For most species the gross size is the
+# transmitted flux. Where the terms nearly cancel, as for a uniform trace
+# carried one way by the diffusive total flux and the other by Darcy flow,
+# Float64 cannot resolve the net flux relative to itself, and it holds only to
+# that absolute level. No closer than floatmin: a subnormal flux has lost its
+# relative precision, so its continuity is resolved absolutely at that level.
+# A blocked species' equation is already dimensionless.
+@inline function _interface_flux_scales(left::StaticVector{N}, right, cl, cr) where {N}
+    raw=max.(left, right)
     common=maximum(raw)
-    return map(x->x==0 ? (common==0 ? 1.0 : common) : x, raw)
+    return SVector{N}(
+        ntuple(Val(N)) do j
+            _blocked_species(cl, cr, j) ? 1.0 :
+            raw[j]==0 ? (common==0 ? 1.0 : common) : max(raw[j], floatmin(Float64))
+        end,
+    )
 end
 @inline function _solve_interface_at_scale(
     base,
@@ -443,21 +450,7 @@ end
     pscale,
     guess,
 )
-    f=z->_interface_residual(
-        z*pscale,
-        base,
-        l,
-        r,
-        tl,
-        tr,
-        ts,
-        dl,
-        dr,
-        cl,
-        cr,
-        scales,
-        pscale,
-    )
+    f=z->_interface_residual(z*pscale, base, l, r, tl, tr, ts, dl, dr, cl, cr, pscale)
     # Division in the normalized lower bound and reconstruction can round in
     # opposite directions. Qualify the physical pressures themselves as well.
     admissible=z->all(base+z*pscale .>= 0)
@@ -467,5 +460,6 @@ end
         lower = -base/pscale,
         admissible,
         tolerance = 2e-10,
+        scale = scales,
     )
 end

@@ -1,5 +1,6 @@
 using Test, Pyrolysis, StaticArrays, LinearAlgebra, ForwardDiff, Random
-using Pyrolysis.Physics: interface_flux, TransportFailure, bounded_transport_root
+using Pyrolysis.Physics:
+    interface_flux, TransportFailure, bounded_transport_root, pore_half_flux
 using Pyrolysis.Materials: R_GAS
 
 # Independent full friction matrices. Every dependent quantity, including the
@@ -18,8 +19,8 @@ function reference_half(left, right, Tl, Tr, Tpath, d, K, t, mob)
     return A\g+v .* (v>=0 ? left/(BigFloat(R_GAS)*Tl) : right/(BigFloat(R_GAS)*Tr))
 end
 
-function reference_interface(left, right, Tl, Tr, dl, dr, cl, cr)
-    setprecision(256) do
+function reference_interface(left, right, Tl, Tr, dl, dr, cl, cr; bits = 256)
+    setprecision(bits) do
         l, r=BigFloat.(left), BigFloat.(right)
         tl, tr, dL, dR=BigFloat(Tl), BigFloat(Tr), BigFloat(dl), BigFloat(dr)
         kl, kr=BigFloat.(cl.K), BigFloat.(cr.K)
@@ -28,15 +29,33 @@ function reference_interface(left, right, Tl, Tr, dl, dr, cl, cr)
         leftflux=p->reference_half(l, p, tl, ts, tl, dL, kl, al, ml)
         rightflux=p->reference_half(p, r, ts, tr, tr, dR, kr, ar, mr)
         f=p->leftflux(p)-rightflux(p)
+        # Each species' continuity is measured against its own flux, so a
+        # trace species is resolved however small its pressure.
+        mismatch=p->maximum(
+            map(
+                (a, b)->a==b ? zero(a) : abs(a-b)/max(abs(a), abs(b)),
+                leftflux(p),
+                rightflux(p),
+            ),
+        )
+        # An absent species carries no flux and stays at zero pressure. The
+        # step of every other species is solved in its own pressure, with
+        # each equation normalized, so elimination resolves a trace species
+        # relative to itself rather than to the largest pressure.
+        absent=(l .== 0) .& (r .== 0)
+        σ=collect(map((a, b, z)->z ? one(a) : max(a, b), l, r, absent))
         p=collect((dR*l+dL*r)/(dL+dR))
         for iteration = 1:80
-            residual=f(p)
-            if norm(residual, Inf)<big"1e-68"
+            e=mismatch(p)
+            if e<big"1e-50"
                 return (p = copy(p), n = (leftflux(p)+rightflux(p))/2)
             end
-            step=ForwardDiff.jacobian(f, p)\residual
+            A=ForwardDiff.jacobian(f, p) .* transpose(σ)
+            rows=[maximum(abs, A[i, :]) for i in axes(A, 1)]
+            step=σ .* ((A ./ rows)\(f(p) ./ rows))
+            step[absent] .= 0
             α=one(BigFloat)
-            while minimum(p-α*step)<0 || norm(f(p-α*step), Inf)>norm(residual, Inf)
+            while minimum(p-α*step)<0 || mismatch(p-α*step)>e
                 α/=2
                 α>big"1e-40" || error("independent root line search failed")
             end
@@ -44,6 +63,22 @@ function reference_interface(left, right, Tl, Tr, dl, dr, cl, cr)
         end
         error("independent root failed to converge")
     end
+end
+
+# The interface's acceptance contract holds each species' continuity to 2e-10
+# of the gross size of its flux, the sum of its terms' magnitudes. The error of
+# each species flux against the reference, relative to the larger of the
+# reference flux and that gross size (and floatmin), checked with a hundredfold
+# margin by the callers.
+function contract_error(actual, ref, l, r, Tl, Tr, dl, dr, cl, cr)
+    Ts=(dr*Tl+dl*Tr)/(dl+dr)
+    gross=max.(
+        pore_half_flux(l, actual.p, Tl, Ts, Tl, dl, cl.K, cl.t, cl.mob).gross,
+        pore_half_flux(actual.p, r, Ts, Tr, Tr, dr, cr.K, cr.t, cr.mob).gross,
+    )
+    return maximum(
+        abs.(BigFloat.(actual.n) .- ref.n) ./ max.(abs.(ref.n), gross, floatmin(Float64)),
+    )
 end
 
 @testset "qualified interface roots at strong counterdiffusion" begin
@@ -197,6 +232,289 @@ end
         hcat(columns...)
     end
     @test all(abs.(BigFloat.(J) .- reference) .< 2e-8 .* abs.(reference))
+end
+
+@testset "a subnormal trace partial pressure" begin
+    # Face inputs from a wood deck with five product gases, water vapour and
+    # air at the onset of heating. The third product's partial pressure is
+    # subnormal, so is its flux; two products are absent. Dividing that
+    # species' Jacobian row by its flux overflows it.
+    l=SVector(
+        1.388129665992509e-10,
+        1.1179743361572907e-105,
+        1.430105215e-315,
+        0.0,
+        0.0,
+        9.021194907543943,
+        101336.13005567773,
+    )
+    r=SVector(
+        1.4649917862771915e-10,
+        1.5096174164360192e-105,
+        2.86342976e-315,
+        0.0,
+        0.0,
+        8.693840087487288,
+        101403.56224167546,
+    )
+    tl, tr=300.0001629922102, 300.34914587667856
+    dl, dr=0.0002499999897919644, 0.00024999998967156246
+    cl=(
+        K = SVector(
+            1.0860591807166755e-5,
+            1.0054954190500078e-5,
+            8.02107863077249e-6,
+            1.0054954190500078e-5,
+            1.1897182241282057e-5,
+            1.982863706880343e-5,
+            1.562985210998852e-5,
+        ),
+        t = 1.574700644525456,
+        mob = 5.4173616031903004e-11,
+    )
+    cr=(
+        K = SVector(
+            1.0866906904765689e-5,
+            1.0060800834789198e-5,
+            8.025742639447286e-6,
+            1.0060800834789198e-5,
+            1.1904100084097624e-5,
+            1.9840166806829373e-5,
+            1.563894038466857e-5,
+        ),
+        t = 1.5715000947014357,
+        mob = 5.412521117726331e-11,
+    )
+    ref=reference_interface(l, r, tl, tr, dl, dr, cl, cr)
+    actual=interface_flux(l, r, tl, tr, dl, dr, cl, cr)
+    @test minimum(actual.p)>=0
+    @test contract_error(actual, ref, l, r, tl, tr, dl, dr, cl, cr)<=2e-8
+    @test actual.n[4]==0 && actual.n[5]==0
+    J=ForwardDiff.jacobian(p->interface_flux(p, r, tl, tr, dl, dr, cl, cr).n, l)
+    @test all(isfinite, J)
+end
+
+@testset "a species flux that is a near cancellation" begin
+    # Face inputs from the same wood deck. In the first, the second product is
+    # uniform across the face; the diffusive total flux carries it one way and
+    # Darcy flow the other, and its net flux is 3.5e5 times smaller than the
+    # sum of its terms' magnitudes. In the second, the fifth product diffuses
+    # against the outflow, its net flux 5.8e6 times smaller than that sum.
+    # Forming such a net flux rounds it by about eps times its terms, so the
+    # solve resolves it relative to that sum, not to itself.
+    faces=(
+        (
+            l = SVector(
+                5.41640721367963,
+                1.7171907968380176e-65,
+                1.3655027189980404e-224,
+                0.0,
+                0.0,
+                28367.084311956154,
+                94874.68347191087,
+            ),
+            r = SVector(
+                5.486750687823508,
+                1.7171908034306018e-65,
+                1.3655027333213306e-224,
+                0.0,
+                0.0,
+                28411.47258403331,
+                94828.71410796158,
+            ),
+            tl = 299.64066818017795,
+            tr = 299.640668189273,
+            dl = 2.499765328020675e-5,
+            dr = 2.4997653280206316e-5,
+            cl = (
+                K = SVector(
+                    1.0854592870886702e-5,
+                    1.0049400254714753e-5,
+                    8.01664812270648e-6,
+                    1.0049400254714753e-5,
+                    1.1890610735838816e-5,
+                    1.981768455973136e-5,
+                    1.562121883396275e-5,
+                ),
+                t = 1.5778602528046815,
+                mob = 5.4223607743092193e-11,
+            ),
+            cr = (
+                K = SVector(
+                    1.085459287105149e-5,
+                    1.0049400254867315e-5,
+                    8.016648122828183e-6,
+                    1.0049400254867315e-5,
+                    1.1890610736019332e-5,
+                    1.981768456003222e-5,
+                    1.5621218834199898e-5,
+                ),
+                t = 1.5778602527208534,
+                mob = 5.4223607741826135e-11,
+            ),
+        ),
+        (
+            l = SVector(
+                4804.866779798065,
+                15188.3893486698,
+                24383.753034092126,
+                767.096539706449,
+                11.502333392619017,
+                23177.814634001104,
+                49579.92291597831,
+            ),
+            r = SVector(
+                4698.963018274633,
+                14856.462794421062,
+                23995.012248518586,
+                777.1524038843719,
+                11.696598095101796,
+                22666.16553111233,
+                50388.05995090284,
+            ),
+            tl = 703.2405191428177,
+            tr = 705.5494775083631,
+            dl = 1.892330159989665e-5,
+            dr = 1.8572252936341696e-5,
+            cl = (
+                K = SVector(
+                    7.014292878296442e-5,
+                    6.493973332418308e-5,
+                    5.180398611331346e-5,
+                    6.493973332418308e-5,
+                    7.6837728687816e-5,
+                    0.00012806288114636,
+                    0.00010094510712719557,
+                ),
+                t = 0.2630523006320036,
+                mob = 3.02852729978399e-10,
+            ),
+            cr = (
+                K = SVector(
+                    7.120156555663104e-5,
+                    6.5919840527602e-5,
+                    5.2585841186570505e-5,
+                    6.5919840527602e-5,
+                    7.79974071700994e-5,
+                    0.00012999567861683234,
+                    0.0001024686278067672,
+                ),
+                t = 0.25808155772191116,
+                mob = 3.1477038676972066e-10,
+            ),
+        ),
+    )
+    for f in faces
+        ref=reference_interface(f.l, f.r, f.tl, f.tr, f.dl, f.dr, f.cl, f.cr)
+        actual=interface_flux(f.l, f.r, f.tl, f.tr, f.dl, f.dr, f.cl, f.cr)
+        @test minimum(actual.p)>=0
+        @test contract_error(actual, ref, f.l, f.r, f.tl, f.tr, f.dl, f.dr, f.cl, f.cr)<=2e-8
+        J=ForwardDiff.jacobian(
+            p->interface_flux(p, f.r, f.tl, f.tr, f.dl, f.dr, f.cl, f.cr).n,
+            f.l,
+        )
+        @test all(isfinite, J)
+    end
+end
+
+@testset "species order does not change a face" begin
+    # Wide-range faces whose total pressure difference is a cancellation of
+    # large partial pressures: an exact equilibrium, and a difference of
+    # 1.5e-37 Pa against partial pressures of 2e4 Pa. A sum rounded at each
+    # step gives a nonzero flux at the equilibrium and a wrong total in other
+    # species orders.
+    equilibrium=SVector(
+        4707.016104067481,
+        1705.2674128762196,
+        0.0,
+        3.9666785116579826e-206,
+        23894.282859413146,
+        8410.931357168873,
+        0.0,
+    )
+    ce=(
+        K = SVector(
+            5.441671518578719e-5,
+            6.605093776828729e-5,
+            6.516173384129243e-5,
+            7.179633747327119e-5,
+            7.132362834072358e-5,
+            5.0543950741019136e-5,
+            4.587824647121041e-5,
+        ),
+        t = 0.49918631964585064,
+        mob = 2.6642307763299436e-10,
+    )
+    for order in (SVector(1, 2, 3, 4, 5, 6, 7), SVector(6, 1, 2, 5, 7, 4, 3))
+        p=equilibrium[order]
+        c=(K = ce.K[order], t = ce.t, mob = ce.mob)
+        flux=interface_flux(
+            p,
+            p,
+            674.2162139453269,
+            674.2162139453269,
+            1.4e-4,
+            1.4e-4,
+            c,
+            c,
+        )
+        @test all(iszero, flux.n)
+    end
+    l=SVector(
+        1195.1467747237953,
+        23783.363092044074,
+        0.0,
+        8.135587761057449e-247,
+        2.3236718242273295e-90,
+        21073.15966036879,
+        2.495580014507679e-36,
+    )
+    r=SVector(
+        1195.1467747237953,
+        23783.363092044074,
+        0.0,
+        9.765219107480036e-247,
+        2.323671824430157e-90,
+        21073.15966036879,
+        2.6469636410949682e-36,
+    )
+    tl, tr=797.5546770094605, 793.5422361873897
+    dl, dr=0.00011257745703750401, 0.00012119038084899428
+    cl=(
+        K = SVector(
+            2.2603078547129284e-5,
+            2.2410678311053414e-5,
+            2.0817508033888874e-5,
+            2.5191021759809883e-5,
+            2.0964953374170812e-5,
+            2.1549100278759034e-5,
+            3.0735404888406795e-5,
+        ),
+        t = 2.904484734458638,
+        mob = 2.0095183256870005e-10,
+    )
+    cr=(
+        K = SVector(
+            2.2624409367577443e-5,
+            2.2431827560885812e-5,
+            2.0837153788122e-5,
+            2.5214794856069482e-5,
+            2.0984738274497377e-5,
+            2.1569436446149115e-5,
+            3.076441029144113e-5,
+        ),
+        t = 2.9042802603416984,
+        mob = 2.011291151141226e-10,
+    )
+    # The reference needs more than 256 bits to resolve this face.
+    ref=reference_interface(l, r, tl, tr, dl, dr, cl, cr; bits = 512)
+    for order in (SVector(1, 2, 3, 4, 5, 6, 7), SVector(7, 6, 1, 2, 3, 4, 5))
+        permuted(c) = (K = c.K[order], t = c.t, mob = c.mob)
+        flux=interface_flux(l[order], r[order], tl, tr, dl, dr, permuted(cl), permuted(cr))
+        back=SVector{7}(invperm(order))
+        unpermuted=(n = flux.n[back], p = flux.p[back])
+        @test contract_error(unpermuted, ref, l, r, tl, tr, dl, dr, cl, cr)<=2e-8
+    end
 end
 
 # A face of the lumped law reads signed pressures, so a trial state reaches it

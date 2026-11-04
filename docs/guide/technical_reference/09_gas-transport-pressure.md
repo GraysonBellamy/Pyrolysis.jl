@@ -617,11 +617,27 @@ transport path.
 
 Acceptance requires more than a small residual: the local Jacobian must be
 finite and nonsingular, the pressure correction must be resolved, and the two
-half-path fluxes must match. Equations and unknowns are equilibrated by row
-and column scaling before conditioning is assessed. This avoids treating a
-small trace-species flux as evidence of singularity merely because its scale
-differs from that of the other species. Scaling does not alter physical
-pressures, compositions or fluxes.
+half-path fluxes must match. Each species' flux continuity must hold to
+$2\times10^{-10}$ of the gross size of that species' flux, the sum of the
+magnitudes of its wall, collective and Darcy terms on the larger half path.
+The criterion bounds a backward error: the matched fluxes are exact for terms
+perturbed by at most that fraction. For most species the gross size is the
+transmitted flux itself, so continuity holds to that fraction of the flux. A
+species carried one way by the collective flux and the other by Darcy flow, or
+diffusing against the outflow, can have a net flux millions of times smaller
+than its terms. Forming such a net flux in Float64 already rounds it by about
+machine precision times its terms, so it cannot be resolved relative to
+itself; its continuity holds to $2\times10^{-10}$ of its transport rather than
+of its net flux, an error far below the time integration's tolerances. A trace
+species is resolved relative to its own flux, not to the bulk, down to the
+smallest normal Float64 number. Below that a flux has lost its relative
+precision, and its continuity holds absolutely at that level.
+
+This scale enters only the convergence test and the line-search merit.
+Equations and unknowns are equilibrated by row and column scaling before each
+Newton step and before conditioning is assessed, so the step does not depend
+on it, and a small trace-species flux is not mistaken for singularity.
+Scaling does not alter physical pressures, compositions or fluxes.
 
 An unsuccessful solve raises `TransportFailure` with a reason, and its flux
 is not assembled. Very strong, nearly isobaric coupling can demand pressure
@@ -818,6 +834,7 @@ as their limiting behavior:
 | V-GT-02 | The steady compressible Darcy pressure-squared profile. |
 | V-GT-03 | Integrated single- and two-layer pressure potentials, including changes in the conducting mechanism. |
 | V-GT-04 | Graham's binary flux relation and its logarithmic continuum integral. |
+| V-GT-09 | Passive trace species in that isobaric binary: the exponential steady trace profile and flux, the multicomponent Graham relation, a trace scaled by $10^{-12}$ staying proportional to its twin and an absent species staying absent. |
 
 Further checks compare the reduced friction evaluation with high-precision
 full matrices, evaluate vacuum and strong-coupling references from the
