@@ -24,6 +24,92 @@ function _progress_observer(policy, tspan)
     )
 end
 
+# The dense output of a method whose interpolant is the cubic Hermite of the
+# step's ends and their derivatives held as its FSAL pair (`k == [fsalfirst,
+# fsallast]`, KenCarp4) leaves the trajectory between the step's ends in two
+# ways. It starts from `fsalfirst`, which the integrator re-evaluates as `f(uₙ)`
+# after every step whose callbacks leave the derivative-discontinuity flag
+# raised; in a stiff direction that evaluation carries the stage solve's
+# residual amplified by `|hλ|`, and the interpolant spreads it over the step.
+# And the Hermite covers the differential rows only: the algebraic rows are
+# interpolated linearly between the ends, off the values their constraints give
+# at the interpolated differential rows (the cross section off its law of the
+# interpolated conversion history). Inside a long step the pore gas of the
+# surface cell then lies far from its quasi-steady inventory, or the pore
+# volume off the cross section's, and the face flux with them, though the
+# step's ends do not. The saved states inside a step and the recorders'
+# quadrature points start from the method's own derivative at `uₙ`, the
+# previous step's `fsallast`, wherever no event moved or modified the state
+# there, and take their algebraic rows from their constraints (`algebraic`, in
+# a workspace of its own); the saved states of a step an event ends or
+# modifies keep the integrator's own interpolant. The integrator's interpolant
+# is restored after each reading, so the trajectory is unchanged.
+const _AlgebraicWrapper = FunctionWrapper{Nothing,Tuple{_StateVector,Float64}}
+
+mutable struct MethodDerivative
+    k::Vector{Float64}
+    swap::Vector{Float64}
+    valid::Bool
+    events::Int
+    algebraic::_AlgebraicWrapper
+end
+
+MethodDerivative(u0::AbstractVector, algebraic::_AlgebraicWrapper) =
+    MethodDerivative(zeros(length(u0)), zeros(length(u0)), false, 0, algebraic)
+
+# The algebraic rows of a state at time `t` from their constraints given its
+# differential rows (`_consistent_algebraic!`), in a workspace of its own.
+function _algebraic_rows(def::ResidualDefinition, T0)
+    ws = ResidualWorkspace(def, T0)
+    return _AlgebraicWrapper((u, t) -> begin
+        _consistent_algebraic!(u, def, ws, t)
+        return nothing
+    end)
+end
+
+# Whether the integrator's interpolant is the Hermite of its FSAL pair.
+@inline _hermite_fsal(integrator) =
+    length(integrator.k) == 2 &&
+    integrator.k[1] === integrator.fsalfirst &&
+    integrator.k[2] === integrator.fsallast
+
+# The state at `τ` on the current step's interpolant, under a Hermite of the
+# FSAL pair started from the method's derivative where it is known and with
+# its algebraic rows from their constraints; the integrator's own left as it
+# was.
+function _interpolated(integrator, d::MethodDerivative, τ)
+    _hermite_fsal(integrator) || return integrator(τ)
+    k = integrator.k[1]
+    d.valid && (copyto!(d.swap, k); copyto!(k, d.k))
+    u = integrator(τ)
+    d.valid && copyto!(k, d.swap)
+    d.algebraic(u, τ)
+    return u
+end
+
+# After the step's callbacks: the states the step saved inside it (before its
+# first discrete callback, on the integrator's interpolant) again by
+# `_interpolated`, unless an event ended or modified the step (a continuous
+# callback fired, which also rebuilds the interpolant, or a deactivation,
+# `events` those so far); then the step's end derivative as the next step's
+# start, valid on the same terms.
+function _resave_step!(integrator, d::MethodDerivative, events::Int)
+    _hermite_fsal(integrator) || return nothing
+    intact = integrator.event_last_time == 0 && events == d.events
+    if intact
+        sol = integrator.sol
+        for i = integrator.saveiter:-1:1
+            τ = sol.t[i]
+            τ > integrator.tprev || break
+            τ < integrator.t && copyto!(sol.u[i], _interpolated(integrator, d, τ))
+        end
+    end
+    copyto!(d.k, integrator.k[2])
+    d.valid = intact
+    d.events = events
+    return nothing
+end
+
 # The three-point Gauss–Legendre nodes and weights on [−1, 1].
 const _GAUSS3 = ((-sqrt(3 / 5), 5 / 9), (0.0, 8 / 9), (sqrt(3 / 5), 5 / 9))
 
@@ -114,13 +200,20 @@ function _BoundRecorder(rec::ConservationRecorder, cp::PreparedProblem, crossing
 end
 
 # The integrals of the outflow and the enthalpy rate over [a, b] on the
-# step's interpolant.
-function _step_integrals(b::_BoundRecorder, integrator, t0, t1, species)
+# step's interpolant as the saved states read it (`_interpolated`).
+function _step_integrals(
+    b::_BoundRecorder,
+    d::MethodDerivative,
+    integrator,
+    t0,
+    t1,
+    species,
+)
     fill!(species, 0.0)
     E, out = 0.0, 0.0
     for (x, w) in _GAUSS3
         τ = (t0 + t1) / 2 + (t1 - t0) / 2 * x
-        u=integrator(τ)
+        u=_interpolated(integrator, d, τ)
         e, o = b.rates(u, τ)
         species .+= (w*(t1-t0)/2) .* b.species_rates(u, τ)
         E += w * e
@@ -131,13 +224,14 @@ end
 
 # Reads the step that just ended, once, before its events: its integrals, and
 # where an event condition first crosses zero inside it the integrals up to
-# that time, found by bisection on the interpolant.
-function _read_step!(b::_BoundRecorder, u, t, integrator)
+# that time, found by bisection on the integrator's interpolant, the one the
+# events locate their roots on.
+function _read_step!(b::_BoundRecorder, d::MethodDerivative, u, t, integrator)
     rec = b.rec
     (t == integrator.t > integrator.tprev) || return nothing
     rec.reading && integrator.tprev == rec.tprev && return nothing
     rec.reading, rec.t, rec.tprev = true, t, integrator.tprev
-    rec.step = _step_integrals(b, integrator, integrator.tprev, t, rec.step_species)
+    rec.step = _step_integrals(b, d, integrator, integrator.tprev, t, rec.step_species)
     rec.cut = NaN
     for g in b.crossings
         (g(u) <= 0 && g(integrator.uprev) > 0) || continue
@@ -149,8 +243,14 @@ function _read_step!(b::_BoundRecorder, u, t, integrator)
         (isnan(rec.cut) || hi < rec.cut) && (rec.cut = hi)
     end
     isnan(rec.cut) || (
-        rec.to_cut =
-            _step_integrals(b, integrator, integrator.tprev, rec.cut, rec.cut_species)
+        rec.to_cut = _step_integrals(
+            b,
+            d,
+            integrator,
+            integrator.tprev,
+            rec.cut,
+            rec.cut_species,
+        )
     )
     return nothing
 end
@@ -187,8 +287,8 @@ end
 
 # The reader: a continuous callback whose condition never crosses zero, so it
 # sees every step's end before the step's events and never fires.
-_reader(b::_BoundRecorder) = ContinuousCallback(
-    (u, t, integrator) -> (_read_step!(b, u, t, integrator); 1.0),
+_reader(b::_BoundRecorder, d::MethodDerivative) = ContinuousCallback(
+    (u, t, integrator) -> (_read_step!(b, d, u, t, integrator); 1.0),
     integrator -> nothing;
     save_positions = (false, false),
     interp_points = 0,

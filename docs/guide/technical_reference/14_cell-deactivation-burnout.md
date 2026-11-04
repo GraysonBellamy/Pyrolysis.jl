@@ -628,13 +628,16 @@ alone, so a thin, nearly spent skin reads as spent.
 After a pass that transferred inventories, the event restores the algebraic
 rows and checks the result:
 
-1. the face intensities by the attenuation recurrence from the exposed face
-   (`_consistent_intensities!`), which writes zero on the faces upstream of the
-   first live cell;
-2. the cross-section area and lateral rate, then the node velocities by one
-   sweep of the balance rows from the pinned node (`_consistent_motion!`,
-   §15.4); a velocity row left above round-off returns `:inconsistent`;
-3. admissibility (`inadmissible`, §15.5.4) with every live cell, the receiver
+1. under a variable cross section the area and its lateral rate, in two
+   passes, since the history rates the lateral rate reads depend on the
+   concentrations at the area;
+2. the face intensities by the attenuation recurrence from the exposed face
+   (`_consistent_intensities!`), at that area, which writes zero on the faces
+   upstream of the first live cell;
+3. the node velocities by one sweep of the balance rows from the pinned node
+   (`_consistent_algebraic!`, §15.4); a velocity row left above round-off
+   returns `:inconsistent`;
+4. admissibility (`inadmissible`, §15.5.4) with every live cell, the receiver
    included, held to its own mass tolerances, which are those the domain test
    applies to every later proposal, and under gas transport a porosity in
    $[0,1]$ within the skeletal volume of the mass tolerances; a failure returns

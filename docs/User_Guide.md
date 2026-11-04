@@ -7755,6 +7755,27 @@ changes nothing, so the policy decides what the flag means after it:
 - `:keep` leaves it raised: the integrator re-evaluates the derivative at the
   accepted state, which is the KenCarp4 policy's contract.
 
+KenCarp4's interpolant is the cubic Hermite of a step's ends and their
+derivatives on the differential rows, started from that re-evaluated
+derivative. In a fast mode, such as the surface cell's pore gas exchanging with
+the reservoir, the re-evaluation carries the stage solve's residual amplified
+by the step over the mode's time scale, and the interpolant spreads it between
+the step's ends. The algebraic rows (the node velocities, the face intensities,
+the cross section under lateral shrinkage) are interpolated linearly between
+the ends, which leaves them off the values their constraints give at the
+interpolated differential rows; the cross section sets every cell's pore
+volume, and with it the pore pressure. The saved states and the conservation
+recorder's quadrature points therefore start each step's interpolant from the
+method's own derivative, the end derivative of the step before, unless an
+event moved or modified the state there, and take the algebraic rows from
+their constraints. On a step an event ends or modifies, the saved states keep
+the integrator's own interpolant, the one the event was located on, while the
+recorder's points are corrected as on any other step. The trajectory is the
+same either way. On example 07 at 70 cells under KenCarp4, the mass-loss rate
+at the saved states then matches the rate of the saved total mass to 1.1e-3
+g/(m²·s) rms, as under Rodas5P, against 0.48 g/(m²·s) from the re-evaluated
+derivative (measured).
+
 `solve` applies the rule inside each discrete callback you pass, after its
 `affect!`, so a read-only callback leaves the trajectory unchanged under
 every policy (a test asserts identical step sequences with and without one).

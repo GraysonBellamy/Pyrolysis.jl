@@ -587,8 +587,8 @@ $m_{j,i}(0) = \xi_{j,i}(0)\,V_i(0)$ from the reference cell volumes and the ener
 state from $T_i(0)$ (the temperature, or the inventory $H_i=\sum_j m_{j,i}h_j(T_i)$
 under `energy_state = :enthalpy`), writes the history pair under a lateral law
 (§12.8.3) and the node positions on a moving mesh, and then sets the algebraic
-unknowns consistent with them (`consistent_state!`: the face intensities, the area
-and lateral rate, the node velocities; §15.4). For example:
+unknowns consistent with them (`consistent_state!`: the area and lateral rate,
+the face intensities, the node velocities; §15.4). For example:
 
 ```julia
 using Pyrolysis
