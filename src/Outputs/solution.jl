@@ -9,9 +9,10 @@ Counters of a solve: accepted and rejected steps, right-hand-side evaluations
 (the integrator's, its time derivative's and the domain test's that ran, so a
 residual served from the domain test's memory is not one), Jacobian evaluations,
 linear solves, nonlinear-solver failures, the steps the domain test rejected, the
-largest scaled constraint residual of the accepted states (one or below passes;
-zero for a fixed-step solve), and the deactivation callback's invocations that
-deactivated cells.
+residual evaluations of step proposals that raised a `TransportFailure` (each
+rejected its step), the largest scaled constraint residual of the accepted
+states (one or below passes; zero for a fixed-step solve), and the deactivation
+callback's invocations that deactivated cells.
 """
 Base.@kwdef struct SolverStatistics
     accepted::Int
@@ -21,6 +22,7 @@ Base.@kwdef struct SolverStatistics
     linear_solves::Int
     nonlinear_failures::Int
     domain_rejections::Int
+    transport_rejections::Int = 0
     pressure_error_evaluations::Int = 0
     largest_constraint_residual::Float64
     invocations::Int

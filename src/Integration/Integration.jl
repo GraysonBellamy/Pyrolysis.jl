@@ -36,6 +36,7 @@ using ProgressMeter: ProgressMeter, Progress
 using Distributed: pmap, nworkers
 using ..Materials
 import ..Physics
+using ..Physics: TransportFailure
 using ForwardDiff
 using ..Properties: skeletal_volume_fraction
 using ..BoundaryConditions: ImpermeableBC, MassFluxBC, validate_gas_boundary, reads_time

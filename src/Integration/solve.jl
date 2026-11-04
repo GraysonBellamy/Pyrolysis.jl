@@ -268,6 +268,9 @@ function integrate(
     raw = SciMLBase.solve!(integrator)
     monitor.cold == 0 ||
         @warn "solve(): stopped at t = $(raw.t[end]): the last proposed state, at t = $(monitor.cold_t), takes cell $(monitor.cold) to or below absolute zero"
+    SciMLBase.successful_retcode(raw.retcode) ||
+        !(monitor.transport_t >= accepted.t) ||
+        @warn "solve(): stopped at t = $(raw.t[end]): a proposal after the last accepted state, at t = $(monitor.transport_t), raised $(monitor.transport_message)"
     # A solve its controller stopped saves its last proposal, which it
     # rejected, at the last accepted time: report the accepted state there.
     SciMLBase.successful_retcode(raw.retcode) ||
@@ -283,6 +286,7 @@ function integrate(
         linear_solves = s.nsolve,
         nonlinear_failures = s.nnonlinconvfail,
         domain_rejections = check.monitor.rejections,
+        transport_rejections = check.monitor.transport,
         pressure_error_evaluations = pressure_norm.evaluations[],
         largest_constraint_residual = check.monitor.largest,
         invocations = cells === nothing || isempty(cells.events) ? 0 :

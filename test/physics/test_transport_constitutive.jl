@@ -1,5 +1,6 @@
 using Test, LinearAlgebra, Random, StaticArrays, ForwardDiff
 using Pyrolysis.Physics: molar_wall_flux, pore_half_flux
+import Pyrolysis
 using Pyrolysis.Materials: R_GAS
 
 # Every dependent quantity is constructed after conversion of the ORIGINAL
@@ -128,4 +129,29 @@ end
             )
         end
     end
+end
+
+@testset "pressure differences are rounded once" begin
+    difference=Pyrolysis.Physics._pressure_difference
+    rng=MersenneTwister(4242)
+    # Right states hold the left pressures in another order, some perturbed in
+    # their last digits, so the totals cancel across 300 orders of magnitude.
+    for trial = 1:2000
+        l=SVector{7}(ntuple(_->rand(rng)<0.2 ? 0.0 : rand(rng)*10.0^(5-310rand(rng)), 7))
+        order=randperm(rng, 7)
+        r=SVector{7}(
+            ntuple(j->rand(rng)<0.5 ? l[order[j]] : l[order[j]]*(1+1e-9randn(rng)), 7),
+        )
+        s=SVector{7}(ntuple(_->rand(rng)<0.5 ? 0.0 : randn(rng)*10.0^(-300rand(rng)), 7))
+        exact2=setprecision(()->sum(BigFloat.(l))-sum(BigFloat.(r)), 2048)
+        exact3=setprecision(()->exact2+sum(BigFloat.(s)), 2048)
+        @test abs(BigFloat(difference(l, r))-exact2)<=eps(abs(Float64(exact2)))
+        @test abs(BigFloat(difference(l, r, s))-exact3)<=eps(abs(Float64(exact3)))
+        @test difference(l, l[SVector{7}(order)])==0
+    end
+    gradient=ForwardDiff.gradient(
+        x->difference(SVector(x[1], x[2]), SVector(x[3], x[4]), SVector(x[5], x[6])),
+        [1e5, 1e-300, 1e5, 2.0, 3.0, 4.0],
+    )
+    @test gradient==[1, 1, -1, -1, 1, 1]
 end

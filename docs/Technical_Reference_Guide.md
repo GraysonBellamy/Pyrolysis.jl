@@ -7880,17 +7880,42 @@ transport path.
 
 Acceptance requires more than a small residual: the local Jacobian must be
 finite and nonsingular, the pressure correction must be resolved, and the two
-half-path fluxes must match. Equations and unknowns are equilibrated by row
-and column scaling before conditioning is assessed. This avoids treating a
-small trace-species flux as evidence of singularity merely because its scale
-differs from that of the other species. Scaling does not alter physical
-pressures, compositions or fluxes.
+half-path fluxes must match. Each species' flux continuity must hold to
+$2\times10^{-10}$ of the gross size of that species' flux, the sum of the
+magnitudes of its wall, collective and Darcy terms on the larger half path.
+The criterion bounds a backward error: the matched fluxes are exact for terms
+perturbed by at most that fraction. For most species the gross size is the
+transmitted flux itself, so continuity holds to that fraction of the flux. A
+species carried one way by the collective flux and the other by Darcy flow, or
+diffusing against the outflow, can have a net flux millions of times smaller
+than its terms. Forming such a net flux in Float64 already rounds it by about
+machine precision times its terms, so it cannot be resolved relative to
+itself; its continuity holds to $2\times10^{-10}$ of its transport rather than
+of its net flux, an error far below the time integration's tolerances. A trace
+species is resolved relative to its own flux, not to the bulk, down to the
+smallest normal Float64 number. Below that a flux has lost its relative
+precision, and its continuity holds absolutely at that level.
+
+This scale enters only the convergence test and the line-search merit.
+Equations and unknowns are equilibrated by row and column scaling before each
+Newton step and before conditioning is assessed, so the step does not depend
+on it, and a small trace-species flux is not mistaken for singularity.
+Scaling does not alter physical pressures, compositions or fluxes.
 
 An unsuccessful solve raises `TransportFailure` with a reason, and its flux
 is not assembled. Very strong, nearly isobaric coupling can demand pressure
 corrections smaller than Float64 can resolve; that case is diagnosed rather
 than accepted as converged. These checks establish a regular local solution,
 not global uniqueness for arbitrary constitutive data.
+
+The stages of an implicit step evaluate the residual at states the step only
+passes through, which can lie far from any accepted state. A failure there, or
+at the step's proposed end state, rejects the step: the residual is returned as
+not finite, the step's error estimate becomes infinite, and the controller
+retries with its smallest step reduction. Every accepted state has had its
+residual evaluated without failure. The solution's statistics count these
+rejections (`transport_rejections`); a solve that stops after one reports the
+failure.
 
 The derivatives used by the global Jacobian follow from the converged local
 equations. If $F(p^*,u)=0$ describes an interface system depending on surrounding
@@ -8081,6 +8106,7 @@ as their limiting behavior:
 | V-GT-02 | The steady compressible Darcy pressure-squared profile. |
 | V-GT-03 | Integrated single- and two-layer pressure potentials, including changes in the conducting mechanism. |
 | V-GT-04 | Graham's binary flux relation and its logarithmic continuum integral. |
+| V-GT-09 | Passive trace species in that isobaric binary: the exponential steady trace profile and flux, the multicomponent Graham relation, a trace scaled by $10^{-12}$ staying proportional to its twin and an absent species staying absent. |
 
 Further checks compare the reduced friction evaluation with high-precision
 full matrices, evaluate vacuum and strong-coupling references from the
@@ -16102,7 +16128,7 @@ against an exact or manufactured solution; the burnout cases V-BO-01, 02, 03 and
 | Heat conduction | V-HC-01 – V-HC-05 | Carslaw–Jaeger erfc and eigenfunction series, resistance network, Kirchhoff transform | the convective surface Newton (V-HC-01; Biot sweep V-HC-02a–d), the constant-flux slab to its back-face plateau (V-HC-03), the harmonic-mean face conductivity at a layer jump on and off a face, including the same interface on a fitted mesh (V-HC-04a–d), $k(T)$ (V-HC-05) |
 | Kinetics and surface radiation | V-RX-01 – V-RX-08 | Bateman chain, Khawam–Flanagan isothermal integrals, parallel-reaction splits, implicit radiative-cooling law, insulated-reaction logarithmic temperature history, conversion-basis burnout on fixed and moving meshes (V-RX-06), a series scheme on conversions with an order other than one on the intermediate (V-RX-07), a graded conversion in the closed form cell by cell (V-RX-08) | multi-step coupling, reaction order and the depletion limiter (V-RX-02d keeps it on as a guard), two-product yields and heat superposition, `RadiativeBC` through the surface Newton, reaction heat and sensible-enthalpy formation with unequal species heat capacities |
 | In-depth radiation | V-RAD-01 | Lautenberger eigenfunction series | Beer–Lambert absorption with conduction and a convective face, including the sub-surface temperature peak |
-| Gas transport | V-GT-01 – V-GT-08 | Gaussian plane source, integrated wall/Darcy resistance, binary dusty-gas exchange, coupled thermal-film solution, Robin diffusion, prescribed-inflow Darcy $P^2$ profile | wall transport and conservation, pressure closure and upwinding, interfaces and flow reversal, binary exchange, nonisothermal transport, transient mass-film uptake, imposed gas inflow and pressure outflow |
+| Gas transport | V-GT-01 – V-GT-09 | Gaussian plane source, integrated wall/Darcy resistance, binary dusty-gas exchange, coupled thermal-film solution, Robin diffusion, prescribed-inflow Darcy $P^2$ profile, linear trace friction equation | wall transport and conservation, pressure closure and upwinding, interfaces and flow reversal, binary exchange, nonisothermal transport, transient mass-film uptake, imposed gas inflow and pressure outflow, multicomponent exchange with trace and absent species |
 | Coupled physics | V-CPL-01 – V-CPL-05 | Neumann two-phase Stefan solution, Landau ablation wave, exact shrink/swell endpoints, Frank-Kamenetskii slab, 0D TGA curve | a latent-heat front (apparent heat capacity, V-CPL-01; gated reaction, V-CPL-01b), surface regression on a moving mesh (V-CPL-02, 02b), volume change and the lateral-shrinkage law, the reaction–conduction bifurcation, the boundary and volume coupling of the kinetics |
 | Manufactured solutions | V-MMS-01 – V-MMS-04 | the manufactured-solution driver of §18.2 | design order of the coupled residual on a fixed mesh in space and time, free-stream preservation under prescribed motion, order under prescribed and reaction-driven motion |
 | Burnout | V-BO-01 – V-BO-12 | exact exponential thickness (V-BO-04); otherwise exact mass and thickness budgets, conservation ledgers and termination constraints | deactivation through complete burnout on a moving mesh under in-depth absorption (V-BO-01) and on a fixed mesh under surface absorption (V-BO-02); the transmitted-flux series (V-BO-03); the interior-void stop (V-BO-05, `expected_retcode = :Terminated`); a graded mesh (V-BO-06), a layer of mixed composition (V-BO-07) and a thin layer on a deep substrate (V-BO-08); burnout through the event path on the exact conversion at orders 0.5 and 1.2 (V-BO-09a, b); heated burnout without a residue at orders 0, 0.5 and 1.2 with its threshold and mesh pairs (V-BO-10a–c); a cell that dies under a live one at order one against the corrected default (V-BO-11) |

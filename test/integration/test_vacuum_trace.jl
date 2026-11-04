@@ -77,3 +77,57 @@ end
     @test sol.statistics.accepted<1000
     @test sol.statistics.nonlinear_failures<50
 end
+
+# The same start under dusty-gas transport with two product gases. Stages of
+# early steps reach pore states far from the accepted ones, where a face's
+# transport solve has no qualified root; each such step is rejected and
+# retried, so the start completes.
+@testset "dusty-gas trace production from vacuum" begin
+    products = Reaction(
+        :pyrolysis,
+        1 => (2, 3);
+        A = 8.5e12,
+        E = 188e3,
+        h = 870e3,
+        yields = (0.7, 0.3),
+    )
+    dusty = Material(
+        gas_transport = DustyGas(
+            tortuosity = 2.0,
+            D_ref = 2e-5,
+            T_ref = 300.0,
+            P_ref = 1e5,
+            pore_diameter = 1e-6,
+            endpoint = DustyEndpoint(
+                pore_diameter = 1e-6,
+                permeability = 0.0,
+                max_skeletal_occupancy = 0.001,
+            ),
+        ),
+        name = :PMMA,
+        components = (virgin, gas, GaseousComponent(:CO2; M = 0.044, c = 1000.0, k = 0.02)),
+        reactions = (products,),
+    )
+    vacuum = PyrolysisProblem(
+        mesh = mesh,
+        material = dusty,
+        bc_set = bc_set,
+        tspan = (0.0, 2400.0),
+    )
+    solutions = map((1.0, 0.01)) do ptol
+        solve(
+            vacuum;
+            pressure_tolerance = ptol,
+            reltol = 1e-8,
+            abstol = 1e-10,
+            maxiters = 10000,
+            saveat = 20.0,
+        )
+    end
+    @test all(completed, solutions)
+    if all(completed, solutions)
+        loose, tight = solutions
+        @test maximum(abs.(loose.T .- tight.T))<0.001
+        @test maximum(abs.(loose.gas.pressure .- tight.gas.pressure))<20
+    end
+end
