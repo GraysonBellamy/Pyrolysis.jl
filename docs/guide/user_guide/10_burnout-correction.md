@@ -116,8 +116,6 @@ sol = solve(problem;
     deactivation    = true,          # cells below the threshold leave the system
     radiation_model = BEER_LAMBERT,
     min_thickness   = 1e-3,          # [m] stop if the live column ever thins this far
-    reltol          = 1e-7,          # the default 1e-6 ends in pore closure on the
-    abstol          = 1e-9,          # layer's last cells, just before the event
 )
 
 sol.retcode                          # :Success
@@ -580,7 +578,7 @@ the strict test, `:Success` only.
 | `:Terminated` | `:burned_out` | `true` | The last live cell went; its inventories are written to the last event as lost. |
 | `:Terminated` | `:min_thickness` | `true` | The live thickness of a moving mesh fell below `min_thickness` (§10.3). |
 | `:Terminated` | `:interior` | `false` | A cell below the threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one; the solve warns and ends. |
-| `:DtLessThanMin` | `:pore_closure` | `false` | The domain test kept rejecting a cell whose porosity left the resolved pore domain until the step fell below `dtmin`: on a moving mesh a thinning cell's pore volume falls to its own uncertainty before the cell reaches the threshold. Tighter tolerances resolve it (§10.2.1). |
+| `:DtLessThanMin` | `:pore_closure` | `false` | The domain test kept rejecting a cell whose porosity left the resolved pore domain until the step fell below `dtmin`: its pore volume closed, or fell to its own mass, thermal and geometry uncertainty. Tighter tolerances resolve the second. |
 | `:Failure` | `:none` | `false` | The state after an event was inadmissible (a receiver outside its own mass tolerances, crossed nodes, a cell at or below absolute zero, under gas transport a porosity outside `[0, 1]`), or no consistent node velocities exist after it; the solve warns naming the event's time. |
 
 The state a solve ends on is always saved, whether or not `saveat` names its

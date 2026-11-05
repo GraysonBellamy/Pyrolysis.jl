@@ -19,7 +19,7 @@ Thus A-Bx(z) is exponential and the flux follows by a logarithmic integral.
 | --- | --- | --- | --- | --- | --- | --- |
 | Graham wall-weighted flux ratio | -0.3162 | -0.3162 | 0 | 1e-07 | yes |  |
 | logarithmic binary flux | 0.1923 | 0.1922 | 0.0008259 | 0.015 | yes |  |
-| exponential composition profile | 2.22e-16 | — | 2.22e-16 | 0.005 | yes |  |
+| exponential composition profile | 1.665e-16 | — | 1.665e-16 | 0.005 | yes |  |
 | isobaric solution | 3.492e-10 | — | 3.492e-10 | 0.01 | yes |  |
 | isothermal solution | 0 | — | 0 | 1e-08 | yes |  |
 
@@ -33,10 +33,12 @@ Thus A-Bx(z) is exponential and the flux follows by a logarithmic integral.
 
 | n_cells | h | wall (s) | flux |
 | --- | --- | --- | --- |
-| 20 | 0.05 | — | 0.006633 |
-| 40 | 0.025 | — | 0.003309 |
-| 80 | 0.0125 | — | 0.001653 |
-| 160 | 0.00625 | — | 0.0008259 |
+| 20 | 0.05 | 0.05825 | 0.006633 |
+| 40 | 0.025 | 0.1334 | 0.003309 |
+| 80 | 0.0125 | 0.296 | 0.001653 |
+| 160 | 0.00625 | 0.6492 | 0.0008259 |
+
+Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
 Observed order 1.002 (flux), expected 1.0.
 

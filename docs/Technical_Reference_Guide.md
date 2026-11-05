@@ -437,9 +437,10 @@ claims also require matched workloads and timing boundaries.
 
 All Gpyro verification overlays use the pinned V2 revision, and all
 ThermaKin2Ds overlays use ThermaKin2Ds 7 built from its source with only a
-start-time-banner portability change (§18.1.3). The comparisons include independent time/space refinements, with mesh spacing
-and observation conventions documented for each case. They provide accuracy
-evidence; no runtime pair is qualified at a shared achieved accuracy.
+start-time-banner portability change (§18.1.3). Each comparison runs at
+coarser and finer time steps and a finer mesh, with mesh spacing and
+observation conventions documented for each case. The same runs are timed,
+and each case compares cost at matched accuracy.
 
 
 ---
@@ -11907,6 +11908,16 @@ floors and the pressure-error budget. Condensed-mass and geometry absolute
 tolerances retain their reference scales. Gas-row reference tolerances are
 $\phi_i(0)V_i(0)M_jp_{tol}/(N_gRT_i(0))$.
 
+Node positions are held to their absolute tolerance alone. The integrator
+scales every row's error by $a_k+r\,|u_k|$; for a position the relative share
+$r\,|x|$ depends on where the coordinate origin lies, and on a thin cell far
+from the origin it exceeds the cell's own thickness by orders of magnitude
+(at $x=13$ mm, $r=10^{-6}$, a 2.6 µm cell may change by 1 % of its volume within
+one step's error). The internal error norm therefore weights each position's
+scaled error by $(a_k+r\,|x_k|)/a_k$, measuring it against
+$a_k=r\,\varepsilon_m h_n$ alone, and the domain test's pore-volume margin
+uses the same position uncertainty (`_origin_free_rms`, `_pore_margin`).
+
 The internal error norm also reconstructs each unscaled local error at the
 proposed state and differentiates $p_j=m_jRT/(M_jW)$, with
 $W=V-\sum_{condensed}m_j/\rho_{i,j}(T)$. Temperature, condensed masses,
@@ -14161,8 +14172,8 @@ Our default policy is in `src/Integration/policy.jl`; the state Jacobian
 uses colored forward-mode automatic differentiation (§15.5).
 
 The verification studies retain independent temporal refinements while each
-solver uses its native integrator (§18.1.3). Runtime comparisons require a
-shared achieved-accuracy target; no solver pair is qualified at that target.
+solver uses its native integrator (§18.1.3). Their cost comparisons pair each
+external run with each code's cheapest configuration at least as accurate.
 User Guide §§8.3 and 12.6 covers tolerance and step-size studies.
 
 ---
@@ -16219,8 +16230,8 @@ gates open (§18.2.2), while V-RX-02d keeps the limiter on as a guard.
 **Cross-code overlays.** Native inputs must represent the same active equations,
 material laws, boundaries and observable before a curve is included. Retained
 outputs, provenance and transformations are under `test/verification/reference/`.
-Report-mode case curves or the matched-series registry read them; assert mode
-never touches them. The coverage matrix in
+The matched-series registry reads them in report mode; assert mode never
+touches them. The coverage matrix in
 `docs/guide/verification/comparison_coverage.md` identifies full and partial matches.
 Both FDS and Gpyro cover V-HC-01/02/04/05, V-RX-01, V-RX-02a–c, V-RX-04,
 V-RX-05a–b, V-CPL-03 P1/P2/P3 and the subcritical V-CPL-04 steady profile.
@@ -16232,23 +16243,21 @@ context layer in a separate `_vs_codes` variant of each affected figure, so the 
 figure keeps the solver's own error on its own scale; for exact-solution cases the
 other codes' *errors* against the same exact solution are compared.
 The guide's formulation comparisons use V2 at the revision in
-§1.6.5. The V-GT-07, V-GT-08 and V-RX-05 comparisons use that pinned V2
-revision, retain raw numerical outputs and refinement checks, and omit timings.
-Their source and transformations are documented in
-`test/verification/reference/gpyro/v2_accuracy/README.md`.
-The conduction, reaction and deformation comparisons use the same pinned
-Gpyro V2 revision, FDS 6.11.1 and ThermaKin2Ds 7, with native base and independent time/space refinement outputs and executable
-hashes under `test/verification/reference/matched/`. That dataset also holds
-the ThermaKin2Ds V-HC-01, V-HC-03, V-RX-01, V-GT-01 and V-GT-07a/b runs.
+§1.6.5. Every cross-code comparison, with that pinned Gpyro V2 revision,
+FDS 6.11.1 and ThermaKin2Ds 7, is a matched native-input run at seven
+configurations (coarser and finer time steps and a finer mesh). The native
+inputs and outputs, executable hashes, solve times and each deck's source
+and transformations are under `test/verification/reference/matched/`.
 ThermaKin2Ds is built from its source, which is not redistributable and is
 not committed, with only a start-time-banner portability change; the build
 script and the source and executable hashes are retained with the outputs.
-These runs contain no timing measurements.
+The same runs are timed on one pinned core under `scripts/timing/README.md`;
+the times and their provenance are in `test/verification/reference/matched/timing/`.
 In particular, FDS V-RX-05a–b uses `ADJUST_H=F` to match the specified local
 reaction heat. No gas-transport comparison is attributed to FDS, and the
 V-CPL-04 comparison does not extend to the upper-temperature-gated runaway branch.
 
-The reports compare accuracy. Runtime comparisons require a shared achieved-accuracy target; no pair is qualified under this criterion. See the [comparison basis](guide/verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions, independent time refinement, and runtime qualification. ThermaKin2Ds cannot express V-RAD-01, V-CPL-01, V-RX-02a/c or the pressure-driven V-GT-02–06 and V-GT-08; the [coverage matrix](guide/verification/comparison_coverage.md) gives the reasons.
+The reports compare accuracy, and each case compares cost at matched accuracy: for each external run, that code's cheapest run at least as accurate against this code's cheapest mesh and solver tolerance at least as accurate on every scored reference. The ratio is a cost at equal accuracy for that problem, not a pure solver speedup; on the smallest problems the external times are mostly input, setup and output. See the [comparison basis](guide/verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions and time refinement. ThermaKin2Ds cannot express V-RAD-01, V-CPL-01, V-RX-02a/c or the pressure-driven V-GT-02–06 and V-GT-08; the [coverage matrix](guide/verification/comparison_coverage.md) gives the reasons.
 
 ---
 
@@ -17027,11 +17036,9 @@ can arise from either, from input transcription, or from output definitions.
   separately supplied outputs and are not part of that dataset.
 - **Gpyro V2:** this is the reference for formulation comparisons (§1.6.5).
   Match condensed/gas density definitions, conversion-rate normalization,
-  diffusion, thermal exchange and volume-change laws. All active overlays,
-  including V-HC-01, V-HC-03, V-RAD-01, V-RX-01 and V-CPL-01 route A,
-  use the pinned V2 executable. Native outputs and independent refinement
-  studies are retained for the cases listed in §18.1.3; they supply no timing
-  measurements.
+  diffusion, thermal exchange and volume-change laws. Every overlay uses the
+  pinned V2 executable in the matched study (§18.1.3), which retains its
+  native outputs, refinements and solve times.
 - **FDS:** the retained 6.11.1 overlays concern matched solid conduction,
   reaction kinetics/heat, radiative boundaries, solid-only volume change
   and subcritical thermal feedback (§18.1.3). Its instantaneous gas release and optional two-flux
@@ -17042,8 +17049,8 @@ can arise from either, from input transcription, or from output definitions.
 The benchmark definitions, actual input decks and exact-solution errors
 provide the evidence for each comparison (§18.1.3). The MaCFP community
 predictions use differing calibrated models; their spread is not a
-solver-only verification result. Runtime comparisons require qualified
-workloads at the same achieved accuracy.
+solver-only verification result. Cost is compared only at matched accuracy
+(§18.1.3).
 
 ---
 

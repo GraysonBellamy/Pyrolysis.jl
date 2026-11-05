@@ -46,6 +46,5 @@ before any deactivation, with the maximum live-cell temperature below
 | use_ale | false |
 | deactivation | true |
 | radiation_model | BEER_LAMBERT |
-| abstol | 1.0e-11 |
-| reltol | 1.0e-9 |
-| pressure_tolerance | 0.0001 |
+| abstol | 1.0e-8 |
+| reltol | 1.0e-6 |

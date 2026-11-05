@@ -1,26 +1,71 @@
 "code","curve","reference","resolution","samples","Linf","RMS"
+"Gpyro V2, t = 50.0 s","profiles","t = 50.0 s","base",161,0.00011376589138492599,2.647004332084164e-5
+"Gpyro V2, t = 50.0 s","profiles","t = 50.0 s","time_double",161,0.00011948419138492657,2.9670362397499764e-5
+"Gpyro V2, t = 50.0 s","profiles","t = 50.0 s","time_quadruple",161,0.00015182529017514212,3.8077924133430406e-5
+"Gpyro V2, t = 50.0 s","profiles","t = 50.0 s","time_half",161,0.00011090529138492629,2.524175773848072e-5
+"Gpyro V2, t = 50.0 s","profiles","t = 50.0 s","time_quarter",161,0.00010947459138492717,2.473803658521983e-5
+"Gpyro V2, t = 50.0 s","profiles","t = 50.0 s","space_half",321,2.843419138492606e-5,6.636148242040064e-6
+"Gpyro V2, t = 50.0 s","profiles","t = 50.0 s","refined",321,2.9994171521796967e-5,7.451120558202264e-6
+"Gpyro V2, t = 150.0 s","profiles","t = 150.0 s","base",161,3.898764276834624e-5,1.204088235933475e-5
+"Gpyro V2, t = 150.0 s","profiles","t = 150.0 s","time_double",161,4.1112333389929645e-5,1.34664052239079e-5
+"Gpyro V2, t = 150.0 s","profiles","t = 150.0 s","time_quadruple",161,5.2545907585424545e-5,1.7173364734039828e-5
+"Gpyro V2, t = 150.0 s","profiles","t = 150.0 s","time_half",161,3.8117942768346735e-5,1.1485268169467367e-5
+"Gpyro V2, t = 150.0 s","profiles","t = 150.0 s","time_quarter",161,3.768314276834765e-5,1.1254027739328376e-5
+"Gpyro V2, t = 150.0 s","profiles","t = 150.0 s","space_half",321,9.750853534639878e-6,3.021156828265293e-6
+"Gpyro V2, t = 150.0 s","profiles","t = 150.0 s","refined",321,1.026704338992837e-5,3.3843461038247115e-6
+"Gpyro V2, t = 400.0 s","profiles","t = 400.0 s","base",161,1.4871450724486882e-5,5.885092034593737e-6
+"Gpyro V2, t = 400.0 s","profiles","t = 400.0 s","time_double",161,1.5636667288834727e-5,6.573885289799311e-6
+"Gpyro V2, t = 400.0 s","profiles","t = 400.0 s","time_quadruple",161,1.9997091577614312e-5,8.354010381684194e-6
+"Gpyro V2, t = 400.0 s","profiles","t = 400.0 s","time_half",161,1.4511750724486086e-5,5.614288931283938e-6
+"Gpyro V2, t = 400.0 s","profiles","t = 400.0 s","time_quarter",161,1.4351734200808777e-5,5.500654121106645e-6
+"Gpyro V2, t = 400.0 s","profiles","t = 400.0 s","space_half",321,3.706250724485466e-6,1.4787001803191166e-6
+"Gpyro V2, t = 400.0 s","profiles","t = 400.0 s","refined",321,3.899217288836146e-6,1.6554327451957488e-6
+"Gpyro V2","uptake","surface influx","base",8,1.209136270117716e-7,4.640558055501232e-8
+"Gpyro V2","uptake","surface influx","time_double",8,9.862362701184538e-8,3.778103136644015e-8
+"Gpyro V2","uptake","surface influx","time_quadruple",8,5.398362701175156e-8,2.0515164976353012e-8
+"Gpyro V2","uptake","surface influx","time_half",8,1.3205362701173098e-7,5.071815099169969e-8
+"Gpyro V2","uptake","surface influx","time_quarter",8,1.3761362701186243e-7,5.287051171728611e-8
+"Gpyro V2","uptake","surface influx","space_half",8,2.756362701177359e-8,1.0353894948204004e-8
+"Gpyro V2","uptake","surface influx","refined",8,2.1943627011678597e-8,8.193034897646817e-9
+"Gpyro V2","inventory","stored tracer","base",9,1.4280667524124713e-5,8.212478181736194e-6
+"Gpyro V2","inventory","stored tracer","time_double",9,1.3533600497249616e-5,7.800371659112154e-6
+"Gpyro V2","inventory","stored tracer","time_quadruple",9,1.2039765308326407e-5,6.976390905882225e-6
+"Gpyro V2","inventory","stored tracer","time_half",9,1.4654243019968094e-5,8.418558970200416e-6
+"Gpyro V2","inventory","stored tracer","time_quarter",9,1.4841049635348595e-5,8.521608433406319e-6
+"Gpyro V2","inventory","stored tracer","space_half",9,3.796992990049916e-6,2.469235388172175e-6
+"Gpyro V2","inventory","stored tracer","refined",9,3.609171307598219e-6,2.3670868317225114e-6
 "ThermaKin2Ds 7, t = 50.0 s","profiles","t = 50.0 s","base",160,0.012212428487838517,0.0023961080452323514
-"ThermaKin2Ds 7, t = 50.0 s","profiles","t = 50.0 s","refined",320,0.006109956165903513,0.0011850868505906874
+"ThermaKin2Ds 7, t = 50.0 s","profiles","t = 50.0 s","time_double",160,0.012212428487838517,0.002396110503176984
+"ThermaKin2Ds 7, t = 50.0 s","profiles","t = 50.0 s","time_quadruple",160,0.012212428487838517,0.002396130937354379
 "ThermaKin2Ds 7, t = 50.0 s","profiles","t = 50.0 s","time_half",160,0.012212428487838517,0.0023961078126987756
 "ThermaKin2Ds 7, t = 50.0 s","profiles","t = 50.0 s","time_quarter",160,0.012212428487838517,0.002396107485557027
 "ThermaKin2Ds 7, t = 50.0 s","profiles","t = 50.0 s","space_half",320,0.006109956165903513,0.0011850868623513274
+"ThermaKin2Ds 7, t = 50.0 s","profiles","t = 50.0 s","refined",320,0.006109956165903513,0.0011850868505906874
 "ThermaKin2Ds 7, t = 150.0 s","profiles","t = 150.0 s","base",160,0.007071370314286701,0.0018351818509184414
-"ThermaKin2Ds 7, t = 150.0 s","profiles","t = 150.0 s","refined",320,0.0035363742135899323,0.0009120724924348403
+"ThermaKin2Ds 7, t = 150.0 s","profiles","t = 150.0 s","time_double",160,0.007071370314286701,0.001835182075026347
+"ThermaKin2Ds 7, t = 150.0 s","profiles","t = 150.0 s","time_quadruple",160,0.007071370314286701,0.0018351859126891482
 "ThermaKin2Ds 7, t = 150.0 s","profiles","t = 150.0 s","time_half",160,0.007071370314286701,0.0018351818553984502
 "ThermaKin2Ds 7, t = 150.0 s","profiles","t = 150.0 s","time_quarter",160,0.007071370314286701,0.0018351818553957848
 "ThermaKin2Ds 7, t = 150.0 s","profiles","t = 150.0 s","space_half",320,0.0035363742135899323,0.0009120724960887147
+"ThermaKin2Ds 7, t = 150.0 s","profiles","t = 150.0 s","refined",320,0.0035363742135899323,0.0009120724924348403
 "ThermaKin2Ds 7, t = 400.0 s","profiles","t = 400.0 s","base",160,0.004334307616807698,0.0014422091247359365
-"ThermaKin2Ds 7, t = 400.0 s","profiles","t = 400.0 s","refined",320,0.0021673160207638376,0.000718505390686794
+"ThermaKin2Ds 7, t = 400.0 s","profiles","t = 400.0 s","time_double",160,0.004334307616807698,0.0014422090441576446
+"ThermaKin2Ds 7, t = 400.0 s","profiles","t = 400.0 s","time_quadruple",160,0.004334307616807698,0.0014422092380186968
 "ThermaKin2Ds 7, t = 400.0 s","profiles","t = 400.0 s","time_half",160,0.004334307616807698,0.0014422091247345056
 "ThermaKin2Ds 7, t = 400.0 s","profiles","t = 400.0 s","time_quarter",160,0.004334307616807698,0.0014422091247342256
 "ThermaKin2Ds 7, t = 400.0 s","profiles","t = 400.0 s","space_half",320,0.0021673160207638376,0.0007185053050568131
+"ThermaKin2Ds 7, t = 400.0 s","profiles","t = 400.0 s","refined",320,0.0021673160207638376,0.000718505390686794
 "ThermaKin2Ds 7","uptake","surface influx","base",40,1.5987012787421425e-6,2.7714666615171397e-7
-"ThermaKin2Ds 7","uptake","surface influx","refined",40,1.204601278742139e-6,2.0893207734448284e-7
+"ThermaKin2Ds 7","uptake","surface influx","time_double",40,1.597101278742139e-6,2.7689710416705594e-7
+"ThermaKin2Ds 7","uptake","surface influx","time_quadruple",40,1.5905012787421381e-6,2.7586824480015627e-7
 "ThermaKin2Ds 7","uptake","surface influx","time_half",40,1.5991012787421434e-6,2.772088393144124e-7
 "ThermaKin2Ds 7","uptake","surface influx","time_quarter",40,1.5992012787421233e-6,2.772246571892583e-7
 "ThermaKin2Ds 7","uptake","surface influx","space_half",40,1.2047012787421189e-6,2.0894728106964608e-7
+"ThermaKin2Ds 7","uptake","surface influx","refined",40,1.204601278742139e-6,2.0893207734448284e-7
 "ThermaKin2Ds 7","inventory","stored tracer","base",41,0.0005241359986699438,0.0005138244465197776
-"ThermaKin2Ds 7","inventory","stored tracer","refined",41,0.0002607645163303328,0.00025463804092621295
+"ThermaKin2Ds 7","inventory","stored tracer","time_double",41,0.000524135932145349,0.0005138247423724636
+"ThermaKin2Ds 7","inventory","stored tracer","time_quadruple",41,0.0005241359809648564,0.0005138261557799467
 "ThermaKin2Ds 7","inventory","stored tracer","time_half",41,0.0005241359983159492,0.0005138243281512093
 "ThermaKin2Ds 7","inventory","stored tracer","time_quarter",41,0.0005241359982293588,0.0005138243192940727
 "ThermaKin2Ds 7","inventory","stored tracer","space_half",41,0.00026076448494690915,0.00025463801946198846
+"ThermaKin2Ds 7","inventory","stored tracer","refined",41,0.0002607645163303328,0.00025463804092621295

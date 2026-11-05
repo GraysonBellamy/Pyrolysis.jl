@@ -1,0 +1,36 @@
+"code","curve","reference","resolution","samples","Linf","RMS"
+"Gpyro V2, t = 30.0 s","T_profiles","t = 30.0 s","base",401,0.03929392879092575,0.025066102215606394
+"Gpyro V2, t = 30.0 s","T_profiles","t = 30.0 s","time_double",401,0.07836752879092046,0.05003166793035583
+"Gpyro V2, t = 30.0 s","T_profiles","t = 30.0 s","time_quadruple",401,0.15614892879091258,0.09978725607122209
+"Gpyro V2, t = 30.0 s","T_profiles","t = 30.0 s","time_half",401,0.019711401036261122,0.01256318709841082
+"Gpyro V2, t = 30.0 s","T_profiles","t = 30.0 s","time_quarter",401,0.009909601036270033,0.006310505662964455
+"Gpyro V2, t = 30.0 s","T_profiles","t = 30.0 s","space_half",801,0.00983509388714765,0.0062755323348720965
+"Gpyro V2, t = 30.0 s","T_profiles","t = 30.0 s","refined",801,0.019638028790893713,0.01253704997974572
+"Gpyro V2, t = 60.0 s","T_profiles","t = 60.0 s","base",401,0.04218322458871171,0.02705604407205477
+"Gpyro V2, t = 60.0 s","T_profiles","t = 60.0 s","time_double",401,0.08407712458870265,0.05399621782735344
+"Gpyro V2, t = 60.0 s","T_profiles","t = 60.0 s","time_quadruple",401,0.16763712458867985,0.10779994941974815
+"Gpyro V2, t = 60.0 s","T_profiles","t = 60.0 s","time_half",401,0.021207524588703563,0.013578719184361756
+"Gpyro V2, t = 60.0 s","T_profiles","t = 60.0 s","time_quarter",401,0.010712424588689373,0.006842947514607682
+"Gpyro V2, t = 60.0 s","T_profiles","t = 60.0 s","space_half",801,0.010553162485848588,0.006765181451909224
+"Gpyro V2, t = 60.0 s","T_profiles","t = 60.0 s","refined",801,0.02104832458871897,0.013506540593162917
+"Gpyro V2, t = 90.0 s","T_profiles","t = 90.0 s","base",401,0.05019440902964334,0.028563269243565455
+"Gpyro V2, t = 90.0 s","T_profiles","t = 90.0 s","time_double",401,0.10015860902967688,0.057069211423623395
+"Gpyro V2, t = 90.0 s","T_profiles","t = 90.0 s","time_quadruple",401,0.19990670902967622,0.11403359505966376
+"Gpyro V2, t = 90.0 s","T_profiles","t = 90.0 s","time_half",401,0.02518970902968931,0.014306883989659576
+"Gpyro V2, t = 90.0 s","T_profiles","t = 90.0 s","time_quarter",401,0.012681609029698393,0.007182928458891218
+"Gpyro V2, t = 90.0 s","T_profiles","t = 90.0 s","space_half",801,0.012554309029667365,0.00713895653081156
+"Gpyro V2, t = 90.0 s","T_profiles","t = 90.0 s","refined",801,0.025062309029692642,0.0142669965207558
+"Gpyro V2, t = 180.0 s","T_profiles","t = 180.0 s","base",401,0.03612283252704174,0.027487577078511658
+"Gpyro V2, t = 180.0 s","T_profiles","t = 180.0 s","time_double",401,0.07246583252702976,0.055222753575151086
+"Gpyro V2, t = 180.0 s","T_profiles","t = 180.0 s","time_quadruple",401,0.14515783252699066,0.11070916494417907
+"Gpyro V2, t = 180.0 s","T_profiles","t = 180.0 s","time_half",401,0.01795183252698962,0.013624986169744136
+"Gpyro V2, t = 180.0 s","T_profiles","t = 180.0 s","time_quarter",401,0.00986828027134834,0.006701061059758678
+"Gpyro V2, t = 180.0 s","T_profiles","t = 180.0 s","space_half",801,0.009030832527002985,0.006868868393233411
+"Gpyro V2, t = 180.0 s","T_profiles","t = 180.0 s","refined",801,0.018115832527030307,0.013799291071807393
+"Gpyro V2","surface_T_history","front face","base",180,0.06013238916057162,0.02444847290140854
+"Gpyro V2","surface_T_history","front face","time_double",180,0.11913358916058314,0.04759612460844739
+"Gpyro V2","surface_T_history","front face","time_quadruple",150,0.23098919253413897,0.09349055909997456
+"Gpyro V2","surface_T_history","front face","time_half",180,0.02991308916057278,0.01286064980769562
+"Gpyro V2","surface_T_history","front face","time_quarter",180,0.0146213891605953,0.007118758260398048
+"Gpyro V2","surface_T_history","front face","space_half",180,0.01521408916062228,0.006124319456233368
+"Gpyro V2","surface_T_history","front face","refined",180,0.030504189160581063,0.01194974704078237

@@ -1,6 +1,7 @@
 """Run and extract matched accuracy comparisons; see README.md for mappings.
 
-Python 3.12+, standard library only. No solver source changes or timing claims.
+Python 3.12+, standard library only. No solver source changes; scripts/timing/
+times these decks.
 """
 
 from pathlib import Path
@@ -19,6 +20,38 @@ import subprocess
 DEST = Path(__file__).resolve().parent
 CASES = {
     "gpyro": [
+        "vhc01",
+        "vhc02a",
+        "vhc02b",
+        "vhc02c",
+        "vhc02d",
+        "vhc03",
+        "vhc04a",
+        "vhc04b",
+        "vhc04c",
+        "vhc05",
+        "vrad01",
+        "vrx01",
+        "vrx02a",
+        "vrx02b",
+        "vrx02c",
+        "vrx04a",
+        "vrx04b",
+        "vrx05a",
+        "vrx05b",
+        "vrx05c",
+        "vcpl01",
+        "vcpl03p1",
+        "vcpl03p2",
+        "vcpl03p3",
+        "vcpl04",
+        "vgt07a",
+        "vgt07b",
+        "vgt08a",
+        "vgt08b",
+    ],
+    "fds": [
+        "vhc01",
         "vhc02a",
         "vhc02b",
         "vhc02c",
@@ -27,21 +60,7 @@ CASES = {
         "vhc04b",
         "vhc04c",
         "vhc05",
-        "vrx02a",
-        "vrx02b",
-        "vrx02c",
-        "vrx04a",
-        "vrx04b",
-        "vcpl03p1",
-        "vcpl03p2",
-        "vcpl03p3",
-        "vcpl04",
-    ],
-    "fds": [
-        "vhc04a",
-        "vhc04b",
-        "vhc04c",
-        "vhc05",
+        "vrx01",
         "vrx02a",
         "vrx02b",
         "vrx02c",
@@ -111,7 +130,13 @@ LEVELS = {
     "time_half": (0, 1),
     "time_quarter": (0, 2),
     "space_half": (1, 2),
+    "time_double": (0, -1),
+    "time_quadruple": (0, -2),
 }
+# The coarser steps look for a cheaper configuration of each code at its
+# accuracy. A coarse configuration the code cannot express or complete is
+# recorded as unavailable, with the reason, instead of failing the study.
+COARSE = {"time_double", "time_quadruple"}
 
 
 def refinement(level):
@@ -205,6 +230,7 @@ def parameters(case):
             nodes=161,
             diffusivity=2e-05,
             hm=0.0001 if case[-1] == "a" else 0.01,
+            porosity=porosity,
             pore_gas_density=porosity * gas_density,
             ambient_fraction=0.22,
         )
@@ -324,6 +350,12 @@ def parameters(case):
             if case[-1] == "2"
             else 1000.0,
         )
+    elif case == "vrad01":
+        p.update(L=0.01, end=180.0, dt=0.1, nodes=401)
+    elif case == "vcpl01":
+        p.update(L=0.04, end=300.0, dt=0.02, nodes=801, melt_T=433.0)
+    elif case.startswith("vgt08"):
+        p.update(L=0.1, end=1.0, dt=0.005, nodes=81)
     elif case == "vcpl04":
         p.update(
             L=0.02,
@@ -349,8 +381,44 @@ def section(name, lines):
     return "&GPYRO_" + name + "\n" + "\n".join(lines) + "\n/\n\n"
 
 
+# Native V2 inputs for physics the parametric deck below does not express:
+# a surface-absorbed flux, in-depth absorption, apparent-heat-capacity latent
+# heat, a two-step chain, retained reaction gas, mass-transfer films and Darcy
+# inflow. Each holds its base level; a level changes only DT0, NCELLZ(1) and
+# TSTOP(1).
+GPYRO_DECKS = DEST / "gpyro_decks"
+GPYRO_TEMPLATED = {
+    "vhc01", "vhc03", "vrad01", "vrx01", "vrx05a", "vrx05b", "vrx05c",
+    "vcpl01", "vgt07a", "vgt07b", "vgt08a", "vgt08b",
+}
+# A homogeneous ZEROD run has one lumped unknown and no mesh to refine.
+GPYRO_LUMPED = {"vrx01"}
+
+
+def gpyro_templated(p, level):
+    case = p["case"]
+    space, time = refinement(level)
+    dt = p["dt"] / 2**time
+    nodes = 1 if case in GPYRO_LUMPED else (p["nodes"] - 1) * 2**space + 1
+    text = (GPYRO_DECKS / f"{case}.data").read_text()
+    base = 1 if case in GPYRO_LUMPED else p["nodes"]
+    for key, value, expected in (
+        ("DT0", f"{dt:.17g}", p["dt"]),
+        ("NCELLZ(1)", str(nodes), base),
+        ("TSTOP(1)", f"{p['end'] + dt:.17g}", p["end"] + p["dt"]),
+    ):
+        pattern = r"(?<![\w(])" + re.escape(key) + r"\s*=\s*([^,\s]+)"
+        found = re.findall(pattern, text)
+        if len(found) != 1 or not math.isclose(float(found[0]), expected, rel_tol=1e-12):
+            raise ValueError(f"{case}: template {key} = {found}, expected one value {expected}")
+        text = re.sub(pattern, f"{key}={value}", text)
+    return text
+
+
 def gpyro(p, level):
     case = p["case"]
+    if case in GPYRO_TEMPLATED:
+        return gpyro_templated(p, level)
     space, time = refinement(level)
     refine = 2**space
     L, rho, cp, k, ti, end, dt, nodes, dump = (
@@ -453,6 +521,12 @@ def gpyro(p, level):
     return "".join((section(*s) for s in sections))
 
 
+def fds_transient_profiles(case):
+    """FDS writes a profile at every output where the comparison reads
+    transient profiles; otherwise only the final (steady) profile."""
+    return case == "vhc01" or case.startswith("vhc02")
+
+
 def fds(p, level):
     case = p["case"]
     space, time = refinement(level)
@@ -461,17 +535,19 @@ def fds(p, level):
         p[x] for x in ("L", "rho", "cp", "k", "ti", "end", "dt", "nodes", "dump")
     )
     dt /= 2**time
+    transient = fds_transient_profiles(case)
     lines = [
         f"&HEAD CHID='{case}', TITLE='Matched Pyrolysis.jl verification problem' /",
         "&MESH IJK=3,3,3, XB=-0.15,0.15,-0.15,0.15,0,0.3 /",
         f"&TIME T_END={end:.17g}, DT={dt:.17g}, WALL_INCREMENT=1 /",
         f"&MISC SOLID_PHASE_ONLY=T, TMPA={(p['tf'] if p['front'] == 'radiative' else ti) - 273.15} /",
         f"&RADI RADIATION={('T' if p['front'] == 'radiative' else 'F')} /",
-        f"&DUMP DT_DEVC={dump:.17g}, DT_PROF={end:.17g} /",
+        f"&DUMP DT_DEVC={dump:.17g}, DT_PROF={(dump if transient else end):.17g} /",
     ]
     reaction = case.startswith(("vrx02", "vrx05", "vcpl03", "vcpl04"))
+    chain = case == "vrx01"
     layered = case.startswith("vhc04")
-    ns = 1 if case == "vcpl04" else 2 if reaction or layered else 1
+    ns = 3 if chain else 1 if case == "vcpl04" else 2 if reaction or layered else 1
     for i in range(1, ns + 1):
         kval = 1.0 if layered and i == 2 else k
         c = 1900.0 if case.startswith("vrx05") and i == 2 else cp
@@ -483,6 +559,9 @@ def fds(p, level):
             props += ", CONDUCTIVITY_RAMP='k'"
         if reaction and i == 1:
             props += f", A={p['a'] * rho ** (1 - p['n']):.17g}, E={p.get('activation', 0) * 8.314472 / 8.314462618}, N_S={p['n']}, NU_MATL=1, MATL_ID='{('A' if case == 'vcpl04' else 'B')}', HEAT_OF_REACTION={p.get('heat', 0) / 1000}"
+        if chain and i < ns:
+            # A → B → C, first order in each, E = 0, unit yield.
+            props += f", A={p['rates'][i - 1]:.17g}, E=0, N_S=1, NU_MATL=1, MATL_ID='{chr(65 + i)}', HEAT_OF_REACTION=0"
         lines.append(props + " /")
     if case == "vhc05":
         for temp in (300, 800):
@@ -502,6 +581,13 @@ def fds(p, level):
         surf += f", TMP_FRONT={p['tf'] - 273.15}"
     if p["front"] == "convective":
         surf += f", TMP_GAS_FRONT={p['tf'] - 273.15}"
+    if p["front"] == "flux":
+        # An absorbed flux q with a convective loss h(T − T∞) is convection
+        # to T∞ + q/h. A pure net flux (h = 0) has no FDS input on a
+        # conducting material: NET_HEAT_FLUX is incompatible with MATL_ID.
+        if not p.get("h"):
+            raise ValueError(f"{case}: FDS cannot apply a pure net flux to a conducting material")
+        surf += f", TMP_GAS_FRONT={p['tf'] + p['q'] / p['h'] - 273.15}"
     if p["front"] == "radiative":
         surf += f", TMP_INNER={ti - 273.15}, SKIP_INRAD=T, EXTERNAL_FLUX={(p['q'] / p['eps'] + 5.670373e-08 * p['tf'] ** 4) / 1000}"
     surf += (
@@ -512,7 +598,7 @@ def fds(p, level):
     lines += [
         surf + " /",
         "&VENT XB=-0.05,0.05,-0.05,0.05,0,0, SURF_ID='wall' /",
-        "&PROF XYZ=0,0,0, IOR=3, QUANTITY='TEMPERATURE', CELL_CENTERED=T, FORMAT_INDEX=2, ID='temperature' /",
+        f"&PROF XYZ=0,0,0, IOR=3, QUANTITY='TEMPERATURE', CELL_CENTERED=T, FORMAT_INDEX={1 if transient else 2}, ID='temperature' /",
     ]
     for ident, quantity, extras in [
         ("front", "WALL TEMPERATURE", ""),
@@ -531,8 +617,8 @@ def fds(p, level):
             lines.append(
                 f"&DEVC ID='cell_{j}', XYZ=0,0,0, IOR=3, QUANTITY='INSIDE WALL TEMPERATURE', DEPTH={L * (j - .5) / count}, TIME_AVERAGED=F /"
             )
-    if reaction:
-        for name in ("A",) if case == "vcpl04" else ("A", "B"):
+    if reaction or chain:
+        for name in ("A",) if case == "vcpl04" else ("A", "B", "C") if chain else ("A", "B"):
             lines.append(
                 f"&DEVC ID='{name}', XYZ=0,0,0, IOR=3, QUANTITY='SOLID DENSITY', MATL_ID='{name}', DEPTH={L / 2}, TIME_AVERAGED=F /"
             )
@@ -741,6 +827,18 @@ def thermakin_snapshots(path):
 
 def run(job, executable, workspace, extract_only):
     solver, case, level = job
+    if level not in COARSE:
+        return _run(job, executable, workspace, extract_only)
+    try:
+        return _run(job, executable, workspace, extract_only)
+    except (ValueError, RuntimeError, subprocess.CalledProcessError,
+            subprocess.TimeoutExpired) as err:
+        print(f"{solver} {case} {level}: unavailable: {err}", flush=True)
+        return dict(case=case, level=level, unavailable=str(err)[:300]), None
+
+
+def _run(job, executable, workspace, extract_only):
+    solver, case, level = job
     p = parameters(case)
     path = workspace / solver / level / case
     path.mkdir(parents=True, exist_ok=True)
@@ -857,8 +955,14 @@ def native_grid(solver, case, path):
         convention = ("uniform element-centered unknowns; faces from ELEMENT SIZE, verified "
                       "against printed centers; boundary conditions act on boundary-element centers")
         unknowns = n
+    elif case in GPYRO_LUMPED:
+        # ZEROD prints no profile: one lumped unknown spans the declared depth.
+        coordinates = [0.0, parameters(case)["L"]]
+        layers = []
+        convention = "ZEROD homogeneous kinetics; one lumped unknown"
+        unknowns = 1
     else:
-        profile = path / f"{case}_profile_01_01_TEMPERATURE.csv"
+        profile = sorted(path.glob(f"{case}_profile_01_01_*.csv"))[0]
         coordinates = numeric_csv(profile, 0)[0][1:]
         layers = []
         convention = "boundary-centered nodes; half control volumes at boundaries"
@@ -872,9 +976,10 @@ def native_grid(solver, case, path):
 
 
 def case_id(case):
-    if case.startswith("vcpl"):
-        return "V-CPL-" + case[4:6]
-    return f"V-{case[1:3].upper()}-{case[3:]}"
+    family = re.match(r"v([a-z]+)", case)[1]
+    rest = case[1 + len(family):]
+    # V-CPL-03's P1/P2/P3 decks are subcases of one case.
+    return f"V-{family.upper()}-{rest[:2] if family == 'cpl' else rest}"
 
 
 def extract(solver, case, level, path, decks):
@@ -913,29 +1018,181 @@ def extract(solver, case, level, path, decks):
         raise RuntimeError(f"{native}: nonmonotone output times")
     files = decks + [native]
     profile = None
-    if case.startswith(("vhc", "vcpl04")) or case == "vrx04a":
+    transient = solver == "fds" and fds_transient_profiles(case)
+    if case.startswith(("vhc", "vrad", "vcpl01", "vcpl04", "vgt")) or case == "vrx04a":
+        quantity = (
+            "YJ(01)" if case.startswith("vgt07")
+            else "PRESSURE" if case.startswith("vgt08")
+            else "TEMPERATURE"
+        )
         profile = path / (
             f"{case}_prof_1.csv"
             if solver == "fds"
-            else f"{case}_profile_01_01_TEMPERATURE.csv"
+            else f"{case}_profile_01_01_{quantity}.csv"
         )
         files.append(profile)
-        prof = numeric_csv(profile, 2 if solver == "fds" else 0)
-    if case.startswith("vhc02"):
-        depth = prof[0][1:]
-        for fo in (0.05, 0.1, 0.2, 0.5):
-            t = fo * 0.1**2 / (0.5 / 1000000.0)
-            row = min(prof[1:], key=lambda r: abs(r[0] - t))
-            if abs(row[0] - t) > tolerance:
-                raise RuntimeError(f"{profile}: missing t={t}")
+        prof = numeric_csv(profile, (3 if transient else 2) if solver == "fds" else 0)
+
+    def profile_at(t):
+        """(depth from the front face, native value) at output time t."""
+        rows = prof if solver == "fds" else prof[1:]
+        row = min(rows, key=lambda r: abs(r[0] - t))
+        if abs(row[0] - t) > tolerance:
+            raise RuntimeError(f"{profile}: missing t={t}")
+        if solver == "fds":
+            n = int(row[1])
+            return list(zip(row[2:2 + n], row[2 + n:2 + 2 * n]))
+        return list(zip(prof[0][1:], row[1:]))
+
+    def node_mean(depth, values):
+        """Volume mean of boundary-node values: trapezoids over half end cells."""
+        return sum(
+            (b - a) * (u + v) / 2
+            for a, b, u, v in zip(depth, depth[1:], values, values[1:])
+        ) / p["L"]
+
+    def isothermal(column, temperature):
+        if max(abs(r[column] + 273.15 - temperature) for r in data) > 1e-6:
+            raise RuntimeError(f"{native}: temperature left {temperature} K")
+
+    if case == "vhc01":
+        for t in (30.0, 60.0, 90.0, 180.0):
+            add(
+                "T_profiles",
+                f"t = {t} s",
+                sorted((d, v + 273.15) for d, v in profile_at(t)),
+                f", t = {t} s",
+            )
+        # The exact surface form is 0/0 at t = 0.
+        add(
+            "surface_T_history",
+            "surface Newton solve",
+            ((r[0], r[1] + 273.15) for r in data if r[0] > 0),
+        )
+    elif case == "vhc03":
+        alpha = p["k"] / (p["rho"] * p["cp"])
+        for fo in (0.1, 0.5, 1.5):
             add(
                 "T_profiles",
                 f"Fo = {fo}",
                 sorted(
-                    (
-                        ((p["L"] - d) / p["L"], v + 273.15)
-                        for d, v in zip(depth, row[1:])
-                    )
+                    (1 - d / p["L"], v + 273.15)
+                    for d, v in profile_at(fo * p["L"] ** 2 / alpha)
+                ),
+                f", Fo = {fo}",
+            )
+        depth = prof[0][1:]
+        add(
+            "mean_T_history",
+            "volume mean",
+            ((r[0], node_mean(depth, r[1:]) + 273.15) for r in prof[1:]),
+        )
+    elif case == "vrad01":
+        for t in (30.0, 60.0, 90.0, 180.0):
+            add(
+                "T_profiles",
+                f"t = {t} s",
+                sorted((d, v + 273.15) for d, v in profile_at(t)),
+                f", t = {t} s",
+            )
+        add(
+            "surface_T_history",
+            "front face",
+            ((r[0], r[1] + 273.15) for r in data if r[0] > 0),
+        )
+    elif case == "vcpl01":
+        depth = prof[0][1:]
+        for d in (0.5e-3, 1.0e-3, 1.5e-3, 2.0e-3):
+            i = min(range(len(depth)), key=lambda i: abs(depth[i] - d))
+            if abs(depth[i] - d) > 1e-9:
+                raise RuntimeError(f"{profile}: no node at depth {d}")
+            add(
+                "T_histories_at_depths",
+                f"x = {d * 1e3} mm",
+                ((r[0], r[1 + i] + 273.15) for r in prof[1:] if r[0] > 0),
+                f", x = {d * 1e3} mm",
+            )
+
+        def front(values):
+            # First crossing of the melting isotherm, linear between nodes.
+            T = [v + 273.15 - p["melt_T"] for v in values]
+            for a, b, u, v in zip(depth, depth[1:], T, T[1:]):
+                if u * v <= 0 and u != v:
+                    return a + (b - a) * u / (u - v)
+            return None
+
+        fronts = [(r[0], front(r[1:])) for r in prof[1:] if r[0] > 0]
+        add(
+            "front_trajectory",
+            "T_m isotherm",
+            ((t, s) for t, s in fronts if s is not None),
+        )
+    elif case == "vrx01":
+        # Gpyro reports mass fractions of the initial density.
+        columns, scale = ((4, 5, 6), 1.0) if solver == "fds" else ((1, 2, 3), p["rho"])
+        for name, column in zip("ABC", columns):
+            add(
+                "xi_histories",
+                f"ξ_{name}",
+                ((r[0], scale * r[column]) for r in data),
+                f" ξ_{name}",
+            )
+        if solver == "gpyro":
+            isothermal(5, p["ti"])
+            if max(abs(r[4] - 1) for r in data) > 1e-6:
+                raise RuntimeError(f"{native}: condensed mass not conserved")
+    elif case.startswith("vgt07"):
+        for t in (50.0, 150.0, 400.0):
+            add("profiles", f"t = {t} s", profile_at(t), f", t = {t} s")
+        depth = prof[0][1:]
+        # Gpyro's native gas density (RHOGOFT constant R = 8314/M), not the
+        # benchmark gas constant.
+        density = p["porosity"] * 1e5 * 32 / (8314 * 300)
+        add(
+            "uptake",
+            "surface influx",
+            ((r[0], p["hm"] * (p["ambient_fraction"] - r[1])) for r in prof[1:] if r[0] > 0),
+        )
+        add(
+            "inventory",
+            "stored tracer",
+            ((r[0], density * node_mean(depth, r[1:]) * p["L"]) for r in prof[1:]),
+        )
+        diffusivity = path / f"{case}_profile_01_02_D12.csv"
+        files.append(diffusivity)
+        if any(abs(v / p["diffusivity"] - 1) > 1e-8
+               for row in numeric_csv(diffusivity, 0)[2:] for v in row[1:]):
+            raise RuntimeError(f"{diffusivity}: binary diffusivity is not {p['diffusivity']}")
+        isothermal(1, 300.0)
+    elif case.startswith("vgt08"):
+        add(
+            "pressure",
+            "steady pressure",
+            sorted((p["L"] - d, v + 1e5) for d, v in profile_at(p["end"])),
+        )
+        # Outward-positive kg/(m² s): the top-face flux is printed in g, and
+        # MLR integrates both outward boundary fluxes.
+        top = [(r[0], -r[3] / 1000) for r in data if r[0] > 0]
+        bottom = [(t, r[2] / 1000 - f) for (t, f), r in zip(top, (r for r in data if r[0] > 0))]
+        inlet, outlet = (("bottom", bottom), ("top", top)) if case[-1] == "a" else (
+            ("top", top), ("bottom", bottom))
+        add("boundary_flux", f"inlet ({inlet[0]})", inlet[1], " inlet")
+        add("boundary_flux", f"outlet ({outlet[0]})", outlet[1], " outlet")
+        add(
+            "boundary_flux",
+            "net (inlet + outlet)",
+            ((t, a + b) for (t, a), (_, b) in zip(inlet[1], outlet[1])),
+            " net",
+        )
+        isothermal(1, 300.0)
+    elif case.startswith("vhc02"):
+        for fo in (0.05, 0.1, 0.2, 0.5):
+            add(
+                "T_profiles",
+                f"Fo = {fo}",
+                sorted(
+                    ((p["L"] - d) / p["L"], v + 273.15)
+                    for d, v in profile_at(fo * 0.1**2 / (0.5 / 1000000.0))
                 ),
                 f", Fo = {fo}",
             )
@@ -965,20 +1222,7 @@ def extract(solver, case, level, path, decks):
     elif case == "vrx04a":
         if solver == "gpyro":
             depth = prof[0][1:]
-            means = [
-                (
-                    r[0],
-                    sum(
-                        (
-                            (b - a) * (u + v) / 2
-                            for a, b, u, v in zip(depth, depth[1:], r[1:], r[2:])
-                        )
-                    )
-                    / p["L"]
-                    + 273.15,
-                )
-                for r in prof[1:]
-            ]
+            means = [(r[0], node_mean(depth, r[1:]) + 273.15) for r in prof[1:]]
         else:
             m = (p["nodes"] - 1) * 2**space
             means = [
@@ -994,14 +1238,22 @@ def extract(solver, case, level, path, decks):
             ((r[0], r[1] + 273.15) for r in data),
         )
     elif case.startswith("vrx05"):
-        add("temperature", "temperature", ((r[0], r[3] + 273.15) for r in data))
-        for name, col in [("A", 4), ("B", 5)]:
+        # FDS releases its gas; Gpyro retains it (CJ), with heat capacity 1000.
+        T, A, B, G = (3, 4, 5, None) if solver == "fds" else (1, 2, 3, 4)
+        species = [("A", A), ("B", B)] + ([("G", G)] if p["solid_yield"] < 1 else [])
+        add("temperature", "temperature", ((r[0], r[T] + 273.15) for r in data))
+        for name, col in species:
             add("species", name, ((r[0], r[col]) for r in data), " " + name)
         add(
             "enthalpy",
             "enthalpy",
             (
-                (r[0], p["L"] * (1200 * r[4] + 1900 * r[5]) * (r[3] + 273.15 - 298.15))
+                (
+                    r[0],
+                    p["L"]
+                    * (1200 * r[A] + 1900 * r[B] + (0.0 if G is None else 1000 * r[G]))
+                    * (r[T] + 273.15 - 298.15),
+                )
                 for r in data
             ),
         )
@@ -1149,7 +1401,8 @@ def retain(solver, case, level, path, files, samples, metadata):
     raw = DEST / "raw" / solver / refined / case
     raw.mkdir(parents=True, exist_ok=True)
     grid = native_grid(solver, case, path)
-    expected_intervals = (p["nodes"] - 1) * 2**space
+    lumped = solver == "gpyro" and case in GPYRO_LUMPED
+    expected_intervals = 1 if lumped else (p["nodes"] - 1) * 2**space
     if grid["intervals"] != expected_intervals:
         raise RuntimeError(f"{solver} {case}: requested {expected_intervals} intervals, "
                            f"native grid has {grid['intervals']}")
@@ -1162,7 +1415,7 @@ def retain(solver, case, level, path, files, samples, metadata):
         # These spatially homogeneous ODE cases still have total volume L.
         # Preserve the actual coordinates and expose the exception explicitly.
         if (solver == "gpyro" and grid["spatial_unknowns"] == 2 and
-                case.startswith("vrx02") and
+                case.startswith(("vrx02", "vrx05")) and
                 math.isclose(grid["coordinates_m"][-1], .75*p["L"], rel_tol=1e-8)):
             grid["coordinate_exception"] = "native two-node position formula: printed span 3L/4; control-volume sum L; homogeneous ODE only"
         else:
@@ -1194,7 +1447,7 @@ def retain(solver, case, level, path, files, samples, metadata):
             case=case,
             level=refined,
             dt=thermakin_dt(p, level) if solver == "thermakin" else p["dt"] / 2**time,
-            requested_intervals=(p["nodes"] - 1) * 2**space,
+            requested_intervals=expected_intervals,
             grid=grid,
             observed_step_history="not retained; output intervals are not integration steps",
             timestep_interpretation=("outer step; native solid substepping permitted"
@@ -1245,6 +1498,8 @@ def main():
                 jobs,
             )
         )
+    unavailable = [audit for audit, series in results if series is None]
+    results = [r for r in results if r[1] is not None]
     manifest = DEST / f"{args.solver}.toml"
     with manifest.open("w") as stream:
         for audit, series in results:
@@ -1265,6 +1520,7 @@ def main():
         generator_sha256=sha256(Path(__file__)),
         manifest_sha256=sha256(manifest),
         runs=[r[0] for r in results],
+        unavailable=unavailable,
     )
     if args.solver == "thermakin":
         # build_thermakin.sh records the compiler and the source hash.

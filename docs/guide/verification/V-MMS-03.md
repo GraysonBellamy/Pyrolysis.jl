@@ -41,9 +41,9 @@ report also retains the coarse meshes to show the approach to it.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| L∞ T error on moving mesh, t=10.0 s | 6.456e-05 | — | 6.456e-05 | 0.25 | yes | manufactured T* on 30%-compressed mesh |
-| relative L∞ ξ_solid (uniform) error, t=10.0 s | 1.252e-12 | — | 1.252e-12 | 1e-10 | yes | uniform solid: verifies the relative flux of a uniform field under the moving mesh + source injection |
-| relative L∞ ξ_gas error, t=10.0 s | 3.14e-05 | — | 3.14e-05 | 0.006 | yes | gas: diffusive + relative flux on the moving mesh |
+| L∞ T error on moving mesh, t=10.0 s | 6.46e-05 | — | 6.46e-05 | 0.25 | yes | manufactured T* on 30%-compressed mesh |
+| relative L∞ ξ_solid (uniform) error, t=10.0 s | 9.068e-13 | — | 9.068e-13 | 1e-10 | yes | uniform solid: verifies the relative flux of a uniform field under the moving mesh + source injection |
+| relative L∞ ξ_gas error, t=10.0 s | 3.139e-05 | — | 3.139e-05 | 0.006 | yes | gas: diffusive + relative flux on the moving mesh |
 
 ![V-MMS-03 T_profiles](assets/V-MMS-03/V-MMS-03_T_profiles.png)
 
@@ -69,12 +69,14 @@ report also retains the coarse meshes to show the approach to it.
 
 | n_cells | h | wall (s) | L2_T | Linf_T |
 | --- | --- | --- | --- | --- |
-| 16 | 0.0625 | 0.02602 | 0.04149 | 0.09965 |
-| 32 | 0.03125 | 0.07228 | 0.005495 | 0.0096 |
-| 64 | 0.01562 | 0.2148 | 0.002116 | 0.003183 |
-| 128 | 0.007812 | 0.3569 | 0.0006559 | 0.0008895 |
-| 256 | 0.003906 | — | 0.0001806 | 0.0002461 |
-| 512 | 0.001953 | — | 4.724e-05 | 6.456e-05 |
+| 16 | 0.0625 | 0.03347 | 0.04149 | 0.09965 |
+| 32 | 0.03125 | 0.08663 | 0.005495 | 0.0096 |
+| 64 | 0.01562 | 0.2044 | 0.002116 | 0.003183 |
+| 128 | 0.007812 | 0.4961 | 0.0006559 | 0.0008895 |
+| 256 | 0.003906 | 1.088 | 0.0001806 | 0.0002461 |
+| 512 | 0.001953 | 3.045 | 4.728e-05 | 6.46e-05 |
+
+Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
 Observed order 1.867 (L2_T), expected 2.0.
 

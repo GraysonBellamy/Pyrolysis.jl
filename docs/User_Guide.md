@@ -1033,9 +1033,6 @@ deactivate as the sample burns out.
 ```julia
 solution = solve(
     problem;
-    abstol = 1e-11,                         # temperature tolerance [K]
-    reltol = 1e-9,                          # resolves thin-cell pore volume
-    pressure_tolerance = 1e-4,              # absolute local pressure budget [Pa]
     dtmin = 1e-14,                          # smallest step [s] (default 1e-12)
     use_ale = true,                         # move the mesh with the solid as it shrinks
     radiation_model = SURFACE_ABSORPTION,   # absorb the cone flux at the surface
@@ -1425,7 +1422,7 @@ problem = PyrolysisProblem(
 
 # ---- Step 5: solve ----------------------------------------------------------
 solution = solve(problem;
-    abstol = 1e-11, reltol = 1e-9, pressure_tolerance = 1e-4, dtmin = 1e-14,
+    dtmin = 1e-14,
     use_ale = true,
     radiation_model = SURFACE_ABSORPTION,
     min_thickness = 0.01e-3,
@@ -5385,8 +5382,9 @@ methods and the matrix `W` they factor.
 ## 8.3 Tolerances and step control
 
 The integrator adapts its step to keep the local error estimate of every row
-within `abstol_row + reltol · |u_row|`. `reltol` applies to every row; the
-absolute tolerances are set **per row** by `setup` from `abstol`, `reltol`,
+within `abstol_row + reltol · |u_row|`. `reltol` applies to every row but the
+node positions of a moving mesh, which are held to their absolute tolerance
+alone; the absolute tolerances are set **per row** by `setup` from `abstol`, `reltol`,
 `threshold` and each cell's initial condensed mass `m_s,i(0)`:
 
 | Row | Absolute tolerance |
@@ -5394,7 +5392,7 @@ absolute tolerances are set **per row** by `setup` from `abstol`, `reltol`,
 | Temperature (temperature form) | `abstol` [K] |
 | Enthalpy inventory (enthalpy form) | `threshold · m_s,i(0) · c_p,ref · abstol` [J], so a cell at the threshold resolves its temperature to `abstol` |
 | Component mass of cell `i` | `reltol · threshold · m_s,i(0)` [kg] (every component of the cell, a product included) |
-| Node position (moving mesh) | `reltol · threshold · h_n`, `h_n` the smallest initial size of the cells around node `n` |
+| Node position (moving mesh) | `reltol · threshold · h_n`, `h_n` the smallest initial size of the cells around node `n`; no relative share |
 | Node velocity (moving mesh) | the position tolerance over the time scale `dt` |
 | Face intensity (`BEER_LAMBERT`) | `reltol` times the largest incident intensity over the time span |
 | Cross-section area and its lateral rate (lateral shrinkage) | `reltol · A₀`; the velocity tolerance over the initial thickness |
@@ -5412,6 +5410,10 @@ consequences follow:
   Changing `threshold` changes the tolerances even when `deactivation` is off.
 - **`dt` scales the node-velocity tolerances** on a moving mesh, besides being
   the first step.
+- **A node position is held to its absolute tolerance alone.** Its value is a
+  coordinate, whose size depends on where the origin lies, so a relative share
+  `reltol · |x|` would let a thin cell far from the origin change by a large
+  fraction of its own thickness within one step's error.
 
 The defaults are:
 
@@ -6936,8 +6938,6 @@ sol = solve(problem;
     deactivation    = true,          # cells below the threshold leave the system
     radiation_model = BEER_LAMBERT,
     min_thickness   = 1e-3,          # [m] stop if the live column ever thins this far
-    reltol          = 1e-7,          # the default 1e-6 ends in pore closure on the
-    abstol          = 1e-9,          # layer's last cells, just before the event
 )
 
 sol.retcode                          # :Success
@@ -7400,7 +7400,7 @@ the strict test, `:Success` only.
 | `:Terminated` | `:burned_out` | `true` | The last live cell went; its inventories are written to the last event as lost. |
 | `:Terminated` | `:min_thickness` | `true` | The live thickness of a moving mesh fell below `min_thickness` (§10.3). |
 | `:Terminated` | `:interior` | `false` | A cell below the threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one; the solve warns and ends. |
-| `:DtLessThanMin` | `:pore_closure` | `false` | The domain test kept rejecting a cell whose porosity left the resolved pore domain until the step fell below `dtmin`: on a moving mesh a thinning cell's pore volume falls to its own uncertainty before the cell reaches the threshold. Tighter tolerances resolve it (§10.2.1). |
+| `:DtLessThanMin` | `:pore_closure` | `false` | The domain test kept rejecting a cell whose porosity left the resolved pore domain until the step fell below `dtmin`: its pore volume closed, or fell to its own mass, thermal and geometry uncertainty. Tighter tolerances resolve the second. |
 | `:Failure` | `:none` | `false` | The state after an event was inadmissible (a receiver outside its own mass tolerances, crossed nodes, a cell at or below absolute zero, under gas transport a porosity outside `[0, 1]`), or no consistent node velocities exist after it; the solve warns naming the event's time. |
 
 The state a solve ends on is always saved, whether or not `saveat` names its
@@ -11946,7 +11946,7 @@ it starts empty):
 | enthalpy inventory (`energy_state = :enthalpy`) | `threshold · m_s,i(0) · c_p,ref · abstol` [J] |
 | condensed component mass of cell `i` | `reltol · threshold · m_s,i(0)` [kg] |
 | gas component mass | initial `pressure_tolerance · M_j · φ_i · V_i/(N_g R T_i)` [kg], supplemented by the proposed-state pressure norm |
-| node position (moving mesh) | `reltol · threshold · h_n`, `h_n` the smallest initial size of the cells around node `n` |
+| node position (moving mesh) | `reltol · threshold · h_n`, `h_n` the smallest initial size of the cells around node `n`; no relative share |
 | node velocity (moving mesh) | the position tolerance over `dt` |
 | face intensity (`BEER_LAMBERT`) | `reltol` times the largest incident intensity over the time span (at least 1 W/m²) |
 | conversion-history pair (lateral shrinkage) | the cell's mass tolerance |

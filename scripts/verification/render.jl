@@ -195,66 +195,140 @@ function render_pointwise_error(curve::ReportCurve, path::String; crosscode::Boo
     return path
 end
 
-"""
-Setup-and-simulation comparison: our warmed build-and-solve wall time at every
-ladder rung vs the other codes' internal total elapsed wall time, as a log-x
-lollipop (bars can't start at 0 on a log axis).
-Ours colored, other codes muted gray — the reference runs differ in
-resolution and simulated span (see reference/timings.csv notes), so this is
-indicative, not a controlled benchmark; the subtitle says so.
-"""
-function render_solve_time(
-    case_id::String,
-    ns::Vector{Int},
-    walls::Vector{Float64},
-    refs,
-    path::String,
+# Errors at or below this are drawn at it on the logarithmic axis (exact runs).
+const COST_ERROR_FLOOR = 1e-14
+
+# Each code keeps its colour and marker on every figure (fixed by identity).
+const COST_STYLE = Dict(
+    "this code" => (color = RGBf(0.0, 0.447, 0.698), marker = :circle),
+    "fds" => (color = RGBf(0.902, 0.624, 0.0), marker = :utriangle),
+    "gpyro" => (color = RGBf(0.0, 0.620, 0.451), marker = :rect),
+    "thermakin" => (color = RGBf(0.800, 0.475, 0.655), marker = :diamond),
 )
-    labels = vcat(
-        ["this solver, warm (n = $(n))" for n in ns],
-        String[r.label * " — " * r.res for r in refs],
+
+"""
+Cost against accuracy for the matched external runs of a case
+(`matched_costs`). External runs scored on the same curves and references
+share one panel with this code's configurations, which are the same for all
+of them; a case whose runs are scored on different references (V-CPL-03's
+paths) gets a panel per reference set, all on the same axes. Filled markers
+are each external code's matched mesh and step and this code's report
+tolerances; open markers are the other runs. This code's line joins its
+cheapest configuration at each accuracy. Lower left is better. A run every code solves exactly (all errors at the floor) is not drawn;
+`nothing` when no run is left.
+"""
+function render_cost(case_id::String, panels, path::String)
+    exact(p) = all(q -> q.error <= COST_ERROR_FLOOR, vcat(p.external, p.ladder))
+    panels = filter(!exact, panels)
+    isempty(panels) && return nothing
+    keys_ = unique(p.refs for p in panels)
+    groups = [filter(p -> p.refs == k, panels) for k in keys_]
+    ncol = min(length(groups), 3)
+    nrow = cld(length(groups), ncol)
+    size = length(groups) == 1 ? FIG_SIZE : (380 * ncol + 120, 340 * nrow + 140)
+    fig = Figure(; size)
+    errors =
+        [max(q.error, COST_ERROR_FLOOR) for p in panels for q in vcat(p.external, p.ladder)]
+    times = [q.time for p in panels for q in vcat(p.external, p.ladder)]
+    decades(v) =
+        (a = floor(Int, log10(minimum(v))); (a, max(a + 1, ceil(Int, log10(maximum(v))))))
+    xa, xb = decades(errors)
+    ya, yb = decades(times)
+    ticks(a, b) = (
+        k = b - a > 7 ? 2 : 1;
+        (10.0 .^ (a:k:b), [rich("10", superscript(string(e))) for e = a:k:b])
     )
-    values = vcat(walls, Float64[r.wall for r in refs])
-    code_keys = unique(String[_code_key(r.label) for r in refs])
-    colors = vcat(
-        fill(_series_color(1), length(ns)),
-        [
-            CROSSCODE_GRAYS[mod1(
-                findfirst(==(_code_key(r.label)), code_keys),
-                length(CROSSCODE_GRAYS),
-            )] for r in refs
-        ],
-    )
-    N = length(values)
-    ys = collect(Float64, N:-1:1)   # ours on top
-    x0 = minimum(values) / 3
-    fig = Figure(size = FIG_SIZE)
-    ax = Axis(
-        fig[1, 1];
-        title = "$(case_id): setup and simulation wall time",
-        subtitle = "warm Julia vs internal elapsed; indicative (see timing protocol)",
-        xlabel = "elapsed wall time (s)",
-        xscale = log10,
-        yticks = (ys, labels),
-    )
-    linesegments!(
-        ax,
-        [Point2f(x0, y) => Point2f(v, y) for (v, y) in zip(values, ys)];
-        color = colors,
-        linewidth = 3,
-    )
-    scatter!(ax, values, ys; color = colors, markersize = 14)
-    for (v, y) in zip(values, ys)
-        text!(
-            ax,
-            v,
-            y;
-            text = " $(round(v; sigdigits = 3)) s",
-            align = (:left, :center),
-            fontsize = 11,
+    axes = Axis[]
+    for (g, group) in enumerate(groups)
+        row, col = cld(g, ncol), mod1(g, ncol)
+        ax = Axis(
+            fig[row, col];
+            title = length(groups) > 1 ? join(last.(group[1].refs), ", ") : "",
+            xscale = log10,
+            yscale = log10,
+            xticks = ticks(xa, xb),
+            yticks = ticks(ya, yb),
         )
+        col > 1 && hideydecorations!(ax; grid = false, ticks = false)
+        row < nrow &&
+            length(groups) - g >= ncol &&
+            hidexdecorations!(ax; grid = false, ticks = false)
+        ours = group[1].ladder
+        st = COST_STYLE["this code"]
+        e(q) = max(q.error, COST_ERROR_FLOOR)
+        # Cheapest configuration at each accuracy: nothing at least as accurate is faster.
+        front = sort(
+            filter(q -> !any(p -> e(p) <= e(q) && p.time < q.time, ours), ours);
+            by = e,
+        )
+        lines!(ax, e.(front), [q.time for q in front]; color = st.color, linewidth = 2)
+        for q in ours
+            report = q.tol == 1
+            scatter!(
+                ax,
+                [e(q)],
+                [q.time];
+                marker = st.marker,
+                markersize = 9,
+                color = report ? st.color : (:white, 0.0),
+                strokecolor = st.color,
+                strokewidth = report ? 0 : 1.4,
+            )
+        end
+        for p in group
+            st = COST_STYLE[p.solver]
+            for q in p.external
+                base = q.level == "base"
+                scatter!(
+                    ax,
+                    [max(q.error, COST_ERROR_FLOOR)],
+                    [q.time];
+                    marker = st.marker,
+                    markersize = base ? 13 : 11,
+                    color = base ? st.color : (:white, 0.0),
+                    strokecolor = st.color,
+                    strokewidth = base ? 0 : 1.6,
+                )
+            end
+        end
+        limits!(ax, 10.0^(xa - 0.2), 10.0^(xb + 0.2), 10.0^(ya - 0.2), 10.0^(yb + 0.2))
+        push!(axes, ax)
     end
-    xlims!(ax, x0, maximum(values) * 4)
+    Label(fig[1:nrow, 0], "solve time (s)"; rotation = pi / 2, tellheight = false)
+    Label(
+        fig[nrow+1, 1:ncol],
+        "largest error over the scored references";
+        tellwidth = false,
+    )
+    solvers = unique(p.solver for p in panels)
+    labels =
+        Dict("fds" => "FDS 6.11.1", "gpyro" => "Gpyro V2", "thermakin" => "ThermaKin2Ds 7")
+    Legend(
+        fig[nrow+2, 1:ncol],
+        vcat(
+            [[
+                LineElement(color = COST_STYLE["this code"].color, linewidth = 2),
+                MarkerElement(
+                    color = COST_STYLE["this code"].color,
+                    marker = :circle,
+                    markersize = 9,
+                ),
+            ]],
+            [
+                MarkerElement(
+                    color = COST_STYLE[s].color,
+                    marker = COST_STYLE[s].marker,
+                    markersize = 12,
+                ) for s in solvers
+            ],
+        ),
+        vcat(["Pyrolysis.jl"], [labels[s] for s in solvers]);
+        orientation = :horizontal,
+        framevisible = false,
+        tellwidth = false,
+    )
+    colgap!(fig.layout, 12)
+    rowgap!(fig.layout, 8)
     save(path, fig)
     return path
 end

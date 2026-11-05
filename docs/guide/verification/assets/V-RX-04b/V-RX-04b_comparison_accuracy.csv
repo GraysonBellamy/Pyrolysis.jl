@@ -1,16 +1,22 @@
 "code","curve","reference","resolution","samples","Linf","RMS"
 "FDS 6.11.1","surface_T_history","surface temperature","base",101,432.7973467682259,68.7517200961023
-"FDS 6.11.1","surface_T_history","surface temperature","refined",101,432.7973467682259,68.70389572562325
+"FDS 6.11.1","surface_T_history","surface temperature","time_double",101,432.7973467682259,68.79107190519775
+"FDS 6.11.1","surface_T_history","surface temperature","time_quadruple",101,432.7973467682259,68.84985479570337
 "FDS 6.11.1","surface_T_history","surface temperature","time_half",101,432.7973467682259,68.70166674045281
 "FDS 6.11.1","surface_T_history","surface temperature","time_quarter",101,432.7973467682259,68.66300320988996
 "FDS 6.11.1","surface_T_history","surface temperature","space_half",101,432.7973467682259,68.66522751979093
+"FDS 6.11.1","surface_T_history","surface temperature","refined",101,432.7973467682259,68.70389572562325
 "Gpyro V2","surface_T_history","surface temperature","base",101,432.7973467682259,68.62130173863763
-"Gpyro V2","surface_T_history","surface temperature","refined",101,432.7973467682259,68.63256970688813
+"Gpyro V2","surface_T_history","surface temperature","time_double",101,432.7973467682259,68.59696083496573
+"Gpyro V2","surface_T_history","surface temperature","time_quadruple",101,432.7973467682259,68.54830350006996
 "Gpyro V2","surface_T_history","surface temperature","time_half",101,432.7973467682259,68.63347497103861
 "Gpyro V2","surface_T_history","surface temperature","time_quarter",101,432.7973467682259,68.63956227237495
 "Gpyro V2","surface_T_history","surface temperature","space_half",101,432.7973467682259,68.63865753957275
+"Gpyro V2","surface_T_history","surface temperature","refined",101,432.7973467682259,68.63256970688813
 "ThermaKin2Ds 7","surface_T_history","surface temperature","base",101,432.7973467682259,68.83177401229699
-"ThermaKin2Ds 7","surface_T_history","surface temperature","refined",101,432.7973467682259,68.73888469716228
+"ThermaKin2Ds 7","surface_T_history","surface temperature","time_double",101,432.7973467682259,68.83170776072893
+"ThermaKin2Ds 7","surface_T_history","surface temperature","time_quadruple",101,432.7973467682259,68.83039678175105
 "ThermaKin2Ds 7","surface_T_history","surface temperature","time_half",101,432.7973467682259,68.83179440588849
 "ThermaKin2Ds 7","surface_T_history","surface temperature","time_quarter",101,432.7973467682259,68.83179623999362
 "ThermaKin2Ds 7","surface_T_history","surface temperature","space_half",101,432.7973467682259,68.73888710612913
+"ThermaKin2Ds 7","surface_T_history","surface temperature","refined",101,432.7973467682259,68.73888469716228

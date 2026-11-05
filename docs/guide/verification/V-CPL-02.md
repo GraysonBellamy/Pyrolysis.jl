@@ -75,10 +75,12 @@ is active as front cells approach deactivation.
 
 | n_cells | h | wall (s) | balance | consistency |
 | --- | --- | --- | --- | --- |
-| 60 | 0.01667 | 0.2645 | 0.0006181 | 0.001283 |
-| 100 | 0.01 | 0.3305 | 0.00116 | 0.00051 |
-| 160 | 0.00625 | 0.5917 | 0.0003602 | 0.0001159 |
-| 240 | 0.004167 | 1.466 | 0.0003337 | 2.133e-05 |
+| 60 | 0.01667 | 0.5679 | 0.0006181 | 0.001283 |
+| 100 | 0.01 | 0.7717 | 0.00116 | 0.0005099 |
+| 160 | 0.00625 | 1.532 | 0.0003602 | 0.0001159 |
+| 240 | 0.004167 | 2.686 | 0.0003337 | 2.133e-05 |
+
+Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
 Observed order 0.6363 (balance).
 
@@ -90,9 +92,8 @@ Observed order 0.6363 (balance).
 | use_ale | true |
 | min_thickness | 0.0001 |
 | deactivation | true |
-| abstol | 1.0e-9 |
-| reltol | 1.0e-7 |
-| pressure_tolerance | 0.001 |
+| abstol | 1.0e-7 |
+| reltol | 1.0e-5 |
 
 ## V-CPL-02b — Landau ablation: kinetics-limit insensitivity variant (E/2)
 
@@ -102,7 +103,7 @@ Observed order 0.6363 (balance).
 | --- | --- | --- | --- | --- | --- | --- |
 | steady energy balance: v vs Landau v_ss(measured T_s) | 0.001911 | 0.00191 | 0.0003182 | 0.002 | yes | identity must close at E = 50 kJ/mol as at 100 (locus check) |
 | regression consistency: thickness slope vs gas generation | 0.001911 | 0.00191 | 0.0004004 | 0.0017 | yes | gas outside the strain ⇒ dL/dt = −ṁ‴_gas/ρ exactly |
-| stationary far-field temperature | 3.481e-07 | 0 | 3.481e-07 | 0.0001 | yes | cold reaction gate and domain length qualify the steady reference |
+| stationary far-field temperature | 3.48e-07 | 0 | 3.48e-07 | 0.0001 | yes | cold reaction gate and domain length qualify the steady reference |
 
 ![V-CPL-02b mlr_history](assets/V-CPL-02b/V-CPL-02b_mlr_history.png)
 
@@ -114,9 +115,11 @@ Observed order 0.6363 (balance).
 
 | n_cells | h | wall (s) | balance | consistency |
 | --- | --- | --- | --- | --- |
-| 120 | 0.008333 | — | 0.004637 | 0.0002128 |
-| 200 | 0.005 | — | 0.0006218 | 0.0001949 |
-| 320 | 0.003125 | — | 0.0003182 | 0.0004004 |
+| 120 | 0.008333 | 1.06 | 0.004637 | 0.0002128 |
+| 200 | 0.005 | 2.25 | 0.0006218 | 0.0001949 |
+| 320 | 0.003125 | 4.605 | 0.0003182 | 0.0004004 |
+
+Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
 Observed order 2.749 (balance).
 
@@ -128,6 +131,5 @@ Observed order 2.749 (balance).
 | use_ale | true |
 | min_thickness | 0.0001 |
 | deactivation | true |
-| abstol | 1.0e-9 |
-| reltol | 1.0e-7 |
-| pressure_tolerance | 0.001 |
+| abstol | 1.0e-7 |
+| reltol | 1.0e-5 |

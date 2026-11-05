@@ -139,8 +139,6 @@ function _vrx05_case(id, heat; solid_yield = 1.0)
                                   "density and pressure routines use different gas constants. " :
                                   ""
                               ) *
-                              "Inputs, raw outputs, refinement checks and extraction are in " *
-                              "`test/verification/reference/gpyro/v2_accuracy/`. " *
                               "ThermaKin2Ds 7 uses one insulated element at dt = 0.001 s; " *
                               "its positive reaction heat is exothermic, so the sign is " *
                               "reversed" *
@@ -150,17 +148,6 @@ function _vrx05_case(id, heat; solid_yield = 1.0)
                                   "occupying volume." : "."
                               ),
             curves = sol -> begin
-                stem = "gpyro/v2_accuracy/" * lowercase(replace(id, "-" => ""))
-                gp_t, gp_T, gp_A, gp_B, gp_G, gp_H = reference_columns(
-                    stem * "_history.csv",
-                    "t_s",
-                    "T_K",
-                    "A_kg_m3",
-                    "B_kg_m3",
-                    "G_kg_m3",
-                    "H_J_m2";
-                    header_rows = 1,
-                )
                 [
                     ReportCurve(
                         name = :temperature,
@@ -174,13 +161,6 @@ function _vrx05_case(id, heat; solid_yield = 1.0)
                                 y = vec(sol.T[1, :]),
                                 exact = temperature,
                             ),
-                            CurveSeries(
-                                label = "Gpyro V2",
-                                x = gp_t,
-                                y = gp_T,
-                                exact = temperature,
-                                crosscode = true,
-                            ),
                         ],
                     ),
                     ReportCurve(
@@ -188,25 +168,14 @@ function _vrx05_case(id, heat; solid_yield = 1.0)
                         title = "$(id): species histories",
                         xlabel = "t (s)",
                         ylabel = "mass concentration (kg/m³)",
-                        series = vcat(
-                            [
-                                CurveSeries(
-                                    label = string(name),
-                                    x = sol.t,
-                                    y = vec(sol.ξ[k, 1, :]),
-                                    exact = t -> ξexact(t)[k],
-                                ) for (k, name) in enumerate((:A, :B, :G))
-                            ],
-                            [
-                                CurveSeries(
-                                    label = "Gpyro V2 $(name)",
-                                    x = gp_t,
-                                    y = (gp_A, gp_B, gp_G)[k],
-                                    exact = t -> ξexact(t)[k],
-                                    crosscode = true,
-                                ) for (k, name) in enumerate((:A, :B, :G))
-                            ],
-                        ),
+                        series = [
+                            CurveSeries(
+                                label = string(name),
+                                x = sol.t,
+                                y = vec(sol.ξ[k, 1, :]),
+                                exact = t -> ξexact(t)[k],
+                            ) for (k, name) in enumerate((:A, :B, :G))
+                        ],
                     ),
                     ReportCurve(
                         name = :enthalpy,
@@ -219,13 +188,6 @@ function _vrx05_case(id, heat; solid_yield = 1.0)
                                 x = sol.t,
                                 y = sol.extras.live_energy,
                                 exact = H,
-                            ),
-                            CurveSeries(
-                                label = "Gpyro V2",
-                                x = gp_t,
-                                y = gp_H,
-                                exact = H,
-                                crosscode = true,
                             ),
                         ],
                     ),

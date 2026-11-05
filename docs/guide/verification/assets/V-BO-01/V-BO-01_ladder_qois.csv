@@ -1,16 +1,16 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
-30,"complete burnout: live thickness at t_end is the substrate",0.01199666709404037,0.012,3.3329059596302196e-6,1.0e-5,true
-30,"mass loss of the gasified PMMA layer",69.92063596900408,69.9147977671139,0.005838201890185246,0.3,true
-30,"mass ledger closure",2.2606064587317175e-11,0.0,2.2606064587317175e-11,3.0e-5,true
+30,"complete burnout: live thickness at t_end is the substrate",0.011996667094040264,0.012,3.3329059597360378e-6,1.0e-5,true
+30,"mass loss of the gasified PMMA layer",69.92063584606628,69.9147977671139,0.005838078952379533,0.3,true
+30,"mass ledger closure",1.6014941165879475e-7,0.0,1.6014941165879475e-7,3.0e-5,true
 30,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
 30,"deactivation invocations for the PMMA layer (reported)",1.0,1.0,0.0,Inf,true
-60,"complete burnout: live thickness at t_end is the substrate",0.011996666972032055,0.012,3.333027967945129e-6,1.0e-5,true
-60,"mass loss of the gasified PMMA layer",69.92063741604449,69.9147977671139,0.005839648930589192,0.3,true
-60,"mass ledger closure",1.3816593291185019e-11,0.0,1.3816593291185019e-11,3.0e-5,true
+60,"complete burnout: live thickness at t_end is the substrate",0.011996666972034883,0.012,3.33302796511753e-6,1.0e-5,true
+60,"mass loss of the gasified PMMA layer",69.92063732783915,69.9147977671139,0.005839560725249271,0.3,true
+60,"mass ledger closure",1.0256667292932565e-7,0.0,1.0256667292932565e-7,3.0e-5,true
 60,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
 60,"deactivation invocations for the PMMA layer (reported)",1.0,1.0,0.0,Inf,true
-120,"complete burnout: live thickness at t_end is the substrate",0.011996666851399544,0.012,3.333148600456054e-6,1.0e-5,true
-120,"mass loss of the gasified PMMA layer",69.92063884607505,69.9147977671139,0.005841078961154267,0.3,true
-120,"mass ledger closure",7.666899681737023e-12,0.0,7.666899681737023e-12,3.0e-5,true
+120,"complete burnout: live thickness at t_end is the substrate",0.011996666851400292,0.012,3.333148599708388e-6,1.0e-5,true
+120,"mass loss of the gasified PMMA layer",69.92063878657034,69.9147977671139,0.005841019456440222,0.3,true
+120,"mass ledger closure",8.359743099470399e-8,0.0,8.359743099470399e-8,3.0e-5,true
 120,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
 120,"deactivation invocations for the PMMA layer (reported)",1.0,1.0,0.0,Inf,true

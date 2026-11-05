@@ -285,8 +285,8 @@ gates open (§18.2.2), while V-RX-02d keeps the limiter on as a guard.
 **Cross-code overlays.** Native inputs must represent the same active equations,
 material laws, boundaries and observable before a curve is included. Retained
 outputs, provenance and transformations are under `test/verification/reference/`.
-Report-mode case curves or the matched-series registry read them; assert mode
-never touches them. The coverage matrix in
+The matched-series registry reads them in report mode; assert mode never
+touches them. The coverage matrix in
 `docs/guide/verification/comparison_coverage.md` identifies full and partial matches.
 Both FDS and Gpyro cover V-HC-01/02/04/05, V-RX-01, V-RX-02a–c, V-RX-04,
 V-RX-05a–b, V-CPL-03 P1/P2/P3 and the subcritical V-CPL-04 steady profile.
@@ -298,23 +298,21 @@ context layer in a separate `_vs_codes` variant of each affected figure, so the 
 figure keeps the solver's own error on its own scale; for exact-solution cases the
 other codes' *errors* against the same exact solution are compared.
 The guide's formulation comparisons use V2 at the revision in
-§1.6.5. The V-GT-07, V-GT-08 and V-RX-05 comparisons use that pinned V2
-revision, retain raw numerical outputs and refinement checks, and omit timings.
-Their source and transformations are documented in
-`test/verification/reference/gpyro/v2_accuracy/README.md`.
-The conduction, reaction and deformation comparisons use the same pinned
-Gpyro V2 revision, FDS 6.11.1 and ThermaKin2Ds 7, with native base and independent time/space refinement outputs and executable
-hashes under `test/verification/reference/matched/`. That dataset also holds
-the ThermaKin2Ds V-HC-01, V-HC-03, V-RX-01, V-GT-01 and V-GT-07a/b runs.
+§1.6.5. Every cross-code comparison, with that pinned Gpyro V2 revision,
+FDS 6.11.1 and ThermaKin2Ds 7, is a matched native-input run at seven
+configurations (coarser and finer time steps and a finer mesh). The native
+inputs and outputs, executable hashes, solve times and each deck's source
+and transformations are under `test/verification/reference/matched/`.
 ThermaKin2Ds is built from its source, which is not redistributable and is
 not committed, with only a start-time-banner portability change; the build
 script and the source and executable hashes are retained with the outputs.
-These runs contain no timing measurements.
+The same runs are timed on one pinned core under `scripts/timing/README.md`;
+the times and their provenance are in `test/verification/reference/matched/timing/`.
 In particular, FDS V-RX-05a–b uses `ADJUST_H=F` to match the specified local
 reaction heat. No gas-transport comparison is attributed to FDS, and the
 V-CPL-04 comparison does not extend to the upper-temperature-gated runaway branch.
 
-The reports compare accuracy. Runtime comparisons require a shared achieved-accuracy target; no pair is qualified under this criterion. See the [comparison basis](../verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions, independent time refinement, and runtime qualification. ThermaKin2Ds cannot express V-RAD-01, V-CPL-01, V-RX-02a/c or the pressure-driven V-GT-02–06 and V-GT-08; the [coverage matrix](../verification/comparison_coverage.md) gives the reasons.
+The reports compare accuracy, and each case compares cost at matched accuracy: for each external run, that code's cheapest run at least as accurate against this code's cheapest resolution at least as accurate on every scored reference. The ratio is a cost at equal accuracy for that problem, not a pure solver speedup; on the smallest problems the external times are mostly input, setup and output. See the [comparison basis](../verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions and time refinement. ThermaKin2Ds cannot express V-RAD-01, V-CPL-01, V-RX-02a/c or the pressure-driven V-GT-02–06 and V-GT-08; the [coverage matrix](../verification/comparison_coverage.md) gives the reasons.
 
 ---
 
@@ -1093,11 +1091,9 @@ can arise from either, from input transcription, or from output definitions.
   separately supplied outputs and are not part of that dataset.
 - **Gpyro V2:** this is the reference for formulation comparisons (§1.6.5).
   Match condensed/gas density definitions, conversion-rate normalization,
-  diffusion, thermal exchange and volume-change laws. All active overlays,
-  including V-HC-01, V-HC-03, V-RAD-01, V-RX-01 and V-CPL-01 route A,
-  use the pinned V2 executable. Native outputs and independent refinement
-  studies are retained for the cases listed in §18.1.3; they supply no timing
-  measurements.
+  diffusion, thermal exchange and volume-change laws. Every overlay uses the
+  pinned V2 executable in the matched study (§18.1.3), which retains its
+  native outputs, refinements and solve times.
 - **FDS:** the retained 6.11.1 overlays concern matched solid conduction,
   reaction kinetics/heat, radiative boundaries, solid-only volume change
   and subcritical thermal feedback (§18.1.3). Its instantaneous gas release and optional two-flux
@@ -1108,8 +1104,8 @@ can arise from either, from input transcription, or from output definitions.
 The benchmark definitions, actual input decks and exact-solution errors
 provide the evidence for each comparison (§18.1.3). The MaCFP community
 predictions use differing calibrated models; their spread is not a
-solver-only verification result. Runtime comparisons require qualified
-workloads at the same achieved accuracy.
+solver-only verification result. Cost is compared only at matched accuracy
+(§18.1.3).
 
 ---
 

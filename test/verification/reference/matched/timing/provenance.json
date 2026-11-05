@@ -1,0 +1,50 @@
+{
+  "protocol": "scripts/timing/README.md",
+  "measured": "2026-11-04",
+  "machine": {
+    "cpu_model": "Intel(R) Core(TM) Ultra 7 155H",
+    "timed_cpu": 1,
+    "timed_cpu_sibling": [
+      2
+    ],
+    "governor": "powersave",
+    "energy_performance_preference": "performance",
+    "platform_profile": "performance",
+    "kernel": "7.3.1-1-cachyos"
+  },
+  "pyrolysis": {
+    "commit": "0054f654fd24b7c907761795a83de47ebc0fb5a0",
+    "tree": "be33fa0cebb634f71f06f9417c1b7b09bff9101e",
+    "uncommitted_changes": false,
+    "julia": "1.13.0",
+    "threads": 1
+  },
+  "executables": {
+    "fds": {
+      "sha256": "fe2b123dfc759dbebb161cc91912ed60861f3fe2a141602634b53f417f731b1d"
+    },
+    "thermakin": {
+      "sha256": "3e25760b5f245716fbfc0fcb37695fb3a45d7672eb2e4612700d2917df702e45"
+    },
+    "gpyro": {
+      "sha256": "65d6891bd87ec5f9eeee08dbe7e6ef21ef43970bdbc6fa570bb13ccd665b1fd0"
+    }
+  },
+  "executable_notes": {
+    "gpyro": "rebuilt from the pinned source with the documented recipe; its hash differs from the accuracy provenance only by the embedded build date, and every timed run reproduced the committed native outputs byte for byte"
+  },
+  "timers": {
+    "fds": "internal Total Elapsed Wall Clock Time (excludes MPI start-up, about 0.26 s here)",
+    "gpyro": "process time",
+    "thermakin": "process time (its own timer ticks in whole seconds)",
+    "pyrolysis": "warm problem construction and solve, after a discarded compiling solve"
+  },
+  "repeats": "5 when a run takes under 1 s (30 s for external codes), 3 under 10 s (300 s), else 1; median",
+  "disturbance": {
+    "external_max_sibling_busy": 0.25,
+    "external_max_other_cores_busy": 0.34690476190476194,
+    "pyrolysis_sibling_busy": 0.00012083375289497533,
+    "pyrolysis_other_cores_busy": 0.005090207955058481
+  },
+  "outputs_identical_to_committed": true
+}

@@ -1,0 +1,7 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"trace flux",-3.335447339354128e-7,-3.332694789035594e-7,0.0008259233121465925,0.005,true,""
+"trace exponential profile",4.2351647362715017e-16,NaN,4.2351647362715017e-16,1.0e-13,true,""
+"trace scaled by 1e-12 stays proportional",5.551115123125783e-16,NaN,5.551115123125783e-16,1.0e-13,true,""
+"absent species stays absent",0.0,NaN,0.0,2.2250738585072014e-308,true,""
+"multicomponent Graham relation",-9.330767958984981e-15,NaN,9.330767958984981e-15,1.0e-12,true,""
+"isobaric solution",1.1641532182693481e-10,NaN,1.1641532182693481e-10,1.0e-9,true,""

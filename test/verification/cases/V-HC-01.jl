@@ -136,82 +136,27 @@ function _verification_case_vhc01()
             ),
         ),
         report = (
-            comparison_note = "Gpyro V2 revision `bff0126c68f2` uses 501 boundary nodes (500 intervals, 0.1 mm spacing). The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements. ThermaKin2Ds 7 uses 500 uniform elements (0.1 mm) at a fixed dt = 0.1 s. It has no pure flux boundary, so the absorbed flux is incident radiation q″/ε on the exposed element with ε = 1e-8; re-radiation stays below 1e-3 W/m². Its surface temperature is the boundary-element center value, 0.05 mm below the face.",
-            n_cells_ladder = [25, 50, 100, 133, 200, 400, 500],
+            comparison_note = "FDS 6.11.1 and Gpyro V2 revision `bff0126c68f2` use 500 intervals (0.1 mm) at dt = 0.1 s. FDS has no pure flux face on a conducting material; the absorbed flux with convective loss is convection to T∞ + q″/h = 1550 K, which is the same boundary condition. Its profile values are cell centers. Gpyro's are boundary-centered nodes with half control volumes at both faces. ThermaKin2Ds 7 uses 500 uniform elements (0.1 mm) at a fixed dt = 0.1 s. It has no pure flux boundary, so the absorbed flux is incident radiation q″/ε on the exposed element with ε = 1e-8; re-radiation stays below 1e-3 W/m². Its surface temperature is the boundary-element center value, 0.05 mm below the face.",
+            n_cells_ladder = [25, 50, 100, 200, 400, 500],
             profile_times = times,
             qoi_curves = (:T_profiles, :surface_T_history),
             solve_kwargs = (abstol = 1e-12, reltol = 1e-10),
             curves = sol -> begin
                 x = L .- sol.cell_centers[:, end]
-                # FDS 6.11.1 overlay (reference/fds/custom/): our deck
-                # vhc01_semi_infinite.fds solves this exact case via the same
-                # Robin-BC equivalence (pure convection toward T∞_eff = 1550 K,
-                # ε = 0). devc depths from the exposed face; T in °C.
-                fds = reference_columns(
-                    "fds/custom/vhc01_semi_infinite_devc.csv",
-                    "Time",
-                    "Front",
-                    "5 mm",
-                    "10 mm",
-                    "15 mm",
-                    "20 mm",
-                    "30 mm",
-                )
-                fds_depths = [0.0, 0.005, 0.010, 0.015, 0.020, 0.030]
-                fds_T = [c .+ 273.15 for c in fds[2:end]]
-                fds_row(t) = argmin(abs.(fds[1] .- t))
-                # Gpyro V2 overlay (reference/gpyro/v2_migration/): dissertation §3.4.1
-                # deck (identical parameters — our case IS Gpyro's variant),
-                # Δz = 0.1 mm, dt = 0.1 s. Long-format (t, x, T) profiles.
-                gp_t, gp_x, gp_T = reference_columns(
-                    "gpyro/v2_migration/vhc01_result.csv",
-                    "t_s",
-                    "x_m",
-                    "T_K";
-                    header_rows = 1,
-                )
-                gp_ts, gp_Ts = reference_columns(
-                    "gpyro/v2_migration/vhc01_surfaceT.csv",
-                    "t_s",
-                    "T_surface_K";
-                    header_rows = 1,
-                )
                 [
                     ReportCurve(
                         name = :T_profiles,
                         title = "V-HC-01: in-depth temperature profiles",
                         xlabel = "depth x (m)",
                         ylabel = "T (K)",
-                        series = vcat(
-                            [
-                                CurveSeries(
-                                    label = "t = $(t) s",
-                                    x = x,
-                                    y = sol.T[:, j+1],
-                                    exact = xx -> T_exact(xx, t),
-                                ) for (j, t) in enumerate(times)
-                            ],
-                            [
-                                CurveSeries(
-                                    label = "FDS 6.11.1, t = $(t) s",
-                                    crosscode = true,
-                                    x = fds_depths,
-                                    y = [fds_T[i][fds_row(t)] for i = 1:6],
-                                    exact = xx -> T_exact(xx, t),
-                                ) for t in times
-                            ],
-                            [
-                                let rows = findall(τ -> abs(τ - t) < 1e-6, gp_t)
-                                    CurveSeries(
-                                        label = "Gpyro V2, t = $(t) s",
-                                        crosscode = true,
-                                        x = gp_x[rows],
-                                        y = gp_T[rows],
-                                        exact = xx -> T_exact(xx, t),
-                                    )
-                                end for t in times
-                            ],
-                        ),
+                        series = [
+                            CurveSeries(
+                                label = "t = $(t) s",
+                                x = x,
+                                y = sol.T[:, j+1],
+                                exact = xx -> T_exact(xx, t),
+                            ) for (j, t) in enumerate(times)
+                        ],
                     ),
                     ReportCurve(
                         name = :surface_T_history,
@@ -223,21 +168,6 @@ function _verification_case_vhc01()
                                 label = "surface Newton solve",
                                 x = sol.t[2:end],  # exact form is 0/0 at t = 0
                                 y = sol.surface_T[2:end],
-                                exact = t -> T_exact(0.0, t),
-                            ),
-                            # devc averages over the 0.2 s output interval
-                            CurveSeries(
-                                label = "FDS 6.11.1",
-                                crosscode = true,
-                                x = fds[1][2:end] .- 0.1,
-                                y = fds_T[1][2:end],
-                                exact = t -> T_exact(0.0, t),
-                            ),
-                            CurveSeries(
-                                label = "Gpyro V2",
-                                crosscode = true,
-                                x = gp_ts[2:end],
-                                y = gp_Ts[2:end],
                                 exact = t -> T_exact(0.0, t),
                             ),
                         ],

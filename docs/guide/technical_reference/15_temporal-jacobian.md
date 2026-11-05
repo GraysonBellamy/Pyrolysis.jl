@@ -978,8 +978,8 @@ Our default policy is in `src/Integration/policy.jl`; the state Jacobian
 uses colored forward-mode automatic differentiation (§15.5).
 
 The verification studies retain independent temporal refinements while each
-solver uses its native integrator (§18.1.3). Runtime comparisons require a
-shared achieved-accuracy target; no solver pair is qualified at that target.
+solver uses its native integrator (§18.1.3). Their cost comparisons pair each
+external run with each code's cheapest configuration at least as accurate.
 User Guide §§8.3 and 12.6 covers tolerance and step-size studies.
 
 ---

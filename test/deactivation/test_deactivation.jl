@@ -1108,9 +1108,10 @@ end
 
 @testset "the domain test rejects error-accepted proposals with unresolved shrinking pores" begin
     policy = rodas5p_policy(KLUFactorization(); restart = :solver_chosen)
-    problem = _ablator(8; radiating = true, porosity = 0.3)
-    # Initially resolved pores become smaller than the mass/position error
-    # margin as cells shrink. The local error test alone cannot admit them.
+    problem = _ablator(8; radiating = true, porosity = 3e-3)
+    # Pores resolved at the start fall below the mass error margin as cells
+    # shrink: a cell's mass tolerance keeps its initial reference while its
+    # condensed mass shrinks. The local error test alone cannot admit them.
     cp = setup(
         problem;
         use_ale = true,
@@ -1125,7 +1126,7 @@ end
     @test sol.outcome === :pore_closure
     @test sol.statistics.domain_rejections > 0
     @test sol.statistics.largest_constraint_residual <= 1
-    @test minimum(filter(isfinite, vec(sol.gas.porosity))) > 0.29
+    @test minimum(filter(isfinite, vec(sol.gas.porosity))) > 2.9e-3
     # Refining the geometric and mass budget resolves the same physical
     # trajectory and permits all four top-down deactivations.
     refined = Integration.solve(
@@ -1141,6 +1142,26 @@ end
     @test completed(refined)
     @test length(refined.events) == 4
     @test refined.statistics.largest_constraint_residual <= 1
+end
+
+# A node position carries no relative tolerance, so the pore margin of a thin
+# cell does not grow with its distance from the coordinate origin: wide pores
+# stay resolved at a loose tolerance through every deactivation.
+@testset "wide pores stay resolved as cells shrink at a loose tolerance" begin
+    policy = rodas5p_policy(KLUFactorization(); restart = :solver_chosen)
+    sol = Integration.solve(
+        _ablator(8; radiating = true, porosity = 0.3);
+        use_ale = true,
+        radiation_model = BEER_LAMBERT,
+        deactivation = true,
+        reltol = 1e-3,
+        abstol = 1e-5,
+        pressure_tolerance = 1e-3,
+        integrator_policy = policy,
+    )
+    @test completed(sol)
+    @test length(sol.events) == 4
+    @test sol.statistics.domain_rejections == 0
 end
 
 # A solve of the 30-cell ablator through its deactivations under `policy`,

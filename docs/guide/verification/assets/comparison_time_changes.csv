@@ -1,9 +1,41 @@
 case,code,curve,reference,delta_dt_to_half,delta_half_to_quarter,samples_base,samples_half,omitted_base_endpoints,omitted_half_endpoints,observation
+V-HC-01,fds,T_profiles,t = 30.0 s,0.08859999999998536,0.1328200000000379,500,500,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-01,fds,T_profiles,t = 60.0 s,0.1682899999999563,0.02803999999991902,500,500,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-01,fds,T_profiles,t = 90.0 s,0.042349999999942156,0.06353999999998905,500,500,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-01,fds,T_profiles,t = 180.0 s,0.025560000000041327,0.012780000000020664,500,500,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-01,fds,surface_T_history,surface Newton solve,0.15753949494950348,0.08582000000001244,36,36,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02a,fds,T_profiles,Fo = 0.05,0.001213000000007014,0.0006070000000022446,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02a,fds,T_profiles,Fo = 0.1,0.0008449999999697866,0.0004230000000120526,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02a,fds,T_profiles,Fo = 0.2,0.0005930000000375912,0.00029700000004595495,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02a,fds,T_profiles,Fo = 0.5,0.00046300000002474917,0.00023200000003953392,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02a,fds,surface_T_history,front face,0.001213000000007014,0.0006070000000022446,10,10,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02a,fds,back_T_history,adiabatic back face,0.00046200000002727393,0.00023099999998521525,10,10,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02b,fds,T_profiles,Fo = 0.05,0.008983999999998105,0.0044900000000325235,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02b,fds,T_profiles,Fo = 0.1,0.005655999999987671,0.002828000000022257,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02b,fds,T_profiles,Fo = 0.2,0.003573000000017146,0.0017870000000357322,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02b,fds,T_profiles,Fo = 0.5,0.002836000000002059,0.0014170000000035543,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02b,fds,surface_T_history,front face,0.00866600000000517,0.004331999999976688,10,10,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02b,fds,back_T_history,adiabatic back face,0.003054000000020096,0.001527000000010048,10,10,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02c,fds,T_profiles,Fo = 0.05,0.022540999999989708,0.011267000000032112,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02c,fds,T_profiles,Fo = 0.1,0.011679000000015094,0.005837999999982912,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02c,fds,T_profiles,Fo = 0.2,0.007671000000016193,0.0038359999999784122,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02c,fds,T_profiles,Fo = 0.5,0.004630000000020118,0.0023200000000542786,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02c,fds,surface_T_history,front face,0.009999999999990905,0.0049999999999954525,10,10,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02c,fds,back_T_history,adiabatic back face,0.007670999999959349,0.0038350000000377804,10,10,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02d,fds,T_profiles,Fo = 0.05,0.0241980000000126,0.012094999999987976,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02d,fds,T_profiles,Fo = 0.1,0.012247999999999593,0.006123000000002321,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02d,fds,T_profiles,Fo = 0.2,0.008900000000039654,0.004448999999965508,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02d,fds,T_profiles,Fo = 0.5,0.0045900000000074215,0.0023000000000479304,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02d,fds,surface_T_history,front face,0.0012600000000020373,0.0006300000000010186,10,10,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02d,fds,back_T_history,adiabatic back face,0.00895900000000438,0.004479999999944084,10,10,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-04a,fds,T_profile_steady,steady solver profile,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-04b,fds,T_profile_steady,steady solver profile,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-04c,fds,T_profile_steady,steady solver profile,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-04d,fds,T_profile_steady,steady solver profile,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-05,fds,T_profile_steady,steady solver profile,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-01,fds,xi_histories,ξ_A,0.03856899999999541,0.019307999999966796,201,201,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-01,fds,xi_histories,ξ_B,0.047015550000025996,0.02480060000004869,201,201,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-01,fds,xi_histories,ξ_C,0.024231750000012653,0.012259949999929631,201,201,0,0,linear interpolation on common support; native units; no order inferred
 V-RX-02a,fds,xi_histories,ξ_A (n = 0.0),1.4210854715202004e-14,1.4210854715202004e-14,101,101,0,0,linear interpolation on common support; native units; no order inferred
 V-RX-02b,fds,xi_histories,ξ_A (n = 2.0),0.010404274999999075,0.005891239999996856,101,101,0,0,linear interpolation on common support; native units; no order inferred
 V-RX-02c,fds,xi_histories,ξ_A (n = 0.6666666666666666),0.024830000000008567,0.012420000000020082,101,101,0,0,linear interpolation on common support; native units; no order inferred
@@ -21,6 +53,11 @@ V-CPL-03,fds,thickness_histories,P1,0.0002131487562186951,0.00011390125000021456
 V-CPL-03,fds,thickness_histories,P2,0.00010657437810934756,5.7000499999904086e-05,81,81,0,0,linear interpolation on common support; native units; no order inferred
 V-CPL-03,fds,thickness_histories,P3,0.0,0.0,81,81,0,0,linear interpolation on common support; native units; no order inferred
 V-CPL-04,fds,steady_profiles,δ = 0.44 ≈ 0.50 δ_c,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-01,gpyro,T_profiles,t = 30.0 s,0.02742799999998624,0.013729200000057062,501,501,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-01,gpyro,T_profiles,t = 60.0 s,0.019435399999963465,0.009722100000033151,501,501,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-01,gpyro,T_profiles,t = 90.0 s,0.0158617000000163,0.007932999999979984,501,501,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-01,gpyro,T_profiles,t = 180.0 s,0.012583999999947082,0.006290000000035434,501,501,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-01,gpyro,surface_T_history,surface Newton solve,0.2513734999999997,0.12654049999997596,180,180,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-02a,gpyro,T_profiles,Fo = 0.05,0.0005374999999503416,0.00026880000001483495,81,81,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-02a,gpyro,T_profiles,Fo = 0.1,0.00035439999999198335,0.00017719999999599167,81,81,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-02a,gpyro,T_profiles,Fo = 0.2,0.0002754000000209089,0.00013769999998203275,81,81,0,0,linear interpolation on common support; native units; no order inferred
@@ -45,20 +82,68 @@ V-HC-02d,gpyro,T_profiles,Fo = 0.2,0.015504000000021279,0.007753200000024663,81,
 V-HC-02d,gpyro,T_profiles,Fo = 0.5,0.0036750000000438376,0.0018380000000206564,81,81,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-02d,gpyro,surface_T_history,front face,0.0031237999999689237,0.0015639999999734755,10,10,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-02d,gpyro,back_T_history,adiabatic back face,0.02087589999996453,0.010441600000035578,10,10,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-03,gpyro,T_profiles,Fo = 0.1,0.0055650000000468935,0.002782700000011573,321,321,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-03,gpyro,T_profiles,Fo = 0.5,0.00044410000003836103,0.00022200000000793807,321,321,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-03,gpyro,T_profiles,Fo = 1.5,1.0000001111620804e-06,1.0000001111620804e-06,321,321,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-03,gpyro,mean_T_history,volume mean,2.812510047078831e-08,3.281252247688826e-08,16,16,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-04a,gpyro,T_profile_steady,steady solver profile,0.0,0.0,81,81,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-04b,gpyro,T_profile_steady,steady solver profile,0.0,0.0,81,81,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-04c,gpyro,T_profile_steady,steady solver profile,0.0,0.0,81,81,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-04d,gpyro,T_profile_steady,steady solver profile,0.0,0.0,81,81,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-05,gpyro,T_profile_steady,steady solver profile,0.0,0.0,81,81,0,0,linear interpolation on common support; native units; no order inferred
+V-RAD-01,gpyro,T_profiles,t = 30.0 s,0.019582800000023326,0.00980290000001105,401,401,0,0,linear interpolation on common support; native units; no order inferred
+V-RAD-01,gpyro,T_profiles,t = 60.0 s,0.020975700000008146,0.01049510000001419,401,401,0,0,linear interpolation on common support; native units; no order inferred
+V-RAD-01,gpyro,T_profiles,t = 90.0 s,0.025004699999954028,0.012508099999990918,401,401,0,0,linear interpolation on common support; native units; no order inferred
+V-RAD-01,gpyro,T_profiles,t = 180.0 s,0.018171000000052118,0.009085000000027321,401,401,0,0,linear interpolation on common support; native units; no order inferred
+V-RAD-01,gpyro,surface_T_history,front face,0.03021929999999884,0.015291699999977482,180,180,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-01,gpyro,xi_histories,ξ_A,0.035799999999994725,0.017899999999997362,201,201,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-01,gpyro,xi_histories,ξ_B,0.05150000000003274,0.024799999999970623,201,201,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-01,gpyro,xi_histories,ξ_C,0.022700000000099863,0.011500000000069122,201,201,0,0,linear interpolation on common support; native units; no order inferred
 V-RX-02a,gpyro,xi_histories,ξ_A (n = 0.0),0.0,0.0,101,101,0,0,linear interpolation on common support; native units; no order inferred
 V-RX-02b,gpyro,xi_histories,ξ_A (n = 2.0),0.009189800000001469,0.00459250000000111,101,101,0,0,linear interpolation on common support; native units; no order inferred
 V-RX-02c,gpyro,xi_histories,ξ_A (n = 0.6666666666666666),0.024834400000003143,0.012416400000006433,101,101,0,0,linear interpolation on common support; native units; no order inferred
 V-RX-04a,gpyro,T_history_vs_exact,slab mean temperature,0.06091025000011996,0.03043287499986036,81,81,0,0,linear interpolation on common support; native units; no order inferred
 V-RX-04b,gpyro,surface_T_history,surface temperature,0.07521799999994982,0.0375894999999673,101,101,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05a,gpyro,temperature,temperature,0.006901499999969474,0.0034504000000197266,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05a,gpyro,species,A,0.018396200000040608,0.009197599999993145,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05a,gpyro,species,B,0.018396199999983764,0.009197599999993145,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05a,gpyro,enthalpy,enthalpy,13.165559481276432,6.582109809794929,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05b,gpyro,temperature,temperature,0.0006901999997808161,0.0003450000001521403,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05b,gpyro,species,A,0.018396200000040608,0.009197599999993145,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05b,gpyro,species,B,0.018396199999983764,0.009197599999993145,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05b,gpyro,enthalpy,enthalpy,10.133119734469801,5.066295481519774,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05c,gpyro,temperature,temperature,0.0,0.0,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05c,gpyro,species,A,0.018396200000040608,0.009197599999993145,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05c,gpyro,species,B,0.00735849999998095,0.003679000000005317,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05c,gpyro,species,G,0.011040400000013051,0.005519300000003113,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05c,gpyro,enthalpy,enthalpy,2.0677273033652455,1.0333197182044387,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-CPL-01,gpyro,T_histories_at_depths,x = 0.5 mm,0.15936900000002652,0.36091600000003154,300,300,0,0,linear interpolation on common support; native units; no order inferred
+V-CPL-01,gpyro,T_histories_at_depths,x = 1.0 mm,0.02797699999996439,0.14708000000001675,300,300,0,0,linear interpolation on common support; native units; no order inferred
+V-CPL-01,gpyro,T_histories_at_depths,x = 1.5 mm,0.012576000000080967,0.07649399999996831,300,300,0,0,linear interpolation on common support; native units; no order inferred
+V-CPL-01,gpyro,T_histories_at_depths,x = 2.0 mm,0.008930999999961386,0.047370999999998276,300,300,0,0,linear interpolation on common support; native units; no order inferred
+V-CPL-01,gpyro,front_trajectory,T_m isotherm,2.185756150638004e-05,3.625536252650069e-05,300,300,0,0,linear interpolation on common support; native units; no order inferred
 V-CPL-03,gpyro,thickness_histories,P1,0.0007500000000000284,0.00034999999999985043,81,81,0,0,linear interpolation on common support; native units; no order inferred
 V-CPL-03,gpyro,thickness_histories,P2,0.00034999999999996145,0.00019999999999997797,81,81,0,0,linear interpolation on common support; native units; no order inferred
 V-CPL-03,gpyro,thickness_histories,P3,0.0,0.0,81,81,0,0,linear interpolation on common support; native units; no order inferred
 V-CPL-04,gpyro,steady_profiles,δ = 0.44 ≈ 0.50 δ_c,9.999999974752427e-07,9.999999974752427e-07,81,81,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07a,gpyro,profiles,t = 50.0 s,3.0489000000036293e-06,1.5244999999955433e-06,161,161,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07a,gpyro,profiles,t = 150.0 s,1.6434000000009608e-06,8.218000000018155e-07,161,161,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07a,gpyro,profiles,t = 400.0 s,8.945000000010195e-07,4.4729999999770786e-07,161,161,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07a,gpyro,uptake,surface influx,3.018400000022502e-10,1.5093000000094962e-10,8,8,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07a,gpyro,inventory,stored tracer,3.6645792276558675e-08,1.8322089506174477e-08,9,9,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07b,gpyro,profiles,t = 50.0 s,1.5083999999998543e-05,7.5419999999992715e-06,161,161,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07b,gpyro,profiles,t = 150.0 s,5.040000000011702e-06,2.519999999991973e-06,161,161,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07b,gpyro,profiles,t = 400.0 s,1.891200000006532e-06,9.455999999963272e-07,161,161,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07b,gpyro,uptake,surface influx,1.1139999999959375e-08,5.560000000131454e-09,8,8,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07b,gpyro,inventory,stored tracer,3.7357549584338123e-07,1.868066153805012e-07,9,9,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-08a,gpyro,pressure,steady pressure,0.0,0.0,81,81,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-08a,gpyro,boundary_flux,inlet (bottom),0.0,0.0,2,2,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-08a,gpyro,boundary_flux,outlet (top),0.0,0.0,2,2,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-08a,gpyro,boundary_flux,net (inlet + outlet),0.0,0.0,2,2,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-08b,gpyro,pressure,steady pressure,0.0,0.0,81,81,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-08b,gpyro,boundary_flux,inlet (top),0.0,0.0,2,2,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-08b,gpyro,boundary_flux,outlet (bottom),0.0,0.0,2,2,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-08b,gpyro,boundary_flux,net (inlet + outlet),0.0,0.0,2,2,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-01,thermakin,T_profiles,t = 30.0 s,0.00010000000008858478,0.00010000000003174137,500,500,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-01,thermakin,T_profiles,t = 60.0 s,0.00010000000008858478,0.00010000000003174137,500,500,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-01,thermakin,T_profiles,t = 90.0 s,0.00010000000008858478,0.00010000000003174137,500,500,0,0,linear interpolation on common support; native units; no order inferred
@@ -134,57 +219,3 @@ V-GT-07b,thermakin,profiles,t = 150.0 s,1.2991347841245782e-09,1.299134784531154
 V-GT-07b,thermakin,profiles,t = 400.0 s,1.299134784531154e-11,1.2991347838535276e-11,160,160,0,0,linear interpolation on common support; native units; no order inferred
 V-GT-07b,thermakin,uptake,surface influx,4.000000000008771e-10,9.999999997989048e-11,40,40,0,0,linear interpolation on common support; native units; no order inferred
 V-GT-07b,thermakin,inventory,stored tracer,1.739458677790795e-09,1.7672243052616055e-10,41,41,0,0,linear interpolation on common support; native units; no order inferred
-V-GT-07a,gpyro_v2,vgt07a_history:influx_kg_m2_s,native observable; time sensitivity only,3.018400000022502e-10,1.5093000000094962e-10,4,4,0,0,identical native coordinates/times; native units; no order inferred
-V-GT-07a,gpyro_v2,vgt07a_history:inventory_kg_m2,native observable; time sensitivity only,3.6645792276558675e-08,1.8322089506174477e-08,4,4,0,0,identical native coordinates/times; native units; no order inferred
-V-GT-07a,gpyro_v2,vgt07a_profiles:Y,native observable; time sensitivity only,3.0489000000036293e-06,1.5244999999955433e-06,483,483,0,0,identical native coordinates/times; native units; no order inferred
-V-GT-07b,gpyro_v2,vgt07b_history:influx_kg_m2_s,native observable; time sensitivity only,1.1139999999959375e-08,5.560000000131454e-09,4,4,0,0,identical native coordinates/times; native units; no order inferred
-V-GT-07b,gpyro_v2,vgt07b_history:inventory_kg_m2,native observable; time sensitivity only,3.7357549584338123e-07,1.868066153805012e-07,4,4,0,0,identical native coordinates/times; native units; no order inferred
-V-GT-07b,gpyro_v2,vgt07b_profiles:Y,native observable; time sensitivity only,1.5083999999998543e-05,7.5419999999992715e-06,483,483,0,0,identical native coordinates/times; native units; no order inferred
-V-GT-08a,gpyro_v2,vgt08a_history:inlet_kg_m2_s,native observable; time sensitivity only,0.0,0.0,2,2,0,0,identical native coordinates/times; native units; no order inferred
-V-GT-08a,gpyro_v2,vgt08a_history:outlet_kg_m2_s,native observable; time sensitivity only,0.0,0.0,2,2,0,0,identical native coordinates/times; native units; no order inferred
-V-GT-08a,gpyro_v2,vgt08a_history:net_kg_m2_s,native observable; time sensitivity only,0.0,0.0,2,2,0,0,identical native coordinates/times; native units; no order inferred
-V-GT-08a,gpyro_v2,vgt08a_profiles:P_Pa,native observable; time sensitivity only,0.0,0.0,81,81,0,0,identical native coordinates/times; native units; no order inferred
-V-GT-08b,gpyro_v2,vgt08b_history:inlet_kg_m2_s,native observable; time sensitivity only,0.0,0.0,2,2,0,0,identical native coordinates/times; native units; no order inferred
-V-GT-08b,gpyro_v2,vgt08b_history:outlet_kg_m2_s,native observable; time sensitivity only,0.0,0.0,2,2,0,0,identical native coordinates/times; native units; no order inferred
-V-GT-08b,gpyro_v2,vgt08b_history:net_kg_m2_s,native observable; time sensitivity only,0.0,0.0,2,2,0,0,identical native coordinates/times; native units; no order inferred
-V-GT-08b,gpyro_v2,vgt08b_profiles:P_Pa,native observable; time sensitivity only,0.0,0.0,81,81,0,0,identical native coordinates/times; native units; no order inferred
-V-RX-05a,gpyro_v2,vrx05a_history:T_K,native observable; time sensitivity only,0.006901499999969474,0.0034504000000197266,41,41,0,0,identical native coordinates/times; native units; no order inferred
-V-RX-05a,gpyro_v2,vrx05a_history:A_kg_m3,native observable; time sensitivity only,0.018396200000040608,0.009197599999993145,41,41,0,0,identical native coordinates/times; native units; no order inferred
-V-RX-05a,gpyro_v2,vrx05a_history:B_kg_m3,native observable; time sensitivity only,0.018396199999983764,0.009197599999993145,41,41,0,0,identical native coordinates/times; native units; no order inferred
-V-RX-05a,gpyro_v2,vrx05a_history:G_kg_m3,native observable; time sensitivity only,0.0,0.0,41,41,0,0,identical native coordinates/times; native units; no order inferred
-V-RX-05a,gpyro_v2,vrx05a_history:H_J_m2,native observable; time sensitivity only,13.165559481276432,6.582109809794929,41,41,0,0,identical native coordinates/times; native units; no order inferred
-V-RX-05b,gpyro_v2,vrx05b_history:T_K,native observable; time sensitivity only,0.0006901999997808161,0.0003450000001521403,41,41,0,0,identical native coordinates/times; native units; no order inferred
-V-RX-05b,gpyro_v2,vrx05b_history:A_kg_m3,native observable; time sensitivity only,0.018396200000040608,0.009197599999993145,41,41,0,0,identical native coordinates/times; native units; no order inferred
-V-RX-05b,gpyro_v2,vrx05b_history:B_kg_m3,native observable; time sensitivity only,0.018396199999983764,0.009197599999993145,41,41,0,0,identical native coordinates/times; native units; no order inferred
-V-RX-05b,gpyro_v2,vrx05b_history:G_kg_m3,native observable; time sensitivity only,0.0,0.0,41,41,0,0,identical native coordinates/times; native units; no order inferred
-V-RX-05b,gpyro_v2,vrx05b_history:H_J_m2,native observable; time sensitivity only,10.133119734469801,5.066295481519774,41,41,0,0,identical native coordinates/times; native units; no order inferred
-V-RX-05c,gpyro_v2,vrx05c_history:T_K,native observable; time sensitivity only,0.0,0.0,41,41,0,0,identical native coordinates/times; native units; no order inferred
-V-RX-05c,gpyro_v2,vrx05c_history:A_kg_m3,native observable; time sensitivity only,0.018396200000040608,0.009197599999993145,41,41,0,0,identical native coordinates/times; native units; no order inferred
-V-RX-05c,gpyro_v2,vrx05c_history:B_kg_m3,native observable; time sensitivity only,0.00735849999998095,0.003679000000005317,41,41,0,0,identical native coordinates/times; native units; no order inferred
-V-RX-05c,gpyro_v2,vrx05c_history:G_kg_m3,native observable; time sensitivity only,0.011040400000013051,0.005519300000003113,41,41,0,0,identical native coordinates/times; native units; no order inferred
-V-RX-05c,gpyro_v2,vrx05c_history:H_J_m2,native observable; time sensitivity only,2.0677273033652455,1.0333197182044387,41,41,0,0,identical native coordinates/times; native units; no order inferred
-V-CPL-01,gpyro_v2,vcpl01_front:s_front_m,native observable; time sensitivity only,2.1857600000000006e-05,3.625540000000001e-05,300,300,0,0,native coordinates/times; common support; no extrapolation
-V-CPL-01,gpyro_v2,vcpl01_result:x_m=5.000000e-04:T_K,native observable; time sensitivity only,0.159370000000024,0.36090999999998985,301,301,0,0,native coordinates/times; common support; no extrapolation
-V-CPL-01,gpyro_v2,vcpl01_result:x_m=1.000000e-03:T_K,native observable; time sensitivity only,0.027979999999956817,0.1470799999999599,301,301,0,0,native coordinates/times; common support; no extrapolation
-V-CPL-01,gpyro_v2,vcpl01_result:x_m=1.500000e-03:T_K,native observable; time sensitivity only,0.012580000000014024,0.07650000000001,301,301,0,0,native coordinates/times; common support; no extrapolation
-V-CPL-01,gpyro_v2,vcpl01_result:x_m=2.000000e-03:T_K,native observable; time sensitivity only,0.008930000000020755,0.0473700000000008,301,301,0,0,native coordinates/times; common support; no extrapolation
-V-HC-01,gpyro_v2,vhc01_result:t_s=30.0000:T_K,native observable; time sensitivity only,0.02742999999998119,0.013730000000009568,501,501,0,0,native coordinates/times; common support; no extrapolation
-V-HC-01,gpyro_v2,vhc01_result:t_s=60.0000:T_K,native observable; time sensitivity only,0.019429999999999836,0.009720000000015716,501,501,0,0,native coordinates/times; common support; no extrapolation
-V-HC-01,gpyro_v2,vhc01_result:t_s=90.0000:T_K,native observable; time sensitivity only,0.015870000000006712,0.007929999999987558,501,501,0,0,native coordinates/times; common support; no extrapolation
-V-HC-01,gpyro_v2,vhc01_result:t_s=180.0000:T_K,native observable; time sensitivity only,0.01259000000004562,0.006290000000035434,501,501,0,0,native coordinates/times; common support; no extrapolation
-V-HC-01,gpyro_v2,vhc01_surfaceT:T_surface_K,native observable; time sensitivity only,0.25137000000000853,0.12653999999997723,181,181,0,0,native coordinates/times; common support; no extrapolation
-V-HC-01,gpyro_v2,vhc01_surfaceT:T_back_K,native observable; time sensitivity only,0.0,0.0,181,181,0,0,native coordinates/times; common support; no extrapolation
-V-HC-03,gpyro_v2,vhc03_frontback:T_front_K,native observable; time sensitivity only,0.03510999999997466,0.01761000000004742,601,601,0,0,native coordinates/times; common support; no extrapolation
-V-HC-03,gpyro_v2,vhc03_frontback:T_back_K,native observable; time sensitivity only,0.004070000000012897,0.002039999999965403,601,601,0,0,native coordinates/times; common support; no extrapolation
-V-HC-03,gpyro_v2,vhc03_result:t_s=80.0000:T_K,native observable; time sensitivity only,0.005569999999977426,0.0027800000000297587,321,321,0,0,native coordinates/times; common support; no extrapolation
-V-HC-03,gpyro_v2,vhc03_result:t_s=400.0000:T_K,native observable; time sensitivity only,0.0004500000000007276,0.00022000000001298758,321,321,0,0,native coordinates/times; common support; no extrapolation
-V-HC-03,gpyro_v2,vhc03_result:t_s=1200.0000:T_K,native observable; time sensitivity only,9.999999974752427e-06,9.999999974752427e-06,321,321,0,0,native coordinates/times; common support; no extrapolation
-V-RAD-01,gpyro_v2,vrad01_result:t_s=30.0000:T_K,native observable; time sensitivity only,0.019580000000019027,0.009810000000015862,401,401,0,0,native coordinates/times; common support; no extrapolation
-V-RAD-01,gpyro_v2,vrad01_result:t_s=60.0000:T_K,native observable; time sensitivity only,0.02098000000000866,0.010500000000035925,401,401,0,0,native coordinates/times; common support; no extrapolation
-V-RAD-01,gpyro_v2,vrad01_result:t_s=90.0000:T_K,native observable; time sensitivity only,0.02501000000000886,0.012510000000020227,401,401,0,0,native coordinates/times; common support; no extrapolation
-V-RAD-01,gpyro_v2,vrad01_result:t_s=180.0000:T_K,native observable; time sensitivity only,0.01817999999997255,0.009090000000014697,401,401,0,0,native coordinates/times; common support; no extrapolation
-V-RAD-01,gpyro_v2,vrad01_surfaceT:T_front_K,native observable; time sensitivity only,0.030219999999985703,0.015289999999993142,181,181,0,0,native coordinates/times; common support; no extrapolation
-V-RAD-01,gpyro_v2,vrad01_surfaceT:T_back_K,native observable; time sensitivity only,0.02501000000000886,0.012510000000020227,181,181,0,0,native coordinates/times; common support; no extrapolation
-V-RX-01,gpyro_v2,vrx01_result:Y_A,native observable; time sensitivity only,3.579999999997474e-05,1.7900000000015126e-05,201,201,0,0,native coordinates/times; common support; no extrapolation
-V-RX-01,gpyro_v2,vrx01_result:Y_B,native observable; time sensitivity only,5.150000000003763e-05,2.4799999999991496e-05,201,201,0,0,native coordinates/times; common support; no extrapolation
-V-RX-01,gpyro_v2,vrx01_result:Y_C,native observable; time sensitivity only,2.270000000004213e-05,1.1500000000053134e-05,201,201,0,0,native coordinates/times; common support; no extrapolation

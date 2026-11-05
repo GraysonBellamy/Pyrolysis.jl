@@ -68,21 +68,51 @@ end
     return _condensed_volume(Base.tail(cs), m, T, j+1, S)
 end
 
+# The RMS of the normalized error with node positions measured against their
+# absolute tolerance alone: a position's magnitude depends on where the
+# coordinate origin lies, so its relative share would let a cell far from the
+# origin move by a large fraction of its own thickness. `abstol_vector` scales
+# position tolerances with the cells they bound.
+function _origin_free_rms(x, rows, u, uprev, abstol, reltol)
+    s=sum(abs2, x)
+    @inbounds for j in rows
+        w=(abstol[j]+reltol*max(abs(u[j]), abs(uprev[j])))/abstol[j]
+        s+=abs2(x[j])*(w*w-1)
+    end
+    return sqrt(s/length(x))
+end
+
 function bind_pressure_norm!(norm::PressureErrorNorm, integrator)
-    has_gas(norm.cp.def.setup.material) || return norm
+    layout=norm.cp.def.layout
+    gas=has_gas(norm.cp.def.setup.material)
+    gas || is_moving(layout) || return norm
     hasproperty(integrator.cache, :atmp) || throw(
         ArgumentError(
             "the selected integrator does not expose its normalized local error vector for pressure-aware error control",
         ),
     )
+    rows =
+        is_moving(layout) ?
+        [
+            position_index(layout, nd, k) for nd = 1:n_nodes(layout) for
+            k = 1:dimension(layout)
+        ] : Int[]
     norm.callback[]=_PressureNormWrapper(
         (x, t)->begin
-            base=_rms_error(x, t)
-            x===integrator.cache.atmp || return base
+            x===integrator.cache.atmp || return _rms_error(x, t)
+            base=_origin_free_rms(
+                x,
+                rows,
+                integrator.u,
+                integrator.uprev,
+                integrator.opts.abstol,
+                integrator.opts.reltol,
+            )
             # A stage whose right-hand side failed leaves a non-finite error;
             # as infinite it rejects the step by the controller's smallest
             # factor, where NaN would make the next step size NaN.
             isfinite(base) || return Inf
+            gas || return base
             norm.evaluations[]+=1
             return max(
                 base,

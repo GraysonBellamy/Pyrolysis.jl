@@ -1,26 +1,91 @@
 "code","curve","reference","resolution","samples","Linf","RMS"
+"FDS 6.11.1, t = 30.0 s","T_profiles","t = 30.0 s","base",500,0.18595054965794588,0.04403652292176069
+"FDS 6.11.1, t = 30.0 s","T_profiles","t = 30.0 s","time_half",500,0.09748379760958414,0.022322715802050384
+"FDS 6.11.1, t = 30.0 s","T_profiles","t = 30.0 s","time_quarter",500,0.03710557663043801,0.010666557554944745
+"FDS 6.11.1, t = 30.0 s","T_profiles","t = 30.0 s","space_half",1000,0.04216266741025265,0.010779042542164457
+"FDS 6.11.1, t = 30.0 s","T_profiles","t = 30.0 s","refined",1000,0.09073133419906299,0.021880277254920255
+"FDS 6.11.1, t = 60.0 s","T_profiles","t = 60.0 s","base",500,0.11941366183214086,0.03425716164680458
+"FDS 6.11.1, t = 60.0 s","T_profiles","t = 60.0 s","time_half",500,0.0495683864522789,0.016020272849288777
+"FDS 6.11.1, t = 60.0 s","T_profiles","t = 60.0 s","time_quarter",500,0.022457676358101253,0.0077855423433300435
+"FDS 6.11.1, t = 60.0 s","T_profiles","t = 60.0 s","space_half",1000,0.02634384323937411,0.008167619911091283
+"FDS 6.11.1, t = 60.0 s","T_profiles","t = 60.0 s","refined",1000,0.054352338005514866,0.016511734824017483
+"FDS 6.11.1, t = 90.0 s","T_profiles","t = 90.0 s","base",500,0.07883662146969073,0.027366217162341826
+"FDS 6.11.1, t = 90.0 s","T_profiles","t = 90.0 s","time_half",500,0.03676655999350942,0.01329763907712051
+"FDS 6.11.1, t = 90.0 s","T_profiles","t = 90.0 s","time_quarter",500,0.027752025805625635,0.008157164347606483
+"FDS 6.11.1, t = 90.0 s","T_profiles","t = 90.0 s","space_half",1000,0.022745342577195515,0.007306136308917314
+"FDS 6.11.1, t = 90.0 s","T_profiles","t = 90.0 s","refined",1000,0.040860204807131595,0.013897626979072495
+"FDS 6.11.1, t = 180.0 s","T_profiles","t = 180.0 s","base",500,0.05579455816655354,0.021738523440440062
+"FDS 6.11.1, t = 180.0 s","T_profiles","t = 180.0 s","time_half",500,0.030340970038992054,0.011448170508537876
+"FDS 6.11.1, t = 180.0 s","T_profiles","t = 180.0 s","time_quarter",500,0.01771555326217822,0.006346945772396863
+"FDS 6.11.1, t = 180.0 s","T_profiles","t = 180.0 s","space_half",1000,0.013949680943369458,0.005434355252563693
+"FDS 6.11.1, t = 180.0 s","T_profiles","t = 180.0 s","refined",1000,0.026705315385129325,0.010592392269870906
+"FDS 6.11.1","surface_T_history","surface Newton solve","base",36,0.43362735177959166,0.1279938069964496
+"FDS 6.11.1","surface_T_history","surface Newton solve","time_half",36,0.17932752758525794,0.05493921707766216
+"FDS 6.11.1","surface_T_history","surface Newton solve","time_quarter",36,0.05146814677556222,0.018503595890687938
+"FDS 6.11.1","surface_T_history","surface Newton solve","space_half",36,0.1094481467755486,0.032123678760634274
+"FDS 6.11.1","surface_T_history","surface Newton solve","refined",36,0.23701752758523753,0.06878682271136886
+"Gpyro V2, t = 30.0 s","T_profiles","t = 30.0 s","base",501,0.05515360860084684,0.01515767035898158
+"Gpyro V2, t = 30.0 s","T_profiles","t = 30.0 s","time_double",501,0.10972203654029045,0.028801282368036495
+"Gpyro V2, t = 30.0 s","T_profiles","t = 30.0 s","time_quadruple",501,0.218557112985593,0.056571334099216955
+"Gpyro V2, t = 30.0 s","T_profiles","t = 30.0 s","time_half",501,0.030600031532173944,0.008806153955023882
+"Gpyro V2, t = 30.0 s","T_profiles","t = 30.0 s","time_quarter",501,0.026533031532153473,0.00620663248511743
+"Gpyro V2, t = 30.0 s","T_profiles","t = 30.0 s","space_half",1001,0.013805808600864111,0.0037933840578924234
+"Gpyro V2, t = 30.0 s","T_profiles","t = 30.0 s","refined",1001,0.027495536540300236,0.007217462819516419
+"Gpyro V2, t = 60.0 s","T_profiles","t = 60.0 s","base",501,0.0390611303353694,0.01182592982219972
+"Gpyro V2, t = 60.0 s","T_profiles","t = 60.0 s","time_double",501,0.07778113237804973,0.023728086104825432
+"Gpyro V2, t = 60.0 s","T_profiles","t = 60.0 s","time_quadruple",501,0.1552409331707736,0.04785611283242197
+"Gpyro V2, t = 60.0 s","T_profiles","t = 60.0 s","time_half",501,0.019806249158875744,0.006216485789882752
+"Gpyro V2, t = 60.0 s","T_profiles","t = 60.0 s","time_quarter",501,0.011959789458785508,0.003958437488772403
+"Gpyro V2, t = 60.0 s","T_profiles","t = 60.0 s","space_half",1001,0.009770430335379388,0.0029587700150530533
+"Gpyro V2, t = 60.0 s","T_profiles","t = 60.0 s","refined",1001,0.01946503237803654,0.005937090225009888
+"Gpyro V2, t = 90.0 s","T_profiles","t = 90.0 s","base",501,0.03186699793275238,0.010890461521694834
+"Gpyro V2, t = 90.0 s","T_profiles","t = 90.0 s","time_double",501,0.06348223391438523,0.022307632601934118
+"Gpyro V2, t = 90.0 s","T_profiles","t = 90.0 s","time_quadruple",501,0.12677067316309376,0.04534352798905279
+"Gpyro V2, t = 90.0 s","T_profiles","t = 90.0 s","time_half",501,0.016157552469451275,0.0054044655082777174
+"Gpyro V2, t = 90.0 s","T_profiles","t = 90.0 s","time_quarter",501,0.008434678958508357,0.0030904809717738906
+"Gpyro V2, t = 90.0 s","T_profiles","t = 90.0 s","space_half",1001,0.007970151344181886,0.00272267999819911
+"Gpyro V2, t = 90.0 s","T_profiles","t = 90.0 s","refined",1001,0.01587993391439113,0.005576301829044374
+"Gpyro V2, t = 180.0 s","T_profiles","t = 180.0 s","base",501,0.022883722479036805,0.010158532722181092
+"Gpyro V2, t = 180.0 s","T_profiles","t = 180.0 s","time_double",501,0.048061722479133095,0.02092997608597468
+"Gpyro V2, t = 180.0 s","T_profiles","t = 180.0 s","time_quadruple",501,0.09846872247908323,0.0425444272488556
+"Gpyro V2, t = 180.0 s","T_profiles","t = 180.0 s","time_half",501,0.011349329237191341,0.0048497999170362205
+"Gpyro V2, t = 180.0 s","T_profiles","t = 180.0 s","time_quarter",501,0.005924294483520498,0.002370728861572779
+"Gpyro V2, t = 180.0 s","T_profiles","t = 180.0 s","space_half",1001,0.0057197224790570544,0.00253764496097765
+"Gpyro V2, t = 180.0 s","T_profiles","t = 180.0 s","refined",1001,0.012009722479092488,0.0052280232432412085
+"Gpyro V2","surface_T_history","surface Newton solve","base",180,0.7104384669407864,0.08065330748302268
+"Gpyro V2","surface_T_history","surface Newton solve","time_double",180,1.2058074669407688,0.1367473128601845
+"Gpyro V2","surface_T_history","surface Newton solve","time_quadruple",150,1.9243237513088047,0.23647600336924776
+"Gpyro V2","surface_T_history","surface Newton solve","time_half",180,0.4590649669407867,0.052897294960940255
+"Gpyro V2","surface_T_history","surface Newton solve","time_quarter",180,0.3325244669408107,0.03944703823138846
+"Gpyro V2","surface_T_history","surface Newton solve","space_half",180,0.17645316694080293,0.020088999548566445
+"Gpyro V2","surface_T_history","surface Newton solve","refined",180,0.3012465669407902,0.0341944047921426
 "ThermaKin2Ds 7, t = 30.0 s","T_profiles","t = 30.0 s","base",500,1.0040732719652397,0.15106524448889486
-"ThermaKin2Ds 7, t = 30.0 s","T_profiles","t = 30.0 s","refined",1000,0.5084068582000327,0.0756546665803497
+"ThermaKin2Ds 7, t = 30.0 s","T_profiles","t = 30.0 s","time_double",500,1.0043732719651643,0.15110102282531096
 "ThermaKin2Ds 7, t = 30.0 s","T_profiles","t = 30.0 s","time_half",500,1.0039732719652648,0.15105574776297304
 "ThermaKin2Ds 7, t = 30.0 s","T_profiles","t = 30.0 s","time_quarter",500,1.0039732719652648,0.15105627873731745
 "ThermaKin2Ds 7, t = 30.0 s","T_profiles","t = 30.0 s","space_half",1000,0.5084068582000327,0.07565357722179984
+"ThermaKin2Ds 7, t = 30.0 s","T_profiles","t = 30.0 s","refined",1000,0.5084068582000327,0.0756546665803497
 "ThermaKin2Ds 7, t = 60.0 s","T_profiles","t = 60.0 s","base",500,1.2521050755327678,0.2251755539129918
-"ThermaKin2Ds 7, t = 60.0 s","T_profiles","t = 60.0 s","refined",1000,0.631102060586727,0.11270237428174655
+"ThermaKin2Ds 7, t = 60.0 s","T_profiles","t = 60.0 s","time_double",500,1.2522050755327427,0.22519180472698014
 "ThermaKin2Ds 7, t = 60.0 s","T_profiles","t = 60.0 s","time_half",500,1.2521050755327678,0.2251734027327455
 "ThermaKin2Ds 7, t = 60.0 s","T_profiles","t = 60.0 s","time_quarter",500,1.2521050755327678,0.22517279762092018
 "ThermaKin2Ds 7, t = 60.0 s","T_profiles","t = 60.0 s","space_half",1000,0.631102060586727,0.1126998013509357
+"ThermaKin2Ds 7, t = 60.0 s","T_profiles","t = 60.0 s","refined",1000,0.631102060586727,0.11270237428174655
 "ThermaKin2Ds 7, t = 90.0 s","T_profiles","t = 90.0 s","base",500,1.3931971343639589,0.27906682435665947
-"ThermaKin2Ds 7, t = 90.0 s","T_profiles","t = 90.0 s","refined",1000,0.7007792809756666,0.13962318574742907
+"ThermaKin2Ds 7, t = 90.0 s","T_profiles","t = 90.0 s","time_double",500,1.3931971343639589,0.27907692868173606
 "ThermaKin2Ds 7, t = 90.0 s","T_profiles","t = 90.0 s","time_half",500,1.3931971343639589,0.27906438094838143
 "ThermaKin2Ds 7, t = 90.0 s","T_profiles","t = 90.0 s","time_quarter",500,1.393097134363984,0.27906252495190825
 "ThermaKin2Ds 7, t = 90.0 s","T_profiles","t = 90.0 s","space_half",1000,0.7007792809756666,0.13962209738470593
+"ThermaKin2Ds 7, t = 90.0 s","T_profiles","t = 90.0 s","refined",1000,0.7007792809756666,0.13962318574742907
 "ThermaKin2Ds 7, t = 180.0 s","T_profiles","t = 180.0 s","base",500,1.5974034758741027,0.3870011304762501
-"ThermaKin2Ds 7, t = 180.0 s","T_profiles","t = 180.0 s","refined",1000,0.8015551383819002,0.19352829456376322
+"ThermaKin2Ds 7, t = 180.0 s","T_profiles","t = 180.0 s","time_double",500,1.5974034758741027,0.38700710008587275
 "ThermaKin2Ds 7, t = 180.0 s","T_profiles","t = 180.0 s","time_half",500,1.5974034758741027,0.3869995004882239
 "ThermaKin2Ds 7, t = 180.0 s","T_profiles","t = 180.0 s","time_quarter",500,1.5974034758741027,0.3869995004882239
 "ThermaKin2Ds 7, t = 180.0 s","T_profiles","t = 180.0 s","space_half",1000,0.8015551383819002,0.19352805098743073
+"ThermaKin2Ds 7, t = 180.0 s","T_profiles","t = 180.0 s","refined",1000,0.8015551383819002,0.19352829456376322
 "ThermaKin2Ds 7","surface_T_history","surface Newton solve","base",37,5.125548146775543,3.168571667297163
-"ThermaKin2Ds 7","surface_T_history","surface Newton solve","refined",37,2.5767481467755147,1.5851028892707841
+"ThermaKin2Ds 7","surface_T_history","surface Newton solve","time_double",37,5.121048146775536,3.1681779403823636
 "ThermaKin2Ds 7","surface_T_history","surface Newton solve","time_half",37,5.126648146775551,3.168665273660735
 "ThermaKin2Ds 7","surface_T_history","surface Newton solve","time_quarter",37,5.126948146775533,3.168688505317406
 "ThermaKin2Ds 7","surface_T_history","surface Newton solve","space_half",37,2.577048146775553,1.585126241904072
+"ThermaKin2Ds 7","surface_T_history","surface Newton solve","refined",37,2.5767481467755147,1.5851028892707841

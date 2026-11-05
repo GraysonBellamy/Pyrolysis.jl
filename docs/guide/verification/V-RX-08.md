@@ -24,9 +24,9 @@ where the onset is exactly one, and the rate is the kernel's own.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| x(t) of every cell | 2.405e-13 | 0 | 2.405e-13 | 7e-13 | yes | max relative error against the closed form |
-| the kernel's rate | 9.548e-15 | 0 | 9.548e-15 | 3.2e-14 | yes | max relative error of the rate of A against the sum |
-| isothermal: T stays at 600 K | 6.821e-13 | 0 | 6.821e-13 | 1.9e-11 | yes | K |
+| x(t) of every cell | 2.442e-13 | 0 | 2.442e-13 | 7e-13 | yes | max relative error against the closed form |
+| the kernel's rate | 1.099e-14 | 0 | 1.099e-14 | 3.2e-14 | yes | max relative error of the rate of A against the sum |
+| isothermal: T stays at 600 K | 1.023e-12 | 0 | 1.023e-12 | 1.9e-11 | yes | K |
 
 ![V-RX-08 conversion_history](assets/V-RX-08/V-RX-08_conversion_history.png)
 

@@ -165,50 +165,20 @@ function _vcpl01_report_curves(p, λ, L, id)
         ts = sol.t[js]
         front = [F.front(j) for j in js]
         keep = findall(!isnan, front)   # pre-detection outputs (front inside wall cell)
-        # Gpyro V2 overlay (reference/gpyro/v2_migration/): dissertation §3.4.3 deck —
-        # the identical Stefan setup, latent heat via Gpyro's apparent-c_p
-        # Gaussian (σₘ² = 0.1), Δz = 0.05 mm. Long-format depth histories +
-        # T_m-isotherm front trajectory.
-        gp_t, gp_x, gp_T = reference_columns(
-            "gpyro/v2_migration/vcpl01_result.csv",
-            "t_s",
-            "x_m",
-            "T_K";
-            header_rows = 1,
-        )
-        gp_ft, gp_fs = reference_columns(
-            "gpyro/v2_migration/vcpl01_front.csv",
-            "t_s",
-            "s_front_m";
-            header_rows = 1,
-        )
-        curves = [
+        [
             ReportCurve(
                 name = :T_histories_at_depths,
                 title = "$(id): T histories at the dissertation depths (cf. Fig. 3.11)",
                 xlabel = "t (s)",
                 ylabel = "T (K)",
-                series = vcat(
-                    [
-                        CurveSeries(
-                            label = "x = $(d * 1e3) mm",
-                            x = ts,
-                            y = [F.Tnum(d, j) for j in js],
-                            exact = t -> stefan_T(d, t, p, λ),
-                        ) for d in (0.5e-3, 1.0e-3, 1.5e-3, 2.0e-3)
-                    ],
-                    [
-                        let rows = findall(x -> abs(x - d) < 1e-8, gp_x)
-                            CurveSeries(
-                                label = "Gpyro V2, x = $(d * 1e3) mm",
-                                crosscode = true,
-                                x = gp_t[rows],
-                                y = gp_T[rows],
-                                exact = t -> stefan_T(d, t, p, λ),
-                            )
-                        end for d in (0.5e-3, 1.0e-3, 1.5e-3, 2.0e-3)
-                    ],
-                ),
+                series = [
+                    CurveSeries(
+                        label = "x = $(d * 1e3) mm",
+                        x = ts,
+                        y = [F.Tnum(d, j) for j in js],
+                        exact = t -> stefan_T(d, t, p, λ),
+                    ) for d in (0.5e-3, 1.0e-3, 1.5e-3, 2.0e-3)
+                ],
             ),
             ReportCurve(
                 name = :front_trajectory,
@@ -222,22 +192,9 @@ function _vcpl01_report_curves(p, λ, L, id)
                         y = front[keep],
                         exact = t -> stefan_front(t; λ = λ, αs = αs),
                     ),
-                    CurveSeries(
-                        label = "Gpyro V2 (T_m isotherm)",
-                        crosscode = true,
-                        x = gp_ft,
-                        y = gp_fs,
-                        exact = t -> stefan_front(t; λ = λ, αs = αs),
-                    ),
                 ],
             ),
         ]
-        # The retained Gpyro deck matches route A only. Route B has different
-        # temperatures, latent heat, and a gated reaction closure.
-        if id != "V-CPL-01"
-            foreach(c -> filter!(s -> !s.crosscode, c.series), curves)
-        end
-        return curves
     end
 end
 
@@ -317,7 +274,7 @@ function _verification_case_vcpl01()
         qois = qois,
         ci = CIConfig(n_cells = 150, budget_s = 35.0),
         report = (
-            comparison_note = "Gpyro V2 revision `bff0126c68f2` uses 801 boundary nodes (800 intervals, 0.05 mm spacing), with every node retained for front interpolation. The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements.",
+            comparison_note = "Gpyro V2 revision `bff0126c68f2` uses 801 boundary nodes (800 intervals, 0.05 mm spacing) at dt = 0.02 s, with the latent heat as its apparent-c_p Gaussian (σₘ² = 0.1). The front is the T_m isotherm, interpolated linearly between the first pair of nodes that bracket it.",
             n_cells_ladder = [75, 150, 300, 800],
             qoi_curves = (:T_histories_at_depths, :front_trajectory),
             curves = _vcpl01_report_curves(p, λ, L, "V-CPL-01"),

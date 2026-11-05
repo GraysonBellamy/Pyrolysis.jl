@@ -406,9 +406,10 @@ claims also require matched workloads and timing boundaries.
 
 All Gpyro verification overlays use the pinned V2 revision, and all
 ThermaKin2Ds overlays use ThermaKin2Ds 7 built from its source with only a
-start-time-banner portability change (§18.1.3). The comparisons include independent time/space refinements, with mesh spacing
-and observation conventions documented for each case. They provide accuracy
-evidence; no runtime pair is qualified at a shared achieved accuracy.
+start-time-banner portability change (§18.1.3). Each comparison runs at
+coarser and finer time steps and a finer mesh, with mesh spacing and
+observation conventions documented for each case. The same runs are timed,
+and each case compares cost at matched accuracy.
 
 
 ---

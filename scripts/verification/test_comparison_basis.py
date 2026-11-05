@@ -17,31 +17,53 @@ def module(name, path):
 
 runner = module("matched_runner", ROOT / "test/verification/reference/matched/run_comparisons.py")
 audit = module("basis_audit", Path(__file__).with_name("audit_comparison_basis.py"))
-migration = module("v2_migration", ROOT / "test/verification/reference/gpyro/v2_migration/run_migration.py")
 
 
 class ComparisonBasisTest(unittest.TestCase):
-    def test_all_active_gpyro_overlays_use_v2(self):
+    def test_external_curves_come_only_from_the_matched_study(self):
         for path in (ROOT / "test/verification/cases").glob("*.jl"):
             text = path.read_text()
-            self.assertNotIn("Gpyro 0.8200", text, str(path))
-            self.assertIsNone(re.search(r'"gpyro/(?:vhc|vrad|vcpl|vrx|vbo)', text), str(path))
+            self.assertNotIn("crosscode = true", text, str(path))
+            self.assertIsNone(re.search(r'"(?:gpyro|fds)/', text), str(path))
 
-    def test_v2_migration_preserves_ode_dimension_and_independent_controls(self):
-        for case in migration.CASES:
-            decks = {level: migration.deck_text(case, level) for level in migration.LEVELS}
-            nodes = {level: int(re.search(r"NCELLZ\(1\)\s*=\s*(\d+)", text)[1])
-                     for level, text in decks.items()}
-            dt = {level: float(re.search(r"DT0\s*=\s*([^,]+)", text)[1])
-                  for level, text in decks.items()}
-            self.assertEqual([nodes[k] for k in ("base", "time_half", "time_quarter")], [nodes["base"]]*3)
-            self.assertEqual(dt["time_quarter"], dt["base"]/4)
+    def test_gpyro_templates_independent_controls(self):
+        for case in runner.GPYRO_TEMPLATED:
+            p = runner.parameters(case)
+            decks = {level: runner.gpyro(p, level) for level in runner.LEVELS}
+            value = lambda key: {k: float(re.search(r"(?<![\w(])" + re.escape(key) + r"=([^,\s]+)", v)[1])
+                                 for k, v in decks.items()}
+            dt, nodes, stop = value("DT0"), value("NCELLZ(1)"), value("TSTOP(1)")
+            self.assertEqual([dt[k] for k in ("time_quadruple", "time_double", "base", "time_half", "time_quarter")],
+                             [p["dt"] * f for f in (4, 2, 1, .5, .25)])
             self.assertEqual(dt["space_half"], dt["time_quarter"])
-            self.assertEqual(nodes["space_half"]-1, 2*(nodes["base"]-1))
-            if case == "vrx01":
+            self.assertEqual(dt["refined"], dt["time_half"])
+            for level in runner.LEVELS:
+                self.assertAlmostEqual(stop[level], p["end"] + dt[level])
+            if case in runner.GPYRO_LUMPED:
                 self.assertEqual(set(nodes.values()), {1})
-                self.assertRegex(decks["base"], r"SOLVE_GAS_YJ\s*=\s*\.FALSE\.")
-                self.assertRegex(decks["base"], r"IO2\s*=\s*1,")
+                self.assertRegex(decks["base"], r"ZEROD\(1\)\s*=\s*\.TRUE\.")
+            else:
+                self.assertEqual({nodes[k] for k in ("base", "time_half", "time_quarter")}, {p["nodes"]})
+                self.assertEqual(nodes["space_half"] - 1, 2 * (p["nodes"] - 1))
+
+    def test_fds_flux_face_is_convection_to_an_equivalent_gas(self):
+        text = runner.fds(runner.parameters("vhc01"), "base")
+        self.assertIn("TMP_GAS_FRONT=1276.85", text)
+        self.assertIn("HEAT_TRANSFER_COEFFICIENT=20.0", text)
+        self.assertIn("EMISSIVITY=0.0", text)
+        self.assertIn("FORMAT_INDEX=1", text)
+        with self.assertRaises(ValueError):
+            runner.fds(runner.parameters("vhc03"), "base")
+
+    def test_fds_series_chain(self):
+        text = runner.fds(runner.parameters("vrx01"), "base")
+        chain = []
+        for line in re.findall(r"^&MATL .*$", text, re.M):
+            rate = re.search(r", A=([^,]+)", line)
+            product = re.search(r"MATL_ID='(\w)'", line)
+            chain.append((re.search(r"ID='(\w)'", line)[1], rate and float(rate[1]), product and product[1]))
+        self.assertEqual(chain, [("A", .389, "B"), ("B", .262, "C"), ("C", None, None)])
+        self.assertEqual(re.findall(r"QUANTITY='SOLID DENSITY', MATL_ID='(\w)'", text), ["A", "B", "C"])
 
     def test_both_fds_layers_receive_spacing(self):
         text = runner.fds(runner.parameters("vhc04a"), "base")
@@ -59,6 +81,17 @@ class ComparisonBasisTest(unittest.TestCase):
         self.assertEqual([dt[k] for k in ("base", "time_half", "time_quarter")], [2, 1, .5])
         self.assertEqual(dt["space_half"], dt["time_quarter"])
         self.assertEqual(nodes["space_half"]-1, 2*(nodes["base"]-1))
+        self.assertEqual([dt[k] for k in ("time_double", "time_quadruple")], [4, 8])
+        self.assertEqual([nodes[k] for k in ("time_double", "time_quadruple")], [81]*2)
+
+    def test_coarse_configuration_a_code_cannot_express_is_unavailable(self):
+        # ThermaKin saves every whole number of steps: 5 s at 4 × 0.1 s is 12.5.
+        with self.assertRaises(ValueError):
+            runner.thermakin(runner.parameters("vhc01"), "time_quadruple")
+        audit, series = runner.run(("thermakin", "vhc01", "time_quadruple"),
+                                   Path("/nonexistent"), Path(tempfile.mkdtemp()), False)
+        self.assertIsNone(series)
+        self.assertIn("whole number of steps", audit["unavailable"])
 
     def test_thermakin_independent_controls(self):
         p = runner.parameters("vhc05")

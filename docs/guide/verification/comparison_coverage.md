@@ -8,51 +8,52 @@ results. Different discretizations remain visible as numerical error.
 
 Comparisons use unmodified FDS 6.11.1, Gpyro V2 revision
 `bff0126c68f2a35c084ef04490ae327185f281a3`, and ThermaKin2Ds 7 built from
-source with a start-time-banner portability change only. The native refinement studies
-include time-only runs at dt/2 and dt/4, spatial refinement at fixed dt/4,
-and coupled mesh/time refinement. Native inputs, outputs, executable hashes,
-extraction code and equation mappings are under `test/verification/reference/`.
-Each case's comparison section links its analytical-error CSV. These studies
-provide accuracy measurements. Matching equations does **not** establish
+source with a start-time-banner portability change only. Every external curve
+comes from one matched study, run at seven configurations: time-only runs at
+2dt, 4dt, dt/2 and dt/4, spatial refinement at fixed dt/4, and coupled
+mesh/time refinement. Native inputs, outputs, executable hashes, extraction
+code and equation mappings are under `test/verification/reference/matched/`.
+Each case's comparison section links its analytical-error CSV; the same runs'
+solve times give its cost at matched accuracy. Matching equations does **not** establish
 matching discretization, observation operators, or achieved accuracy.
 
 ## Comparison basis audit
 
 The [per-pair inventory](assets/comparison_basis.csv) records the actual Julia
-mesh used in the published overlay, external intervals and spacing, time
-qualification, and requirements for a matched comparison. The
+mesh used in the published overlay, the external intervals and spacing, and
+the time refinement retained for each pair. The
 [time-refinement differences](assets/comparison_time_changes.csv) isolate
 temporal sensitivity at fixed mesh. These differences have native observable
-units; they are not convergence orders or runtime qualifications.
+units; they are not convergence orders.
 
 The inventory covers **77 case/code/subcase pairs across 29 case IDs**:
-18 have matching plotted spacing, 26 have different plotted meshes, 27 are
-spatially homogeneous ODE comparisons, and 6 require a separate material
-interface audit. There are 340 retained native accuracy runs across the
-three runners (68 native solver/subcase combinations × five configurations).
+19 have matching plotted spacing, 25 have different plotted meshes, 27 are
+spatially homogeneous ODE comparisons, and 6 compare a material interface
+that each code represents differently. There are 511 retained native runs (74 native decks × seven
+configurations, 7 recorded unavailable).
 The Julia study contains 108 solves across 36 case/mesh/variant workloads;
 all three tolerance levels reached their expected return codes and the
 accepted-step observer counts agreed with the solver statistics.
 
 The comparison basis and its limits are:
 
-| Comparisons | Mesh, observations and qualification |
+| Comparisons | Mesh and observations |
 |:--|:--|
 | HC-01 / Gpyro V2 | 501 boundary nodes span 500 intervals at 0.1 mm, matching Julia's plotted mesh. Independent time/space refinements are retained. |
 | HC-01, HC-03 / ThermaKin | 500 and 320 uniform elements match Julia's plotted cells exactly. The surface value is the boundary-element center, Δx/2 below the face. |
-| HC-01 / FDS | Published Julia uses 500 cells versus the reported native 133; native probes are time averaged. A matched comparison requires instantaneous probes (or identical averaging), a retained native grid, and the same mesh in Julia. |
-| HC-02a–d | Julia's plotted 320 cells differ from Gpyro's 80 intervals and FDS's 101 cells. Julia's resolution ladder includes 80- and 101-cell meshes; the plots use the finest mesh. FDS uses t_Julia = 2 t_FDS, so its 0.5 s outer step represents 1 s on our axis. A matched comparison requires instantaneous FDS outputs and separate overlays at each native mesh spacing. |
-| HC-03 / Gpyro V2 | 321 nodes span 320 intervals at 0.0625 mm, matching Julia's plotted mesh. Independent refinements are retained. The 1200 s observation horizon uses a one-requested-step native output guard; exclude that guard from timed workloads. |
-| HC-04a–d / FDS | Both layers have explicit `CELL_SIZE` and `STRETCH_FACTOR` controls. The base grid has 80 cells; Julia's published mesh has 40. A matched comparison requires an 80-cell Julia solve and matching layer boundaries. |
-| HC-04c/d / both codes | Equal total count is insufficient: prescribed and represented material interfaces differ. FDS follows physical layer thicknesses; Gpyro samples obstacle composition on boundary nodes. Keep c as a geometry-quantization experiment. For d, compare explicit interface-aligned meshes and report each layer's widths and assigned-material boundary. |
-| HC-05 | Julia's plotted 320 cells versus 80 external intervals. Use the existing 80-cell Julia rung. |
+| HC-01 / FDS | 500 cells at 0.1 mm, matching Julia's plotted mesh, with instantaneous devices and full cell-center profiles. The absorbed flux with convective loss is convection to the equivalent 1550 K gas. |
+| HC-02a–d | Julia's plotted 320 cells differ from the 80 external intervals of every code. Julia's resolution ladder includes an 80-cell mesh; the plots use the finest mesh. |
+| HC-03 / Gpyro V2 | 321 nodes span 320 intervals at 0.0625 mm, matching Julia's plotted mesh. Independent refinements are retained. |
+| HC-04a–d / FDS | Both layers have explicit `CELL_SIZE` and `STRETCH_FACTOR` controls. The base grid has 80 cells; Julia's plotted mesh has 40, and its cost ladder includes 80 cells. |
+| HC-04c/d / both codes | Equal total count is insufficient: prescribed and represented material interfaces differ. FDS follows physical layer thicknesses; Gpyro samples obstacle composition on boundary nodes. c is a geometry-quantization experiment; d aligns a Julia mesh face with the interface and reports both prescribed- and represented-geometry errors. |
+| HC-05 | Julia's plotted 320 cells versus 80 external intervals; the cost ladder includes the 80-cell rung. |
 | RAD-01 / Gpyro V2 | 401 nodes span 400 intervals at 0.025 mm, matching Julia's plotted mesh. Independent time/space refinements are retained. |
-| RX-01/02 and RX-05 | Spatially homogeneous ODEs: one Julia cell, two Gpyro boundary nodes, or native 0D are physically comparable, but not equal work. Match time observations and error targets; do not manufacture a spatial convergence claim. RX-05c retains its native gas-constant error floor. |
-| RX-04a/b | Base spatial spacing matches (4/20 Julia cells versus 4/20 native intervals). Slab-mean quadrature must remain fixed during time refinement. Cooling uses a thermally thin approximation; heating has only a steady exact reference. A whole-history error against the steady line is not transient numerical error. |
+| RX-01/02 and RX-05 | Spatially homogeneous ODEs: one Julia cell, two Gpyro boundary nodes, or native 0D are physically comparable, but not equal work. Cost compares time at equal error on the same time observations; no spatial convergence is claimed. RX-05c retains its native gas-constant error floor. |
+| RX-04a/b | Base spatial spacing matches (4/20 Julia cells versus 4/20 native intervals). Slab-mean quadrature stays fixed across time refinement. Cooling uses a thermally thin approximation; heating has only a steady exact reference. A whole-history error against the steady line is not transient numerical error. |
 | CPL-01 route A | The plotted 800-cell Julia mesh is uniform, matching V2's 801 boundary nodes. Every native node contributes to front interpolation. Independent refinements retain the finite Gaussian-peak and sharp-interface-reference distinction. Route B remains excluded. |
-| CPL-03 P1/P2/P3 | Base spacing matches 8 Julia cells and 8 external intervals. Time only the same paths and output cadence, excluding unrelated Julia QoI sub-solves. |
-| CPL-04 stable branch | Julia's plotted 160 cells versus 80 native intervals; use the existing 80-cell rung. Time the δ = 0.44 solve only, excluding the report's unrelated bifurcation sweep. Establish settling at the common final time. |
-| GT-07a/b and GT-08a/b | Base spacing matches (160/80 intervals). Independent time and space refinements isolate their respective sensitivities. Preserve cell-average versus point-value distinctions and native constant differences. |
+| CPL-03 P1/P2/P3 | Base spacing matches 8 Julia cells and 8 external intervals. Timing covers the same paths and output cadence, without the report's unrelated QoI sub-solves. |
+| CPL-04 stable branch | Julia's plotted 160 cells versus 80 native intervals; the cost ladder includes the 80-cell rung. Timing covers the δ = 0.44 solve only, not the report's bifurcation sweep. Profiles are compared at the common final time. |
+| GT-07a/b and GT-08a/b | Base spacing matches (160/80 intervals). Independent time and space refinements isolate their respective sensitivities. Cell-average and point-value references stay separate, and native constant differences are retained. |
 | GT-01 / ThermaKin | 160 elements versus Julia's plotted 640 cells; Julia's ladder has a 160-cell rung. ThermaKin's 30000-character input limit caps the one-layer-per-element Gaussian initial state at 320 elements. |
 | ThermaKin boundary conditions | Fixed temperatures, films and fluxes act on boundary-element centers, so fixed-temperature and film cases carry an O(Δx) boundary offset that refinement reduces but the base comparison retains. |
 
@@ -71,9 +72,8 @@ position formulas overlap when `NCELLZ=2`; `DZN` still contains two widths
 L/2, so the total control volume remains L. The extractor preserves these
 coordinates and flags the exception instead of shifting them. These retained
 runs are homogeneous ODE checks only. Do not use a two-node V2 deck as evidence
-of a matched spatial transport mesh. The V2 RX-05 two-node decks use
-the same native implementation but retain only point histories, not a grid
-profile; they likewise do not qualify a spatial transport comparison.
+of a matched spatial transport mesh. The V2 RX-05 two-node decks print the
+same coordinates and likewise do not qualify a spatial transport comparison.
 
 FDS's `PROF` output defaults to temperatures interpolated to **faces**, even
 though the thermal unknowns are cell centered. Its printed "Solid Phase Node"
@@ -113,69 +113,62 @@ For example, the 80-cell Julia HC-05 baseline took 588 accepted steps over
 maximum dt = 2113 s. The large late steady-state steps dominate the average;
 a fixed 8.50 s reference run would not reproduce its startup resolution.
 
-1. Freeze the mesh and physical observation times. For the reference codes
-   run dt, dt/2 and dt/4 with unchanged output cadence, quadrature, solver
-   iteration tolerances and equations. Retain accepted/rejected-step or
-   substep information when available; explicitly mark unavailable counters.
-2. For Julia run the baseline tolerances and two tighter settings (e.g.
-   rtol/10 and rtol/100, with matching atol scaling). Also reduce `dtmax`
-   when there is a fast event or a tolerance plateau. Keep the mesh fixed.
-   Record accepted/rejected steps and RHS/Jacobian/linear-solve counts;
-   record min/median/max accepted dt if a step observer is enabled.
-3. Compare the same physical quantities at common times. Use instantaneous
-   samples, or apply the same averaging window to both codes. Never silently
-   select the nearest output or extrapolate a missing endpoint. Bound any
-   interpolation error by increasing output density separately.
-4. Allocate a temporal-sensitivity allowance of **10% of the chosen total
-   error target**. Require both refinement changes to fall within it; inspect
-   nonmonotone changes, roundoff and reference-model floors rather than
-   inferring an order automatically. This is an observed sensitivity check,
-   not a mathematical upper error bound.
-5. Then refine space with the qualified time controls held fixed and recheck
-   temporal sensitivity on the finer mesh. A dt/4 spatial pair alone does
-   not establish time independence at the fine mesh. For steady comparisons
-   also check late-time drift (or a longer run); do not interpret approach to
-   equilibrium as transient discretization error.
+The native runner freezes each external code's mesh, observation times,
+output cadence, quadrature, iteration tolerances and equations, and runs
+`(h,dt)`, the coarser `(h,2dt)` and `(h,4dt)`, the finer `(h,dt/2)` and
+`(h,dt/4)`, and the finer mesh at `(h/2,dt/4)` and `(h/2,dt/2)`. Native
+step histories are not retained: output intervals are not integration steps.
+Every code is sampled instantaneously and scored against the analytical
+reference at its own output points. Profiles come only from an output at the
+case's observation time, never from another output and never by
+extrapolation, so a coarse configuration that misses an observation time is
+recorded as unavailable. Julia's time study runs each pair's native interval
+count at three tolerance levels, with step caps from its own baseline run,
+and records its step and work counters (see
+[Reproduce the audit](#reproduce-the-audit)).
 
-The native runners retain the five configurations `(h,dt)`, `(h,dt/2)`,
-`(h,dt/4)`, `(h/2,dt/4)` and `(h/2,dt/2)`. No unobserved step
-history is reconstructed from output spacing.
+The [time-refinement differences](assets/comparison_time_changes.csv)
+record each code's change from dt to dt/2 and from dt/2 to dt/4 at fixed
+mesh, as observed sensitivity, not an order or an upper error bound. No
+temporal allowance is subtracted: each run's measured error includes its
+temporal error, and the cost comparison below selects runs by that measured
+error. Approach to a steady reference is not transient discretization error.
 
 ### Runtime at matched accuracy
 
-Publish a work-versus-error curve, with matched-spacing errors as a separate
-result. Choose the observation set, normalization and error targets **before**
-tuning either solver. A useful initial ladder is normalized maximum error
-10⁻², 10⁻³ and 10⁻⁴, supplemented by physical absolute tolerances. Normalize
-temperature by the imposed temperature change, concentrations by initial
-bulk density, inventory/enthalpy by their common initial scales, and flux
-by the prescribed or analytical scale. For a zero invariant use an explicit
-nonzero absolute scale. These are proposed study targets, not retroactive
-claims that the existing runs meet them. CI regression tolerances need not
-be suitable cross-code accuracy budgets.
+Each case's cost section plots solve time against analytical error for every
+configuration of each external code and of this code. This code's
+configurations are its resolution ladder, each pair's native interval count
+and any finer cost-only meshes, each at the report tolerances and at 10, 100
+and 1000 times looser ones. The looser tolerances are the counterpart of the
+external codes' coarser steps; a level that fails is left out. A run's error
+is its largest analytical error over the curves and references it is scored
+on, at its own output coordinates. For each external configuration, the
+table lists that code's cheapest configuration at least as accurate, this
+code's cheapest configuration at least as accurate on every scored
+reference, and their ratio. Errors at or below 1e-12 count as exact. A ratio
+marked ≥ uses this code's coarsest configuration (fewest cells at the
+loosest tolerance), which is already more accurate; "not reached" means no
+configuration of this code is as accurate.
 
-For each target select the least costly **qualified** mesh/time combination
-for each solver; different cell counts and timesteps are allowed in this
-performance comparison. Require all selected QoIs to meet the target and
-the temporal/output-sampling allowances. A code whose native constant,
-closure or output precision imposes a larger floor is "target not attained",
-not assigned a misleading speedup. Approximate thermally thin, sharp-front
-and steady references need separately verified limits; their model error
-cannot be charged as time-integrator error.
+Times are medians of repeated runs, serial, on one pinned core of an idle
+machine (`scripts/timing/README.md`):
+FDS's internal elapsed time, which excludes its MPI start-up; Gpyro's and
+ThermaKin's process time; and this code's warm problem construction and
+solve after a discarded compiling solve. Every timed external run reproduced
+its committed native outputs byte for byte, so each time belongs to the run
+whose error the page reports. Times include native output, and Gpyro's
+include its one step past the last observation. Plotting, analytical
+references and the reports' unrelated sweeps are not timed. The machine,
+commits, executable hashes, timer boundaries and disturbance record are in
+`test/verification/reference/matched/timing/provenance.json`.
 
-Benchmark the selected configurations on the same idle machine and pinned
-CPU, serially, with one warm-up and at least five repetitions. Report median
-and spread, executable/source hashes, thread count, hardware, output cadence,
-actual grid, tolerances and actual work counters. Compare warmed Julia
-construction-plus-solve with native internal setup-plus-simulation timers;
-list native output costs explicitly. Full process times are a separate
-metric and require a full-process Julia measurement too. Do not time plotting,
-analytical references, unrelated parameter sweeps or qualification searches.
-
-**No runtime pair is qualified under this policy.** The reports provide
-accuracy comparisons. Matched-accuracy runtime ratios require
-interval-matched meshes, common observations, per-QoI accuracy qualification,
-and measurements of the qualified workloads.
+A ratio is a cost at equal accuracy for that problem, not a pure solver
+speedup. On the smallest problems the external times are mostly input,
+setup and output, and the codes' discretizations, step control and output
+workloads differ. Approximate references (the thermally thin cooling limit,
+the sharp-interface Stefan solution, steady profiles) put the same model
+error into every code's error.
 
 ### Reproduce the audit
 
@@ -187,14 +180,11 @@ julia --project=scripts/verification scripts/verification/run_comparison_time_st
 python3 -m unittest discover -s scripts/verification -p test_comparison_basis.py
 ```
 
-`matched/run_comparisons.py` runs all five levels by default for FDS, Gpyro
+`matched/run_comparisons.py` runs all seven levels by default for FDS, Gpyro
 V2 and ThermaKin2Ds; `matched/build_thermakin.sh` builds the ThermaKin
 executable from a local, uncommitted source copy. Its `--cases`,
 `--levels` and `--destination` options support isolated pilots; a partial
-study cannot replace the complete reference manifest. The Gpyro V2 accuracy
-runner and `gpyro/v2_migration/run_migration.py` also retain the five levels.
-The latter covers HC-01, HC-03, RAD-01, RX-01 and CPL-01 route A with the
-pinned V2 executable. Each matched run stores a hashed
+study cannot replace the complete reference manifest. Each matched run stores a hashed
 `grid.json`; the audit checks every retained native-input/output hash.
 
 The Julia time-study runner uses each pair's external interval count (separate
@@ -215,26 +205,23 @@ measured by this runner.
 The HC-01, HC-03, RAD-01 and CPL-01 spatial base grids match the plotted Julia interval spacing:
 501 Gpyro boundary nodes versus 500 Julia cells for HC-01; 321 versus 320
 for HC-03; 401 versus 400 for RAD-01; and 801 versus 800 for CPL-01.
-RX-01 is a spatially homogeneous, one-unknown 0D chain. Stefan front
-interpolation uses every node in the full native profiles.
+RX-01 is a `ZEROD` chain with one lumped unknown, and RX-05 a two-node
+homogeneous slab. Stefan front interpolation uses every node in the full
+native profiles. Each run stops one requested step past its last
+observation so that the final output is written; the timed runs include that
+step.
 
-The dataset contains 25 successful native runs (five cases × five
-configurations). Inputs, logs, full profiles, extracted curves and hashes are in
-`test/verification/reference/gpyro/v2_migration/`.
-
-The [analytical-error table](assets/comparison_v2_migration_accuracy.csv)
-records sampled errors at all five configurations. Base maximum profile
-errors are 0.0552 K for HC-01, 0.0116 K for HC-03 and 0.0502 K for RAD-01.
-RX-01's maximum species-fraction error is 9.98e-5, with no printed mass or
-temperature drift. CPL-01's maximum front error at the selected 100, 200 and
-299 s samples is 0.1092 mm; the finite Gaussian latent-heat peak and spatial
-front interpolation retain an offset from the sharp-interface reference.
-These sampled checks do not establish whole-history error bounds.
+The finite Gaussian latent-heat peak and spatial front interpolation keep
+CPL-01's front offset from the sharp-interface reference at every
+configuration. RX-05c retains a native total-mass offset of about 3.27e-5
+of the initial mass from inconsistent gas constants; halving dt leaves it
+unchanged. Each case's comparison-accuracy CSV records the analytical errors
+at all seven configurations.
 
 ## ThermaKin2Ds accuracy
 
-ThermaKin2Ds 7 contributes 24 native cases (120 runs) to the matched
-dataset. Its elements are cell centered, so HC-01, HC-03 and RX-04a/b use
+ThermaKin2Ds 7 contributes 24 native cases (165 runs, 3 recorded
+unavailable) to the matched dataset. Its elements are cell centered, so HC-01, HC-03 and RX-04a/b use
 exactly Julia's plotted cells. Halving its fixed Crank–Nicolson step changes
 the outputs by at most a few units in the seventh printed digit, so its
 errors are spatial or observational.
@@ -250,14 +237,14 @@ HC-04a–d, 5.1 K for HC-05, 0.11 K for CPL-04, up to 3.1 K for the HC-02
 profiles, 5.1 K for the HC-01 surface history and 1.2e-3 to 1.2e-2 in tracer
 fraction for GT-07a/b. The [time-refinement
 differences](assets/comparison_time_changes.csv) and each case's
-comparison-accuracy CSV record all five configurations.
+comparison-accuracy CSV record all seven configurations.
 
 ## Solver coverage
 
 | Verification problem | FDS | Gpyro V2 | ThermaKin2Ds | Scope |
 |:--|:--|:--|:--|:--|
-| V-HC-01: semi-infinite solid, flux and convection | Time-averaged probes | Available | Available | Profiles and surface history |
-| V-HC-02a–d: convective slab / Biot sweep | Equivalent dimensionless problem | Profiles and histories | Profiles and histories | Four profiles and front/back histories |
+| V-HC-01: semi-infinite solid, flux and convection | Available | Available | Available | Profiles and surface history |
+| V-HC-02a–d: convective slab / Biot sweep | Profiles and histories | Profiles and histories | Profiles and histories | Four profiles and front/back histories |
 | V-HC-03: finite slab, constant flux | Excluded | Available | Available | Profiles and volume-mean history |
 | V-HC-04a–d: layered conduction | Available | Available | Available | Steady profile against the prescribed interface; c/d share native runs, with only Julia's mesh aligned in d |
 | V-HC-05: temperature-dependent conductivity | Available | Available | Available | Steady Kirchhoff profile; same affine conductivity law |
@@ -280,12 +267,11 @@ manifests because the materials, geometry and boundary conditions are identical.
 
 V-GT-07 reports pointwise errors and analytical cell-average errors for
 Julia's finite-volume inventories. Gpyro boundary-node outputs
-retain point references. Resolution figures compare maximum profile, surface
-flux and inventory errors over 50, 150 and 400 s against actual mesh spacing.
-The Gpyro `base`/`refined` pair also halves its timestep, so those
-two plotted samples do not establish an isolated spatial convergence order.
-The retained `time_half`, `time_quarter` and `space_half` runs separate
-temporal and spatial sensitivity.
+retain point references. Resolution figures show Julia's maximum profile,
+surface-flux and inventory errors over 50, 150 and 400 s against mesh
+spacing. The external codes' errors at every configuration are in the case's
+comparison-accuracy CSV and cost figure; their `time_half`, `time_quarter`
+and `space_half` runs separate temporal and spatial sensitivity.
 
 ## Exclusions and limits
 

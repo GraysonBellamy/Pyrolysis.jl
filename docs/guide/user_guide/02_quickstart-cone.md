@@ -421,9 +421,6 @@ deactivate as the sample burns out.
 ```julia
 solution = solve(
     problem;
-    abstol = 1e-11,                         # temperature tolerance [K]
-    reltol = 1e-9,                          # resolves thin-cell pore volume
-    pressure_tolerance = 1e-4,              # absolute local pressure budget [Pa]
     dtmin = 1e-14,                          # smallest step [s] (default 1e-12)
     use_ale = true,                         # move the mesh with the solid as it shrinks
     radiation_model = SURFACE_ABSORPTION,   # absorb the cone flux at the surface
@@ -813,7 +810,7 @@ problem = PyrolysisProblem(
 
 # ---- Step 5: solve ----------------------------------------------------------
 solution = solve(problem;
-    abstol = 1e-11, reltol = 1e-9, pressure_tolerance = 1e-4, dtmin = 1e-14,
+    dtmin = 1e-14,
     use_ale = true,
     radiation_model = SURFACE_ABSORPTION,
     min_thickness = 0.01e-3,

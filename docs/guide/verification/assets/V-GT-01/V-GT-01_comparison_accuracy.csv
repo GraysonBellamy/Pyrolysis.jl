@@ -1,21 +1,25 @@
 "code","curve","reference","resolution","samples","Linf","RMS"
 "ThermaKin2Ds 7, t = 2.0 s","xi_profiles","t = 2.0 s","base",160,5.566301121968237e-5,1.5053143995020273e-5
-"ThermaKin2Ds 7, t = 2.0 s","xi_profiles","t = 2.0 s","refined",320,1.3946319553682918e-5,3.7541936565190625e-6
+"ThermaKin2Ds 7, t = 2.0 s","xi_profiles","t = 2.0 s","time_double",160,5.540301121968044e-5,1.498926874834344e-5
 "ThermaKin2Ds 7, t = 2.0 s","xi_profiles","t = 2.0 s","time_half",160,5.573301121968022e-5,1.506988098976567e-5
 "ThermaKin2Ds 7, t = 2.0 s","xi_profiles","t = 2.0 s","time_quarter",160,5.575301121967663e-5,1.507419232279518e-5
 "ThermaKin2Ds 7, t = 2.0 s","xi_profiles","t = 2.0 s","space_half",320,1.3956319553684593e-5,3.7578952429061765e-6
+"ThermaKin2Ds 7, t = 2.0 s","xi_profiles","t = 2.0 s","refined",320,1.3946319553682918e-5,3.7541936565190625e-6
 "ThermaKin2Ds 7, t = 4.0 s","xi_profiles","t = 4.0 s","base",160,2.5669296810811038e-5,8.017746224513266e-6
-"ThermaKin2Ds 7, t = 4.0 s","xi_profiles","t = 4.0 s","refined",320,6.419678102602411e-6,2.001137407417214e-6
+"ThermaKin2Ds 7, t = 4.0 s","xi_profiles","t = 4.0 s","time_double",160,2.5599296810813188e-5,7.99916966991415e-6
 "ThermaKin2Ds 7, t = 4.0 s","xi_profiles","t = 4.0 s","time_half",160,2.5689296810814388e-5,8.023000918797998e-6
 "ThermaKin2Ds 7, t = 4.0 s","xi_profiles","t = 4.0 s","time_quarter",160,2.5689296810814388e-5,8.024302816259916e-6
 "ThermaKin2Ds 7, t = 4.0 s","xi_profiles","t = 4.0 s","space_half",320,6.429678102604086e-6,2.0027431881748766e-6
+"ThermaKin2Ds 7, t = 4.0 s","xi_profiles","t = 4.0 s","refined",320,6.419678102602411e-6,2.001137407417214e-6
 "ThermaKin2Ds 7, t = 8.0 s","xi_profiles","t = 8.0 s","base",160,1.0480874302325194e-5,3.832434774936321e-6
-"ThermaKin2Ds 7, t = 8.0 s","xi_profiles","t = 8.0 s","refined",320,2.6238209662743373e-6,9.574130648785865e-7
+"ThermaKin2Ds 7, t = 8.0 s","xi_profiles","t = 8.0 s","time_double",160,1.0470874302323518e-5,3.827339047143801e-6
 "ThermaKin2Ds 7, t = 8.0 s","xi_profiles","t = 8.0 s","time_half",160,1.0480874302325194e-5,3.833210571574688e-6
 "ThermaKin2Ds 7, t = 8.0 s","xi_profiles","t = 8.0 s","time_quarter",160,1.04908743023234e-5,3.833838301322575e-6
 "ThermaKin2Ds 7, t = 8.0 s","xi_profiles","t = 8.0 s","space_half",320,2.6238209662743373e-6,9.57819742601162e-7
+"ThermaKin2Ds 7, t = 8.0 s","xi_profiles","t = 8.0 s","refined",320,2.6238209662743373e-6,9.574130648785865e-7
 "ThermaKin2Ds 7","variance_history","discrete second moment","base",17,8.523209778403605e-11,2.2965943035189048e-11
-"ThermaKin2Ds 7","variance_history","discrete second moment","refined",17,7.924296803593286e-11,2.133226374225774e-11
+"ThermaKin2Ds 7","variance_history","discrete second moment","time_double",17,8.493783425217319e-11,2.2906710696813722e-11
 "ThermaKin2Ds 7","variance_history","discrete second moment","time_half",17,8.472841249475825e-11,2.281071929943171e-11
 "ThermaKin2Ds 7","variance_history","discrete second moment","time_quarter",17,8.511121157622672e-11,2.291626378234405e-11
 "ThermaKin2Ds 7","variance_history","discrete second moment","space_half",17,7.945933065914442e-11,2.1434871838582546e-11
+"ThermaKin2Ds 7","variance_history","discrete second moment","refined",17,7.924296803593286e-11,2.133226374225774e-11

@@ -7,18 +7,7 @@ include(joinpath(@__DIR__, "..", "..", "test", "verification", "casedefs.jl"))
 function export_comparison_meshes(path)
     rows = Dict{String,Any}[]
     reference = joinpath(@__DIR__, "..", "..", "test", "verification", "reference")
-    active = Set([
-        "V-HC-01",
-        "V-HC-03",
-        "V-RAD-01",
-        "V-RX-01",
-        "V-CPL-01",
-        "V-GT-07a",
-        "V-GT-07b",
-        "V-GT-08a",
-        "V-GT-08b",
-        "V-RX-05c",
-    ])
+    active = Set{String}()
     for solver in ("fds", "gpyro", "thermakin")
         for entry in
             TOML.parsefile(joinpath(reference, "matched", "$(solver).toml"))["series"]

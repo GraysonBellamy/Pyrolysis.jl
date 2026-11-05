@@ -237,13 +237,12 @@ function _verification_case_vcpl02()
             use_ale = true,
             min_thickness = 1e-4,
             deactivation = true,
-            abstol = 1e-9,
-            reltol = 1e-7,
-            pressure_tolerance = 1e-3,
+            abstol = 1e-7,
+            reltol = 1e-5,
         ),
         qois = qois,
         # Observed 5–6 s for a warm solve and 20 s in the harness (load 18–21).
-        ci = CIConfig(n_cells = 160, budget_s = 30.0),
+        ci = CIConfig(n_cells = 160, budget_s = 10.0),
         report = (
             n_cells_ladder = [60, 100, 160, 240],
             E_ladder = [5e4, 1e5, 1.5e5, 2e5],
@@ -407,12 +406,11 @@ function _verification_case_vcpl02b()
             use_ale = true,
             min_thickness = 1e-4,
             deactivation = true,
-            abstol = 1e-9,
-            reltol = 1e-7,
-            pressure_tolerance = 1e-3,
+            abstol = 1e-7,
+            reltol = 1e-5,
         ),
         qois = qois,
-        ci = CIConfig(n_cells = 200, budget_s = 90.0),
+        ci = CIConfig(n_cells = 200, budget_s = 10.0),
         report = (
             n_cells_ladder = [120, 200, 320],
             curves = sol -> begin
