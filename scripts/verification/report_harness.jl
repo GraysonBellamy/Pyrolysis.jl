@@ -13,6 +13,7 @@
 
 using Printf
 using Dates
+using Statistics: median
 import Pkg
 
 # --- CSV helpers (hand-rolled: values are numbers + a few quoted strings; a
@@ -55,38 +56,6 @@ report_expected_order(case::VerificationCase) =
     haskey(case.report, :expected_order) ? Float64(case.report.expected_order) :
     case.ci.convergence === nothing ? nothing : case.ci.convergence.expected_order
 
-"""
-Other codes' internal and process wall times, from `reference/timings.csv`
-(case,code,label,res,wall_s,process_wall_s,note — plain commas; `res`
-is the resolution text shown next to the code's label on the figure).
-`wall_s` includes setup and simulation; `process_wall_s` also includes launch
-and shutdown and is shown separately from the warmed Julia comparison.
-Empty when the file or the case's rows are absent.
-"""
-function _reference_timings(case_id::AbstractString)
-    path = joinpath(REFERENCE_DIR, "timings.csv")
-    isfile(path) || return NamedTuple[]
-    out = NamedTuple[]
-    for ln in Iterators.drop(readlines(path), 1)
-        isempty(strip(ln)) && continue
-        f = split(ln, ','; limit = 7)
-        length(f) == 7 || error("expected seven reference timing fields: $ln")
-        strip(f[1]) == case_id || continue
-        push!(
-            out,
-            (
-                code = String(strip(f[2])),
-                label = String(strip(f[3])),
-                res = String(strip(f[4])),
-                wall = parse(Float64, f[5]),
-                process_wall = parse(Float64, f[6]),
-                note = String(strip(f[7])),
-            ),
-        )
-    end
-    return out
-end
-
 # --- per-case execution -------------------------------------------------------
 
 """
@@ -104,9 +73,12 @@ Base.@kwdef struct CaseReportResult
     figures::Vector{Pair{Symbol,String}}   # kind => relative path
     solve_kwargs::NamedTuple
     timings_recorded::Bool = true
+    cost_rows::Vector{Any} = Any[]
 end
 
 _relfig(outdir, path) = relpath(path, outdir)
+
+_timing_repeats(first_seconds) = first_seconds < 1 ? 5 : first_seconds < 10 ? 3 : 1
 
 """
 Run `case` through its report ladder and write every artifact under
@@ -117,7 +89,6 @@ function run_case_report(
     case::VerificationCase,
     outdir::String;
     timings::Bool = true,
-    historical_timings::Bool = false,
     comparisons_only::Bool = false,
 )
     isempty(pairs(case.report)) && return nothing
@@ -147,7 +118,16 @@ function run_case_report(
     for n in ns
         local sol
         wall = if timings
-            @elapsed sol = _case_solve(case, case.build(n); skw...)
+            # Median of repeated construction-and-solve times, each after a
+            # full collection: five when a solve takes under 1 s, three under
+            # 10 s, otherwise one (scripts/timing/README.md).
+            samples = Float64[]
+            while true
+                GC.gc()
+                push!(samples, @elapsed sol = _case_solve(case, case.build(n); skw...))
+                length(samples) >= _timing_repeats(samples[1]) && break
+            end
+            median(samples)
         else
             sol = _case_solve(case, case.build(n); skw...)
             NaN
@@ -212,14 +192,29 @@ function run_case_report(
         )
     end
 
-    # Solve-time comparison, when other codes' reference runs exist for this
-    # case (reference/timings.csv; provenance in reference/*/README.md).
-    # Archive costs have no shared accuracy qualification. They must not be
-    # presented by default as a current cross-code performance comparison.
-    ref_times = timings && historical_timings ? _reference_timings(case.id) : NamedTuple[]
-    if !isempty(ref_times)
-        p = render_solve_time(case.id, ns, walls, ref_times, apath("solve_time.png"))
-        push!(figures, :solve_time => _relfig(outdir, p))
+    # Cost at matched accuracy against the matched external runs, from the
+    # committed timing dataset (reference/matched/timing/, measured under
+    # scripts/timing/README.md).
+    cost = timings ? matched_costs(case.id, apath("comparison_accuracy.csv")) : nothing
+    cost_rows = Any[]
+    if cost !== nothing
+        p = render_cost(case.id, cost.panels, apath("cost.png"))
+        p === nothing || push!(figures, :cost => _relfig(outdir, p))
+        write_csv(
+            apath("cost.csv"),
+            [
+                "external run",
+                "resolution",
+                "external error",
+                "external time_s",
+                "cheapest external at this accuracy_s",
+                "our rung",
+                "our time_s",
+                "cheapest external/our time",
+            ],
+            cost.rows,
+        )
+        cost_rows = cost.rows
     end
 
     # Resolution ladder: CSV always; convergence figure when ≥ 2 usable rungs.
@@ -384,5 +379,6 @@ function run_case_report(
         figures = figures,
         solve_kwargs = skw,
         timings_recorded = timings,
+        cost_rows = cost_rows,
     )
 end

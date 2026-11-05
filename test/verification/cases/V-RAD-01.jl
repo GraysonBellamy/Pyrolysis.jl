@@ -179,7 +179,7 @@ function _verification_case_vrad01()
             ),
         ),
         report = (
-            comparison_note = "Gpyro V2 revision `bff0126c68f2` uses 401 boundary nodes (400 intervals, 0.025 mm spacing). The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements.",
+            comparison_note = "Gpyro V2 revision `bff0126c68f2` uses 401 boundary nodes (400 intervals, 0.025 mm spacing) at dt = 0.1 s, with Beer–Lambert deposition through its absorption coefficient and the same eigenfunction parameters.",
             n_cells_ladder = [25, 50, 100, 200, 400],
             profile_times = times,
             qoi_curves = (:T_profiles, :surface_T_history, :peak_trajectory),
@@ -189,49 +189,20 @@ function _verification_case_vrad01()
                 xs_fine = range(0.0, δ, length = 2001)
                 peak_depth_exact(t) =
                     xs_fine[argmax([ex.T_exact(x, t) for x in xs_fine])]
-                # Gpyro V2 overlay (reference/gpyro/v2_migration/): dissertation §3.4.2
-                # deck (identical parameters — the same eigenfunction case),
-                # in-depth Beer–Lambert via KAPPA, Δz = 0.025 mm, dt = 0.1 s.
-                gp_t, gp_x, gp_T = reference_columns(
-                    "gpyro/v2_migration/vrad01_result.csv",
-                    "t_s",
-                    "x_m",
-                    "T_K";
-                    header_rows = 1,
-                )
-                gp_ts, gp_Ts = reference_columns(
-                    "gpyro/v2_migration/vrad01_surfaceT.csv",
-                    "t_s",
-                    "T_front_K";
-                    header_rows = 1,
-                )
                 [
                     ReportCurve(
                         name = :T_profiles,
                         title = "V-RAD-01: in-depth absorption profiles (sub-surface peak)",
                         xlabel = "depth x (m)",
                         ylabel = "T (K)",
-                        series = vcat(
-                            [
-                                CurveSeries(
-                                    label = "t = $(t) s",
-                                    x = δ .- z,
-                                    y = sol.T[:, j+1],
-                                    exact = x -> ex.T_exact(x, t),
-                                ) for (j, t) in enumerate(times)
-                            ],
-                            [
-                                let rows = findall(τ -> abs(τ - t) < 1e-6, gp_t)
-                                    CurveSeries(
-                                        label = "Gpyro V2, t = $(t) s",
-                                        crosscode = true,
-                                        x = gp_x[rows],
-                                        y = gp_T[rows],
-                                        exact = x -> ex.T_exact(x, t),
-                                    )
-                                end for t in times
-                            ],
-                        ),
+                        series = [
+                            CurveSeries(
+                                label = "t = $(t) s",
+                                x = δ .- z,
+                                y = sol.T[:, j+1],
+                                exact = x -> ex.T_exact(x, t),
+                            ) for (j, t) in enumerate(times)
+                        ],
                     ),
                     ReportCurve(
                         name = :surface_T_history,
@@ -243,13 +214,6 @@ function _verification_case_vrad01()
                                 label = "front face",
                                 x = sol.t[2:end],
                                 y = sol.surface_T[2:end],
-                                exact = t -> ex.T_exact(0.0, t),
-                            ),
-                            CurveSeries(
-                                label = "Gpyro V2",
-                                crosscode = true,
-                                x = gp_ts[2:end],
-                                y = gp_Ts[2:end],
                                 exact = t -> ex.T_exact(0.0, t),
                             ),
                         ],

@@ -115,6 +115,10 @@ if !isdefined(@__MODULE__, :VerificationCase)
 
     - `n_cells_ladder::Vector{Int}` — Richardson resolution ladder
       (fallback: single run at `ci.n_cells`).
+    - `cost_n_cells::Vector{Int}` — further cell counts timed only for the
+      cost comparison (`scripts/timing/pyrolysis_matched.jl`), where a finer
+      external run is more accurate than the ladder's finest rung; the
+      figures keep the ladder's finest rung.
     - `curves::Function` — `sol -> Vector{ReportCurve}`; the case-authored
       overlay/error figure data (fallback: tables only, no figures).
     - `resolution_curves::Function` — `(ns, qois_per_n) -> Vector{ReportCurve}`;

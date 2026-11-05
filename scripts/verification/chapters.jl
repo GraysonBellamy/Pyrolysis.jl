@@ -31,18 +31,32 @@ function _md_table(io, header::Vector{String}, rows)
     println(io)
 end
 
-function _write_timing_comparison(io, case_id::String, figures)
+function _write_cost_comparison(io, case_id::String, figures, rows)
+    println(io, "#### Cost at matched accuracy\n")
     println(
         io,
         """
-        Setup and simulation costs for the listed configurations, without equal-accuracy qualification.
-        Julia times model construction and solve after warm-up;
-        FDS and Gpyro use internal total elapsed wall time, including setup and
-        simulation output. Process launch and Julia compilation are excluded
-        from the figure. Output costs, discretizations and time-stepping rules
-        still differ, so these are indicative costs, not pure solver speedups.
-        See `test/verification/reference/README.md` and `timings.csv` for the
-        timer boundaries, resolutions and measurement provenance.
+        Each external code appears at its matched mesh h and time step Δt, at
+        coarser steps (2Δt, 4Δt) and at refinements (Δt/2, Δt/4, h/2 at Δt/4,
+        h/2 at Δt/2); this code at its report ladder, the external meshes and any
+        finer cost-only meshes, each at its report tolerances and at 10, 100 and
+        1000 times looser ones, the counterpart of the coarser steps. A coarse
+        configuration a code cannot express or complete is left out; for the
+        external codes the reason is in the matched provenance. The error is the
+        largest analytical error over
+        the curves and references the external run is scored on. Times are FDS's
+        internal elapsed time, which excludes its MPI start-up; Gpyro's and
+        ThermaKin's process time; and this code's warm problem construction and
+        solve. Each is the median of repeated runs on one pinned core
+        (`scripts/timing/README.md`; data and provenance in
+        `test/verification/reference/matched/timing/`). On the smallest problems
+        the external times are mostly input, setup and output. In the figure,
+        filled markers are each external code's matched mesh and step and this
+        code's report tolerances, open markers are the other runs, and this
+        code's line joins its cheapest configuration at each accuracy; lower left
+        is better. Errors at or below 1e-12 count as exact
+        when matching accuracy, errors at or below 1e-14 are drawn at 1e-14, and
+        runs every code solves exactly are not drawn.
         """,
     )
     for (kind, path) in figures
@@ -50,16 +64,37 @@ function _write_timing_comparison(io, case_id::String, figures)
     end
     println(
         io,
-        "Reference timings below are medians of five runs after one warm-up. ",
-        "Full process time also includes launch and shutdown; it is shown ",
-        "separately and is not compared with Julia's warmed time.\n",
+        "For each external mesh and step: the external code's cheapest run at least as " *
+        "accurate (often itself; a coarser or finer run of the same code when that " *
+        "costs less), this code's cheapest configuration at least as accurate on every " *
+        "scored reference (its cells, and its tolerance multiplier when looser than the " *
+        "report's), and the ratio of the two. A ratio marked ≥ uses this code's " *
+        "coarsest configuration, fewest cells at the loosest tolerance, whose accuracy " *
+        "already exceeds the external run's.\n",
     )
     _md_table(
         io,
-        ["Code", "Resolution", "Internal elapsed (s)", "Full process (s)"],
         [
-            (r.label, r.res, _fmt(r.wall), _fmt(r.process_wall)) for
-            r in _reference_timings(case_id)
+            "External run",
+            "Mesh, step",
+            "External error",
+            "External time (s)",
+            "Cheapest external at this accuracy (s)",
+            "Our cells, tolerance",
+            "Our time (s)",
+            "Cheapest external/our time",
+        ],
+        [
+            (
+                r[1],
+                LEVEL_LABELS[r[2]],
+                _fmt(r[3]),
+                _fmt(r[4]),
+                _fmt(r[5]),
+                r[6],
+                isnan(r[7]) ? "—" : _fmt(r[7]),
+                isempty(r[8]) ? "—" : r[8],
+            ) for r in rows
         ],
     )
 end
@@ -130,7 +165,7 @@ function _write_member!(io, r::CaseReportResult)
     # section below rather than being dumped in sequence.
     _is_vs_err(k) = endswith(string(k), "_vs_codes_error")
     _is_vs(k) = endswith(string(k), "_vs_codes") && !_is_vs_err(k)
-    _is_cc(k) = _is_vs(k) || _is_vs_err(k) || k === :solve_time
+    _is_cc(k) = _is_vs(k) || _is_vs_err(k) || k === :cost
     for (kind, path) in r.figures
         _is_cc(kind) && continue
         println(io, "![$(case.id) $(kind)]($(path))\n")
@@ -138,42 +173,38 @@ function _write_member!(io, r::CaseReportResult)
 
     cc_err = [(k, p) for (k, p) in r.figures if _is_vs_err(k)]
     cc_over = [(k, p) for (k, p) in r.figures if _is_vs(k)]
-    cc_time = [(k, p) for (k, p) in r.figures if k === :solve_time]
-    if !(isempty(cc_err) && isempty(cc_over) && isempty(cc_time))
+    cc_cost = [(k, p) for (k, p) in r.figures if k === :cost]
+    if !(isempty(cc_err) && isempty(cc_over) && isempty(r.cost_rows))
         println(io, "### Comparison with other codes\n")
         println(
             io,
             "Physical-problem agreement does not establish equal discretization or cost. " *
             "See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) " *
-            "and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons " *
-            "require a shared achieved-accuracy target.\n",
+            "and [per-pair inventory](assets/comparison_basis.csv). Costs are compared " *
+            "at matched accuracy only.\n",
         )
         if has_matched_comparison(case.id)
             println(
                 io,
-                "Matched native-input runs, independent time refinement at fixed mesh " *
-                "(dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under " *
+                "Matched native-input runs at seven configurations (coarser and finer " *
+                "time steps at fixed mesh, and a finer mesh) are retained under " *
                 "`test/verification/reference/matched/`. See the " *
                 "[coverage and matching notes](comparison_coverage.md). " *
                 "The plotted external series use the base resolution; " *
-                "[analytical errors at all retained resolutions](assets/$(case.id)/$(case.id)_comparison_accuracy.csv) " *
-                "are retained separately. These runs provide accuracy measurements.\n",
+                "[analytical errors at every configuration](assets/$(case.id)/$(case.id)_comparison_accuracy.csv) " *
+                "are retained separately, and the same runs are timed for the cost comparison.\n",
             )
         end
         if haskey(case.report, :comparison_note)
             println(io, case.report.comparison_note, "\n")
         elseif !has_matched_comparison(case.id)
-            refs = _reference_timings(case.id)
-            codes_txt =
-                isempty(refs) ? "the reference codes" :
-                join(("$(t.label) at $(t.res)" for t in refs), " and ")
             println(
                 io,
                 """
-                Reference runs are available from $(codes_txt). Decks, outputs and
-                available provenance are under `test/verification/reference/`; check
-                case-specific parameters and transformations before comparing. Where
-                error panels are present, they compare against the analytical reference.
+                Reference runs from other codes are under `test/verification/reference/`,
+                with their decks, outputs and provenance; check case-specific parameters
+                and transformations before comparing. Where error panels are present,
+                they compare against the analytical reference.
                 """,
             )
         end
@@ -191,12 +222,8 @@ function _write_member!(io, r::CaseReportResult)
         for (kind, path) in cc_err
             println(io, "![$(case.id) $(kind)]($(path))\n")
         end
-        if !isempty(cc_time)
-            println(
-                io,
-                "A timing entry alone does not establish an identical physical workload.\n",
-            )
-            _write_timing_comparison(io, case.id, cc_time)
+        if !isempty(r.cost_rows)
+            _write_cost_comparison(io, case.id, cc_cost, r.cost_rows)
         end
         if !isempty(cc_over)
             println(
@@ -226,6 +253,13 @@ function _write_member!(io, r::CaseReportResult)
                 ) for i in eachindex(r.ladder_ns)
             ],
         )
+        if r.timings_recorded
+            println(
+                io,
+                "Wall time: median of up to five warm runs of problem construction and ",
+                "solve on one pinned core, after a discarded compiling run.\n",
+            )
+        end
         expected = report_expected_order(case)
         if r.observed_order !== nothing
             print(io, "Observed order $( _fmt(r.observed_order)) ($(norm_names[1]))")
@@ -326,14 +360,15 @@ function write_chapters(
         exact/reference solution, markers are the solver. Tolerances are
         pinned at ~3× the observed error at pin time (the provenance column).
 
-        Selected cases include retained FDS 6.11.1 and pinned Gpyro V2 results.
-        Their decks, transformations and available provenance are documented in
+        Selected cases include retained FDS 6.11.1, pinned Gpyro V2 and ThermaKin2Ds 7
+        results. Their decks, transformations and available provenance are documented in
         `test/verification/reference/`. The [comparison coverage](comparison_coverage.md)
         identifies matched problems, partial coverage, and excluded physics.
         The [comparison-basis audit](comparison_coverage.md#comparison-basis-audit)
-        records meshes, observations and temporal sensitivity. Runtime comparisons
-        require the solvers to meet the same achieved-accuracy target; no runtime
-        pair is qualified under this criterion.
+        records meshes, observations and temporal sensitivity. Costs are compared only
+        at matched accuracy: each matched case plots time against analytical error for
+        every external run and for this code's resolution ladder, timed under
+        `scripts/timing/README.md`.
 
         Generated by
         `scripts/verification/run_reports.jl`. Regenerate with:

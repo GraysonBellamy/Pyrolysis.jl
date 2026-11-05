@@ -1,4 +1,236 @@
 [[series]]
+case = "V-HC-01"
+curve = "T_profiles"
+reference = "t = 30.0 s"
+label = "FDS 6.11.1, t = 30.0 s"
+path = "fds/vhc01.csv"
+index = 1
+
+[[series]]
+case = "V-HC-01"
+curve = "T_profiles"
+reference = "t = 60.0 s"
+label = "FDS 6.11.1, t = 60.0 s"
+path = "fds/vhc01.csv"
+index = 2
+
+[[series]]
+case = "V-HC-01"
+curve = "T_profiles"
+reference = "t = 90.0 s"
+label = "FDS 6.11.1, t = 90.0 s"
+path = "fds/vhc01.csv"
+index = 3
+
+[[series]]
+case = "V-HC-01"
+curve = "T_profiles"
+reference = "t = 180.0 s"
+label = "FDS 6.11.1, t = 180.0 s"
+path = "fds/vhc01.csv"
+index = 4
+
+[[series]]
+case = "V-HC-01"
+curve = "surface_T_history"
+reference = "surface Newton solve"
+label = "FDS 6.11.1"
+path = "fds/vhc01.csv"
+index = 5
+
+[[series]]
+case = "V-HC-02a"
+curve = "T_profiles"
+reference = "Fo = 0.05"
+label = "FDS 6.11.1, Fo = 0.05"
+path = "fds/vhc02a.csv"
+index = 1
+
+[[series]]
+case = "V-HC-02a"
+curve = "T_profiles"
+reference = "Fo = 0.1"
+label = "FDS 6.11.1, Fo = 0.1"
+path = "fds/vhc02a.csv"
+index = 2
+
+[[series]]
+case = "V-HC-02a"
+curve = "T_profiles"
+reference = "Fo = 0.2"
+label = "FDS 6.11.1, Fo = 0.2"
+path = "fds/vhc02a.csv"
+index = 3
+
+[[series]]
+case = "V-HC-02a"
+curve = "T_profiles"
+reference = "Fo = 0.5"
+label = "FDS 6.11.1, Fo = 0.5"
+path = "fds/vhc02a.csv"
+index = 4
+
+[[series]]
+case = "V-HC-02a"
+curve = "surface_T_history"
+reference = "front face"
+label = "FDS 6.11.1"
+path = "fds/vhc02a.csv"
+index = 5
+
+[[series]]
+case = "V-HC-02a"
+curve = "back_T_history"
+reference = "adiabatic back face"
+label = "FDS 6.11.1"
+path = "fds/vhc02a.csv"
+index = 6
+
+[[series]]
+case = "V-HC-02b"
+curve = "T_profiles"
+reference = "Fo = 0.05"
+label = "FDS 6.11.1, Fo = 0.05"
+path = "fds/vhc02b.csv"
+index = 1
+
+[[series]]
+case = "V-HC-02b"
+curve = "T_profiles"
+reference = "Fo = 0.1"
+label = "FDS 6.11.1, Fo = 0.1"
+path = "fds/vhc02b.csv"
+index = 2
+
+[[series]]
+case = "V-HC-02b"
+curve = "T_profiles"
+reference = "Fo = 0.2"
+label = "FDS 6.11.1, Fo = 0.2"
+path = "fds/vhc02b.csv"
+index = 3
+
+[[series]]
+case = "V-HC-02b"
+curve = "T_profiles"
+reference = "Fo = 0.5"
+label = "FDS 6.11.1, Fo = 0.5"
+path = "fds/vhc02b.csv"
+index = 4
+
+[[series]]
+case = "V-HC-02b"
+curve = "surface_T_history"
+reference = "front face"
+label = "FDS 6.11.1"
+path = "fds/vhc02b.csv"
+index = 5
+
+[[series]]
+case = "V-HC-02b"
+curve = "back_T_history"
+reference = "adiabatic back face"
+label = "FDS 6.11.1"
+path = "fds/vhc02b.csv"
+index = 6
+
+[[series]]
+case = "V-HC-02c"
+curve = "T_profiles"
+reference = "Fo = 0.05"
+label = "FDS 6.11.1, Fo = 0.05"
+path = "fds/vhc02c.csv"
+index = 1
+
+[[series]]
+case = "V-HC-02c"
+curve = "T_profiles"
+reference = "Fo = 0.1"
+label = "FDS 6.11.1, Fo = 0.1"
+path = "fds/vhc02c.csv"
+index = 2
+
+[[series]]
+case = "V-HC-02c"
+curve = "T_profiles"
+reference = "Fo = 0.2"
+label = "FDS 6.11.1, Fo = 0.2"
+path = "fds/vhc02c.csv"
+index = 3
+
+[[series]]
+case = "V-HC-02c"
+curve = "T_profiles"
+reference = "Fo = 0.5"
+label = "FDS 6.11.1, Fo = 0.5"
+path = "fds/vhc02c.csv"
+index = 4
+
+[[series]]
+case = "V-HC-02c"
+curve = "surface_T_history"
+reference = "front face"
+label = "FDS 6.11.1"
+path = "fds/vhc02c.csv"
+index = 5
+
+[[series]]
+case = "V-HC-02c"
+curve = "back_T_history"
+reference = "adiabatic back face"
+label = "FDS 6.11.1"
+path = "fds/vhc02c.csv"
+index = 6
+
+[[series]]
+case = "V-HC-02d"
+curve = "T_profiles"
+reference = "Fo = 0.05"
+label = "FDS 6.11.1, Fo = 0.05"
+path = "fds/vhc02d.csv"
+index = 1
+
+[[series]]
+case = "V-HC-02d"
+curve = "T_profiles"
+reference = "Fo = 0.1"
+label = "FDS 6.11.1, Fo = 0.1"
+path = "fds/vhc02d.csv"
+index = 2
+
+[[series]]
+case = "V-HC-02d"
+curve = "T_profiles"
+reference = "Fo = 0.2"
+label = "FDS 6.11.1, Fo = 0.2"
+path = "fds/vhc02d.csv"
+index = 3
+
+[[series]]
+case = "V-HC-02d"
+curve = "T_profiles"
+reference = "Fo = 0.5"
+label = "FDS 6.11.1, Fo = 0.5"
+path = "fds/vhc02d.csv"
+index = 4
+
+[[series]]
+case = "V-HC-02d"
+curve = "surface_T_history"
+reference = "front face"
+label = "FDS 6.11.1"
+path = "fds/vhc02d.csv"
+index = 5
+
+[[series]]
+case = "V-HC-02d"
+curve = "back_T_history"
+reference = "adiabatic back face"
+label = "FDS 6.11.1"
+path = "fds/vhc02d.csv"
+index = 6
+
+[[series]]
 case = "V-HC-04a"
 curve = "T_profile_steady"
 reference = "steady solver profile"
@@ -38,6 +270,30 @@ reference = "steady solver profile"
 label = "FDS 6.11.1"
 path = "fds/vhc05.csv"
 index = 1
+
+[[series]]
+case = "V-RX-01"
+curve = "xi_histories"
+reference = "ξ_A"
+label = "FDS 6.11.1 ξ_A"
+path = "fds/vrx01.csv"
+index = 1
+
+[[series]]
+case = "V-RX-01"
+curve = "xi_histories"
+reference = "ξ_B"
+label = "FDS 6.11.1 ξ_B"
+path = "fds/vrx01.csv"
+index = 2
+
+[[series]]
+case = "V-RX-01"
+curve = "xi_histories"
+reference = "ξ_C"
+label = "FDS 6.11.1 ξ_C"
+path = "fds/vrx01.csv"
+index = 3
 
 [[series]]
 case = "V-RX-02a"

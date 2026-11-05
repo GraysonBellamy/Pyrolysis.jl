@@ -60,12 +60,6 @@ spatial_status = "spacing matched"
 
 [[targets]]
 case = "V-HC-01"
-n_cells = 133
-variant = ""
-spatial_status = "mesh mismatch"
-
-[[targets]]
-case = "V-HC-01"
 n_cells = 500
 variant = ""
 spatial_status = "spacing matched"
@@ -77,20 +71,8 @@ variant = ""
 spatial_status = "mesh mismatch"
 
 [[targets]]
-case = "V-HC-02a"
-n_cells = 101
-variant = ""
-spatial_status = "mesh mismatch"
-
-[[targets]]
 case = "V-HC-02b"
 n_cells = 80
-variant = ""
-spatial_status = "mesh mismatch"
-
-[[targets]]
-case = "V-HC-02b"
-n_cells = 101
 variant = ""
 spatial_status = "mesh mismatch"
 
@@ -101,20 +83,8 @@ variant = ""
 spatial_status = "mesh mismatch"
 
 [[targets]]
-case = "V-HC-02c"
-n_cells = 101
-variant = ""
-spatial_status = "mesh mismatch"
-
-[[targets]]
 case = "V-HC-02d"
 n_cells = 80
-variant = ""
-spatial_status = "mesh mismatch"
-
-[[targets]]
-case = "V-HC-02d"
-n_cells = 101
 variant = ""
 spatial_status = "mesh mismatch"
 
@@ -140,13 +110,13 @@ spatial_status = "mesh mismatch"
 case = "V-HC-04c"
 n_cells = 80
 variant = ""
-spatial_status = "interface representation must be audited separately"
+spatial_status = "material interface represented differently by each code"
 
 [[targets]]
 case = "V-HC-04d"
 n_cells = 80
 variant = ""
-spatial_status = "interface representation must be audited separately"
+spatial_status = "material interface represented differently by each code"
 
 [[targets]]
 case = "V-HC-05"

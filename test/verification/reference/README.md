@@ -6,64 +6,43 @@ errors on our verification figures. Assert mode (`Pkg.test()`) never reads
 this directory.
 
 Each subdirectory records the available version, input, run-date and extraction
-information. FDS files are native outputs; Gpyro reference CSVs are extracted
-and converted to SI; MaCFP files are row-downsampled. Plotting the retained
+information. Matched runs retain native inputs and outputs beside extracted SI
+samples; MaCFP files are row-downsampled. Plotting the retained
 curves is reproducible without the external codes. Reproducing a run
 requires its pinned executable and input deck. All active Gpyro comparisons
 use V2 revision `bff0126c68f2a35c084ef04490ae327185f281a3`.
-Repeated timing measurements have separate provenance records.
+Cost measurements and their provenance are in `matched/timing/`.
 
 | Directory | Code | What it feeds |
 |---|---|---|
-| `fds/` | FDS 6.11.1 (NIST), run locally on the shipped verification inputs | V-HC-01/02 and V-RX-01 overlays; supplied-deck outputs and custom timing workloads |
-| `gpyro/` | Gpyro 0.8200 (Lautenberger), original dissertation §3.4 decks | Numerical datasets and timings; no active accuracy overlay reads these CSVs |
-| `gpyro/v2_migration/` | Gpyro V2 at pinned revision `bff0126c68f2`, 25 native runs with matched base spacing and independent refinements | Current V-HC-01/03, V-RAD-01, V-CPL-01 route A and V-RX-01 overlays; no timings |
-| `gpyro/v2_accuracy/` | Gpyro V2 at pinned revision `bff0126c68f2`, matched inputs, raw outputs and refinement checks | V-GT-07a/b, V-GT-08a/b, V-RX-05a–c accuracy overlays; no timings |
-| `matched/` | FDS 6.11.1, pinned Gpyro V2 and ThermaKin2Ds 7, native decks and independent time/space refinements | HC-02/04/05, RX-02/04/05, CPL-03/04 coverage, plus ThermaKin HC-01/03, RX-01 and GT-01/07; see [mappings and reproduction](matched/README.md); no timings |
+| `fds/` | FDS 6.11.1 (NIST), run locally on the shipped verification inputs | Supplied-deck outputs and two custom decks; no verification page reads them |
+| `gpyro/` | Gpyro V2 on the MaCFP PMMA deck | V-BO-01 burnout gradient gates |
+| `matched/` | FDS 6.11.1, pinned Gpyro V2 and ThermaKin2Ds 7, native decks and independent time/space refinements | Every cross-code curve and cost on the verification pages; see [mappings and reproduction](matched/README.md); cost at matched accuracy from `matched/timing/` |
 | `macfp/` | MaCFP-2 PMMA community submissions (9 institutions: FDS/Gpyro/ThermaKin/Sierra) | Community predictions; no verification case reads these files |
-| `timings.csv` | internal elapsed and full process wall times; timing protocols recorded with the data | Optional `solve_time` figures and supporting timing tables |
 
-## Timing convention
+## Cost convention
 
-**No timing pair is qualified at a shared achieved accuracy.** Report
-generation excludes cross-code timing figures by default. The
-[mesh/time inventory and runtime policy](../../../../docs/guide/verification/comparison_coverage.md#comparison-basis-audit)
-define the qualification requirements. The native refinement studies
-contain no timing measurements.
+Times are compared only at matched accuracy, on the matched cases: each
+external run's time at its seven configurations against its analytical error,
+beside this code's time and error over its resolution ladder and looser
+solver tolerances on the same curves and references. `matched/timing/` holds the times (`external.csv`,
+`pyrolysis.csv`) and their provenance (`provenance.json`: machine, commits,
+executable hashes, timer boundaries, disturbance record). Every timed external
+run reproduced the committed native outputs byte for byte, so each time
+belongs to the computation whose error the pages report. The protocol and the
+scripts that measure and export the data are in `scripts/timing/`.
 
-`--historical-timings=true` enables figures for the configurations in
-`timings.csv`; each row identifies its solver version and workload.
+| Code | Time compared |
+|---|---|
+| Pyrolysis.jl | problem construction and solve in a warmed session, after a discarded compiling solve |
+| FDS 6.11.1 | internal Total Elapsed Wall Clock Time: input reading to the final timing report, after MPI start-up |
+| Gpyro V2 | process time |
+| ThermaKin2Ds 7 | process time (its own timer ticks in whole seconds) |
 
-The optional timing figures compare **setup and simulation wall time**. Julia times
-`case.build(n)` and the solve after a discarded warm-up. Its process startup,
-compilation warm-up, and report/plot generation are outside the measurement.
-FDS and Gpyro use their **internal total elapsed wall time**, not their
-time-stepping-only or per-routine timing statistics. The `wall_s` column in
-`timings.csv` holds this internal elapsed time; `process_wall_s` separately
-holds full process wall time. Both reference columns are medians of five
-fresh-process runs after one warm-up, on one pinned CPU.
-
-Julia timing figures and wall-time columns describe source revision
-`a3016a55a68f7e1a2a5baf451f7cfd7dbdf9cb74`. Numerical errors and QoIs
-come from separate verification runs. Configurations without a retained
-timing have an empty `wall_s` field in CSV and a dash in the displayed table.
-
-| Code | Primary timer starts | Primary timer ends |
-|---|---|---|
-| Pyrolysis.jl | before model construction in a warmed Julia session | after solve returns |
-| FDS 6.11.1 | after MPI initialization; before input reading | final timing report before MPI finalization |
-| Gpyro 0.8200 | before input reading and allocation | shutdown timing print after simulation and final timing-file output |
-
-Full process wall times include launch and shutdown and appear in supporting
-tables, not in ratios against warmed Julia. No complete-process Julia
-measurement is supplied here. FDS/Gpyro output remains inside their internal
-timers; Julia report output is outside its timer. Discretizations, adaptive
-steps and output workloads also differ, so these are indicative costs, not
-pure solver speedups. The matched timing decks use the same simulated spans
-as the corresponding Julia cases; per-row details are in the note column.
-
-See [FDS provenance](fds/README.md) and [Gpyro provenance](gpyro/README.md) for
-build details, timer boundaries, repeated measurements and input hashes.
+Each is the median of repeated runs on one pinned core. On the smallest
+problems the external times are mostly input, setup and output, and the
+discretizations, step control and output workloads differ, so a ratio is a
+cost at equal accuracy for that problem, not a pure solver speedup.
 
 ThermaKin2Ds 7 outputs are in `matched/`. Its source is not redistributable,
 so neither the source nor the executable is committed; the

@@ -24,10 +24,8 @@
 # Cell-center and cell-average profile errors are reported separately. The
 # latter compares each finite-volume inventory with the analytical integral
 # over its actual cell. Gpyro's boundary-node values retain point references.
-# Resolution comparisons use the maximum over 50, 150 and 400 s; the existing
-# spatial-order check uses the profile at 400 s. Gpyro refines time as well as
-# space (dt = 0.05 / 0.025 s), so its two points are a refinement comparison,
-# not an isolated spatial-order measurement.
+# Resolution figures use the maximum over 50, 150 and 400 s; the existing
+# spatial-order check uses the profile at 400 s.
 
 function _vgt07_case(id, hm)
     L, T, P, φ, M = 1.0, 300.0, 1e5, 0.6, 0.032
@@ -197,6 +195,7 @@ function _vgt07_case(id, hm)
         ),
         report = (
             n_cells_ladder = [40, 80, 160],
+            cost_n_cells = [320, 640],
             error_norms = sol -> (
                 Linf = profile_error(sol; last_only = true),
                 cell_average_Linf = profile_error(
@@ -205,62 +204,32 @@ function _vgt07_case(id, hm)
                     cell_average = true,
                 ),
             ),
-            resolution_curves = (ns, qs) ->
-                _vgt07_resolution_curves(id, ns, qs; L, Y∞, fraction, influx, inventory),
+            resolution_curves = (ns, qs) -> _vgt07_resolution_curves(id, ns, qs; L),
             comparison_note = "Gpyro V2 (`bff0126c68f2`) uses 161 boundary-centered nodes " *
                               "(160 intervals) and Δt = 0.05 s. Molecular collision parameters " *
                               "give D = 2e-5 m²/s at 300 K and 1 bar. The far-side reservoir " *
                               "contains only carrier gas so Gpyro's positive floor on the zero " *
-                              "film coefficient contributes negligible exchange. Both codes " *
+                              "film coefficient contributes negligible exchange. Its influx is " *
+                              "the film flux h_m(Y∞ − Y_s) and its inventory integrates the " *
+                              "nodes over half end cells at its native gas density. All codes " *
                               "are compared with the analytical Robin solution, with their " *
-                              "native gas constants retained. Inputs, raw outputs, refinement " *
-                              "checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`. " *
-                              "Cell-average errors apply only to Julia's cell inventories; Gpyro retains " *
-                              "its native point-value reference. Resolution plots show maximum errors " *
-                              "over all three output times against actual mesh spacing. Gpyro's two " *
-                              "resolutions also halve the timestep; no spatial order is inferred from them.",
+                              "native gas constants retained; Gpyro's are point values.",
             curves = sol -> begin
-                stem = "gpyro/v2_accuracy/" * lowercase(replace(id, "-" => ""))
                 half_width = L/(2length(sol.cell_centers[:, end]))
-                gp_t, gp_x, gp_y = reference_columns(
-                    stem * "_profiles.csv",
-                    "t_s",
-                    "depth_m",
-                    "Y";
-                    header_rows = 1,
-                )
-                gp_ts, gp_flux, gp_mass = reference_columns(
-                    stem * "_history.csv",
-                    "t_s",
-                    "influx_kg_m2_s",
-                    "inventory_kg_m2";
-                    header_rows = 1,
-                )
                 [
                     ReportCurve(
                         name = :profiles,
                         title = "$(id): transient species diffusion",
                         xlabel = "depth (m)",
                         ylabel = "tracer mass fraction",
-                        series = vcat(
-                            [
-                                CurveSeries(
-                                    label = "t = $(sol.t[j]) s",
-                                    x = L .- sol.cell_centers[:, end],
-                                    y = vec(sol.ξ[2, :, j]) ./ (φ*ρg),
-                                    exact = x -> fraction(x, sol.t[j]),
-                                ) for j = 2:length(sol.t)
-                            ],
-                            [
-                                CurveSeries(
-                                    label = "Gpyro V2, t = $(t) s",
-                                    x = gp_x[gp_t .== t],
-                                    y = gp_y[gp_t .== t],
-                                    exact = x -> fraction(x, t),
-                                    crosscode = true,
-                                ) for t in ts
-                            ],
-                        ),
+                        series = [
+                            CurveSeries(
+                                label = "t = $(sol.t[j]) s",
+                                x = L .- sol.cell_centers[:, end],
+                                y = vec(sol.ξ[2, :, j]) ./ (φ*ρg),
+                                exact = x -> fraction(x, sol.t[j]),
+                            ) for j = 2:length(sol.t)
+                        ],
                     ),
                     ReportCurve(
                         name = :cell_average_profiles,
@@ -295,13 +264,6 @@ function _vgt07_case(id, hm)
                                 y = -vec(get_boundary_exchange(sol, :top).fluxes[1, 2:end]),
                                 exact = influx,
                             ),
-                            CurveSeries(
-                                label = "Gpyro V2",
-                                x = gp_ts[2:end],
-                                y = gp_flux[2:end],
-                                exact = influx,
-                                crosscode = true,
-                            ),
                         ],
                     ),
                     ReportCurve(
@@ -316,13 +278,6 @@ function _vgt07_case(id, hm)
                                 y = vec(sum(sol.m[2, :, :]; dims = 1)),
                                 exact = inventory,
                             ),
-                            CurveSeries(
-                                label = "Gpyro V2",
-                                x = gp_ts,
-                                y = gp_mass,
-                                exact = inventory,
-                                crosscode = true,
-                            ),
                         ],
                     ),
                 ]
@@ -331,38 +286,9 @@ function _vgt07_case(id, hm)
     )
 end
 
-# Report-only comparisons: every error is evaluated from retained native
-# samples against the same functions used by the Julia case, without fitting
-# coordinates or treating Gpyro boundary nodes as cell averages.
-function _vgt07_resolution_curves(id, ns, qs; L, Y∞, fraction, influx, inventory)
-    stem = lowercase(replace(id, "-" => ""))
-    gp_h, gp_profile, gp_flux, gp_inventory = (Float64[] for _ = 1:4)
-    for prefix in ("gpyro/v2_accuracy/", "gpyro/v2_accuracy/refined/")
-        t, x, y = reference_columns(
-            prefix*stem*"_profiles.csv",
-            "t_s",
-            "depth_m",
-            "Y";
-            header_rows = 1,
-        )
-        ht, flux, mass = reference_columns(
-            prefix*stem*"_history.csv",
-            "t_s",
-            "influx_kg_m2_s",
-            "inventory_kg_m2";
-            header_rows = 1,
-        )
-        push!(gp_h, maximum(diff(sort(unique(x)))))
-        push!(gp_profile, maximum(abs(y[i]-fraction(x[i], t[i]))/Y∞ for i in eachindex(t)))
-        push!(
-            gp_flux,
-            maximum(abs(flux[i]/influx(ht[i])-1) for i in eachindex(ht) if ht[i]>0),
-        )
-        push!(
-            gp_inventory,
-            maximum(abs(mass[i]/inventory(ht[i])-1) for i in eachindex(ht) if ht[i]>0),
-        )
-    end
+# Maximum error over the three output times against mesh spacing, for the
+# center-value and cell-average profile references and the boundary ledgers.
+function _vgt07_resolution_curves(id, ns, qs; L)
     errors(name) = [only(q.error for q in rung if q.name == name) for rung in qs]
     profiles = ReportCurve(
         name = :resolution_profiles,
@@ -382,46 +308,27 @@ function _vgt07_resolution_curves(id, ns, qs; L, Y∞, fraction, influx, invento
                 x = L ./ ns,
                 y = errors("transient tracer cell average / reservoir fraction"),
             ),
-            CurveSeries(
-                label = "Gpyro V2 point values",
-                x = gp_h,
-                y = gp_profile,
-                crosscode = true,
-            ),
         ],
     )
-    curves = [profiles]
-    for (slug, title, qoi, gp) in (
-        (
-            :resolution_uptake,
-            "surface influx",
-            "surface uptake vs analytical flux",
-            gp_flux,
-        ),
-        (
-            :resolution_inventory,
-            "tracer inventory",
-            "stored tracer vs integrated analytical influx",
-            gp_inventory,
-        ),
-    )
-        push!(
-            curves,
-            ReportCurve(
-                name = slug,
-                title = "$(id): $(title) error vs mesh spacing (all output times)",
-                xlabel = "mesh spacing (m)",
-                ylabel = "maximum relative error",
-                xscale = :log10,
-                yscale = :log10,
-                series = [
-                    CurveSeries(label = "Pyrolysis.jl", x = L ./ ns, y = errors(qoi)),
-                    CurveSeries(label = "Gpyro V2", x = gp_h, y = gp, crosscode = true),
-                ],
+    ledgers = [
+        ReportCurve(
+            name = slug,
+            title = "$(id): $(title) error vs mesh spacing (all output times)",
+            xlabel = "mesh spacing (m)",
+            ylabel = "maximum relative error",
+            xscale = :log10,
+            yscale = :log10,
+            series = [CurveSeries(label = "Pyrolysis.jl", x = L ./ ns, y = errors(qoi))],
+        ) for (slug, title, qoi) in (
+            (:resolution_uptake, "surface influx", "surface uptake vs analytical flux"),
+            (
+                :resolution_inventory,
+                "tracer inventory",
+                "stored tracer vs integrated analytical influx",
             ),
         )
-    end
-    return curves
+    ]
+    return [profiles; ledgers]
 end
 push!(VERIFICATION_CASE_BUILDERS, () -> _vgt07_case("V-GT-07a", 1e-4))
 push!(VERIFICATION_CASE_BUILDERS, () -> _vgt07_case("V-GT-07b", 1e-2))

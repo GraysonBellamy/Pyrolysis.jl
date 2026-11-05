@@ -137,24 +137,8 @@ function _vgt08_case(id; reverse = false)
                               "νP = μRT/M used in this problem. Native gauge pressure is converted " *
                               "to absolute pressure, depth to z = L − depth, and boundary fluxes " *
                               "to outward-positive kg/(m² s). Both codes are compared with the " *
-                              "same steady solution. Inputs, raw outputs, refinement checks and " *
-                              "extraction are in `test/verification/reference/gpyro/v2_accuracy/`.",
+                              "same steady solution.",
             curves = sol -> begin
-                stem = "gpyro/v2_accuracy/" * lowercase(replace(id, "-" => ""))
-                gp_z, gp_p = reference_columns(
-                    stem * "_profiles.csv",
-                    "z_m",
-                    "P_Pa";
-                    header_rows = 1,
-                )
-                gp_t, gp_in, gp_out, gp_net = reference_columns(
-                    stem * "_history.csv",
-                    "t_s",
-                    "inlet_kg_m2_s",
-                    "outlet_kg_m2_s",
-                    "net_kg_m2_s";
-                    header_rows = 1,
-                )
                 [
                     ReportCurve(
                         name = :pressure,
@@ -167,13 +151,6 @@ function _vgt08_case(id; reverse = false)
                                 x = sol.cell_centers[:, end],
                                 y = sol.gas.pressure[:, end],
                                 exact = pressure,
-                            ),
-                            CurveSeries(
-                                label = "Gpyro V2",
-                                x = gp_z,
-                                y = gp_p,
-                                exact = pressure,
-                                crosscode = true,
                             ),
                         ],
                     ),
@@ -205,27 +182,6 @@ function _vgt08_case(id; reverse = false)
                                     get_boundary_exchange(sol, outlet).fluxes[1, 2:end],
                                 ),
                                 exact = t -> 0.0,
-                            ),
-                            CurveSeries(
-                                label = "Gpyro V2 inlet",
-                                x = gp_t,
-                                y = gp_in,
-                                exact = t -> -J,
-                                crosscode = true,
-                            ),
-                            CurveSeries(
-                                label = "Gpyro V2 outlet",
-                                x = gp_t,
-                                y = gp_out,
-                                exact = t -> J,
-                                crosscode = true,
-                            ),
-                            CurveSeries(
-                                label = "Gpyro V2 net",
-                                x = gp_t,
-                                y = gp_net,
-                                exact = t -> 0.0,
-                                crosscode = true,
                             ),
                         ],
                     ),

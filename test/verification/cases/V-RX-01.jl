@@ -112,73 +112,25 @@ function _verification_case_vrx01()
         qois = qois,
         ci = CIConfig(n_cells = 1, budget_s = 10.0),
         report = (
-            comparison_note = "Gpyro V2 revision `bff0126c68f2` uses one 0D isothermal unknown with unit condensed yields. The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements. ThermaKin2Ds 7 uses one insulated element at dt = 0.001 s with the same rate constants and E = 0.",
+            comparison_note = "FDS 6.11.1 and ThermaKin2Ds 7 use one insulated 1 mm cell (element); Gpyro V2 revision `bff0126c68f2` uses one ZEROD isothermal unknown. All three use the same rate constants with E = 0 and unit condensed yields, at dt = 0.001 s.",
             qoi_curves = (:xi_histories,),
             heating = :isothermal,
             curves = sol -> begin
-                # FDS 6.11.1 overlay (reference/fds/custom/): the span-matched
-                # re-run of two_step_solid_reaction (T_END = 20 s = our
-                # window; identical kinetics 0.389/0.262 s⁻¹, E = 0,
-                # isothermal — the same constants as Gpyro §3.4.4). FDS devc
-                # values are time-averages over the output interval, so
-                # samples plot at t − Δt_out/2; their Y (ρ_s with
-                # ρ₀ = 1 kg/m³) scales to ξ by ξ0.
-                fds = reference_columns(
-                    "fds/custom/two_step_solid_reaction_matched_devc.csv",
-                    "Time",
-                    "Ya",
-                    "Yb",
-                    "Yc",
-                )
-                t_fds = fds[1][2:end] .- (fds[1][2] - fds[1][1]) / 2
-                # Gpyro V2 overlay (reference/gpyro/v2_migration/): dissertation §3.4.4
-                # 0D isothermal deck, identical constants, dt = 1 ms (Gpyro's
-                # species update is first-order in time).
-                gp = reference_columns(
-                    "gpyro/v2_migration/vrx01_result.csv",
-                    "t_s",
-                    "Y_A",
-                    "Y_B",
-                    "Y_C";
-                    header_rows = 1,
-                )
                 [
                     ReportCurve(
                         name = :xi_histories,
                         title = "V-RX-01: series chain A→B→C (Bateman solution)",
                         xlabel = "t (s)",
                         ylabel = "ξ (kg/m³)",
-                        series = vcat(
-                            [
-                                CurveSeries(
-                                    label = "ξ_$(species)",
-                                    x = sol.t,
-                                    y = sol.ξ[idx, 1, :],
-                                    exact = t ->
-                                        series_chain_xi(t; ξ0 = ξ0, k1 = k1, k2 = k2)[idx],
-                                ) for (species, idx) in ((:A, 1), (:B, 2), (:C, 3))
-                            ],
-                            [
-                                CurveSeries(
-                                    label = "FDS 6.11.1 ξ_$(species)",
-                                    crosscode = true,
-                                    x = t_fds,
-                                    y = ξ0 .* fds[1+idx][2:end],
-                                    exact = t ->
-                                        series_chain_xi(t; ξ0 = ξ0, k1 = k1, k2 = k2)[idx],
-                                ) for (species, idx) in ((:A, 1), (:B, 2), (:C, 3))
-                            ],
-                            [
-                                CurveSeries(
-                                    label = "Gpyro V2 ξ_$(species)",
-                                    crosscode = true,
-                                    x = gp[1],
-                                    y = ξ0 .* gp[1+idx],
-                                    exact = t ->
-                                        series_chain_xi(t; ξ0 = ξ0, k1 = k1, k2 = k2)[idx],
-                                ) for (species, idx) in ((:A, 1), (:B, 2), (:C, 3))
-                            ],
-                        ),
+                        series = [
+                            CurveSeries(
+                                label = "ξ_$(species)",
+                                x = sol.t,
+                                y = sol.ξ[idx, 1, :],
+                                exact = t ->
+                                    series_chain_xi(t; ξ0 = ξ0, k1 = k1, k2 = k2)[idx],
+                            ) for (species, idx) in ((:A, 1), (:B, 2), (:C, 3))
+                        ],
                     ),
                 ]
             end,

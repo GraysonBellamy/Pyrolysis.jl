@@ -1,4 +1,44 @@
 [[series]]
+case = "V-HC-01"
+curve = "T_profiles"
+reference = "t = 30.0 s"
+label = "Gpyro V2, t = 30.0 s"
+path = "gpyro/vhc01.csv"
+index = 1
+
+[[series]]
+case = "V-HC-01"
+curve = "T_profiles"
+reference = "t = 60.0 s"
+label = "Gpyro V2, t = 60.0 s"
+path = "gpyro/vhc01.csv"
+index = 2
+
+[[series]]
+case = "V-HC-01"
+curve = "T_profiles"
+reference = "t = 90.0 s"
+label = "Gpyro V2, t = 90.0 s"
+path = "gpyro/vhc01.csv"
+index = 3
+
+[[series]]
+case = "V-HC-01"
+curve = "T_profiles"
+reference = "t = 180.0 s"
+label = "Gpyro V2, t = 180.0 s"
+path = "gpyro/vhc01.csv"
+index = 4
+
+[[series]]
+case = "V-HC-01"
+curve = "surface_T_history"
+reference = "surface Newton solve"
+label = "Gpyro V2"
+path = "gpyro/vhc01.csv"
+index = 5
+
+[[series]]
 case = "V-HC-02a"
 curve = "T_profiles"
 reference = "Fo = 0.05"
@@ -189,6 +229,38 @@ reference = "adiabatic back face"
 label = "Gpyro V2"
 path = "gpyro/vhc02d.csv"
 index = 6
+
+[[series]]
+case = "V-HC-03"
+curve = "T_profiles"
+reference = "Fo = 0.1"
+label = "Gpyro V2, Fo = 0.1"
+path = "gpyro/vhc03.csv"
+index = 1
+
+[[series]]
+case = "V-HC-03"
+curve = "T_profiles"
+reference = "Fo = 0.5"
+label = "Gpyro V2, Fo = 0.5"
+path = "gpyro/vhc03.csv"
+index = 2
+
+[[series]]
+case = "V-HC-03"
+curve = "T_profiles"
+reference = "Fo = 1.5"
+label = "Gpyro V2, Fo = 1.5"
+path = "gpyro/vhc03.csv"
+index = 3
+
+[[series]]
+case = "V-HC-03"
+curve = "mean_T_history"
+reference = "volume mean"
+label = "Gpyro V2"
+path = "gpyro/vhc03.csv"
+index = 4
 
 [[series]]
 case = "V-HC-04a"
@@ -232,6 +304,70 @@ path = "gpyro/vhc05.csv"
 index = 1
 
 [[series]]
+case = "V-RAD-01"
+curve = "T_profiles"
+reference = "t = 30.0 s"
+label = "Gpyro V2, t = 30.0 s"
+path = "gpyro/vrad01.csv"
+index = 1
+
+[[series]]
+case = "V-RAD-01"
+curve = "T_profiles"
+reference = "t = 60.0 s"
+label = "Gpyro V2, t = 60.0 s"
+path = "gpyro/vrad01.csv"
+index = 2
+
+[[series]]
+case = "V-RAD-01"
+curve = "T_profiles"
+reference = "t = 90.0 s"
+label = "Gpyro V2, t = 90.0 s"
+path = "gpyro/vrad01.csv"
+index = 3
+
+[[series]]
+case = "V-RAD-01"
+curve = "T_profiles"
+reference = "t = 180.0 s"
+label = "Gpyro V2, t = 180.0 s"
+path = "gpyro/vrad01.csv"
+index = 4
+
+[[series]]
+case = "V-RAD-01"
+curve = "surface_T_history"
+reference = "front face"
+label = "Gpyro V2"
+path = "gpyro/vrad01.csv"
+index = 5
+
+[[series]]
+case = "V-RX-01"
+curve = "xi_histories"
+reference = "ξ_A"
+label = "Gpyro V2 ξ_A"
+path = "gpyro/vrx01.csv"
+index = 1
+
+[[series]]
+case = "V-RX-01"
+curve = "xi_histories"
+reference = "ξ_B"
+label = "Gpyro V2 ξ_B"
+path = "gpyro/vrx01.csv"
+index = 2
+
+[[series]]
+case = "V-RX-01"
+curve = "xi_histories"
+reference = "ξ_C"
+label = "Gpyro V2 ξ_C"
+path = "gpyro/vrx01.csv"
+index = 3
+
+[[series]]
 case = "V-RX-02a"
 curve = "xi_histories"
 reference = "ξ_A (n = 0.0)"
@@ -272,6 +408,150 @@ path = "gpyro/vrx04b.csv"
 index = 1
 
 [[series]]
+case = "V-RX-05a"
+curve = "temperature"
+reference = "temperature"
+label = "Gpyro V2"
+path = "gpyro/vrx05a.csv"
+index = 1
+
+[[series]]
+case = "V-RX-05a"
+curve = "species"
+reference = "A"
+label = "Gpyro V2 A"
+path = "gpyro/vrx05a.csv"
+index = 2
+
+[[series]]
+case = "V-RX-05a"
+curve = "species"
+reference = "B"
+label = "Gpyro V2 B"
+path = "gpyro/vrx05a.csv"
+index = 3
+
+[[series]]
+case = "V-RX-05a"
+curve = "enthalpy"
+reference = "enthalpy"
+label = "Gpyro V2"
+path = "gpyro/vrx05a.csv"
+index = 4
+
+[[series]]
+case = "V-RX-05b"
+curve = "temperature"
+reference = "temperature"
+label = "Gpyro V2"
+path = "gpyro/vrx05b.csv"
+index = 1
+
+[[series]]
+case = "V-RX-05b"
+curve = "species"
+reference = "A"
+label = "Gpyro V2 A"
+path = "gpyro/vrx05b.csv"
+index = 2
+
+[[series]]
+case = "V-RX-05b"
+curve = "species"
+reference = "B"
+label = "Gpyro V2 B"
+path = "gpyro/vrx05b.csv"
+index = 3
+
+[[series]]
+case = "V-RX-05b"
+curve = "enthalpy"
+reference = "enthalpy"
+label = "Gpyro V2"
+path = "gpyro/vrx05b.csv"
+index = 4
+
+[[series]]
+case = "V-RX-05c"
+curve = "temperature"
+reference = "temperature"
+label = "Gpyro V2"
+path = "gpyro/vrx05c.csv"
+index = 1
+
+[[series]]
+case = "V-RX-05c"
+curve = "species"
+reference = "A"
+label = "Gpyro V2 A"
+path = "gpyro/vrx05c.csv"
+index = 2
+
+[[series]]
+case = "V-RX-05c"
+curve = "species"
+reference = "B"
+label = "Gpyro V2 B"
+path = "gpyro/vrx05c.csv"
+index = 3
+
+[[series]]
+case = "V-RX-05c"
+curve = "species"
+reference = "G"
+label = "Gpyro V2 G"
+path = "gpyro/vrx05c.csv"
+index = 4
+
+[[series]]
+case = "V-RX-05c"
+curve = "enthalpy"
+reference = "enthalpy"
+label = "Gpyro V2"
+path = "gpyro/vrx05c.csv"
+index = 5
+
+[[series]]
+case = "V-CPL-01"
+curve = "T_histories_at_depths"
+reference = "x = 0.5 mm"
+label = "Gpyro V2, x = 0.5 mm"
+path = "gpyro/vcpl01.csv"
+index = 1
+
+[[series]]
+case = "V-CPL-01"
+curve = "T_histories_at_depths"
+reference = "x = 1.0 mm"
+label = "Gpyro V2, x = 1.0 mm"
+path = "gpyro/vcpl01.csv"
+index = 2
+
+[[series]]
+case = "V-CPL-01"
+curve = "T_histories_at_depths"
+reference = "x = 1.5 mm"
+label = "Gpyro V2, x = 1.5 mm"
+path = "gpyro/vcpl01.csv"
+index = 3
+
+[[series]]
+case = "V-CPL-01"
+curve = "T_histories_at_depths"
+reference = "x = 2.0 mm"
+label = "Gpyro V2, x = 2.0 mm"
+path = "gpyro/vcpl01.csv"
+index = 4
+
+[[series]]
+case = "V-CPL-01"
+curve = "front_trajectory"
+reference = "T_m isotherm"
+label = "Gpyro V2"
+path = "gpyro/vcpl01.csv"
+index = 5
+
+[[series]]
 case = "V-CPL-03"
 curve = "thickness_histories"
 reference = "P1"
@@ -302,4 +582,148 @@ reference = "δ = 0.44 ≈ 0.50 δ_c"
 label = "Gpyro V2, δ = 0.44"
 path = "gpyro/vcpl04.csv"
 index = 1
+
+[[series]]
+case = "V-GT-07a"
+curve = "profiles"
+reference = "t = 50.0 s"
+label = "Gpyro V2, t = 50.0 s"
+path = "gpyro/vgt07a.csv"
+index = 1
+
+[[series]]
+case = "V-GT-07a"
+curve = "profiles"
+reference = "t = 150.0 s"
+label = "Gpyro V2, t = 150.0 s"
+path = "gpyro/vgt07a.csv"
+index = 2
+
+[[series]]
+case = "V-GT-07a"
+curve = "profiles"
+reference = "t = 400.0 s"
+label = "Gpyro V2, t = 400.0 s"
+path = "gpyro/vgt07a.csv"
+index = 3
+
+[[series]]
+case = "V-GT-07a"
+curve = "uptake"
+reference = "surface influx"
+label = "Gpyro V2"
+path = "gpyro/vgt07a.csv"
+index = 4
+
+[[series]]
+case = "V-GT-07a"
+curve = "inventory"
+reference = "stored tracer"
+label = "Gpyro V2"
+path = "gpyro/vgt07a.csv"
+index = 5
+
+[[series]]
+case = "V-GT-07b"
+curve = "profiles"
+reference = "t = 50.0 s"
+label = "Gpyro V2, t = 50.0 s"
+path = "gpyro/vgt07b.csv"
+index = 1
+
+[[series]]
+case = "V-GT-07b"
+curve = "profiles"
+reference = "t = 150.0 s"
+label = "Gpyro V2, t = 150.0 s"
+path = "gpyro/vgt07b.csv"
+index = 2
+
+[[series]]
+case = "V-GT-07b"
+curve = "profiles"
+reference = "t = 400.0 s"
+label = "Gpyro V2, t = 400.0 s"
+path = "gpyro/vgt07b.csv"
+index = 3
+
+[[series]]
+case = "V-GT-07b"
+curve = "uptake"
+reference = "surface influx"
+label = "Gpyro V2"
+path = "gpyro/vgt07b.csv"
+index = 4
+
+[[series]]
+case = "V-GT-07b"
+curve = "inventory"
+reference = "stored tracer"
+label = "Gpyro V2"
+path = "gpyro/vgt07b.csv"
+index = 5
+
+[[series]]
+case = "V-GT-08a"
+curve = "pressure"
+reference = "steady pressure"
+label = "Gpyro V2"
+path = "gpyro/vgt08a.csv"
+index = 1
+
+[[series]]
+case = "V-GT-08a"
+curve = "boundary_flux"
+reference = "inlet (bottom)"
+label = "Gpyro V2 inlet"
+path = "gpyro/vgt08a.csv"
+index = 2
+
+[[series]]
+case = "V-GT-08a"
+curve = "boundary_flux"
+reference = "outlet (top)"
+label = "Gpyro V2 outlet"
+path = "gpyro/vgt08a.csv"
+index = 3
+
+[[series]]
+case = "V-GT-08a"
+curve = "boundary_flux"
+reference = "net (inlet + outlet)"
+label = "Gpyro V2 net"
+path = "gpyro/vgt08a.csv"
+index = 4
+
+[[series]]
+case = "V-GT-08b"
+curve = "pressure"
+reference = "steady pressure"
+label = "Gpyro V2"
+path = "gpyro/vgt08b.csv"
+index = 1
+
+[[series]]
+case = "V-GT-08b"
+curve = "boundary_flux"
+reference = "inlet (top)"
+label = "Gpyro V2 inlet"
+path = "gpyro/vgt08b.csv"
+index = 2
+
+[[series]]
+case = "V-GT-08b"
+curve = "boundary_flux"
+reference = "outlet (bottom)"
+label = "Gpyro V2 outlet"
+path = "gpyro/vgt08b.csv"
+index = 3
+
+[[series]]
+case = "V-GT-08b"
+curve = "boundary_flux"
+reference = "net (inlet + outlet)"
+label = "Gpyro V2 net"
+path = "gpyro/vgt08b.csv"
+index = 4
 
