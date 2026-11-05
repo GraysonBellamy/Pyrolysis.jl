@@ -34,10 +34,12 @@ from the original material inputs inside 256-bit arithmetic.
 
 | n_cells | h | wall (s) | pressure |
 | --- | --- | --- | --- |
-| 20 | 0.05 | — | 0.0009047 |
-| 40 | 0.025 | — | 0.0004567 |
-| 80 | 0.0125 | — | 0.0002293 |
-| 160 | 0.00625 | — | 0.0001149 |
+| 20 | 0.05 | 0.003496 | 0.0009047 |
+| 40 | 0.025 | 0.005762 | 0.0004567 |
+| 80 | 0.0125 | 0.0105 | 0.0002293 |
+| 160 | 0.00625 | 0.02018 | 0.0001149 |
+
+Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
 Observed order 0.9926 (pressure), expected 1.0.
 
@@ -71,10 +73,12 @@ Observed order 0.9926 (pressure), expected 1.0.
 
 | n_cells | h | wall (s) | pressure |
 | --- | --- | --- | --- |
-| 20 | 0.05 | — | 0.0009952 |
-| 40 | 0.025 | — | 0.000507 |
-| 80 | 0.0125 | — | 0.0002558 |
-| 160 | 0.00625 | — | 0.0001285 |
+| 20 | 0.05 | 0.003446 | 0.0009952 |
+| 40 | 0.025 | 0.006099 | 0.000507 |
+| 80 | 0.0125 | 0.01111 | 0.0002558 |
+| 160 | 0.00625 | 0.02162 | 0.0001285 |
+
+Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
 Observed order 0.9848 (pressure), expected 1.0.
 
@@ -108,10 +112,12 @@ Observed order 0.9848 (pressure), expected 1.0.
 
 | n_cells | h | wall (s) | pressure |
 | --- | --- | --- | --- |
-| 20 | 0.05 | — | 0.0003027 |
-| 40 | 0.025 | — | 0.000157 |
-| 80 | 0.0125 | — | 7.996e-05 |
-| 160 | 0.00625 | — | 4.034e-05 |
+| 20 | 0.05 | 0.003686 | 0.0003027 |
+| 40 | 0.025 | 0.006197 | 0.000157 |
+| 80 | 0.0125 | 0.01182 | 7.996e-05 |
+| 160 | 0.00625 | 0.0224 | 4.034e-05 |
+
+Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
 Observed order 0.9695 (pressure), expected 1.0.
 
@@ -145,10 +151,12 @@ Observed order 0.9695 (pressure), expected 1.0.
 
 | n_cells | h | wall (s) | pressure |
 | --- | --- | --- | --- |
-| 20 | 0.05 | — | 0.0003177 |
-| 40 | 0.025 | — | 0.0001634 |
-| 80 | 0.0125 | — | 8.281e-05 |
-| 160 | 0.00625 | — | 4.169e-05 |
+| 20 | 0.05 | 0.003258 | 0.0003177 |
+| 40 | 0.025 | 0.005578 | 0.0001634 |
+| 80 | 0.0125 | 0.01053 | 8.281e-05 |
+| 160 | 0.00625 | 0.0194 | 4.169e-05 |
+
+Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
 Observed order 0.977 (pressure), expected 1.0.
 

@@ -1,0 +1,7 @@
+"external run","resolution","external error","external time_s","cheapest external at this accuracy_s","our rung","our time_s","cheapest external/our time"
+"ThermaKin2Ds 7","base",5.566301121968237e-5,0.0503055,0.0270682,"320, 10× tol",0.0154245,"1.75"
+"ThermaKin2Ds 7","time_double",5.540301121968044e-5,0.0270682,0.0270682,"320, 10× tol",0.0154245,"1.75"
+"ThermaKin2Ds 7","time_half",5.573301121968022e-5,0.0950876,0.0270682,"320, 10× tol",0.0154245,"1.75"
+"ThermaKin2Ds 7","time_quarter",5.575301121967663e-5,0.18509,0.0270682,"320, 10× tol",0.0154245,"1.75"
+"ThermaKin2Ds 7","space_half",1.3956319553684593e-5,0.368093,0.186535,"640, 1000× tol",0.029624,"6.3"
+"ThermaKin2Ds 7","refined",1.3946319553682918e-5,0.186535,0.186535,"640, 1000× tol",0.029624,"6.3"

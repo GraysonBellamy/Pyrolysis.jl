@@ -49,11 +49,11 @@ _The steady mass-balance plot shows the saved samples at 0.5 and 1 s. Markers sh
 
 ### Comparison with other codes
 
-Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Costs are compared at matched accuracy only.
 
-Gpyro V2 (`bff0126c68f2`) uses 81 boundary-centered nodes (80 intervals) and Δt = 0.005 s, with temperature held at 300 K. Its molecular collision parameters match the Darcy coefficient νP = μRT/M used in this problem. Native gauge pressure is converted to absolute pressure, depth to z = L − depth, and boundary fluxes to outward-positive kg/(m² s). Both codes are compared with the same steady solution. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`.
+Matched native-input runs at seven configurations (coarser and finer time steps at fixed mesh, and a finer mesh) are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at every configuration](assets/V-GT-08a/V-GT-08a_comparison_accuracy.csv) are retained separately, and the same runs are timed for the cost comparison.
 
-Accuracy comparison only; timing measurements are omitted.
+Gpyro V2 (`bff0126c68f2`) uses 81 boundary-centered nodes (80 intervals) and Δt = 0.005 s, with temperature held at 300 K. Its molecular collision parameters match the Darcy coefficient νP = μRT/M used in this problem. Native gauge pressure is converted to absolute pressure, depth to z = L − depth, and boundary fluxes to outward-positive kg/(m² s). Both codes are compared with the same steady solution.
 
 Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
 
@@ -61,15 +61,55 @@ Error panels show absolute error at each code's output points. Zeros are display
 
 ![V-GT-08a boundary_flux_vs_codes_error](assets/V-GT-08a/V-GT-08a_boundary_flux_vs_codes_error.png)
 
+#### Cost at matched accuracy
+
+Each external code appears at its matched mesh h and time step Δt, at
+coarser steps (2Δt, 4Δt) and at refinements (Δt/2, Δt/4, h/2 at Δt/4,
+h/2 at Δt/2); this code at its report ladder, the external meshes and any
+finer cost-only meshes, each at its report tolerances and at 10, 100 and
+1000 times looser ones, the counterpart of the coarser steps. A coarse
+configuration a code cannot express or complete is left out; for the
+external codes the reason is in the matched provenance. The error is the
+largest analytical error over
+the curves and references the external run is scored on. Times are FDS's
+internal elapsed time, which excludes its MPI start-up; Gpyro's and
+ThermaKin's process time; and this code's warm problem construction and
+solve. Each is the median of repeated runs on one pinned core
+(`scripts/timing/README.md`; data and provenance in
+`test/verification/reference/matched/timing/`). On the smallest problems
+the external times are mostly input, setup and output. In the figure,
+filled markers are each external code's matched mesh and step and this
+code's report tolerances, open markers are the other runs, and this
+code's line joins its cheapest configuration at each accuracy; lower left
+is better. Errors at or below 1e-12 count as exact
+when matching accuracy, errors at or below 1e-14 are drawn at 1e-14, and
+runs every code solves exactly are not drawn.
+
+![V-GT-08a cost](assets/V-GT-08a/V-GT-08a_cost.png)
+
+For each external mesh and step: the external code's cheapest run at least as accurate (often itself; a coarser or finer run of the same code when that costs less), this code's cheapest configuration at least as accurate on every scored reference (its cells, and its tolerance multiplier when looser than the report's), and the ratio of the two. A ratio marked ≥ uses this code's coarsest configuration, fewest cells at the loosest tolerance, whose accuracy already exceeds the external run's.
+
+| External run | Mesh, step | External error | External time (s) | Cheapest external at this accuracy (s) | Our cells, tolerance | Our time (s) | Cheapest external/our time |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Gpyro V2 | h, Δt | 43.45 | 0.009489 | 0.005602 | 40, 1000× tol | 0.004149 | 1.35 |
+| Gpyro V2 | h, 2Δt | 43.45 | 0.006626 | 0.005602 | 40, 1000× tol | 0.004149 | 1.35 |
+| Gpyro V2 | h, 4Δt | 43.45 | 0.005602 | 0.005602 | 40, 1000× tol | 0.004149 | 1.35 |
+| Gpyro V2 | h, Δt/2 | 43.45 | 0.01428 | 0.005602 | 40, 1000× tol | 0.004149 | 1.35 |
+| Gpyro V2 | h, Δt/4 | 43.45 | 0.02496 | 0.005602 | 40, 1000× tol | 0.004149 | 1.35 |
+| Gpyro V2 | h/2, Δt/4 | 21.69 | 0.04079 | 0.02311 | 80, 1000× tol | 0.008035 | 2.88 |
+| Gpyro V2 | h/2, Δt/2 | 21.69 | 0.02311 | 0.02311 | 80, 1000× tol | 0.008035 | 2.88 |
+
 Solution overlays including the other codes' points: [pressure_vs_codes](assets/V-GT-08a/V-GT-08a_pressure_vs_codes.png), [boundary_flux_vs_codes](assets/V-GT-08a/V-GT-08a_boundary_flux_vs_codes.png).
 
 ### Convergence
 
-| n_cells | h | P2 |
-| --- | --- | --- |
-| 20 | 0.05 | 0.00319 |
-| 40 | 0.025 | 0.001616 |
-| 80 | 0.0125 | 0.0008129 |
+| n_cells | h | wall (s) | P2 |
+| --- | --- | --- | --- |
+| 20 | 0.05 | 0.00491 | 0.00319 |
+| 40 | 0.025 | 0.008983 | 0.001616 |
+| 80 | 0.0125 | 0.0178 | 0.0008129 |
+
+Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
 Observed order 0.9861 (P2), expected 1.0.
 
@@ -109,11 +149,11 @@ _The steady mass-balance plot shows the saved samples at 0.5 and 1 s. Markers sh
 
 ### Comparison with other codes
 
-Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Costs are compared at matched accuracy only.
 
-Gpyro V2 (`bff0126c68f2`) uses 81 boundary-centered nodes (80 intervals) and Δt = 0.005 s, with temperature held at 300 K. Its molecular collision parameters match the Darcy coefficient νP = μRT/M used in this problem. Native gauge pressure is converted to absolute pressure, depth to z = L − depth, and boundary fluxes to outward-positive kg/(m² s). Both codes are compared with the same steady solution. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`.
+Matched native-input runs at seven configurations (coarser and finer time steps at fixed mesh, and a finer mesh) are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at every configuration](assets/V-GT-08b/V-GT-08b_comparison_accuracy.csv) are retained separately, and the same runs are timed for the cost comparison.
 
-Accuracy comparison only; timing measurements are omitted.
+Gpyro V2 (`bff0126c68f2`) uses 81 boundary-centered nodes (80 intervals) and Δt = 0.005 s, with temperature held at 300 K. Its molecular collision parameters match the Darcy coefficient νP = μRT/M used in this problem. Native gauge pressure is converted to absolute pressure, depth to z = L − depth, and boundary fluxes to outward-positive kg/(m² s). Both codes are compared with the same steady solution.
 
 Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
 
@@ -121,15 +161,55 @@ Error panels show absolute error at each code's output points. Zeros are display
 
 ![V-GT-08b boundary_flux_vs_codes_error](assets/V-GT-08b/V-GT-08b_boundary_flux_vs_codes_error.png)
 
+#### Cost at matched accuracy
+
+Each external code appears at its matched mesh h and time step Δt, at
+coarser steps (2Δt, 4Δt) and at refinements (Δt/2, Δt/4, h/2 at Δt/4,
+h/2 at Δt/2); this code at its report ladder, the external meshes and any
+finer cost-only meshes, each at its report tolerances and at 10, 100 and
+1000 times looser ones, the counterpart of the coarser steps. A coarse
+configuration a code cannot express or complete is left out; for the
+external codes the reason is in the matched provenance. The error is the
+largest analytical error over
+the curves and references the external run is scored on. Times are FDS's
+internal elapsed time, which excludes its MPI start-up; Gpyro's and
+ThermaKin's process time; and this code's warm problem construction and
+solve. Each is the median of repeated runs on one pinned core
+(`scripts/timing/README.md`; data and provenance in
+`test/verification/reference/matched/timing/`). On the smallest problems
+the external times are mostly input, setup and output. In the figure,
+filled markers are each external code's matched mesh and step and this
+code's report tolerances, open markers are the other runs, and this
+code's line joins its cheapest configuration at each accuracy; lower left
+is better. Errors at or below 1e-12 count as exact
+when matching accuracy, errors at or below 1e-14 are drawn at 1e-14, and
+runs every code solves exactly are not drawn.
+
+![V-GT-08b cost](assets/V-GT-08b/V-GT-08b_cost.png)
+
+For each external mesh and step: the external code's cheapest run at least as accurate (often itself; a coarser or finer run of the same code when that costs less), this code's cheapest configuration at least as accurate on every scored reference (its cells, and its tolerance multiplier when looser than the report's), and the ratio of the two. A ratio marked ≥ uses this code's coarsest configuration, fewest cells at the loosest tolerance, whose accuracy already exceeds the external run's.
+
+| External run | Mesh, step | External error | External time (s) | Cheapest external at this accuracy (s) | Our cells, tolerance | Our time (s) | Cheapest external/our time |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Gpyro V2 | h, Δt | 43.21 | 0.009623 | 0.005453 | 40, 1000× tol | 0.004258 | 1.28 |
+| Gpyro V2 | h, 2Δt | 43.21 | 0.007086 | 0.005453 | 40, 1000× tol | 0.004258 | 1.28 |
+| Gpyro V2 | h, 4Δt | 43.21 | 0.005453 | 0.005453 | 40, 1000× tol | 0.004258 | 1.28 |
+| Gpyro V2 | h, Δt/2 | 43.21 | 0.01465 | 0.005453 | 40, 1000× tol | 0.004258 | 1.28 |
+| Gpyro V2 | h, Δt/4 | 43.21 | 0.02475 | 0.005453 | 40, 1000× tol | 0.004258 | 1.28 |
+| Gpyro V2 | h/2, Δt/4 | 21.63 | 0.03976 | 0.02287 | 80, 1000× tol | 0.00816 | 2.8 |
+| Gpyro V2 | h/2, Δt/2 | 21.63 | 0.02287 | 0.02287 | 80, 1000× tol | 0.00816 | 2.8 |
+
 Solution overlays including the other codes' points: [pressure_vs_codes](assets/V-GT-08b/V-GT-08b_pressure_vs_codes.png), [boundary_flux_vs_codes](assets/V-GT-08b/V-GT-08b_boundary_flux_vs_codes.png).
 
 ### Convergence
 
-| n_cells | h | P2 |
-| --- | --- | --- |
-| 20 | 0.05 | 0.00319 |
-| 40 | 0.025 | 0.001616 |
-| 80 | 0.0125 | 0.0008129 |
+| n_cells | h | wall (s) | P2 |
+| --- | --- | --- | --- |
+| 20 | 0.05 | 0.004868 | 0.00319 |
+| 40 | 0.025 | 0.009101 | 0.001616 |
+| 80 | 0.0125 | 0.01814 | 0.0008129 |
+
+Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
 Observed order 0.9861 (P2), expected 1.0.
 

@@ -1,0 +1,7 @@
+"external run","resolution","external error","external time_s","cheapest external at this accuracy_s","our rung","our time_s","cheapest external/our time"
+"Gpyro V2","base",0.42843918891298927,1.71416,1.71416,"75, 100× tol",0.00588884,"291.0"
+"Gpyro V2","time_double",0.4978921889129424,0.899993,0.899993,"75, 100× tol",0.00588884,"153.0"
+"Gpyro V2","time_half",0.45977818891299194,3.33336,1.71416,"75, 100× tol",0.00588884,"291.0"
+"Gpyro V2","time_quarter",0.41160618891296963,6.62367,6.5224,"75, 100× tol",0.00588884,"1110.0"
+"Gpyro V2","space_half",0.2805061889130229,12.8717,12.8717,"75, 100× tol",0.00588884,"2190.0"
+"Gpyro V2","refined",0.3016011889129686,6.5224,6.5224,"75, 100× tol",0.00588884,"1110.0"

@@ -56,13 +56,11 @@ inside the cell, the depletion limiter is disabled, and no mesh moves.
 
 ### Comparison with other codes
 
-Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Costs are compared at matched accuracy only.
 
-Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-RX-05a/V-RX-05a_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
+Matched native-input runs at seven configurations (coarser and finer time steps at fixed mesh, and a finer mesh) are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at every configuration](assets/V-RX-05a/V-RX-05a_comparison_accuracy.csv) are retained separately, and the same runs are timed for the cost comparison.
 
-Gpyro V2 (`bff0126c68f2`) uses two boundary nodes on a uniform insulated slab, Δt = 0.001 s, E = 0, and the same reaction heat, yields and heat capacities. A 1e-6 Pa initial gas pressure avoids a singular vacuum diffusivity; its initial mass is negligible (about 1e-15 kg/m²). Sensible enthalpy is reconstructed from native concentrations and temperature at the common 298.15 K datum. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`. ThermaKin2Ds 7 uses one insulated element at dt = 0.001 s; its positive reaction heat is exothermic, so the sign is reversed.
-
-Accuracy comparison only; timing measurements are omitted.
+Gpyro V2 (`bff0126c68f2`) uses two boundary nodes on a uniform insulated slab, Δt = 0.001 s, E = 0, and the same reaction heat, yields and heat capacities. A 1e-6 Pa initial gas pressure avoids a singular vacuum diffusivity; its initial mass is negligible (about 1e-15 kg/m²). Sensible enthalpy is reconstructed from native concentrations and temperature at the common 298.15 K datum. ThermaKin2Ds 7 uses one insulated element at dt = 0.001 s; its positive reaction heat is exothermic, so the sign is reversed.
 
 Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
 
@@ -71,6 +69,58 @@ Error panels show absolute error at each code's output points. Zeros are display
 ![V-RX-05a species_vs_codes_error](assets/V-RX-05a/V-RX-05a_species_vs_codes_error.png)
 
 ![V-RX-05a enthalpy_vs_codes_error](assets/V-RX-05a/V-RX-05a_enthalpy_vs_codes_error.png)
+
+#### Cost at matched accuracy
+
+Each external code appears at its matched mesh h and time step Δt, at
+coarser steps (2Δt, 4Δt) and at refinements (Δt/2, Δt/4, h/2 at Δt/4,
+h/2 at Δt/2); this code at its report ladder, the external meshes and any
+finer cost-only meshes, each at its report tolerances and at 10, 100 and
+1000 times looser ones, the counterpart of the coarser steps. A coarse
+configuration a code cannot express or complete is left out; for the
+external codes the reason is in the matched provenance. The error is the
+largest analytical error over
+the curves and references the external run is scored on. Times are FDS's
+internal elapsed time, which excludes its MPI start-up; Gpyro's and
+ThermaKin's process time; and this code's warm problem construction and
+solve. Each is the median of repeated runs on one pinned core
+(`scripts/timing/README.md`; data and provenance in
+`test/verification/reference/matched/timing/`). On the smallest problems
+the external times are mostly input, setup and output. In the figure,
+filled markers are each external code's matched mesh and step and this
+code's report tolerances, open markers are the other runs, and this
+code's line joins its cheapest configuration at each accuracy; lower left
+is better. Errors at or below 1e-12 count as exact
+when matching accuracy, errors at or below 1e-14 are drawn at 1e-14, and
+runs every code solves exactly are not drawn.
+
+![V-RX-05a cost](assets/V-RX-05a/V-RX-05a_cost.png)
+
+For each external mesh and step: the external code's cheapest run at least as accurate (often itself; a coarser or finer run of the same code when that costs less), this code's cheapest configuration at least as accurate on every scored reference (its cells, and its tolerance multiplier when looser than the report's), and the ratio of the two. A ratio marked ≥ uses this code's coarsest configuration, fewest cells at the loosest tolerance, whose accuracy already exceeds the external run's.
+
+| External run | Mesh, step | External error | External time (s) | Cheapest external at this accuracy (s) | Our cells, tolerance | Our time (s) | Cheapest external/our time |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| FDS 6.11.1 | h, Δt | 26.33 | 0.355 | 0.355 | 1, 1000× tol | 0.0007927 | ≥ 448.0 |
+| FDS 6.11.1 | h, 2Δt | 52.66 | 0.184 | 0.184 | 1, 1000× tol | 0.0007927 | ≥ 232.0 |
+| FDS 6.11.1 | h, 4Δt | 105.4 | 0.098 | 0.098 | 1, 1000× tol | 0.0007927 | ≥ 124.0 |
+| FDS 6.11.1 | h, Δt/2 | 13.16 | 0.697 | 0.697 | 1, 1000× tol | 0.0007927 | ≥ 879.0 |
+| FDS 6.11.1 | h, Δt/4 | 6.581 | 1.39 | 1.39 | 1, 1000× tol | 0.0007927 | ≥ 1750.0 |
+| FDS 6.11.1 | h/2, Δt/4 | 6.581 | 1.394 | 1.39 | 1, 1000× tol | 0.0007927 | ≥ 1750.0 |
+| FDS 6.11.1 | h/2, Δt/2 | 13.16 | 0.707 | 0.697 | 1, 1000× tol | 0.0007927 | ≥ 879.0 |
+| Gpyro V2 | h, Δt | 26.33 | 0.2398 | 0.2398 | 1, 1000× tol | 0.0007927 | ≥ 303.0 |
+| Gpyro V2 | h, 2Δt | 52.66 | 0.1249 | 0.1249 | 1, 1000× tol | 0.0007927 | ≥ 158.0 |
+| Gpyro V2 | h, 4Δt | 105.4 | 0.06583 | 0.06583 | 1, 1000× tol | 0.0007927 | ≥ 83.1 |
+| Gpyro V2 | h, Δt/2 | 13.16 | 0.4714 | 0.4714 | 1, 1000× tol | 0.0007927 | ≥ 595.0 |
+| Gpyro V2 | h, Δt/4 | 6.582 | 0.909 | 0.909 | 1, 1000× tol | 0.0007927 | ≥ 1150.0 |
+| Gpyro V2 | h/2, Δt/4 | 6.582 | 0.9685 | 0.909 | 1, 1000× tol | 0.0007927 | ≥ 1150.0 |
+| Gpyro V2 | h/2, Δt/2 | 13.16 | 0.4929 | 0.4714 | 1, 1000× tol | 0.0007927 | ≥ 595.0 |
+| ThermaKin2Ds 7 | h, Δt | 0.09511 | 0.008531 | 0.005405 | 1, 1000× tol | 0.0007927 | ≥ 6.82 |
+| ThermaKin2Ds 7 | h, 2Δt | 0.09511 | 0.005405 | 0.005405 | 1, 1000× tol | 0.0007927 | ≥ 6.82 |
+| ThermaKin2Ds 7 | h, 4Δt | 0.1599 | 0.004517 | 0.004517 | 1, 1000× tol | 0.0007927 | ≥ 5.7 |
+| ThermaKin2Ds 7 | h, Δt/2 | 0.09511 | 0.01349 | 0.005405 | 1, 1000× tol | 0.0007927 | ≥ 6.82 |
+| ThermaKin2Ds 7 | h, Δt/4 | 0.09511 | 0.02294 | 0.005405 | 1, 1000× tol | 0.0007927 | ≥ 6.82 |
+| ThermaKin2Ds 7 | h/2, Δt/4 | 0.09511 | 0.05052 | 0.005405 | 1, 1000× tol | 0.0007927 | ≥ 6.82 |
+| ThermaKin2Ds 7 | h/2, Δt/2 | 0.09511 | 0.02672 | 0.005405 | 1, 1000× tol | 0.0007927 | ≥ 6.82 |
 
 Solution overlays including the other codes' points: [temperature_vs_codes](assets/V-RX-05a/V-RX-05a_temperature_vs_codes.png), [species_vs_codes](assets/V-RX-05a/V-RX-05a_species_vs_codes.png), [enthalpy_vs_codes](assets/V-RX-05a/V-RX-05a_enthalpy_vs_codes.png).
 
@@ -108,13 +158,11 @@ Solution overlays including the other codes' points: [temperature_vs_codes](asse
 
 ### Comparison with other codes
 
-Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Costs are compared at matched accuracy only.
 
-Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-RX-05b/V-RX-05b_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
+Matched native-input runs at seven configurations (coarser and finer time steps at fixed mesh, and a finer mesh) are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at every configuration](assets/V-RX-05b/V-RX-05b_comparison_accuracy.csv) are retained separately, and the same runs are timed for the cost comparison.
 
-Gpyro V2 (`bff0126c68f2`) uses two boundary nodes on a uniform insulated slab, Δt = 0.001 s, E = 0, and the same reaction heat, yields and heat capacities. A 1e-6 Pa initial gas pressure avoids a singular vacuum diffusivity; its initial mass is negligible (about 1e-15 kg/m²). Sensible enthalpy is reconstructed from native concentrations and temperature at the common 298.15 K datum. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`. ThermaKin2Ds 7 uses one insulated element at dt = 0.001 s; its positive reaction heat is exothermic, so the sign is reversed.
-
-Accuracy comparison only; timing measurements are omitted.
+Gpyro V2 (`bff0126c68f2`) uses two boundary nodes on a uniform insulated slab, Δt = 0.001 s, E = 0, and the same reaction heat, yields and heat capacities. A 1e-6 Pa initial gas pressure avoids a singular vacuum diffusivity; its initial mass is negligible (about 1e-15 kg/m²). Sensible enthalpy is reconstructed from native concentrations and temperature at the common 298.15 K datum. ThermaKin2Ds 7 uses one insulated element at dt = 0.001 s; its positive reaction heat is exothermic, so the sign is reversed.
 
 Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
 
@@ -123,6 +171,58 @@ Error panels show absolute error at each code's output points. Zeros are display
 ![V-RX-05b species_vs_codes_error](assets/V-RX-05b/V-RX-05b_species_vs_codes_error.png)
 
 ![V-RX-05b enthalpy_vs_codes_error](assets/V-RX-05b/V-RX-05b_enthalpy_vs_codes_error.png)
+
+#### Cost at matched accuracy
+
+Each external code appears at its matched mesh h and time step Δt, at
+coarser steps (2Δt, 4Δt) and at refinements (Δt/2, Δt/4, h/2 at Δt/4,
+h/2 at Δt/2); this code at its report ladder, the external meshes and any
+finer cost-only meshes, each at its report tolerances and at 10, 100 and
+1000 times looser ones, the counterpart of the coarser steps. A coarse
+configuration a code cannot express or complete is left out; for the
+external codes the reason is in the matched provenance. The error is the
+largest analytical error over
+the curves and references the external run is scored on. Times are FDS's
+internal elapsed time, which excludes its MPI start-up; Gpyro's and
+ThermaKin's process time; and this code's warm problem construction and
+solve. Each is the median of repeated runs on one pinned core
+(`scripts/timing/README.md`; data and provenance in
+`test/verification/reference/matched/timing/`). On the smallest problems
+the external times are mostly input, setup and output. In the figure,
+filled markers are each external code's matched mesh and step and this
+code's report tolerances, open markers are the other runs, and this
+code's line joins its cheapest configuration at each accuracy; lower left
+is better. Errors at or below 1e-12 count as exact
+when matching accuracy, errors at or below 1e-14 are drawn at 1e-14, and
+runs every code solves exactly are not drawn.
+
+![V-RX-05b cost](assets/V-RX-05b/V-RX-05b_cost.png)
+
+For each external mesh and step: the external code's cheapest run at least as accurate (often itself; a coarser or finer run of the same code when that costs less), this code's cheapest configuration at least as accurate on every scored reference (its cells, and its tolerance multiplier when looser than the report's), and the ratio of the two. A ratio marked ≥ uses this code's coarsest configuration, fewest cells at the loosest tolerance, whose accuracy already exceeds the external run's.
+
+| External run | Mesh, step | External error | External time (s) | Cheapest external at this accuracy (s) | Our cells, tolerance | Our time (s) | Cheapest external/our time |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| FDS 6.11.1 | h, Δt | 20.26 | 0.353 | 0.353 | 1, 1000× tol | 0.000775 | ≥ 455.0 |
+| FDS 6.11.1 | h, 2Δt | 40.54 | 0.185 | 0.185 | 1, 1000× tol | 0.000775 | ≥ 239.0 |
+| FDS 6.11.1 | h, 4Δt | 81.08 | 0.098 | 0.098 | 1, 1000× tol | 0.000775 | ≥ 126.0 |
+| FDS 6.11.1 | h, Δt/2 | 10.14 | 0.7 | 0.7 | 1, 1000× tol | 0.000775 | ≥ 903.0 |
+| FDS 6.11.1 | h, Δt/4 | 5.069 | 1.387 | 1.387 | 1, 1000× tol | 0.000775 | ≥ 1790.0 |
+| FDS 6.11.1 | h/2, Δt/4 | 5.069 | 1.391 | 1.387 | 1, 1000× tol | 0.000775 | ≥ 1790.0 |
+| FDS 6.11.1 | h/2, Δt/2 | 10.14 | 0.703 | 0.7 | 1, 1000× tol | 0.000775 | ≥ 903.0 |
+| Gpyro V2 | h, Δt | 20.27 | 0.2302 | 0.2302 | 1, 1000× tol | 0.000775 | ≥ 297.0 |
+| Gpyro V2 | h, 2Δt | 40.53 | 0.116 | 0.116 | 1, 1000× tol | 0.000775 | ≥ 150.0 |
+| Gpyro V2 | h, 4Δt | 81.08 | 0.05936 | 0.05936 | 1, 1000× tol | 0.000775 | ≥ 76.6 |
+| Gpyro V2 | h, Δt/2 | 10.13 | 0.456 | 0.456 | 1, 1000× tol | 0.000775 | ≥ 588.0 |
+| Gpyro V2 | h, Δt/4 | 5.066 | 0.9078 | 0.9078 | 1, 1000× tol | 0.000775 | ≥ 1170.0 |
+| Gpyro V2 | h/2, Δt/4 | 5.066 | 0.9464 | 0.9078 | 1, 1000× tol | 0.000775 | ≥ 1170.0 |
+| Gpyro V2 | h/2, Δt/2 | 10.13 | 0.4783 | 0.456 | 1, 1000× tol | 0.000775 | ≥ 588.0 |
+| ThermaKin2Ds 7 | h, Δt | 0.8697 | 0.008503 | 0.00453 | 1, 1000× tol | 0.000775 | ≥ 5.85 |
+| ThermaKin2Ds 7 | h, 2Δt | 0.8697 | 0.005847 | 0.00453 | 1, 1000× tol | 0.000775 | ≥ 5.85 |
+| ThermaKin2Ds 7 | h, 4Δt | 0.8697 | 0.00453 | 0.00453 | 1, 1000× tol | 0.000775 | ≥ 5.85 |
+| ThermaKin2Ds 7 | h, Δt/2 | 0.8697 | 0.01285 | 0.00453 | 1, 1000× tol | 0.000775 | ≥ 5.85 |
+| ThermaKin2Ds 7 | h, Δt/4 | 0.8697 | 0.0226 | 0.00453 | 1, 1000× tol | 0.000775 | ≥ 5.85 |
+| ThermaKin2Ds 7 | h/2, Δt/4 | 0.8697 | 0.05042 | 0.00453 | 1, 1000× tol | 0.000775 | ≥ 5.85 |
+| ThermaKin2Ds 7 | h/2, Δt/2 | 0.8697 | 0.02726 | 0.00453 | 1, 1000× tol | 0.000775 | ≥ 5.85 |
 
 Solution overlays including the other codes' points: [temperature_vs_codes](assets/V-RX-05b/V-RX-05b_temperature_vs_codes.png), [species_vs_codes](assets/V-RX-05b/V-RX-05b_species_vs_codes.png), [enthalpy_vs_codes](assets/V-RX-05b/V-RX-05b_enthalpy_vs_codes.png).
 
@@ -160,13 +260,11 @@ Solution overlays including the other codes' points: [temperature_vs_codes](asse
 
 ### Comparison with other codes
 
-Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Costs are compared at matched accuracy only.
 
-Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-RX-05c/V-RX-05c_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
+Matched native-input runs at seven configurations (coarser and finer time steps at fixed mesh, and a finer mesh) are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at every configuration](assets/V-RX-05c/V-RX-05c_comparison_accuracy.csv) are retained separately, and the same runs are timed for the cost comparison.
 
-Gpyro V2 (`bff0126c68f2`) uses two boundary nodes on a uniform insulated slab, Δt = 0.001 s, E = 0, and the same reaction heat, yields and heat capacities. A 1e-6 Pa initial gas pressure avoids a singular vacuum diffusivity; its initial mass is negligible (about 1e-15 kg/m²). Sensible enthalpy is reconstructed from native concentrations and temperature at the common 298.15 K datum. The retained-gas case has a Gpyro mass discrepancy of about 3.27e-5 of initial mass that persists when Δt is halved; its density and pressure routines use different gas constants. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`. ThermaKin2Ds 7 uses one insulated element at dt = 0.001 s; its positive reaction heat is exothermic, so the sign is reversed, and its gas product stays in the element without occupying volume.
-
-Accuracy comparison only; timing measurements are omitted.
+Gpyro V2 (`bff0126c68f2`) uses two boundary nodes on a uniform insulated slab, Δt = 0.001 s, E = 0, and the same reaction heat, yields and heat capacities. A 1e-6 Pa initial gas pressure avoids a singular vacuum diffusivity; its initial mass is negligible (about 1e-15 kg/m²). Sensible enthalpy is reconstructed from native concentrations and temperature at the common 298.15 K datum. The retained-gas case has a Gpyro mass discrepancy of about 3.27e-5 of initial mass that persists when Δt is halved; its density and pressure routines use different gas constants. ThermaKin2Ds 7 uses one insulated element at dt = 0.001 s; its positive reaction heat is exothermic, so the sign is reversed, and its gas product stays in the element without occupying volume.
 
 Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
 
@@ -175,6 +273,51 @@ Error panels show absolute error at each code's output points. Zeros are display
 ![V-RX-05c species_vs_codes_error](assets/V-RX-05c/V-RX-05c_species_vs_codes_error.png)
 
 ![V-RX-05c enthalpy_vs_codes_error](assets/V-RX-05c/V-RX-05c_enthalpy_vs_codes_error.png)
+
+#### Cost at matched accuracy
+
+Each external code appears at its matched mesh h and time step Δt, at
+coarser steps (2Δt, 4Δt) and at refinements (Δt/2, Δt/4, h/2 at Δt/4,
+h/2 at Δt/2); this code at its report ladder, the external meshes and any
+finer cost-only meshes, each at its report tolerances and at 10, 100 and
+1000 times looser ones, the counterpart of the coarser steps. A coarse
+configuration a code cannot express or complete is left out; for the
+external codes the reason is in the matched provenance. The error is the
+largest analytical error over
+the curves and references the external run is scored on. Times are FDS's
+internal elapsed time, which excludes its MPI start-up; Gpyro's and
+ThermaKin's process time; and this code's warm problem construction and
+solve. Each is the median of repeated runs on one pinned core
+(`scripts/timing/README.md`; data and provenance in
+`test/verification/reference/matched/timing/`). On the smallest problems
+the external times are mostly input, setup and output. In the figure,
+filled markers are each external code's matched mesh and step and this
+code's report tolerances, open markers are the other runs, and this
+code's line joins its cheapest configuration at each accuracy; lower left
+is better. Errors at or below 1e-12 count as exact
+when matching accuracy, errors at or below 1e-14 are drawn at 1e-14, and
+runs every code solves exactly are not drawn.
+
+![V-RX-05c cost](assets/V-RX-05c/V-RX-05c_cost.png)
+
+For each external mesh and step: the external code's cheapest run at least as accurate (often itself; a coarser or finer run of the same code when that costs less), this code's cheapest configuration at least as accurate on every scored reference (its cells, and its tolerance multiplier when looser than the report's), and the ratio of the two. A ratio marked ≥ uses this code's coarsest configuration, fewest cells at the loosest tolerance, whose accuracy already exceeds the external run's.
+
+| External run | Mesh, step | External error | External time (s) | Cheapest external at this accuracy (s) | Our cells, tolerance | Our time (s) | Cheapest external/our time |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Gpyro V2 | h, Δt | 23.9 | 0.2294 | 0.2294 | 1, 1000× tol | 0.0007615 | ≥ 301.0 |
+| Gpyro V2 | h, 2Δt | 26.3 | 0.1184 | 0.1184 | 1, 1000× tol | 0.0007615 | ≥ 156.0 |
+| Gpyro V2 | h, 4Δt | 33.21 | 0.06376 | 0.06376 | 1, 1000× tol | 0.0007615 | ≥ 83.7 |
+| Gpyro V2 | h, Δt/2 | 23.37 | 0.4499 | 0.4499 | 1, 1000× tol | 0.0007615 | ≥ 591.0 |
+| Gpyro V2 | h, Δt/4 | 23.16 | 0.9023 | 0.9023 | 1, 1000× tol | 0.0007615 | ≥ 1180.0 |
+| Gpyro V2 | h/2, Δt/4 | 23.16 | 0.9361 | 0.9023 | 1, 1000× tol | 0.0007615 | ≥ 1180.0 |
+| Gpyro V2 | h/2, Δt/2 | 23.37 | 0.4826 | 0.4499 | 1, 1000× tol | 0.0007615 | ≥ 591.0 |
+| ThermaKin2Ds 7 | h, Δt | 0.104 | 0.009347 | 0.006465 | 1, 1000× tol | 0.0007615 | ≥ 8.49 |
+| ThermaKin2Ds 7 | h, 2Δt | 0.104 | 0.006465 | 0.006465 | 1, 1000× tol | 0.0007615 | ≥ 8.49 |
+| ThermaKin2Ds 7 | h, 4Δt | 0.1068 | 0.00486 | 0.00486 | 1, 1000× tol | 0.0007615 | ≥ 6.38 |
+| ThermaKin2Ds 7 | h, Δt/2 | 0.104 | 0.01574 | 0.006465 | 1, 1000× tol | 0.0007615 | ≥ 8.49 |
+| ThermaKin2Ds 7 | h, Δt/4 | 0.104 | 0.02856 | 0.006465 | 1, 1000× tol | 0.0007615 | ≥ 8.49 |
+| ThermaKin2Ds 7 | h/2, Δt/4 | 0.104 | 0.07037 | 0.006465 | 1, 1000× tol | 0.0007615 | ≥ 8.49 |
+| ThermaKin2Ds 7 | h/2, Δt/2 | 0.104 | 0.03675 | 0.006465 | 1, 1000× tol | 0.0007615 | ≥ 8.49 |
 
 Solution overlays including the other codes' points: [temperature_vs_codes](assets/V-RX-05c/V-RX-05c_temperature_vs_codes.png), [species_vs_codes](assets/V-RX-05c/V-RX-05c_species_vs_codes.png), [enthalpy_vs_codes](assets/V-RX-05c/V-RX-05c_enthalpy_vs_codes.png).
 

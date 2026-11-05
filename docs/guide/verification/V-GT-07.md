@@ -30,10 +30,8 @@ predicts the stored tracer mass. All references use original inputs.
 Cell-center and cell-average profile errors are reported separately. The
 latter compares each finite-volume inventory with the analytical integral
 over its actual cell. Gpyro's boundary-node values retain point references.
-Resolution comparisons use the maximum over 50, 150 and 400 s; the existing
-spatial-order check uses the profile at 400 s. Gpyro refines time as well as
-space (dt = 0.05 / 0.025 s), so its two points are a refinement comparison,
-not an isolated spatial-order measurement.
+Resolution figures use the maximum over 50, 150 and 400 s; the existing
+spatial-order check uses the profile at 400 s.
 
 ## V-GT-07a — transient binary diffusion through a mass film (h_m = 0.0001)
 
@@ -78,13 +76,11 @@ not an isolated spatial-order measurement.
 
 ### Comparison with other codes
 
-Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Costs are compared at matched accuracy only.
 
-Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-GT-07a/V-GT-07a_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
+Matched native-input runs at seven configurations (coarser and finer time steps at fixed mesh, and a finer mesh) are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at every configuration](assets/V-GT-07a/V-GT-07a_comparison_accuracy.csv) are retained separately, and the same runs are timed for the cost comparison.
 
-Gpyro V2 (`bff0126c68f2`) uses 161 boundary-centered nodes (160 intervals) and Δt = 0.05 s. Molecular collision parameters give D = 2e-5 m²/s at 300 K and 1 bar. The far-side reservoir contains only carrier gas so Gpyro's positive floor on the zero film coefficient contributes negligible exchange. Both codes are compared with the analytical Robin solution, with their native gas constants retained. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`. Cell-average errors apply only to Julia's cell inventories; Gpyro retains its native point-value reference. Resolution plots show maximum errors over all three output times against actual mesh spacing. Gpyro's two resolutions also halve the timestep; no spatial order is inferred from them.
-
-Accuracy comparison only; timing measurements are omitted.
+Gpyro V2 (`bff0126c68f2`) uses 161 boundary-centered nodes (160 intervals) and Δt = 0.05 s. Molecular collision parameters give D = 2e-5 m²/s at 300 K and 1 bar. The far-side reservoir contains only carrier gas so Gpyro's positive floor on the zero film coefficient contributes negligible exchange. Its influx is the film flux h_m(Y∞ − Y_s) and its inventory integrates the nodes over half end cells at its native gas density. All codes are compared with the analytical Robin solution, with their native gas constants retained; Gpyro's are point values.
 
 Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
 
@@ -94,15 +90,62 @@ Error panels show absolute error at each code's output points. Zeros are display
 
 ![V-GT-07a inventory_vs_codes_error](assets/V-GT-07a/V-GT-07a_inventory_vs_codes_error.png)
 
-Solution overlays including the other codes' points: [profiles_vs_codes](assets/V-GT-07a/V-GT-07a_profiles_vs_codes.png), [uptake_vs_codes](assets/V-GT-07a/V-GT-07a_uptake_vs_codes.png), [inventory_vs_codes](assets/V-GT-07a/V-GT-07a_inventory_vs_codes.png), [resolution_profiles_vs_codes](assets/V-GT-07a/V-GT-07a_resolution_profiles_vs_codes.png), [resolution_uptake_vs_codes](assets/V-GT-07a/V-GT-07a_resolution_uptake_vs_codes.png), [resolution_inventory_vs_codes](assets/V-GT-07a/V-GT-07a_resolution_inventory_vs_codes.png).
+#### Cost at matched accuracy
+
+Each external code appears at its matched mesh h and time step Δt, at
+coarser steps (2Δt, 4Δt) and at refinements (Δt/2, Δt/4, h/2 at Δt/4,
+h/2 at Δt/2); this code at its report ladder, the external meshes and any
+finer cost-only meshes, each at its report tolerances and at 10, 100 and
+1000 times looser ones, the counterpart of the coarser steps. A coarse
+configuration a code cannot express or complete is left out; for the
+external codes the reason is in the matched provenance. The error is the
+largest analytical error over
+the curves and references the external run is scored on. Times are FDS's
+internal elapsed time, which excludes its MPI start-up; Gpyro's and
+ThermaKin's process time; and this code's warm problem construction and
+solve. Each is the median of repeated runs on one pinned core
+(`scripts/timing/README.md`; data and provenance in
+`test/verification/reference/matched/timing/`). On the smallest problems
+the external times are mostly input, setup and output. In the figure,
+filled markers are each external code's matched mesh and step and this
+code's report tolerances, open markers are the other runs, and this
+code's line joins its cheapest configuration at each accuracy; lower left
+is better. Errors at or below 1e-12 count as exact
+when matching accuracy, errors at or below 1e-14 are drawn at 1e-14, and
+runs every code solves exactly are not drawn.
+
+![V-GT-07a cost](assets/V-GT-07a/V-GT-07a_cost.png)
+
+For each external mesh and step: the external code's cheapest run at least as accurate (often itself; a coarser or finer run of the same code when that costs less), this code's cheapest configuration at least as accurate on every scored reference (its cells, and its tolerance multiplier when looser than the report's), and the ratio of the two. A ratio marked ≥ uses this code's coarsest configuration, fewest cells at the loosest tolerance, whose accuracy already exceeds the external run's.
+
+| External run | Mesh, step | External error | External time (s) | Cheapest external at this accuracy (s) | Our cells, tolerance | Our time (s) | Cheapest external/our time |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Gpyro V2 | h, Δt | 7.359e-05 | 0.726 | 0.726 | 160, 1000× tol | 0.01575 | 46.1 |
+| Gpyro V2 | h, 2Δt | 7.938e-05 | 0.3793 | 0.3793 | 160, 1000× tol | 0.01575 | 24.1 |
+| Gpyro V2 | h, 4Δt | 9.096e-05 | 0.2295 | 0.2295 | 160, 1000× tol | 0.01575 | 14.6 |
+| Gpyro V2 | h, Δt/2 | 7.069e-05 | 1.284 | 1.284 | 160, 1000× tol | 0.01575 | 81.5 |
+| Gpyro V2 | h, Δt/4 | 6.924e-05 | 2.309 | 2.309 | 160, 1000× tol | 0.01575 | 147.0 |
+| Gpyro V2 | h/2, Δt/4 | 1.948e-05 | 4.442 | 4.442 | 320, 1000× tol | 0.03415 | 130.0 |
+| Gpyro V2 | h/2, Δt/2 | 2.097e-05 | 2.71 | 2.71 | 320, 1000× tol | 0.03415 | 79.4 |
+| ThermaKin2Ds 7 | h, Δt | 0.001162 | 0.4674 | 0.1208 | 40, 1000× tol | 0.003864 | ≥ 31.3 |
+| ThermaKin2Ds 7 | h, 2Δt | 0.001162 | 0.2332 | 0.1208 | 40, 1000× tol | 0.003864 | ≥ 31.3 |
+| ThermaKin2Ds 7 | h, 4Δt | 0.001162 | 0.1208 | 0.1208 | 40, 1000× tol | 0.003864 | ≥ 31.3 |
+| ThermaKin2Ds 7 | h, Δt/2 | 0.001162 | 0.9367 | 0.1208 | 40, 1000× tol | 0.003864 | ≥ 31.3 |
+| ThermaKin2Ds 7 | h, Δt/4 | 0.001162 | 1.861 | 0.1208 | 40, 1000× tol | 0.003864 | ≥ 31.3 |
+| ThermaKin2Ds 7 | h/2, Δt/4 | 0.000588 | 3.703 | 1.856 | 40, 1000× tol | 0.003864 | ≥ 480.0 |
+| ThermaKin2Ds 7 | h/2, Δt/2 | 0.000588 | 1.856 | 1.856 | 40, 1000× tol | 0.003864 | ≥ 480.0 |
+
+Solution overlays including the other codes' points: [profiles_vs_codes](assets/V-GT-07a/V-GT-07a_profiles_vs_codes.png), [uptake_vs_codes](assets/V-GT-07a/V-GT-07a_uptake_vs_codes.png), [inventory_vs_codes](assets/V-GT-07a/V-GT-07a_inventory_vs_codes.png).
 
 ### Convergence
 
-| n_cells | h | Linf | cell_average_Linf |
-| --- | --- | --- | --- |
-| 40 | 0.025 | 0.001024 | 0.001489 |
-| 80 | 0.0125 | 0.0002564 | 0.0003724 |
-| 160 | 0.00625 | 6.402e-05 | 9.307e-05 |
+| n_cells | h | wall (s) | Linf | cell_average_Linf |
+| --- | --- | --- | --- | --- |
+| 40 | 0.025 | 0.006356 | 0.001024 | 0.001489 |
+| 80 | 0.0125 | 0.01417 | 0.0002564 | 0.0003724 |
+| 160 | 0.00625 | 0.031 | 6.402e-05 | 9.307e-05 |
+
+Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
 Observed order 2 (Linf), expected 2.0.
 
@@ -158,13 +201,11 @@ Observed order 2 (Linf), expected 2.0.
 
 ### Comparison with other codes
 
-Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Costs are compared at matched accuracy only.
 
-Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-GT-07b/V-GT-07b_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
+Matched native-input runs at seven configurations (coarser and finer time steps at fixed mesh, and a finer mesh) are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at every configuration](assets/V-GT-07b/V-GT-07b_comparison_accuracy.csv) are retained separately, and the same runs are timed for the cost comparison.
 
-Gpyro V2 (`bff0126c68f2`) uses 161 boundary-centered nodes (160 intervals) and Δt = 0.05 s. Molecular collision parameters give D = 2e-5 m²/s at 300 K and 1 bar. The far-side reservoir contains only carrier gas so Gpyro's positive floor on the zero film coefficient contributes negligible exchange. Both codes are compared with the analytical Robin solution, with their native gas constants retained. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`. Cell-average errors apply only to Julia's cell inventories; Gpyro retains its native point-value reference. Resolution plots show maximum errors over all three output times against actual mesh spacing. Gpyro's two resolutions also halve the timestep; no spatial order is inferred from them.
-
-Accuracy comparison only; timing measurements are omitted.
+Gpyro V2 (`bff0126c68f2`) uses 161 boundary-centered nodes (160 intervals) and Δt = 0.05 s. Molecular collision parameters give D = 2e-5 m²/s at 300 K and 1 bar. The far-side reservoir contains only carrier gas so Gpyro's positive floor on the zero film coefficient contributes negligible exchange. Its influx is the film flux h_m(Y∞ − Y_s) and its inventory integrates the nodes over half end cells at its native gas density. All codes are compared with the analytical Robin solution, with their native gas constants retained; Gpyro's are point values.
 
 Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
 
@@ -174,15 +215,62 @@ Error panels show absolute error at each code's output points. Zeros are display
 
 ![V-GT-07b inventory_vs_codes_error](assets/V-GT-07b/V-GT-07b_inventory_vs_codes_error.png)
 
-Solution overlays including the other codes' points: [profiles_vs_codes](assets/V-GT-07b/V-GT-07b_profiles_vs_codes.png), [uptake_vs_codes](assets/V-GT-07b/V-GT-07b_uptake_vs_codes.png), [inventory_vs_codes](assets/V-GT-07b/V-GT-07b_inventory_vs_codes.png), [resolution_profiles_vs_codes](assets/V-GT-07b/V-GT-07b_resolution_profiles_vs_codes.png), [resolution_uptake_vs_codes](assets/V-GT-07b/V-GT-07b_resolution_uptake_vs_codes.png), [resolution_inventory_vs_codes](assets/V-GT-07b/V-GT-07b_resolution_inventory_vs_codes.png).
+#### Cost at matched accuracy
+
+Each external code appears at its matched mesh h and time step Δt, at
+coarser steps (2Δt, 4Δt) and at refinements (Δt/2, Δt/4, h/2 at Δt/4,
+h/2 at Δt/2); this code at its report ladder, the external meshes and any
+finer cost-only meshes, each at its report tolerances and at 10, 100 and
+1000 times looser ones, the counterpart of the coarser steps. A coarse
+configuration a code cannot express or complete is left out; for the
+external codes the reason is in the matched provenance. The error is the
+largest analytical error over
+the curves and references the external run is scored on. Times are FDS's
+internal elapsed time, which excludes its MPI start-up; Gpyro's and
+ThermaKin's process time; and this code's warm problem construction and
+solve. Each is the median of repeated runs on one pinned core
+(`scripts/timing/README.md`; data and provenance in
+`test/verification/reference/matched/timing/`). On the smallest problems
+the external times are mostly input, setup and output. In the figure,
+filled markers are each external code's matched mesh and step and this
+code's report tolerances, open markers are the other runs, and this
+code's line joins its cheapest configuration at each accuracy; lower left
+is better. Errors at or below 1e-12 count as exact
+when matching accuracy, errors at or below 1e-14 are drawn at 1e-14, and
+runs every code solves exactly are not drawn.
+
+![V-GT-07b cost](assets/V-GT-07b/V-GT-07b_cost.png)
+
+For each external mesh and step: the external code's cheapest run at least as accurate (often itself; a coarser or finer run of the same code when that costs less), this code's cheapest configuration at least as accurate on every scored reference (its cells, and its tolerance multiplier when looser than the report's), and the ratio of the two. A ratio marked ≥ uses this code's coarsest configuration, fewest cells at the loosest tolerance, whose accuracy already exceeds the external run's.
+
+| External run | Mesh, step | External error | External time (s) | Cheapest external at this accuracy (s) | Our cells, tolerance | Our time (s) | Cheapest external/our time |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Gpyro V2 | h, Δt | 0.0001138 | 1.447 | 1.447 | 320, 1000× tol | 0.04625 | 31.3 |
+| Gpyro V2 | h, 2Δt | 0.0001195 | 1.178 | 1.178 | 320, 1000× tol | 0.04625 | 25.5 |
+| Gpyro V2 | h, 4Δt | 0.0001518 | 1.581 | 1.178 | 320, 1000× tol | 0.04625 | 25.5 |
+| Gpyro V2 | h, Δt/2 | 0.0001109 | 2.147 | 2.147 | 320, 1000× tol | 0.04625 | 46.4 |
+| Gpyro V2 | h, Δt/4 | 0.0001095 | 3.341 | 3.341 | 320, 1000× tol | 0.04625 | 72.3 |
+| Gpyro V2 | h/2, Δt/4 | 2.843e-05 | 7.339 | 7.339 | 640, 1000× tol | 0.102 | 71.9 |
+| Gpyro V2 | h/2, Δt/2 | 2.999e-05 | 5.042 | 5.042 | 640, 1000× tol | 0.102 | 49.4 |
+| ThermaKin2Ds 7 | h, Δt | 0.01221 | 0.4684 | 0.1205 | 40, 1000× tol | 0.004358 | ≥ 27.7 |
+| ThermaKin2Ds 7 | h, 2Δt | 0.01221 | 0.2339 | 0.1205 | 40, 1000× tol | 0.004358 | ≥ 27.7 |
+| ThermaKin2Ds 7 | h, 4Δt | 0.01221 | 0.1205 | 0.1205 | 40, 1000× tol | 0.004358 | ≥ 27.7 |
+| ThermaKin2Ds 7 | h, Δt/2 | 0.01221 | 0.9311 | 0.1205 | 40, 1000× tol | 0.004358 | ≥ 27.7 |
+| ThermaKin2Ds 7 | h, Δt/4 | 0.01221 | 1.864 | 0.1205 | 40, 1000× tol | 0.004358 | ≥ 27.7 |
+| ThermaKin2Ds 7 | h/2, Δt/4 | 0.00611 | 3.7 | 1.858 | 40, 1000× tol | 0.004358 | ≥ 426.0 |
+| ThermaKin2Ds 7 | h/2, Δt/2 | 0.00611 | 1.858 | 1.858 | 40, 1000× tol | 0.004358 | ≥ 426.0 |
+
+Solution overlays including the other codes' points: [profiles_vs_codes](assets/V-GT-07b/V-GT-07b_profiles_vs_codes.png), [uptake_vs_codes](assets/V-GT-07b/V-GT-07b_uptake_vs_codes.png), [inventory_vs_codes](assets/V-GT-07b/V-GT-07b_inventory_vs_codes.png).
 
 ### Convergence
 
-| n_cells | h | Linf | cell_average_Linf |
-| --- | --- | --- | --- |
-| 40 | 0.025 | 0.002551 | 0.003291 |
-| 80 | 0.0125 | 0.0006366 | 0.0008253 |
-| 160 | 0.00625 | 0.000159 | 0.0002063 |
+| n_cells | h | wall (s) | Linf | cell_average_Linf |
+| --- | --- | --- | --- | --- |
+| 40 | 0.025 | 0.008777 | 0.002551 | 0.003291 |
+| 80 | 0.0125 | 0.01982 | 0.0006366 | 0.0008253 |
+| 160 | 0.00625 | 0.0463 | 0.000159 | 0.0002063 |
+
+Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
 Observed order 2.002 (Linf), expected 2.0.
 

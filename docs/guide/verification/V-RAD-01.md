@@ -68,11 +68,11 @@ comparability of the dissertation figures (report mode).
 
 ### Comparison with other codes
 
-Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Costs are compared at matched accuracy only.
 
-Gpyro V2 revision `bff0126c68f2` uses 401 boundary nodes (400 intervals, 0.025 mm spacing). The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements.
+Matched native-input runs at seven configurations (coarser and finer time steps at fixed mesh, and a finer mesh) are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at every configuration](assets/V-RAD-01/V-RAD-01_comparison_accuracy.csv) are retained separately, and the same runs are timed for the cost comparison.
 
-Accuracy comparison only; timing measurements are omitted.
+Gpyro V2 revision `bff0126c68f2` uses 401 boundary nodes (400 intervals, 0.025 mm spacing) at dt = 0.1 s, with Beer–Lambert deposition through its absorption coefficient and the same eigenfunction parameters.
 
 Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
 
@@ -80,17 +80,57 @@ Error panels show absolute error at each code's output points. Zeros are display
 
 ![V-RAD-01 surface_T_history_vs_codes_error](assets/V-RAD-01/V-RAD-01_surface_T_history_vs_codes_error.png)
 
+#### Cost at matched accuracy
+
+Each external code appears at its matched mesh h and time step Δt, at
+coarser steps (2Δt, 4Δt) and at refinements (Δt/2, Δt/4, h/2 at Δt/4,
+h/2 at Δt/2); this code at its report ladder, the external meshes and any
+finer cost-only meshes, each at its report tolerances and at 10, 100 and
+1000 times looser ones, the counterpart of the coarser steps. A coarse
+configuration a code cannot express or complete is left out; for the
+external codes the reason is in the matched provenance. The error is the
+largest analytical error over
+the curves and references the external run is scored on. Times are FDS's
+internal elapsed time, which excludes its MPI start-up; Gpyro's and
+ThermaKin's process time; and this code's warm problem construction and
+solve. Each is the median of repeated runs on one pinned core
+(`scripts/timing/README.md`; data and provenance in
+`test/verification/reference/matched/timing/`). On the smallest problems
+the external times are mostly input, setup and output. In the figure,
+filled markers are each external code's matched mesh and step and this
+code's report tolerances, open markers are the other runs, and this
+code's line joins its cheapest configuration at each accuracy; lower left
+is better. Errors at or below 1e-12 count as exact
+when matching accuracy, errors at or below 1e-14 are drawn at 1e-14, and
+runs every code solves exactly are not drawn.
+
+![V-RAD-01 cost](assets/V-RAD-01/V-RAD-01_cost.png)
+
+For each external mesh and step: the external code's cheapest run at least as accurate (often itself; a coarser or finer run of the same code when that costs less), this code's cheapest configuration at least as accurate on every scored reference (its cells, and its tolerance multiplier when looser than the report's), and the ratio of the two. A ratio marked ≥ uses this code's coarsest configuration, fewest cells at the loosest tolerance, whose accuracy already exceeds the external run's.
+
+| External run | Mesh, step | External error | External time (s) | Cheapest external at this accuracy (s) | Our cells, tolerance | Our time (s) | Cheapest external/our time |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Gpyro V2 | h, Δt | 0.06013 | 0.09695 | 0.09695 | 200, 1000× tol | 0.008858 | 10.9 |
+| Gpyro V2 | h, 2Δt | 0.1191 | 0.05161 | 0.05161 | 100, 1000× tol | 0.004791 | 10.8 |
+| Gpyro V2 | h, 4Δt | 0.231 | 0.02716 | 0.02716 | 100, 1000× tol | 0.004791 | 5.67 |
+| Gpyro V2 | h, Δt/2 | 0.02991 | 0.1897 | 0.1897 | 200, 1000× tol | 0.008858 | 21.4 |
+| Gpyro V2 | h, Δt/4 | 0.01462 | 0.3769 | 0.3769 | 400, 1000× tol | 0.0177 | 21.3 |
+| Gpyro V2 | h/2, Δt/4 | 0.01521 | 0.7147 | 0.3769 | 400, 1000× tol | 0.0177 | 21.3 |
+| Gpyro V2 | h/2, Δt/2 | 0.0305 | 0.3592 | 0.1897 | 200, 1000× tol | 0.008858 | 21.4 |
+
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-RAD-01/V-RAD-01_T_profiles_vs_codes.png), [surface_T_history_vs_codes](assets/V-RAD-01/V-RAD-01_surface_T_history_vs_codes.png).
 
 ### Convergence
 
-| n_cells | h | L2 | Linf |
-| --- | --- | --- | --- |
-| 25 | 0.04 | 0.2555 | 0.9054 |
-| 50 | 0.02 | 0.06456 | 0.248 |
-| 100 | 0.01 | 0.01618 | 0.06485 |
-| 200 | 0.005 | 0.004048 | 0.01658 |
-| 400 | 0.0025 | 0.001012 | 0.004191 |
+| n_cells | h | wall (s) | L2 | Linf |
+| --- | --- | --- | --- | --- |
+| 25 | 0.04 | 0.003466 | 0.2555 | 0.9054 |
+| 50 | 0.02 | 0.005625 | 0.06456 | 0.248 |
+| 100 | 0.01 | 0.01087 | 0.01618 | 0.06485 |
+| 200 | 0.005 | 0.02062 | 0.004048 | 0.01658 |
+| 400 | 0.0025 | 0.04116 | 0.001012 | 0.004191 |
+
+Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
 Observed order 1.996 (L2), expected 2.0.
 

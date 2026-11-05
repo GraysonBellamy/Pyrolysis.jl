@@ -1,0 +1,31 @@
+"code","curve","reference","resolution","samples","Linf","RMS"
+"Gpyro V2, x = 0.5 mm","T_histories_at_depths","x = 0.5 mm","base",300,0.42843918891298927,0.057942525297698944
+"Gpyro V2, x = 0.5 mm","T_histories_at_depths","x = 0.5 mm","time_double",300,0.4978921889129424,0.06692159738833467
+"Gpyro V2, x = 0.5 mm","T_histories_at_depths","x = 0.5 mm","time_half",300,0.45977818891299194,0.06159411422488766
+"Gpyro V2, x = 0.5 mm","T_histories_at_depths","x = 0.5 mm","time_quarter",300,0.41160618891296963,0.06657894062963868
+"Gpyro V2, x = 0.5 mm","T_histories_at_depths","x = 0.5 mm","space_half",300,0.2805061889130229,0.03632814321469892
+"Gpyro V2, x = 0.5 mm","T_histories_at_depths","x = 0.5 mm","refined",300,0.3016011889129686,0.0334795945281823
+"Gpyro V2, x = 1.0 mm","T_histories_at_depths","x = 1.0 mm","base",300,0.2805061889130229,0.06906470172640834
+"Gpyro V2, x = 1.0 mm","T_histories_at_depths","x = 1.0 mm","time_double",300,0.3016011889129686,0.06514181529155662
+"Gpyro V2, x = 1.0 mm","T_histories_at_depths","x = 1.0 mm","time_half",300,0.289765188912952,0.06822949898135038
+"Gpyro V2, x = 1.0 mm","T_histories_at_depths","x = 1.0 mm","time_quarter",300,0.27488918891299363,0.07565211518379802
+"Gpyro V2, x = 1.0 mm","T_histories_at_depths","x = 1.0 mm","space_half",300,0.16934318891298972,0.04987501496477451
+"Gpyro V2, x = 1.0 mm","T_histories_at_depths","x = 1.0 mm","refined",300,0.17471618891295293,0.04674049078638342
+"Gpyro V2, x = 1.5 mm","T_histories_at_depths","x = 1.5 mm","base",300,0.2146310742604669,0.08005322787195163
+"Gpyro V2, x = 1.5 mm","T_histories_at_depths","x = 1.5 mm","time_double",300,0.22440307426046502,0.07367837231030931
+"Gpyro V2, x = 1.5 mm","T_histories_at_depths","x = 1.5 mm","time_half",300,0.21899107426048658,0.0786951539685753
+"Gpyro V2, x = 1.5 mm","T_histories_at_depths","x = 1.5 mm","time_quarter",300,0.2119580742604512,0.08483830964040594
+"Gpyro V2, x = 1.5 mm","T_histories_at_depths","x = 1.5 mm","space_half",300,0.14854318041307124,0.06420529272694409
+"Gpyro V2, x = 1.5 mm","T_histories_at_depths","x = 1.5 mm","refined",300,0.1438621804130662,0.061642300742148326
+"Gpyro V2, x = 2.0 mm","T_histories_at_depths","x = 2.0 mm","base",300,0.1735453957552977,0.09090761182533641
+"Gpyro V2, x = 2.0 mm","T_histories_at_depths","x = 2.0 mm","time_double",300,0.17894939575529634,0.08475665392714433
+"Gpyro V2, x = 2.0 mm","T_histories_at_depths","x = 2.0 mm","time_half",300,0.17598839575532566,0.08962259868679018
+"Gpyro V2, x = 2.0 mm","T_histories_at_depths","x = 2.0 mm","time_quarter",300,0.17204339575533822,0.09458424090133051
+"Gpyro V2, x = 2.0 mm","T_histories_at_depths","x = 2.0 mm","space_half",300,0.14557674773374174,0.07863929356388102
+"Gpyro V2, x = 2.0 mm","T_histories_at_depths","x = 2.0 mm","refined",300,0.14313674773376306,0.07660922521962475
+"Gpyro V2","front_trajectory","T_m isotherm","base",300,0.00010934547373385667,9.783067598876607e-5
+"Gpyro V2","front_trajectory","T_m isotherm","time_double",300,0.00012979001801031212,0.00010202780667869834
+"Gpyro V2","front_trajectory","T_m isotherm","time_half",300,0.00011028168403850623,9.968788777166625e-5
+"Gpyro V2","front_trajectory","T_m isotherm","time_quarter",300,0.00010876736623487756,9.677065042951789e-5
+"Gpyro V2","front_trajectory","T_m isotherm","space_half",300,6.983712305093327e-5,6.0136881380874936e-5
+"Gpyro V2","front_trajectory","T_m isotherm","refined",300,7.030129891923923e-5,6.103931454262377e-5

@@ -1,0 +1,29 @@
+"code","curve","reference","resolution","samples","Linf","RMS"
+"Gpyro V2","pressure","steady pressure","base",81,43.2078708892368,28.294155044401627
+"Gpyro V2","pressure","steady pressure","time_double",81,43.2078708892368,28.294155044401627
+"Gpyro V2","pressure","steady pressure","time_quadruple",81,43.2078708892368,28.294155044401627
+"Gpyro V2","pressure","steady pressure","time_half",81,43.2078708892368,28.294155044401627
+"Gpyro V2","pressure","steady pressure","time_quarter",81,43.2078708892368,28.294155044401627
+"Gpyro V2","pressure","steady pressure","space_half",161,21.63397088923375,14.161460803066841
+"Gpyro V2","pressure","steady pressure","refined",161,21.63397088923375,14.161460803066841
+"Gpyro V2 inlet","boundary_flux","inlet (top)","base",2,0.0,0.0
+"Gpyro V2 inlet","boundary_flux","inlet (top)","time_double",2,0.0,0.0
+"Gpyro V2 inlet","boundary_flux","inlet (top)","time_quadruple",2,0.0,0.0
+"Gpyro V2 inlet","boundary_flux","inlet (top)","time_half",2,0.0,0.0
+"Gpyro V2 inlet","boundary_flux","inlet (top)","time_quarter",2,0.0,0.0
+"Gpyro V2 inlet","boundary_flux","inlet (top)","space_half",2,0.0,0.0
+"Gpyro V2 inlet","boundary_flux","inlet (top)","refined",2,0.0,0.0
+"Gpyro V2 outlet","boundary_flux","outlet (bottom)","base",2,0.0,0.0
+"Gpyro V2 outlet","boundary_flux","outlet (bottom)","time_double",2,0.0,0.0
+"Gpyro V2 outlet","boundary_flux","outlet (bottom)","time_quadruple",2,0.0,0.0
+"Gpyro V2 outlet","boundary_flux","outlet (bottom)","time_half",2,0.0,0.0
+"Gpyro V2 outlet","boundary_flux","outlet (bottom)","time_quarter",2,0.0,0.0
+"Gpyro V2 outlet","boundary_flux","outlet (bottom)","space_half",2,0.0,0.0
+"Gpyro V2 outlet","boundary_flux","outlet (bottom)","refined",2,0.0,0.0
+"Gpyro V2 net","boundary_flux","net (inlet + outlet)","base",2,0.0,0.0
+"Gpyro V2 net","boundary_flux","net (inlet + outlet)","time_double",2,0.0,0.0
+"Gpyro V2 net","boundary_flux","net (inlet + outlet)","time_quadruple",2,0.0,0.0
+"Gpyro V2 net","boundary_flux","net (inlet + outlet)","time_half",2,0.0,0.0
+"Gpyro V2 net","boundary_flux","net (inlet + outlet)","time_quarter",2,0.0,0.0
+"Gpyro V2 net","boundary_flux","net (inlet + outlet)","space_half",2,0.0,0.0
+"Gpyro V2 net","boundary_flux","net (inlet + outlet)","refined",2,0.0,0.0

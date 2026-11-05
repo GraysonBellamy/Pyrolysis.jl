@@ -49,7 +49,7 @@ read the dense interpolant. The bottom node is pinned (w*(0,t) = 0).
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
 | L∞ T error, t=20.0 s | 6.669e-06 | — | 6.669e-06 | 6e-05 | yes | z-uniform T* — kinetics/source channel through ρcp(ξ_g) |
-| relative L∞ ξ_solid (z-varying, material frame) error, t=20.0 s | 3.949e-08 | — | 3.949e-08 | 2e-06 | yes | solid rides the reaction-driven mesh: balance-row w + dilation of m/V + material-frame source |
+| relative L∞ ξ_solid (z-varying, material frame) error, t=20.0 s | 3.951e-08 | — | 3.951e-08 | 2e-06 | yes | solid rides the reaction-driven mesh: balance-row w + dilation of m/V + material-frame source |
 | relative L∞ ξ_gas error, t=20.0 s | 0.0009029 | — | 0.0009029 | 0.007 | yes | gas rides the reacting, compressing mesh: dilation of m/V + diffusion + material-frame source |
 | relative surface-position error, t=20.0 s | 1.062e-06 | 0.008963 | 1.062e-06 | 5e-05 | yes | \|z_top − z*_top\| / (L − z*_top); recession ≈ 1.04 mm |
 
@@ -77,10 +77,12 @@ read the dense interpolant. The bottom node is pinned (w*(0,t) = 0).
 
 | n_cells | h | wall (s) | L2_xi_s | Linf_xi_g |
 | --- | --- | --- | --- | --- |
-| 16 | 0.0625 | 0.1121 | 0.0007125 | 0.1139 |
-| 32 | 0.03125 | 0.233 | 0.000178 | 0.02873 |
-| 64 | 0.01562 | 0.624 | 4.448e-05 | 0.00721 |
-| 128 | 0.007812 | 1.891 | 1.111e-05 | 0.001806 |
+| 16 | 0.0625 | 0.09811 | 0.0007125 | 0.1139 |
+| 32 | 0.03125 | 0.2057 | 0.000178 | 0.02873 |
+| 64 | 0.01562 | 0.4559 | 4.448e-05 | 0.00721 |
+| 128 | 0.007812 | 1 | 1.112e-05 | 0.001806 |
+
+Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
 Observed order 2.001 (L2_xi_s), expected 2.0.
 
