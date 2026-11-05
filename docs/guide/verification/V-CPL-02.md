@@ -75,10 +75,10 @@ is active as front cells approach deactivation.
 
 | n_cells | h | wall (s) | balance | consistency |
 | --- | --- | --- | --- | --- |
-| 60 | 0.01667 | 0.5711 | 0.0006181 | 0.001283 |
-| 100 | 0.01 | 0.776 | 0.00116 | 0.0005099 |
-| 160 | 0.00625 | 1.544 | 0.0003602 | 0.0001159 |
-| 240 | 0.004167 | 2.709 | 0.0003337 | 2.133e-05 |
+| 60 | 0.01667 | 0.5679 | 0.0006181 | 0.001283 |
+| 100 | 0.01 | 0.7717 | 0.00116 | 0.0005099 |
+| 160 | 0.00625 | 1.532 | 0.0003602 | 0.0001159 |
+| 240 | 0.004167 | 2.686 | 0.0003337 | 2.133e-05 |
 
 Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
@@ -115,9 +115,9 @@ Observed order 0.6363 (balance).
 
 | n_cells | h | wall (s) | balance | consistency |
 | --- | --- | --- | --- | --- |
-| 120 | 0.008333 | 1.083 | 0.004637 | 0.0002128 |
-| 200 | 0.005 | 2.267 | 0.0006218 | 0.0001949 |
-| 320 | 0.003125 | 4.655 | 0.0003182 | 0.0004004 |
+| 120 | 0.008333 | 1.06 | 0.004637 | 0.0002128 |
+| 200 | 0.005 | 2.25 | 0.0006218 | 0.0001949 |
+| 320 | 0.003125 | 4.605 | 0.0003182 | 0.0004004 |
 
 Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 

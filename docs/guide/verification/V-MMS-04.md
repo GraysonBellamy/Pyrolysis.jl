@@ -77,10 +77,10 @@ read the dense interpolant. The bottom node is pinned (w*(0,t) = 0).
 
 | n_cells | h | wall (s) | L2_xi_s | Linf_xi_g |
 | --- | --- | --- | --- | --- |
-| 16 | 0.0625 | 0.09811 | 0.0007125 | 0.1139 |
-| 32 | 0.03125 | 0.2057 | 0.000178 | 0.02873 |
-| 64 | 0.01562 | 0.4559 | 4.448e-05 | 0.00721 |
-| 128 | 0.007812 | 1 | 1.112e-05 | 0.001806 |
+| 16 | 0.0625 | 0.09477 | 0.0007125 | 0.1139 |
+| 32 | 0.03125 | 0.1979 | 0.000178 | 0.02873 |
+| 64 | 0.01562 | 0.4484 | 4.448e-05 | 0.00721 |
+| 128 | 0.007812 | 0.97 | 1.112e-05 | 0.001806 |
 
 Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 

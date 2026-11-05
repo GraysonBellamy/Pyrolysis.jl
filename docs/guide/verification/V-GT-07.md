@@ -120,20 +120,20 @@ For each external mesh and step: the external code's cheapest run at least as ac
 
 | External run | Mesh, step | External error | External time (s) | Cheapest external at this accuracy (s) | Our cells, tolerance | Our time (s) | Cheapest external/our time |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Gpyro V2 | h, Δt | 7.359e-05 | 0.726 | 0.726 | 160, 1000× tol | 0.01575 | 46.1 |
-| Gpyro V2 | h, 2Δt | 7.938e-05 | 0.3793 | 0.3793 | 160, 1000× tol | 0.01575 | 24.1 |
-| Gpyro V2 | h, 4Δt | 9.096e-05 | 0.2295 | 0.2295 | 160, 1000× tol | 0.01575 | 14.6 |
-| Gpyro V2 | h, Δt/2 | 7.069e-05 | 1.284 | 1.284 | 160, 1000× tol | 0.01575 | 81.5 |
-| Gpyro V2 | h, Δt/4 | 6.924e-05 | 2.309 | 2.309 | 160, 1000× tol | 0.01575 | 147.0 |
-| Gpyro V2 | h/2, Δt/4 | 1.948e-05 | 4.442 | 4.442 | 320, 1000× tol | 0.03415 | 130.0 |
-| Gpyro V2 | h/2, Δt/2 | 2.097e-05 | 2.71 | 2.71 | 320, 1000× tol | 0.03415 | 79.4 |
-| ThermaKin2Ds 7 | h, Δt | 0.001162 | 0.4674 | 0.1208 | 40, 1000× tol | 0.003864 | ≥ 31.3 |
-| ThermaKin2Ds 7 | h, 2Δt | 0.001162 | 0.2332 | 0.1208 | 40, 1000× tol | 0.003864 | ≥ 31.3 |
-| ThermaKin2Ds 7 | h, 4Δt | 0.001162 | 0.1208 | 0.1208 | 40, 1000× tol | 0.003864 | ≥ 31.3 |
-| ThermaKin2Ds 7 | h, Δt/2 | 0.001162 | 0.9367 | 0.1208 | 40, 1000× tol | 0.003864 | ≥ 31.3 |
-| ThermaKin2Ds 7 | h, Δt/4 | 0.001162 | 1.861 | 0.1208 | 40, 1000× tol | 0.003864 | ≥ 31.3 |
-| ThermaKin2Ds 7 | h/2, Δt/4 | 0.000588 | 3.703 | 1.856 | 40, 1000× tol | 0.003864 | ≥ 480.0 |
-| ThermaKin2Ds 7 | h/2, Δt/2 | 0.000588 | 1.856 | 1.856 | 40, 1000× tol | 0.003864 | ≥ 480.0 |
+| Gpyro V2 | h, Δt | 7.359e-05 | 0.726 | 0.726 | 160, 1000× tol | 0.01569 | 46.3 |
+| Gpyro V2 | h, 2Δt | 7.938e-05 | 0.3793 | 0.3793 | 160, 1000× tol | 0.01569 | 24.2 |
+| Gpyro V2 | h, 4Δt | 9.096e-05 | 0.2295 | 0.2295 | 160, 1000× tol | 0.01569 | 14.6 |
+| Gpyro V2 | h, Δt/2 | 7.069e-05 | 1.284 | 1.284 | 160, 1000× tol | 0.01569 | 81.8 |
+| Gpyro V2 | h, Δt/4 | 6.924e-05 | 2.309 | 2.309 | 160, 1000× tol | 0.01569 | 147.0 |
+| Gpyro V2 | h/2, Δt/4 | 1.948e-05 | 4.442 | 4.442 | 320, 1000× tol | 0.03386 | 131.0 |
+| Gpyro V2 | h/2, Δt/2 | 2.097e-05 | 2.71 | 2.71 | 320, 1000× tol | 0.03386 | 80.0 |
+| ThermaKin2Ds 7 | h, Δt | 0.001162 | 0.4674 | 0.1208 | 40, 1000× tol | 0.003906 | ≥ 30.9 |
+| ThermaKin2Ds 7 | h, 2Δt | 0.001162 | 0.2332 | 0.1208 | 40, 1000× tol | 0.003906 | ≥ 30.9 |
+| ThermaKin2Ds 7 | h, 4Δt | 0.001162 | 0.1208 | 0.1208 | 40, 1000× tol | 0.003906 | ≥ 30.9 |
+| ThermaKin2Ds 7 | h, Δt/2 | 0.001162 | 0.9367 | 0.1208 | 40, 1000× tol | 0.003906 | ≥ 30.9 |
+| ThermaKin2Ds 7 | h, Δt/4 | 0.001162 | 1.861 | 0.1208 | 40, 1000× tol | 0.003906 | ≥ 30.9 |
+| ThermaKin2Ds 7 | h/2, Δt/4 | 0.000588 | 3.703 | 1.856 | 40, 1000× tol | 0.003906 | ≥ 475.0 |
+| ThermaKin2Ds 7 | h/2, Δt/2 | 0.000588 | 1.856 | 1.856 | 40, 1000× tol | 0.003906 | ≥ 475.0 |
 
 Solution overlays including the other codes' points: [profiles_vs_codes](assets/V-GT-07a/V-GT-07a_profiles_vs_codes.png), [uptake_vs_codes](assets/V-GT-07a/V-GT-07a_uptake_vs_codes.png), [inventory_vs_codes](assets/V-GT-07a/V-GT-07a_inventory_vs_codes.png).
 
@@ -141,9 +141,9 @@ Solution overlays including the other codes' points: [profiles_vs_codes](assets/
 
 | n_cells | h | wall (s) | Linf | cell_average_Linf |
 | --- | --- | --- | --- | --- |
-| 40 | 0.025 | 0.006356 | 0.001024 | 0.001489 |
-| 80 | 0.0125 | 0.01417 | 0.0002564 | 0.0003724 |
-| 160 | 0.00625 | 0.031 | 6.402e-05 | 9.307e-05 |
+| 40 | 0.025 | 0.006204 | 0.001024 | 0.001489 |
+| 80 | 0.0125 | 0.01389 | 0.0002564 | 0.0003724 |
+| 160 | 0.00625 | 0.03099 | 6.402e-05 | 9.307e-05 |
 
 Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
@@ -245,20 +245,20 @@ For each external mesh and step: the external code's cheapest run at least as ac
 
 | External run | Mesh, step | External error | External time (s) | Cheapest external at this accuracy (s) | Our cells, tolerance | Our time (s) | Cheapest external/our time |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Gpyro V2 | h, Δt | 0.0001138 | 1.447 | 1.447 | 320, 1000× tol | 0.04625 | 31.3 |
-| Gpyro V2 | h, 2Δt | 0.0001195 | 1.178 | 1.178 | 320, 1000× tol | 0.04625 | 25.5 |
-| Gpyro V2 | h, 4Δt | 0.0001518 | 1.581 | 1.178 | 320, 1000× tol | 0.04625 | 25.5 |
-| Gpyro V2 | h, Δt/2 | 0.0001109 | 2.147 | 2.147 | 320, 1000× tol | 0.04625 | 46.4 |
-| Gpyro V2 | h, Δt/4 | 0.0001095 | 3.341 | 3.341 | 320, 1000× tol | 0.04625 | 72.3 |
-| Gpyro V2 | h/2, Δt/4 | 2.843e-05 | 7.339 | 7.339 | 640, 1000× tol | 0.102 | 71.9 |
-| Gpyro V2 | h/2, Δt/2 | 2.999e-05 | 5.042 | 5.042 | 640, 1000× tol | 0.102 | 49.4 |
-| ThermaKin2Ds 7 | h, Δt | 0.01221 | 0.4684 | 0.1205 | 40, 1000× tol | 0.004358 | ≥ 27.7 |
-| ThermaKin2Ds 7 | h, 2Δt | 0.01221 | 0.2339 | 0.1205 | 40, 1000× tol | 0.004358 | ≥ 27.7 |
-| ThermaKin2Ds 7 | h, 4Δt | 0.01221 | 0.1205 | 0.1205 | 40, 1000× tol | 0.004358 | ≥ 27.7 |
-| ThermaKin2Ds 7 | h, Δt/2 | 0.01221 | 0.9311 | 0.1205 | 40, 1000× tol | 0.004358 | ≥ 27.7 |
-| ThermaKin2Ds 7 | h, Δt/4 | 0.01221 | 1.864 | 0.1205 | 40, 1000× tol | 0.004358 | ≥ 27.7 |
-| ThermaKin2Ds 7 | h/2, Δt/4 | 0.00611 | 3.7 | 1.858 | 40, 1000× tol | 0.004358 | ≥ 426.0 |
-| ThermaKin2Ds 7 | h/2, Δt/2 | 0.00611 | 1.858 | 1.858 | 40, 1000× tol | 0.004358 | ≥ 426.0 |
+| Gpyro V2 | h, Δt | 0.0001138 | 1.447 | 1.447 | 320, 1000× tol | 0.04613 | 31.4 |
+| Gpyro V2 | h, 2Δt | 0.0001195 | 1.178 | 1.178 | 320, 1000× tol | 0.04613 | 25.5 |
+| Gpyro V2 | h, 4Δt | 0.0001518 | 1.581 | 1.178 | 320, 1000× tol | 0.04613 | 25.5 |
+| Gpyro V2 | h, Δt/2 | 0.0001109 | 2.147 | 2.147 | 320, 1000× tol | 0.04613 | 46.5 |
+| Gpyro V2 | h, Δt/4 | 0.0001095 | 3.341 | 3.341 | 320, 1000× tol | 0.04613 | 72.4 |
+| Gpyro V2 | h/2, Δt/4 | 2.843e-05 | 7.339 | 7.339 | 640, 1000× tol | 0.1019 | 72.0 |
+| Gpyro V2 | h/2, Δt/2 | 2.999e-05 | 5.042 | 5.042 | 640, 1000× tol | 0.1019 | 49.5 |
+| ThermaKin2Ds 7 | h, Δt | 0.01221 | 0.4684 | 0.1205 | 40, 1000× tol | 0.004266 | ≥ 28.3 |
+| ThermaKin2Ds 7 | h, 2Δt | 0.01221 | 0.2339 | 0.1205 | 40, 1000× tol | 0.004266 | ≥ 28.3 |
+| ThermaKin2Ds 7 | h, 4Δt | 0.01221 | 0.1205 | 0.1205 | 40, 1000× tol | 0.004266 | ≥ 28.3 |
+| ThermaKin2Ds 7 | h, Δt/2 | 0.01221 | 0.9311 | 0.1205 | 40, 1000× tol | 0.004266 | ≥ 28.3 |
+| ThermaKin2Ds 7 | h, Δt/4 | 0.01221 | 1.864 | 0.1205 | 40, 1000× tol | 0.004266 | ≥ 28.3 |
+| ThermaKin2Ds 7 | h/2, Δt/4 | 0.00611 | 3.7 | 1.858 | 40, 1000× tol | 0.004266 | ≥ 436.0 |
+| ThermaKin2Ds 7 | h/2, Δt/2 | 0.00611 | 1.858 | 1.858 | 40, 1000× tol | 0.004266 | ≥ 436.0 |
 
 Solution overlays including the other codes' points: [profiles_vs_codes](assets/V-GT-07b/V-GT-07b_profiles_vs_codes.png), [uptake_vs_codes](assets/V-GT-07b/V-GT-07b_uptake_vs_codes.png), [inventory_vs_codes](assets/V-GT-07b/V-GT-07b_inventory_vs_codes.png).
 
@@ -266,9 +266,9 @@ Solution overlays including the other codes' points: [profiles_vs_codes](assets/
 
 | n_cells | h | wall (s) | Linf | cell_average_Linf |
 | --- | --- | --- | --- | --- |
-| 40 | 0.025 | 0.008777 | 0.002551 | 0.003291 |
-| 80 | 0.0125 | 0.01982 | 0.0006366 | 0.0008253 |
-| 160 | 0.00625 | 0.0463 | 0.000159 | 0.0002063 |
+| 40 | 0.025 | 0.008748 | 0.002551 | 0.003291 |
+| 80 | 0.0125 | 0.0202 | 0.0006366 | 0.0008253 |
+| 160 | 0.00625 | 0.04527 | 0.000159 | 0.0002063 |
 
 Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 

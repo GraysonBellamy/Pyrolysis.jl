@@ -110,13 +110,13 @@ For each external mesh and step: the external code's cheapest run at least as ac
 
 | External run | Mesh, step | External error | External time (s) | Cheapest external at this accuracy (s) | Our cells, tolerance | Our time (s) | Cheapest external/our time |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Gpyro V2 | h, Δt | 0.06013 | 0.09695 | 0.09695 | 200, 1000× tol | 0.008858 | 10.9 |
-| Gpyro V2 | h, 2Δt | 0.1191 | 0.05161 | 0.05161 | 100, 1000× tol | 0.004791 | 10.8 |
-| Gpyro V2 | h, 4Δt | 0.231 | 0.02716 | 0.02716 | 100, 1000× tol | 0.004791 | 5.67 |
-| Gpyro V2 | h, Δt/2 | 0.02991 | 0.1897 | 0.1897 | 200, 1000× tol | 0.008858 | 21.4 |
-| Gpyro V2 | h, Δt/4 | 0.01462 | 0.3769 | 0.3769 | 400, 1000× tol | 0.0177 | 21.3 |
-| Gpyro V2 | h/2, Δt/4 | 0.01521 | 0.7147 | 0.3769 | 400, 1000× tol | 0.0177 | 21.3 |
-| Gpyro V2 | h/2, Δt/2 | 0.0305 | 0.3592 | 0.1897 | 200, 1000× tol | 0.008858 | 21.4 |
+| Gpyro V2 | h, Δt | 0.06013 | 0.09695 | 0.09695 | 200, 1000× tol | 0.00892 | 10.9 |
+| Gpyro V2 | h, 2Δt | 0.1191 | 0.05161 | 0.05161 | 100, 1000× tol | 0.004692 | 11.0 |
+| Gpyro V2 | h, 4Δt | 0.231 | 0.02716 | 0.02716 | 100, 1000× tol | 0.004692 | 5.79 |
+| Gpyro V2 | h, Δt/2 | 0.02991 | 0.1897 | 0.1897 | 200, 1000× tol | 0.00892 | 21.3 |
+| Gpyro V2 | h, Δt/4 | 0.01462 | 0.3769 | 0.3769 | 400, 1000× tol | 0.01788 | 21.1 |
+| Gpyro V2 | h/2, Δt/4 | 0.01521 | 0.7147 | 0.3769 | 400, 1000× tol | 0.01788 | 21.1 |
+| Gpyro V2 | h/2, Δt/2 | 0.0305 | 0.3592 | 0.1897 | 200, 1000× tol | 0.00892 | 21.3 |
 
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-RAD-01/V-RAD-01_T_profiles_vs_codes.png), [surface_T_history_vs_codes](assets/V-RAD-01/V-RAD-01_surface_T_history_vs_codes.png).
 
@@ -124,11 +124,11 @@ Solution overlays including the other codes' points: [T_profiles_vs_codes](asset
 
 | n_cells | h | wall (s) | L2 | Linf |
 | --- | --- | --- | --- | --- |
-| 25 | 0.04 | 0.003466 | 0.2555 | 0.9054 |
-| 50 | 0.02 | 0.005625 | 0.06456 | 0.248 |
-| 100 | 0.01 | 0.01087 | 0.01618 | 0.06485 |
-| 200 | 0.005 | 0.02062 | 0.004048 | 0.01658 |
-| 400 | 0.0025 | 0.04116 | 0.001012 | 0.004191 |
+| 25 | 0.04 | 0.003329 | 0.2555 | 0.9054 |
+| 50 | 0.02 | 0.005549 | 0.06456 | 0.248 |
+| 100 | 0.01 | 0.01049 | 0.01618 | 0.06485 |
+| 200 | 0.005 | 0.02107 | 0.004048 | 0.01658 |
+| 400 | 0.0025 | 0.04093 | 0.001012 | 0.004191 |
 
 Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 

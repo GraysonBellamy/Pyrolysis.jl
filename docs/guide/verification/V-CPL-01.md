@@ -118,12 +118,12 @@ For each external mesh and step: the external code's cheapest run at least as ac
 
 | External run | Mesh, step | External error | External time (s) | Cheapest external at this accuracy (s) | Our cells, tolerance | Our time (s) | Cheapest external/our time |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Gpyro V2 | h, Δt | 0.4284 | 1.714 | 1.714 | 75, 100× tol | 0.005889 | 291.0 |
-| Gpyro V2 | h, 2Δt | 0.4979 | 0.9 | 0.9 | 75, 100× tol | 0.005889 | 153.0 |
-| Gpyro V2 | h, Δt/2 | 0.4598 | 3.333 | 1.714 | 75, 100× tol | 0.005889 | 291.0 |
-| Gpyro V2 | h, Δt/4 | 0.4116 | 6.624 | 6.522 | 75, 100× tol | 0.005889 | 1110.0 |
-| Gpyro V2 | h/2, Δt/4 | 0.2805 | 12.87 | 12.87 | 75, 100× tol | 0.005889 | 2190.0 |
-| Gpyro V2 | h/2, Δt/2 | 0.3016 | 6.522 | 6.522 | 75, 100× tol | 0.005889 | 1110.0 |
+| Gpyro V2 | h, Δt | 0.4284 | 1.714 | 1.714 | 75, 100× tol | 0.00598 | 287.0 |
+| Gpyro V2 | h, 2Δt | 0.4979 | 0.9 | 0.9 | 75, 100× tol | 0.00598 | 151.0 |
+| Gpyro V2 | h, Δt/2 | 0.4598 | 3.333 | 1.714 | 75, 100× tol | 0.00598 | 287.0 |
+| Gpyro V2 | h, Δt/4 | 0.4116 | 6.624 | 6.522 | 75, 100× tol | 0.00598 | 1090.0 |
+| Gpyro V2 | h/2, Δt/4 | 0.2805 | 12.87 | 12.87 | 75, 100× tol | 0.00598 | 2150.0 |
+| Gpyro V2 | h/2, Δt/2 | 0.3016 | 6.522 | 6.522 | 75, 100× tol | 0.00598 | 1090.0 |
 
 Solution overlays including the other codes' points: [T_histories_at_depths_vs_codes](assets/V-CPL-01/V-CPL-01_T_histories_at_depths_vs_codes.png), [front_trajectory_vs_codes](assets/V-CPL-01/V-CPL-01_front_trajectory_vs_codes.png).
 

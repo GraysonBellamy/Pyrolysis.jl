@@ -30,10 +30,10 @@ and linear T, the integral is T0² L log(TR/TL)/(Λ0 (TR-TL)).
 
 | n_cells | h | wall (s) | flux |
 | --- | --- | --- | --- |
-| 20 | 0.05 | 0.005605 | 0.0001451 |
-| 40 | 0.025 | 0.009748 | 3.773e-05 |
-| 80 | 0.0125 | 0.01909 | 9.616e-06 |
-| 160 | 0.00625 | 0.03688 | 2.427e-06 |
+| 20 | 0.05 | 0.005639 | 0.0001451 |
+| 40 | 0.025 | 0.009644 | 3.773e-05 |
+| 80 | 0.0125 | 0.01822 | 9.616e-06 |
+| 160 | 0.00625 | 0.036 | 2.427e-06 |
 
 Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 

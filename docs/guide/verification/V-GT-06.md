@@ -37,10 +37,10 @@ profile, integrated pore resistance and film equation determine N and Ts.
 
 | n_cells | h | wall (s) | flux |
 | --- | --- | --- | --- |
-| 10 | 0.1 | 0.004508 | 8.181e-05 |
-| 20 | 0.05 | 0.006184 | 2.046e-05 |
-| 40 | 0.025 | 0.008808 | 5.115e-06 |
-| 80 | 0.0125 | 0.01413 | 1.279e-06 |
+| 10 | 0.1 | 0.00434 | 8.181e-05 |
+| 20 | 0.05 | 0.00589 | 2.046e-05 |
+| 40 | 0.025 | 0.008804 | 5.115e-06 |
+| 80 | 0.0125 | 0.01366 | 1.279e-06 |
 
 Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 

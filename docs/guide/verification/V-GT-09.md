@@ -42,10 +42,10 @@ the pore pressures guard the inventories. The friction equations also sum to
 
 | n_cells | h | wall (s) | flux |
 | --- | --- | --- | --- |
-| 20 | 0.05 | 0.4226 | 0.006633 |
-| 40 | 0.025 | 1.006 | 0.003309 |
-| 80 | 0.0125 | 2.302 | 0.001653 |
-| 160 | 0.00625 | 5.242 | 0.0008259 |
+| 20 | 0.05 | 0.4179 | 0.006633 |
+| 40 | 0.025 | 1.002 | 0.003309 |
+| 80 | 0.0125 | 2.293 | 0.001653 |
+| 160 | 0.00625 | 5.211 | 0.0008259 |
 
 Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 

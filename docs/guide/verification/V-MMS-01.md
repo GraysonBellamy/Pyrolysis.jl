@@ -77,10 +77,10 @@ Fields (z̃ = z/L, smooth, strictly positive concentrations):
 | n_cells | h | wall (s) | L2_T | Linf_T |
 | --- | --- | --- | --- | --- |
 | 20 | 0.05 | 0.1338 | 0.1112 | 0.2226 |
-| 40 | 0.025 | 0.3 | 0.02837 | 0.05681 |
-| 80 | 0.0125 | 0.6041 | 0.007129 | 0.01427 |
-| 160 | 0.00625 | 1.414 | 0.001785 | 0.003573 |
-| 320 | 0.003125 | 2.809 | 0.0004463 | 0.0008934 |
+| 40 | 0.025 | 0.2921 | 0.02837 | 0.05681 |
+| 80 | 0.0125 | 0.5967 | 0.007129 | 0.01427 |
+| 160 | 0.00625 | 1.392 | 0.001785 | 0.003573 |
+| 320 | 0.003125 | 2.774 | 0.0004463 | 0.0008934 |
 
 Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 

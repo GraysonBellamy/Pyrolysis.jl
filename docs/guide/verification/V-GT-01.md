@@ -90,12 +90,12 @@ For each external mesh and step: the external code's cheapest run at least as ac
 
 | External run | Mesh, step | External error | External time (s) | Cheapest external at this accuracy (s) | Our cells, tolerance | Our time (s) | Cheapest external/our time |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| ThermaKin2Ds 7 | h, Δt | 5.566e-05 | 0.05031 | 0.02707 | 320, 10× tol | 0.01542 | 1.75 |
-| ThermaKin2Ds 7 | h, 2Δt | 5.54e-05 | 0.02707 | 0.02707 | 320, 10× tol | 0.01542 | 1.75 |
-| ThermaKin2Ds 7 | h, Δt/2 | 5.573e-05 | 0.09509 | 0.02707 | 320, 10× tol | 0.01542 | 1.75 |
-| ThermaKin2Ds 7 | h, Δt/4 | 5.575e-05 | 0.1851 | 0.02707 | 320, 10× tol | 0.01542 | 1.75 |
-| ThermaKin2Ds 7 | h/2, Δt/4 | 1.396e-05 | 0.3681 | 0.1865 | 640, 1000× tol | 0.02962 | 6.3 |
-| ThermaKin2Ds 7 | h/2, Δt/2 | 1.395e-05 | 0.1865 | 0.1865 | 640, 1000× tol | 0.02962 | 6.3 |
+| ThermaKin2Ds 7 | h, Δt | 5.566e-05 | 0.05031 | 0.02707 | 320 | 0.01505 | 1.8 |
+| ThermaKin2Ds 7 | h, 2Δt | 5.54e-05 | 0.02707 | 0.02707 | 320 | 0.01505 | 1.8 |
+| ThermaKin2Ds 7 | h, Δt/2 | 5.573e-05 | 0.09509 | 0.02707 | 320 | 0.01505 | 1.8 |
+| ThermaKin2Ds 7 | h, Δt/4 | 5.575e-05 | 0.1851 | 0.02707 | 320 | 0.01505 | 1.8 |
+| ThermaKin2Ds 7 | h/2, Δt/4 | 1.396e-05 | 0.3681 | 0.1865 | 640, 1000× tol | 0.02872 | 6.5 |
+| ThermaKin2Ds 7 | h/2, Δt/2 | 1.395e-05 | 0.1865 | 0.1865 | 640, 1000× tol | 0.02872 | 6.5 |
 
 Solution overlays including the other codes' points: [xi_profiles_vs_codes](assets/V-GT-01/V-GT-01_xi_profiles_vs_codes.png), [variance_history_vs_codes](assets/V-GT-01/V-GT-01_variance_history_vs_codes.png).
 
@@ -103,11 +103,11 @@ Solution overlays including the other codes' points: [xi_profiles_vs_codes](asse
 
 | n_cells | h | wall (s) | L2 | Linf |
 | --- | --- | --- | --- | --- |
-| 40 | 0.025 | 0.002544 | 0.003984 | 0.01214 |
-| 80 | 0.0125 | 0.004499 | 0.0009693 | 0.003074 |
-| 160 | 0.00625 | 0.00836 | 0.0002408 | 0.0007709 |
-| 320 | 0.003125 | 0.01531 | 6.011e-05 | 0.000193 |
-| 640 | 0.001563 | 0.02983 | 1.502e-05 | 4.826e-05 |
+| 40 | 0.025 | 0.002487 | 0.003984 | 0.01214 |
+| 80 | 0.0125 | 0.004605 | 0.0009693 | 0.003074 |
+| 160 | 0.00625 | 0.008473 | 0.0002408 | 0.0007709 |
+| 320 | 0.003125 | 0.01593 | 6.011e-05 | 0.000193 |
+| 640 | 0.001563 | 0.03033 | 1.502e-05 | 4.826e-05 |
 
 Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 

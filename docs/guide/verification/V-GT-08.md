@@ -91,13 +91,13 @@ For each external mesh and step: the external code's cheapest run at least as ac
 
 | External run | Mesh, step | External error | External time (s) | Cheapest external at this accuracy (s) | Our cells, tolerance | Our time (s) | Cheapest external/our time |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Gpyro V2 | h, Δt | 43.45 | 0.009489 | 0.005602 | 40, 1000× tol | 0.004149 | 1.35 |
-| Gpyro V2 | h, 2Δt | 43.45 | 0.006626 | 0.005602 | 40, 1000× tol | 0.004149 | 1.35 |
-| Gpyro V2 | h, 4Δt | 43.45 | 0.005602 | 0.005602 | 40, 1000× tol | 0.004149 | 1.35 |
-| Gpyro V2 | h, Δt/2 | 43.45 | 0.01428 | 0.005602 | 40, 1000× tol | 0.004149 | 1.35 |
-| Gpyro V2 | h, Δt/4 | 43.45 | 0.02496 | 0.005602 | 40, 1000× tol | 0.004149 | 1.35 |
-| Gpyro V2 | h/2, Δt/4 | 21.69 | 0.04079 | 0.02311 | 80, 1000× tol | 0.008035 | 2.88 |
-| Gpyro V2 | h/2, Δt/2 | 21.69 | 0.02311 | 0.02311 | 80, 1000× tol | 0.008035 | 2.88 |
+| Gpyro V2 | h, Δt | 43.45 | 0.009489 | 0.005602 | 40, 1000× tol | 0.004261 | 1.31 |
+| Gpyro V2 | h, 2Δt | 43.45 | 0.006626 | 0.005602 | 40, 1000× tol | 0.004261 | 1.31 |
+| Gpyro V2 | h, 4Δt | 43.45 | 0.005602 | 0.005602 | 40, 1000× tol | 0.004261 | 1.31 |
+| Gpyro V2 | h, Δt/2 | 43.45 | 0.01428 | 0.005602 | 40, 1000× tol | 0.004261 | 1.31 |
+| Gpyro V2 | h, Δt/4 | 43.45 | 0.02496 | 0.005602 | 40, 1000× tol | 0.004261 | 1.31 |
+| Gpyro V2 | h/2, Δt/4 | 21.69 | 0.04079 | 0.02311 | 80, 1000× tol | 0.008389 | 2.75 |
+| Gpyro V2 | h/2, Δt/2 | 21.69 | 0.02311 | 0.02311 | 80, 1000× tol | 0.008389 | 2.75 |
 
 Solution overlays including the other codes' points: [pressure_vs_codes](assets/V-GT-08a/V-GT-08a_pressure_vs_codes.png), [boundary_flux_vs_codes](assets/V-GT-08a/V-GT-08a_boundary_flux_vs_codes.png).
 
@@ -105,9 +105,9 @@ Solution overlays including the other codes' points: [pressure_vs_codes](assets/
 
 | n_cells | h | wall (s) | P2 |
 | --- | --- | --- | --- |
-| 20 | 0.05 | 0.00491 | 0.00319 |
-| 40 | 0.025 | 0.008983 | 0.001616 |
-| 80 | 0.0125 | 0.0178 | 0.0008129 |
+| 20 | 0.05 | 0.00514 | 0.00319 |
+| 40 | 0.025 | 0.008976 | 0.001616 |
+| 80 | 0.0125 | 0.01798 | 0.0008129 |
 
 Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
@@ -191,13 +191,13 @@ For each external mesh and step: the external code's cheapest run at least as ac
 
 | External run | Mesh, step | External error | External time (s) | Cheapest external at this accuracy (s) | Our cells, tolerance | Our time (s) | Cheapest external/our time |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Gpyro V2 | h, Δt | 43.21 | 0.009623 | 0.005453 | 40, 1000× tol | 0.004258 | 1.28 |
-| Gpyro V2 | h, 2Δt | 43.21 | 0.007086 | 0.005453 | 40, 1000× tol | 0.004258 | 1.28 |
-| Gpyro V2 | h, 4Δt | 43.21 | 0.005453 | 0.005453 | 40, 1000× tol | 0.004258 | 1.28 |
-| Gpyro V2 | h, Δt/2 | 43.21 | 0.01465 | 0.005453 | 40, 1000× tol | 0.004258 | 1.28 |
-| Gpyro V2 | h, Δt/4 | 43.21 | 0.02475 | 0.005453 | 40, 1000× tol | 0.004258 | 1.28 |
-| Gpyro V2 | h/2, Δt/4 | 21.63 | 0.03976 | 0.02287 | 80, 1000× tol | 0.00816 | 2.8 |
-| Gpyro V2 | h/2, Δt/2 | 21.63 | 0.02287 | 0.02287 | 80, 1000× tol | 0.00816 | 2.8 |
+| Gpyro V2 | h, Δt | 43.21 | 0.009623 | 0.005453 | 40, 1000× tol | 0.004057 | 1.34 |
+| Gpyro V2 | h, 2Δt | 43.21 | 0.007086 | 0.005453 | 40, 1000× tol | 0.004057 | 1.34 |
+| Gpyro V2 | h, 4Δt | 43.21 | 0.005453 | 0.005453 | 40, 1000× tol | 0.004057 | 1.34 |
+| Gpyro V2 | h, Δt/2 | 43.21 | 0.01465 | 0.005453 | 40, 1000× tol | 0.004057 | 1.34 |
+| Gpyro V2 | h, Δt/4 | 43.21 | 0.02475 | 0.005453 | 40, 1000× tol | 0.004057 | 1.34 |
+| Gpyro V2 | h/2, Δt/4 | 21.63 | 0.03976 | 0.02287 | 80, 1000× tol | 0.008018 | 2.85 |
+| Gpyro V2 | h/2, Δt/2 | 21.63 | 0.02287 | 0.02287 | 80, 1000× tol | 0.008018 | 2.85 |
 
 Solution overlays including the other codes' points: [pressure_vs_codes](assets/V-GT-08b/V-GT-08b_pressure_vs_codes.png), [boundary_flux_vs_codes](assets/V-GT-08b/V-GT-08b_boundary_flux_vs_codes.png).
 
@@ -205,9 +205,9 @@ Solution overlays including the other codes' points: [pressure_vs_codes](assets/
 
 | n_cells | h | wall (s) | P2 |
 | --- | --- | --- | --- |
-| 20 | 0.05 | 0.004868 | 0.00319 |
-| 40 | 0.025 | 0.009101 | 0.001616 |
-| 80 | 0.0125 | 0.01814 | 0.0008129 |
+| 20 | 0.05 | 0.004796 | 0.00319 |
+| 40 | 0.025 | 0.008986 | 0.001616 |
+| 80 | 0.0125 | 0.01833 | 0.0008129 |
 
 Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
