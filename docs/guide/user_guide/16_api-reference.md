@@ -946,7 +946,7 @@ it starts empty):
 | enthalpy inventory (`energy_state = :enthalpy`) | `threshold · m_s,i(0) · c_p,ref · abstol` [J] |
 | condensed component mass of cell `i` | `reltol · threshold · m_s,i(0)` [kg] |
 | gas component mass | initial `pressure_tolerance · M_j · φ_i · V_i/(N_g R T_i)` [kg], supplemented by the proposed-state pressure norm |
-| node position (moving mesh) | `reltol · threshold · h_n`, `h_n` the smallest initial size of the cells around node `n` |
+| node position (moving mesh) | `reltol · threshold · h_n`, `h_n` the smallest initial size of the cells around node `n`; no relative share |
 | node velocity (moving mesh) | the position tolerance over `dt` |
 | face intensity (`BEER_LAMBERT`) | `reltol` times the largest incident intensity over the time span (at least 1 W/m²) |
 | conversion-history pair (lateral shrinkage) | the cell's mass tolerance |

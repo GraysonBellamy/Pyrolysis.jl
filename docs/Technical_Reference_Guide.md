@@ -11907,6 +11907,16 @@ floors and the pressure-error budget. Condensed-mass and geometry absolute
 tolerances retain their reference scales. Gas-row reference tolerances are
 $\phi_i(0)V_i(0)M_jp_{tol}/(N_gRT_i(0))$.
 
+Node positions are held to their absolute tolerance alone. The integrator
+scales every row's error by $a_k+r\,|u_k|$; for a position the relative share
+$r\,|x|$ depends on where the coordinate origin lies, and on a thin cell far
+from the origin it exceeds the cell's own thickness by orders of magnitude
+(at $x=13$ mm, $r=10^{-6}$, a 2.6 µm cell may change by 1 % of its volume within
+one step's error). The internal error norm therefore weights each position's
+scaled error by $(a_k+r\,|x_k|)/a_k$, measuring it against
+$a_k=r\,\varepsilon_m h_n$ alone, and the domain test's pore-volume margin
+uses the same position uncertainty (`_origin_free_rms`, `_pore_margin`).
+
 The internal error norm also reconstructs each unscaled local error at the
 proposed state and differentiates $p_j=m_jRT/(M_jW)$, with
 $W=V-\sum_{condensed}m_j/\rho_{i,j}(T)$. Temperature, condensed masses,

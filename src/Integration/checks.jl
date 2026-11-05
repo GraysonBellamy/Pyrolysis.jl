@@ -373,16 +373,12 @@ function _pore_margin(check, ds, i)
             for nd in topo.faces[f].nodes
                 displacement=max(
                     displacement,
-                    sqrt(
-                        sum(
-                            k->(
-                                check.abstol[position_index(layout, nd, k)]+check.reltol*abs(
-                                    ds.x[D*(nd-1)+k],
-                                )
-                            )^2,
-                            1:D,
-                        ),
-                    ),
+                    sqrt(sum(
+                        # positions carry no relative share, as in the
+                        # error norm (`_origin_free_rms`)
+                        k->check.abstol[position_index(layout, nd, k)]^2,
+                        1:D,
+                    )),
                 )
             end
             δV+=ds.geometry.face_area[f]*displacement

@@ -166,8 +166,9 @@ methods and the matrix `W` they factor.
 ## 8.3 Tolerances and step control
 
 The integrator adapts its step to keep the local error estimate of every row
-within `abstol_row + reltol · |u_row|`. `reltol` applies to every row; the
-absolute tolerances are set **per row** by `setup` from `abstol`, `reltol`,
+within `abstol_row + reltol · |u_row|`. `reltol` applies to every row but the
+node positions of a moving mesh, which are held to their absolute tolerance
+alone; the absolute tolerances are set **per row** by `setup` from `abstol`, `reltol`,
 `threshold` and each cell's initial condensed mass `m_s,i(0)`:
 
 | Row | Absolute tolerance |
@@ -175,7 +176,7 @@ absolute tolerances are set **per row** by `setup` from `abstol`, `reltol`,
 | Temperature (temperature form) | `abstol` [K] |
 | Enthalpy inventory (enthalpy form) | `threshold · m_s,i(0) · c_p,ref · abstol` [J], so a cell at the threshold resolves its temperature to `abstol` |
 | Component mass of cell `i` | `reltol · threshold · m_s,i(0)` [kg] (every component of the cell, a product included) |
-| Node position (moving mesh) | `reltol · threshold · h_n`, `h_n` the smallest initial size of the cells around node `n` |
+| Node position (moving mesh) | `reltol · threshold · h_n`, `h_n` the smallest initial size of the cells around node `n`; no relative share |
 | Node velocity (moving mesh) | the position tolerance over the time scale `dt` |
 | Face intensity (`BEER_LAMBERT`) | `reltol` times the largest incident intensity over the time span |
 | Cross-section area and its lateral rate (lateral shrinkage) | `reltol · A₀`; the velocity tolerance over the initial thickness |
@@ -193,6 +194,10 @@ consequences follow:
   Changing `threshold` changes the tolerances even when `deactivation` is off.
 - **`dt` scales the node-velocity tolerances** on a moving mesh, besides being
   the first step.
+- **A node position is held to its absolute tolerance alone.** Its value is a
+  coordinate, whose size depends on where the origin lies, so a relative share
+  `reltol · |x|` would let a thin cell far from the origin change by a large
+  fraction of its own thickness within one step's error.
 
 The defaults are:
 

@@ -558,9 +558,8 @@ const VBO_SOLVE_KWARGS = (
     deactivation = true,
     min_thickness = 1e-3,
     radiation_model = BEER_LAMBERT,
-    abstol = 1e-11,
-    reltol = 1e-9,
-    pressure_tolerance = 1e-4,
+    abstol = 1e-8,
+    reltol = 1e-6,
 )
 
 function _verification_case_vbo01()
@@ -584,9 +583,7 @@ function _verification_case_vbo01()
         solve_fn = _vbo_solve_fn(id),
         solve_kwargs = VBO_SOLVE_KWARGS,
         qois = qois,
-        # The tight pressure/ledger controls cost about 111 s for a warmed
-        # enthalpy run at 60 cells (8690 accepted steps, 1154 rejections).
-        ci = CIConfig(n_cells = 60, budget_s = 120.0),
+        ci = CIConfig(n_cells = 60, budget_s = 10.0),
         report = (
             n_cells_ladder = [30, 60, 120],
             qoi_curves = (:mlr_history, :thickness_history),

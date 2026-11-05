@@ -143,9 +143,6 @@ solution = solve(
     problem;
     progress = false,
     use_ale = true,
-    reltol = 1e-9,
-    abstol = 1e-11,
-    pressure_tolerance = 1e-4,
     radiation_model = SURFACE_ABSORPTION,
     deactivation = true,
     min_thickness = 0.01e-3,

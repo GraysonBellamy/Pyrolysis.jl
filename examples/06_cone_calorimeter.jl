@@ -265,9 +265,6 @@ println("This may take a few minutes...\n")
 # - dtmin: allows very small timesteps during rapid reaction fronts
 solution = solve(
     problem;
-    abstol = 1e-11,
-    reltol = 1e-9,
-    pressure_tolerance = 1e-4,
     dtmin = 1e-14,    # Allow very small timesteps during rapid reaction
     progress = true,
     use_ale = true,                        # Enable ALE mesh motion

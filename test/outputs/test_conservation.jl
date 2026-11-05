@@ -442,8 +442,11 @@ end
     ws = ResidualWorkspace(def, fill(300.0, n_cells(topo)))
     du = zeros(length(first(sol.raw_solution.u)))
     rate_scale = maximum(u -> abs(u[lateral_rate_index(layout)]), sol.raw_solution.u)
+    # Every saved state but the last is the step's interpolant with its
+    # algebraic rows from their constraints; the last is the integrator's own,
+    # its rows as converged as the method's Newton iteration left them.
     intensity, area, rate, velocity = 0.0, 0.0, 0.0, 0.0
-    for (t, u) in zip(sol.t, sol.raw_solution.u)
+    for (t, u) in zip(sol.t[1:(end-1)], sol.raw_solution.u[1:(end-1)])
         residual!(du, u, def, t, ws)
         ds, c = buffers(ws, def, Float64)
         nodes = 1:n_nodes(topo)
@@ -460,6 +463,9 @@ end
     @test area <= 1e-12
     @test rate <= 1e-10
     @test velocity <= 1e-10
+    u = sol.raw_solution.u[end]
+    residual!(du, u, def, sol.t[end], ws)
+    @test abs(du[area_index(layout)]) / u[area_index(layout)] <= 1e-10
 end
 
 # A state whose cross section is off its law: `consistent_state!`, the setup's

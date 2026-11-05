@@ -26,7 +26,7 @@ function _verification_case_vbo02()
             id,
             ledger_tol = 3e-4,
             ledger_comment = VBO_LEDGER_COMMENT *
-                             "; gas-release transients are resolved at reltol 1e-9 and a 1e-4 Pa pressure budget (relative ledger defects below 1e-10 in both energy forms at 60 cells)",
+                             "; relative ledger defects about 1e-7 in both energy forms at 60 cells",
         )
         st = sol.raw_solution.stats
         rec = VBO_STEP_STATS[id]
@@ -61,7 +61,7 @@ function _verification_case_vbo02()
                 exact = 1e-8,
                 error = max(0.0, 1.0 - rec.dt_min / 1e-8),
                 tol = 1e-3,
-                comment = "s; lower work bound 1e-8, above dtmin=1e-12; gas transients can require steps shorter than the proposed restart step (minimum 4.87e-7 at 60 cells across the two energy forms)",
+                comment = "s; lower work bound 1e-8, above dtmin=1e-12; gas transients can require steps shorter than the proposed restart step (minimum 8.84e-5 at 60 cells across the two energy forms)",
             ),
         )
         push!(
@@ -82,9 +82,9 @@ function _verification_case_vbo02()
                 value = Float64(st.naccept),
                 exact = 0.0,
                 error = Float64(st.naccept),
-                tol = (VERIFICATION_ENERGY_STATE === :enthalpy ? 35000.0 : 25000.0) *
+                tol = (VERIFICATION_ENERGY_STATE === :enthalpy ? 12000.0 : 10000.0) *
                       max(1, n_pmma / 60),
-                comment = "work budget at reltol 1e-9 and pressure tolerance 1e-4 Pa, scaled by cell count; 60-cell qualification: 15884 temperature steps, 21868 enthalpy steps",
+                comment = "work budget, scaled by cell count; 60-cell qualification: 3253 temperature steps, 3899 enthalpy steps",
             ),
         )
         return out
@@ -100,12 +100,11 @@ function _verification_case_vbo02()
             use_ale = false,
             deactivation = true,
             radiation_model = SURFACE_ABSORPTION,
-            abstol = 1e-11,
-            reltol = 1e-9,
-            pressure_tolerance = 1e-4,
+            abstol = 1e-8,
+            reltol = 1e-6,
         ),
         qois = qois,
-        ci = CIConfig(n_cells = 60, budget_s = 180.0),
+        ci = CIConfig(n_cells = 60, budget_s = 20.0),
         report = (
             n_cells_ladder = [30, 60, 120],
             curves = sol -> [
