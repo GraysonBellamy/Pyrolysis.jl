@@ -6,7 +6,9 @@
 # over its first 60 s joins them, and so does V-CPL-06a, the char-layer
 # column of `char_layer_problem` below at 80 cells, which no verification
 # case builds and which is solved in the suite's energy state with no other
-# keyword.
+# keyword. The burnout decks V-BO-01, V-BO-03 and V-BO-05 to V-BO-08 give
+# in-depth absorption a digest through a moving mesh, deactivation and an
+# interior void.
 #
 # The decks split by the correction's installation rule. (A) A deck the rule
 # leaves without a correction (a fixed mesh, no deactivation, or no layer that
@@ -57,6 +59,12 @@ const DECKS = (
     "V-HC-05",
     "V-RAD-01",
     "V-RX-02d",
+    "V-BO-01",
+    "V-BO-03",
+    "V-BO-05",
+    "V-BO-06",
+    "V-BO-07",
+    "V-BO-08",
 )
 const CHAR_LAYER = "V-CPL-06a"
 const CHAR_LAYER_CELLS = 80
