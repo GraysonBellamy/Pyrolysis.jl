@@ -7,6 +7,7 @@ using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.States: StateLayout, state_length
 using Pyrolysis.Kernels: RelativeFluxKernel, find_kernel
+using Pyrolysis.Kernels: RadiativeTransferKernel, radiation_reach
 using Pyrolysis.Closures: EquidistributionCorrection, PrescribedCorrection
 using Pyrolysis.ColoredJacobian
 using Pyrolysis.Integration: setup
@@ -245,6 +246,49 @@ end
         reached = Set((g, j) for g in faces, j = 1:R if S[r, q(g, j)])
         @test reached == Set((g, j) for g in (i, i + 1), j = 1:R)
     end
+end
+
+# Under radiative transfer each family reads itself at its own face and at the
+# face upstream of it in its direction of travel, q⁻ (toward the back, node 1)
+# at the face above, q⁺ at the face below, and the two read each other at
+# their face; the cell rows read every row of their two faces, as before.
+@testset "radiation rows in their direction of travel: $(moving ? "moving" : "fixed")" for moving in
+                                                                                           (
+    false,
+    true,
+)
+    n = 6
+    cp = setup(_problem(3, n); use_ale = moving, radiation_model = RADIATIVE_TRANSFER)
+    layout, topo = cp.def.layout, cp.def.setup.topology
+    kernel = find_kernel(RadiativeTransferKernel, cp.def.kernels)
+    reach = radiation_reach(kernel)
+    @test reach.along == [1, -1] && reach.same_node == [[2], [1]]
+    S = cp.jacobian.pattern
+    @test S == jacobian_pattern(cp.def)
+    q(f, k) = radiation_index(layout, f, k)
+    faces = 1:(n+1)
+    for f in faces
+        reached(k) = Set((g, j) for g in faces, j = 1:2 if S[q(f, k), q(g, j)])
+        @test reached(1) == Set([(f, 1), (f, 2), (min(f + 1, n + 1), 1)])
+        @test reached(2) == Set([(f, 2), (f, 1), (max(f - 1, 1), 2)])
+        for k = 1:2
+            @test all(
+                S[q(f, k), c] for i = max(1, f-1):min(n, f) for c in cell_rows(layout, i)
+            )
+            moving && @test all(
+                S[q(f, k), position_index(layout, g)] for g = max(1, f-1):min(n+1, f+1)
+            )
+        end
+    end
+    for i = 1:n, r in cell_rows(layout, i)
+        reached = Set((g, j) for g in faces, j = 1:2 if S[r, q(g, j)])
+        @test reached == Set((g, j) for g in (i, i + 1), j = 1:2)
+    end
+    # Every row of the family pattern that reads all of nodes f − 1 … f + 1
+    # holds the directional rows.
+    symmetric = jacobian_pattern(layout, topo; closure = cp.def.closure)
+    @test all(symmetric[findall(S)])
+    @test count(symmetric) > count(S)
 end
 
 # ============================================================================

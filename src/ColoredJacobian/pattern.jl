@@ -24,9 +24,12 @@ gradients), one otherwise.
   it reads every radiation row of its two faces and, under a variable cross
   section, the area.
 - A radiation row of face `f` (a line) reaches every radiation row of nodes
-  `f − 1 … f + 1`, the unknowns of the cells on either side of its face (the
-  attenuation of the cell it leaves, the absorptivity of the exposed cell),
-  on a moving mesh the positions of those nodes, and the area.
+  `f − 1 … f + 1` or, given the kernel's `radiation_reach`, its own family at
+  `f` and at the face upstream of it in its direction of travel and the rows
+  its reach names at `f`; and the unknowns of the cells on either side of its
+  face (the attenuation and emission of the cell it leaves, the emissivity
+  or absorptivity of the exposed cell), on a moving mesh the positions of
+  nodes `f − 1 … f + 1`, and the area.
 - A node-position row reaches its node's velocity, or, when the closure's
   unknowns are the cells' multipliers, the multipliers of the cells around
   the node and the positions of their nodes (`w = W⁻¹ Dᵀ φ`).
@@ -56,12 +59,14 @@ function jacobian_pattern(def::ResidualDefinition)
     relative = find_kernel(RelativeFluxKernel, def.kernels) !== nothing
     conduction = find_kernel(ConductionKernel, def.kernels)
     cross = conduction !== nothing && conduction.tensor !== nothing
+    transfer = find_kernel(RadiativeTransferKernel, def.kernels)
     return jacobian_pattern(
         def.layout,
         def.setup.topology;
         closure = def.closure,
         reach = relative || cross ? 2 : 1,
         reconstruction = relative,
+        radiation_reach = transfer === nothing ? nothing : radiation_reach(transfer),
     )
 end
 
@@ -71,6 +76,7 @@ function jacobian_pattern(
     closure = nothing,
     reach::Int = 1,
     reconstruction::Bool = false,
+    radiation_reach = nothing,
 )
     N = n_cells(layout)
     L = state_length(layout)
@@ -112,9 +118,19 @@ function jacobian_pattern(
     end
     for f = 1:(N+1), kr = 1:R
         r = radiation_index(layout, f, kr)
+        if radiation_reach !== nothing
+            add!(r, r)
+            g = f + radiation_reach.along[kr]
+            1 <= g <= N + 1 && add!(r, radiation_index(layout, g, kr))
+            for kc in radiation_reach.same_node[kr]
+                add!(r, radiation_index(layout, f, kc))
+            end
+        end
         for nd = max(1, f-1):min(N+1, f+1)
-            for kc = 1:R
-                add!(r, radiation_index(layout, nd, kc))
+            if radiation_reach === nothing
+                for kc = 1:R
+                    add!(r, radiation_index(layout, nd, kc))
+                end
             end
             moving && add!(r, position_index(layout, nd))
         end

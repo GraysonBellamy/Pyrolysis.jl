@@ -138,6 +138,25 @@ families of every band.
 """
 radiative_transfer_rows(bc_set::BoundaryConditionSet) = 2 * RADIATION_BANDS
 
+"""
+	radiation_reach(kernel::RadiativeTransferKernel) -> NamedTuple
+
+The radiation rows each radiation row reads, for the Jacobian's pattern. A
+row of family `k` at face `f` reads its own family at `f` and at
+`f + along[k]`, the face upstream of it in its direction of travel (toward
+the back for `q⁻`, toward the exposed face for `q⁺`), and the rows
+`same_node[k]` at `f`: `q⁻` and `q⁺` read each other there, since any face
+can become the exposed face and the back face reflects `q⁻` into `q⁺`.
+"""
+function radiation_reach(kernel::RadiativeTransferKernel)
+    c = first(kernel.order)
+    toward_exposed = sign(kernel.up[c] - kernel.down[c])
+    R = 2 * RADIATION_BANDS
+    along = [isodd(k) ? toward_exposed : -toward_exposed for k = 1:R]
+    same_node = [[isodd(k) ? k + 1 : k - 1] for k = 1:R]
+    return (; along, same_node)
+end
+
 # The row of family `j` of band `b` in a face's radiation rows.
 @inline _family_row(b, j) = 2 * (b - 1) + j
 
