@@ -39,7 +39,8 @@ not through the face, so a `RadiativeFluxBC` contributes zero `absorbed` and
 zero `net` here; under `BEER_LAMBERT` the volumetric deposit is reported
 separately as `extras.volumetric_absorption`. Under `RADIATIVE_TRANSFER` a
 `RadiativeBC` contributes zero as well: its exchange crosses the face through
-the radiation rows. Under `SURFACE_ABSORPTION` the absorbed α·q_ext is applied at the face and included in `net`. For
+the radiation rows, reported as `extras.radiation_absorbed`,
+`radiation_emitted` and `radiation_back`. Under `SURFACE_ABSORPTION` the absorbed α·q_ext is applied at the face and included in `net`. For
 combined BCs the components *and* `net` are summed over children — `net` is
 never recomputed from the components.
 """
@@ -54,8 +55,8 @@ function compute_boundary_heat_fluxes(
     if radiation_model != SURFACE_ABSORPTION
         # In-depth absorption: the incident radiation enters volumetrically,
         # nothing is absorbed at the face, and the Newton balance applies zero
-        # flux for this BC.
-        # The volumetric deposit is reported via extras.volumetric_absorption.
+        # flux for this BC. The radiation the cells absorb is reported in
+        # the solution's extras.
         return (
             absorbed = 0.0,
             reradiation = 0.0,

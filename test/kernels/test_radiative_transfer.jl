@@ -14,6 +14,7 @@ using Pyrolysis.Kernels:
     find_kernel,
     reset!,
     contribute!,
+    radiation_crossing,
     DIFFUSIVITY
 using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!, buffers
@@ -445,7 +446,67 @@ end
         @test size(ds.q, 1) == _rows[top]
         @test sum(c.S_energy) ≈ net rtol = 1e-12
         @test all(iszero, c.S_energy[kernel.order[1:(s-1)]])
+        # The radiation crossing the faces: the diffuse radiation arriving at
+        # the exposed cell's emissivity and the beams entering, less what
+        # leaves, less what leaves through the back, is what the cells absorb.
+        x = radiation_crossing(kernel, ds, 2.0)
+        i₁ = kernel.order[s]
+        @test x.absorbed ≈ ds.ε[i₁] * incoming_radiation(_tops[top], 2.0) + beams(e) rtol =
+            1e-14
+        @test abs(sum(c.S_energy) / A[e] - (x.absorbed - x.emitted - x.back)) <=
+              1e-12 * maximum(abs, ds.q)
+        @test x.back ≈ ds.q[1, b] + beams(b) - ds.q[2, b] rtol = 1e-14
     end
+    ds.active .= false
+    @test all(isnan, radiation_crossing(kernel, ds, 2.0))
+end
+
+# Where the rows hold, the radiation leaving the exposed face is what its
+# transmissivity passes of the upward flux beneath it; a mirror back passes
+# nothing, an open back the share of the back cell's emissivity of what
+# reaches it less of what arrives from outside; the beams enter with their
+# absorbed share of the heater's flux.
+@testset "Radiative transfer: the radiation crossing the faces at a consistent state, $(top) top, $(back) back" for top in
+                                                                                                                    (
+        :heated,
+        :collimated,
+        :cone,
+    ),
+    back in keys(_backs)
+
+    n = 8
+    cp = setup(
+        _slab(
+            n;
+            top = _tops[top],
+            bottom = _backs[back],
+            absorbing = _absorbing(top, back),
+        );
+        radiation_model = RADIATIVE_TRANSFER,
+    )
+    def, ws = cp.def, cp.ws
+    kernel = find_kernel(RadiativeTransferKernel, def.kernels)
+    ds, _ = buffers(ws, def, Float64)
+    derive!(ds, cp.u0, def.layout, def.setup)
+    scale = _q_scale(cp)
+    i₁, l = first(kernel.order), last(kernel.order)
+    e, b = kernel.up[i₁], kernel.down[l]
+    beams(f) = sum(ds.q[3:end, f]; init = 0.0)
+    entering =
+        top === :collimated ? _beam_absorptivity(0.0) * _flux(0.0) :
+        top === :cone ? ds.a[i₁] * (2.5e4 + _side_flux(0.0)) : 0.0
+    x = radiation_crossing(kernel, ds, 0.0)
+    @test x.absorbed ≈ ds.ε[i₁] * incoming_radiation(_tops[top], 0.0) + entering rtol =
+        1e-12
+    @test abs(x.emitted - ds.ε[i₁] * ds.q[2, e]) <= 1e-12 * scale
+    if back === :mirror
+        @test abs(x.back) <= 1e-12 * scale
+    else
+        arriving = ds.q[1, b] + beams(b)
+        Q_b = incoming_radiation(_backs[back], 0.0)
+        @test abs(x.back - ds.ε[l] * (arriving - Q_b)) <= 1e-12 * scale
+    end
+    top === :heated || @test beams(b) > 0
 end
 
 # The radiation rows read the first live cell's emissivity, its temperature

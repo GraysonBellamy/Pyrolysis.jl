@@ -524,6 +524,41 @@ function contribute!(
 end
 
 """
+	radiation_crossing(kernel::RadiativeTransferKernel, ds, t) -> (; absorbed, emitted, back)
+
+The radiation crossing the exposed and back faces at the derived state `ds`
+[W/m²]: `absorbed`, the radiation entering through the exposed face, the
+diffuse radiation arriving there at the face's transmissivity `tₑ` and every
+beam entering; `emitted`, the radiation leaving through it, `absorbed` less
+the net intake `q⁻_e − q⁺_e + Σ_h I_{h,e}`, which is `tₑ q⁺_e` where the
+exposed row holds; and `back`, the net radiation leaving through the back
+face, `q⁻_b + Σ_h I_{h,b} − q⁺_b`, zero at a mirror where its row holds. The
+cell sources sum to `A_e (absorbed − emitted) − A_b back` at any fluxes. `NaN`
+when no cell is live.
+"""
+function radiation_crossing(kernel::RadiativeTransferKernel, ds, t)
+    q = ds.q
+    s = _first_live(kernel, ds)
+    s == 0 && return (absorbed = NaN, emitted = NaN, back = NaN)
+    i₁ = kernel.order[s]
+    e = kernel.up[i₁]
+    b_face = kernel.down[last(kernel.order)]
+    tₑ = smooth_floor(ds.ε[i₁], INTERFACE_FLOOR)
+    Q = incoming_radiation(kernel.top, t)
+    F = _families(kernel)
+    absorbed, intake, back = zero(eltype(q)), zero(eltype(q)), zero(eltype(q))
+    for b = 1:RADIATION_BANDS
+        o = _family_row(F, b, 0)
+        dn, up = o + Q_DOWN, o + Q_UP
+        entering = _beams_at(q, kernel.beams, o, e)
+        absorbed += tₑ * Q + entering
+        intake += q[dn, e] - q[up, e] + entering
+        back += q[dn, b_face] + _beams_at(q, kernel.beams, o, b_face) - q[up, b_face]
+    end
+    return (; absorbed, emitted = absorbed - intake, back)
+end
+
+"""
 	consistent_radiation!(q, kernel, ds, topology, t) -> q
 
 The face fluxes `q` (radiation rows × faces) that satisfy every radiation row

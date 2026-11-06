@@ -48,6 +48,7 @@ export GasTransportKernel, face_peclet
 export BeerLambertKernel, incident_intensity, sweep_intensities!, transmitted_face
 export RadiativeTransferKernel, MirrorBack, OpenBack, consistent_radiation!
 export radiative_transfer_rows, radiation_reach, incoming_radiation, arriving_radiation
+export radiation_crossing
 export BeamSource
 export DIFFUSIVITY, INTERFACE_FLOOR
 export exposed_face

@@ -1,7 +1,7 @@
 using Test
 using LinearAlgebra
 using Pyrolysis
-using Pyrolysis.Materials: DepletionLimiter
+using Pyrolysis.Materials: DepletionLimiter, STEFAN_BOLTZMANN
 using Pyrolysis.States
 using Pyrolysis.Meshes: n_cells
 using Pyrolysis.States: StateLayout, state_length
@@ -187,12 +187,12 @@ end
     rxn = Reaction(:gasify, 1 => 2; A = 1e8, E = 1.2e5, h = 1e5)
     mat = Material(name = :charring, components = (solid, gas), reactions = (rxn,))
     h_back, T_back_inf = 5.0, 300.0
-    problem = PyrolysisProblem(
+    deck(distribution) = PyrolysisProblem(
         mesh = uniform_mesh(0.01, 12),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(4e4) +
+                top = RadiativeFluxBC(4e4; distribution) +
                       RadiativeBC(T_inf = 300.0) +
                       ConvectiveBC(h = 10.0, T_inf = 300.0),
                 bottom = ConvectiveBC(h = h_back, T_inf = T_back_inf),
@@ -207,8 +207,18 @@ end
         tspan = (0.0, 60.0),
         output_times = collect(0.0:10.0:60.0),
     )
-    for radiation_model in (SURFACE_ABSORPTION, BEER_LAMBERT)
-        sol = Integration.solve(problem; radiation_model, abstol = 1e-8, reltol = 1e-6)
+    for (radiation_model, distribution) in (
+        (SURFACE_ABSORPTION, Diffuse()),
+        (BEER_LAMBERT, Diffuse()),
+        (RADIATIVE_TRANSFER, Diffuse()),
+        (RADIATIVE_TRANSFER, Collimated()),
+    )
+        sol = Integration.solve(
+            deck(distribution);
+            radiation_model,
+            abstol = 1e-8,
+            reltol = 1e-6,
+        )
         @test sol.retcode === :Success
         x = sol.extras
         # The decomposition sums to the applied flux, which the surface balance
@@ -217,12 +227,33 @@ end
               x.surface_heat_flux_absorbed .- x.surface_heat_flux_reradiation .-
               x.surface_heat_flux_convection rtol = 1e-12
         @test x.surface_heat_flux_net ≈ x.surface_heat_flux_conduction rtol = 1e-8
-        @test all(>(0), x.surface_heat_flux_reradiation[2:end])
         @test all(>(0), x.surface_heat_flux_convection[2:end])
+        if radiation_model === RADIATIVE_TRANSFER
+            # Radiation crosses the face through the radiation rows, not the
+            # surface balance: the heater, diffuse or as a beam, and the
+            # surroundings enter at the exposed cell's emissivity (its
+            # absorptivity for the beam), and the convective back is a mirror.
+            # The mirror's row and the beam's entering row (at a constant
+            # emissivity) are linear in the fluxes with constant coefficients,
+            # so the interpolated saved states hold them to round-off.
+            @test all(iszero, x.surface_heat_flux_absorbed)
+            @test all(iszero, x.surface_heat_flux_reradiation)
+            @test x.radiation_absorbed ≈
+                  x.surface_emissivity .* (4e4 + STEFAN_BOLTZMANN * 300.0^4) rtol = 1e-12
+            @test all(>(0), x.radiation_emitted)
+            @test all(x.radiation_emitted .< x.radiation_absorbed)
+            @test maximum(abs, x.radiation_back) <= 1e-10 * 4e4
+            @test all(iszero, x.volumetric_absorption)
+        else
+            @test all(>(0), x.surface_heat_flux_reradiation[2:end])
+            for name in (:radiation_absorbed, :radiation_emitted, :radiation_back)
+                @test all(iszero, x[name])
+            end
+        end
         if radiation_model === SURFACE_ABSORPTION
             @test x.surface_heat_flux_absorbed ≈ 4e4 .* x.surface_emissivity rtol = 1e-12
             @test all(iszero, x.volumetric_absorption)
-        else
+        elseif radiation_model === BEER_LAMBERT
             # The incident flux enters in depth, not through the face, at most
             # its absorbed share.
             @test all(iszero, x.surface_heat_flux_absorbed)
