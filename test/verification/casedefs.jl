@@ -255,7 +255,9 @@ if !isdefined(@__MODULE__, :VerificationCase)
     compositions, and nothing is integrated in time. Returns `retcode`
     (`:Success`), the face fluxes `qm` (q⁻, toward the back) and `qp` (q⁺,
     toward the exposed face) [W/m²] and the beams `I` (faces × directions),
-    every face ordered from the exposed face to the back, and the radiation
+    every face ordered from the exposed face to the back, the cells'
+    absorption coefficients `κ` [1/m] and emissivities `ε` in the same
+    order, and the radiation
     crossing the faces at the start, `absorbed`, `emitted` and `back` (the
     outputs' `radiation_absorbed`, `_emitted` and `_back`). The cases whose
     answer is the consistent start take it as their `solve_fn`; `kwargs` go
@@ -272,12 +274,15 @@ if !isdefined(@__MODULE__, :VerificationCase)
         derive!(ds, prepared.u0, def.layout, def.setup)
         kernel = find_kernel(RadiativeTransferKernel, def.kernels)
         faces = reverse(axes(ds.q, 2))   # on a line face 1 is the back
+        cells = reverse(eachindex(ds.α))
         crossing = radiation_crossing(kernel, ds, first(problem.tspan))
         return (;
             retcode = :Success,
             qm = ds.q[1, faces],
             qp = ds.q[2, faces],
             I = permutedims(ds.q[3:end, faces]),
+            κ = ds.α[cells],
+            ε = ds.ε[cells],
             crossing...,
         )
     end

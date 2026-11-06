@@ -6,6 +6,7 @@ mode read these files.
 
 | File | Generator | Read by |
 |---|---|---|
+| `vrad05_q10_left50.csv`, `vrad05_q10_left10.csv`, `vrad05_q25_left50.csv`, `vrad05_q25_left10.csv` | `vrad05_profiles.jl` | V-RAD-05 |
 | `vrad07_n50.csv`, `vrad07_n100.csv`, `vrad07_n200.csv`, `vrad07_n1600.csv` | `vrad07_reference.jl` | V-RAD-07 |
 
 ## V-RAD-07: an independent method of lines
@@ -40,3 +41,39 @@ OrdinaryDiffEqSDIRK 2.9.6. That run printed:
 | 100 | ≤ 2.11e-7 | 606.443734 | 614.592232 | 6 |
 | 200 | ≤ 2.46e-7 | 606.501195 | 614.616887 | 12 |
 | 1600 | ≤ 9.96e-8 | 606.520069 | 614.619816 | 94 |
+
+## V-RAD-05: burning profiles
+
+`vrad05_profiles.jl` runs the MaCFP-2 PMMA gasification target with the
+GIDAZE+ property set, the deck of `cases/V-RAD-05.jl`:
+- 6 mm on 120 cells;
+- a collimated heater of 10 and 25 kW/m², surroundings at 293 K, no
+  convection, a mirror back;
+- `RADIATIVE_TRANSFER` on a moving mesh with deactivation, at the solver's
+  default tolerances, saved every second.
+
+At the first save with at most 50 % and 10 % of the PMMA mass left, it
+writes the live cells from the back to the exposed face. Each CSV has a
+names row and a units row, then one row per cell: the lower and upper node
+positions [m], the temperature [K] and the PMMA concentration [kg/m³], at
+17 significant digits. The case rebuilds the frames from them exactly.
+
+Regenerate from the repository root:
+
+    julia --project=test --startup-file=no test/verification/reference/radiation/vrad05_profiles.jl
+
+The committed files were generated with Julia 1.13.0 at the commit that
+added them. That run printed:
+
+| heater | mass left | time [s] | live cells | thickness [mm] | T_s [K] |
+|---|---|---|---|---|---|
+| 10 kW/m² | 0.4996 | 1644 | 120 | 2.9974 | 610.29 |
+| 10 kW/m² | 0.0997 | 2467 | 120 | 0.5982 | 628.12 |
+| 25 kW/m² | 0.4986 | 459 | 120 | 2.9917 | 672.70 |
+| 25 kW/m² | 0.0995 | 611 | 120 | 0.5968 | 687.85 |
+
+The frames depend on the solver: a change to the solver that moves its
+trajectory changes them, and they are then regenerated. The case's
+quantities measure the radiation model on the stored profiles, not the
+trajectory, so a regenerated set should give values close to the pinned
+ones.

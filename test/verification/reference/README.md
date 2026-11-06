@@ -20,7 +20,7 @@ Cost measurements and their provenance are in `matched/timing/`.
 | `gpyro/` | Gpyro V2 on the MaCFP PMMA deck | V-BO-01 burnout gradient gates |
 | `matched/` | FDS 6.11.1, pinned Gpyro V2 and ThermaKin2Ds 7, native decks and independent time/space refinements | Every cross-code curve and cost on the verification pages; see [mappings and reproduction](matched/README.md); cost at matched accuracy from `matched/timing/` |
 | `macfp/` | MaCFP-2 PMMA community submissions (9 institutions: FDS/Gpyro/ThermaKin/Sierra) | Community predictions; no verification case reads these files |
-| `radiation/` | This repository's scripts, see [its README](radiation/README.md) | V-RAD-07's method-of-lines reference, read in assert and report mode |
+| `radiation/` | This repository's scripts, see [its README](radiation/README.md) | V-RAD-07's method-of-lines reference and V-RAD-05's burning profiles, read in assert and report mode |
 
 ## Cost convention
 
