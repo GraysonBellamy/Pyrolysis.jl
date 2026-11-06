@@ -8,7 +8,8 @@
 # case builds and which is solved in the suite's energy state with no other
 # keyword. The burnout decks V-BO-01, V-BO-03 and V-BO-05 to V-BO-08 give
 # in-depth absorption a digest through a moving mesh, deactivation and an
-# interior void.
+# interior void; V-RAD-06 and V-RAD-07 give radiative transfer one through a
+# burnout on a moving mesh and on a fixed mesh.
 #
 # The decks split by the correction's installation rule. (A) A deck the rule
 # leaves without a correction (a fixed mesh, no deactivation, or no layer that
@@ -65,6 +66,8 @@ const DECKS = (
     "V-BO-06",
     "V-BO-07",
     "V-BO-08",
+    "V-RAD-06",
+    "V-RAD-07",
 )
 const CHAR_LAYER = "V-CPL-06a"
 const CHAR_LAYER_CELLS = 80

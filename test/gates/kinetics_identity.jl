@@ -46,7 +46,8 @@ const HEADER = "form,deck,digest,retcode,accepted,rejected"
 
 const RATES = "rates-order-one"
 
-# The verification decks. V-RX-02d holds an order other than one.
+# The verification decks. V-RX-02d holds an order other than one; V-RAD-06
+# and V-RAD-07 solve under radiative transfer.
 const CASES = (
     "V-RX-01",
     "V-RX-02d",
@@ -66,6 +67,8 @@ const CASES = (
     "V-HC-05",
     "V-RAD-01",
     "V-BO-04",
+    "V-RAD-06",
+    "V-RAD-07",
 )
 
 # The examples: the deck between `marker` and the solve, without its printing,
