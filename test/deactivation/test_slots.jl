@@ -1,6 +1,6 @@
 using Test
 using Pyrolysis
-using Pyrolysis.Materials: BEER_LAMBERT
+using Pyrolysis.Materials: BEER_LAMBERT, RADIATIVE_TRANSFER
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.Kernels:
@@ -9,6 +9,7 @@ using Pyrolysis.Kernels:
     GasTransportKernel,
     ThermalBoundaryKernel,
     BeerLambertKernel,
+    RadiativeTransferKernel,
     RelativeFluxKernel,
     find_kernel
 using Pyrolysis.Closures: NoCorrection, EquidistributionCorrection
@@ -62,13 +63,13 @@ const _T = [640.0, 630.0, 625.0, 610.0, 600.0, 590.0, 585.0, 570.0]
 const _L = [2, 2, 2, 1, 1, 1, 1, 1]
 const _R = [500.0, 480.0, 450.0, 400.0, 390.0, 370.0, 360.0, 340.0]
 
-_set_up(p, energy; radiating = false) = setup(
+_set_up(p, energy; model = SURFACE_ABSORPTION) = setup(
     p;
     energy_state = energy,
     use_ale = true,
     deactivation = true,
     correction = NoCorrection(),
-    radiation_model = radiating ? BEER_LAMBERT : SURFACE_ABSORPTION,
+    radiation_model = model,
 )
 
 # The registered tables by name: (kind, live array).
@@ -91,6 +92,8 @@ function _named_tables(cp)
     gas === nothing || (out["gas floor"] = (:face, gas.d_floor))
     beam = find_kernel(BeerLambertKernel, k)
     beam === nothing || (out["beam floor"] = (:matrix, beam.d_floor))
+    transfer = find_kernel(RadiativeTransferKernel, k)
+    transfer === nothing || (out["transfer floor"] = (:matrix, transfer.d_floor))
     return out
 end
 
@@ -255,46 +258,42 @@ function _compare_with_fresh(cp, fresh, top)
     end
 end
 
-@testset "a removed cell's tables equal a fresh setup without it: cell $k, $(energy) form, $(radiating ? "in-depth" : "surface") radiation" for k in
-                                                                                                                                                (
+@testset "a removed cell's tables equal a fresh setup without it: cell $k, $(energy) form, $(model)" for k in
+                                                                                                         (
         1,
         3,
         5,
         7,
     ),
     energy in (:temperature, :enthalpy),
-    radiating in (false, true)
+    model in (SURFACE_ABSORPTION, BEER_LAMBERT, RADIATIVE_TRANSFER)
 
-    cp = _set_up(_column(_H, _T, _L, _R; radiating), energy; radiating)
+    radiating = model !== SURFACE_ABSORPTION
+    cp = _set_up(_column(_H, _T, _L, _R; radiating), energy; model)
     keep = [i for i = 1:8 if i != k]
-    fresh = _set_up(
-        _column(_H[keep], _T[keep], _L[keep], _R[keep]; radiating),
-        energy;
-        radiating,
-    )
+    fresh =
+        _set_up(_column(_H[keep], _T[keep], _L[keep], _R[keep]; radiating), energy; model)
     layout, cells = cp.def.layout, cp.deactivation
     _kill!(cells, layout, 8)
     arrange_slots!(cells.tables, layout, vcat(keep, k), Tuple{Int,Int,Float64}[])
     _compare_with_fresh(cp, fresh, 7)
 end
 
-@testset "a cell a pass takes from under live cells leaves the tables of a fresh setup: cell $k, $(energy) form, $(radiating ? "in-depth" : "surface") radiation" for k in
-                                                                                                                                                                      (
+@testset "a cell a pass takes from under live cells leaves the tables of a fresh setup: cell $k, $(energy) form, $(model)" for k in
+                                                                                                                               (
         1,
         3,
         5,
         7,
     ),
     energy in (:temperature, :enthalpy),
-    radiating in (false, true)
+    model in (SURFACE_ABSORPTION, BEER_LAMBERT, RADIATIVE_TRANSFER)
 
-    cp = _set_up(_column(_H, _T, _L, _R; radiating), energy; radiating)
+    radiating = model !== SURFACE_ABSORPTION
+    cp = _set_up(_column(_H, _T, _L, _R; radiating), energy; model)
     keep = [i for i = 1:8 if i != k]
-    fresh = _set_up(
-        _column(_H[keep], _T[keep], _L[keep], _R[keep]; radiating),
-        energy;
-        radiating,
-    )
+    fresh =
+        _set_up(_column(_H[keep], _T[keep], _L[keep], _R[keep]; radiating), energy; model)
     layout, cells = cp.def.layout, cp.deactivation
     u = copy(cp.u0)
     # Cell k empties under spent cells.

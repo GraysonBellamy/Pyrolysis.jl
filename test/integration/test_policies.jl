@@ -488,7 +488,9 @@ function _plain_deck()
     )
 end
 
-function _rich_deck()
+# Under radiative transfer (`transfer`) its back is open to surroundings at the
+# back cell's emissivity and its heater has the given `distribution`.
+function _rich_deck(; transfer = false, distribution = Diffuse())
     virgin = SolidComponent(
         :virgin,
         ρ = 500.0,
@@ -531,10 +533,11 @@ function _rich_deck()
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(50e3) +
+                top = RadiativeFluxBC(50e3; distribution) +
                       RadiativeBC(T_inf = 300.0) +
                       ConvectiveBC(h = 10.0, T_inf = 300.0),
-                bottom = RadiativeBC(ε = 0.9, T_inf = 300.0),
+                bottom = transfer ? RadiativeBC(T_inf = 300.0) :
+                         RadiativeBC(ε = 0.9, T_inf = 300.0),
             ),
             mass = (
                 top = AmbientGasBC(
@@ -588,6 +591,26 @@ end
     @test solution_plain === solution_rich
 end
 
+# Radiative transfer's rows, a beam's among them, take the integrator and the
+# solution of in-depth radiation's configuration on each mesh.
+@testset "the integrator's type does not depend on the radiation rows: $name" for (
+    name,
+    options,
+) in (
+    ("fixed mesh", (;)),
+    ("moving mesh", (use_ale = true,)),
+    ("moving mesh with deactivation", (use_ale = true, deactivation = true)),
+)
+    reference = _solve_types(_rich_deck(); options..., radiation_model = BEER_LAMBERT)
+    for distribution in (Diffuse(), Collimated())
+        @test _solve_types(
+            _rich_deck(; transfer = true, distribution);
+            options...,
+            radiation_model = RADIATIVE_TRANSFER,
+        ) === reference
+    end
+end
+
 @testset "a read-only user callback leaves every policy's trajectory unchanged" begin
     problem = _uniform_slab(12)
     probe = DiscreteCallback(
@@ -639,20 +662,22 @@ end
     end
 end
 
-# In-depth radiation adds the intensity rows, and on a fixed mesh a mass
+# In-depth radiation adds the radiation rows, and on a fixed mesh a mass
 # matrix: a solver configuration of its own on each mesh.
-@testset "repeated solves with in-depth radiation are bit-identical under each linear solver: use_ale = $ale" for ale in
-                                                                                                                  (
-    false,
-    true,
-)
+@testset "repeated solves with in-depth radiation are bit-identical under each linear solver: use_ale = $ale, $model" for ale in
+                                                                                                                          (
+        false,
+        true,
+    ),
+    model in (BEER_LAMBERT, RADIATIVE_TRANSFER)
+
     problem = _slab(12; radiating = true)
     for linear_solver in (StructuredKLU(), KLUFactorization(), UMFPACKFactorization())
         sols = [
             Integration.solve(
                 problem;
                 use_ale = ale,
-                radiation_model = BEER_LAMBERT,
+                radiation_model = model,
                 integrator_policy = default_policy(linear_solver),
                 saveat = Float64[],
                 abstol = 1e-8,

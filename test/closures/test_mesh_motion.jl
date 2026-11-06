@@ -2,7 +2,7 @@ using Test
 using ForwardDiff
 using SparseArrays
 using Pyrolysis
-using Pyrolysis.Materials: DepletionLimiter, BEER_LAMBERT
+using Pyrolysis.Materials: DepletionLimiter, BEER_LAMBERT, RADIATIVE_TRANSFER
 using Pyrolysis.Meshes
 using Pyrolysis.Meshes: MeshGeometry
 using Pyrolysis.States
@@ -99,6 +99,31 @@ const _configurations = (
         ),
         options = (radiation_model = BEER_LAMBERT,),
     ),
+    # The heater as a beam, which enters at the virgin solid's own
+    # absorptivity; with a lateral law the radiation rows read the area.
+    radiative_transfer = (
+        problem = n -> _slab(
+            n;
+            radiating = true,
+            top = RadiativeFluxBC(
+                t -> 3e4 * (1 + 0.5 * sin(t));
+                distribution = Collimated(),
+            ) + RadiativeBC(T_inf = 300.0),
+        ),
+        options = (radiation_model = RADIATIVE_TRANSFER,),
+    ),
+    radiative_transfer_chi = (
+        problem = n -> _slab(
+            n;
+            radiating = true,
+            law = χ -> 1 - 0.4χ,
+            top = RadiativeFluxBC(
+                t -> 3e4 * (1 + 0.5 * sin(t));
+                distribution = Collimated(),
+            ) + RadiativeBC(T_inf = 300.0),
+        ),
+        options = (radiation_model = RADIATIVE_TRANSFER,),
+    ),
     wall = (
         problem = n -> _slab(
             n;
@@ -183,7 +208,7 @@ end
     layout = def.layout
     @test is_moving(layout)
     # Only a lateral law adds the history, area and lateral-rate states.
-    @test has_chi(layout) == (name in (:chi, :darcy))
+    @test has_chi(layout) == (name in (:chi, :darcy, :radiative_transfer_chi))
     @test same_structure(jac_prototype(cj), cj.pattern)
     @test all(cj.pattern[r, r] for r in axes(cj.pattern, 1))
 

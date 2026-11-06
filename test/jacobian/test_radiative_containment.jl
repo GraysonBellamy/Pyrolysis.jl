@@ -8,7 +8,8 @@ using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!
 using Pyrolysis.ColoredJacobian
 using Pyrolysis.Closures: EquidistributionCorrection
-using Pyrolysis.Integration: setup, DomainCheck
+using Pyrolysis.Deactivation
+using Pyrolysis.Integration: setup, DomainCheck, consistent_state!
 
 # The radiative transfer rows in the colored Jacobian: the pattern contains
 # the dense Jacobian at every state, the colored Jacobian equals it per entry,
@@ -237,4 +238,92 @@ end
     @test r == 0
     @test j == 0
     @test d == 0
+end
+
+# ============================================================================
+# After a deactivation
+# ============================================================================
+
+# An ablating solid, absorbing over a few cells: it decomposes to a gas that
+# takes no volume, so a cell thins with its condensed mass. Heated by a beam
+# beside its surroundings.
+function _ablator(n; L = 3e-3, q = 2.8e6, t_end = 0.8)
+    ρ, c, k = 1000.0, 1000.0, 1.0
+    R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
+    v = 2.0e-3
+    A = v^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (k / (ρ * c) * R * Tp^2)
+    solid = SolidComponent(:solid, φ = 0.3, ρ = ρ, c = c, k = k, λ = 1e-6, α = 2.0)
+    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02)
+    mat = Material(
+        name = :ablator,
+        components = (solid, gas),
+        reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
+    )
+    return PyrolysisProblem(
+        mesh = uniform_mesh(L, n),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = RadiativeFluxBC(q; distribution = Collimated()) +
+                      RadiativeBC(T_inf = 300.0),
+                bottom = AdiabaticBC(),
+            ),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> T0 + 1e5 * z,
+        ξ_initial = [z -> ρ, z -> 0.0],
+        tspan = (0.0, t_end),
+    )
+end
+
+# The exposed cell below the threshold, deactivated by the event's own
+# transfer: the pattern still contains the Jacobian, whose exposed face is now
+# the receiver's far face, where every family enters, and no row reads the
+# dead node's rows.
+@testset "radiative transfer after deactivate!: $(energy) form" for energy in (
+    :temperature,
+    :enthalpy,
+)
+    cp = setup(
+        _ablator(6);
+        energy_state = energy,
+        use_ale = true,
+        radiation_model = RADIATIVE_TRANSFER,
+        deactivation = true,
+    )
+    def, layout, cells = cp.def, cp.def.layout, cp.deactivation
+    R = radiation_rows(layout)
+    @test R == 3
+    u = copy(cp.u0)
+    m0 = cells.reference[6]
+    u[mass_index(layout, 6, 2)] += (1 - 0.5 * cells.threshold) * m0
+    u[mass_index(layout, 6, 1)] = 0.5 * cells.threshold * m0
+    consistent_state!(u, def, cp.ws, 0.0)
+    @test deactivate!(u, cells, def, 0.3) === :transferred
+    @test top_live_cell(layout) == 5
+    consistent_state!(u, def, cp.ws, 0.3)
+    row(f, k) = radiation_index(layout, f, k)
+    for (state, v) in
+        (("after the event", u), ("perturbed", u .* (1 .+ 0.1 .* sin.(1:length(u)))))
+        @testset "$state" begin
+            Jd = dense_jacobian(def, cp.ws, v, 0.3)
+            @test isempty(missing_entries(Jd, cp.jacobian.pattern))
+            J = jacobian!(jac_prototype(cp.jacobian), cp.jacobian, v, 0.3)
+            @test compare_entries(Matrix(J), Jd; rtol = 1e-12).passed
+            # The downward families enter at node 6 and the face beneath reads
+            # them; the exposed row reads the upward flux there, which reads
+            # the face beneath.
+            @test Jd[row(5, 1), row(6, 1)] != 0
+            @test Jd[row(5, 3), row(6, 3)] != 0
+            @test Jd[row(6, 1), row(6, 2)] != 0
+            @test Jd[row(6, 2), row(5, 2)] != 0
+            for k = 1:R
+                @test all(iszero, Jd[1:end .!= row(7, k), row(7, k)])
+            end
+        end
+    end
+    fill!(layout.mask, true)
 end
