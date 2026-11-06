@@ -571,9 +571,9 @@ function _consistent_intensities!(u, def::ResidualDefinition, ws::ResidualWorksp
     kernel === nothing && return u
     ds = ws.derived
     derive!(ds, u, layout, def.setup)
-    sweep_intensities!(ds.I, kernel, ds, def.setup.topology, t)
-    for f in eachindex(ds.I)
-        u[intensity_index(layout, f)] = ds.I[f]
+    sweep_intensities!(view(ds.q, 1, :), kernel, ds, def.setup.topology, t)
+    for f in axes(ds.q, 2), k in axes(ds.q, 1)
+        u[radiation_index(layout, f, k)] = ds.q[k, f]
     end
     return u
 end
@@ -811,7 +811,7 @@ function setup(
         topo,
         energy;
         moving = use_ale,
-        intensities = radiation_model === BEER_LAMBERT,
+        radiation_rows = radiation_model === BEER_LAMBERT ? 1 : 0,
         chi,
         history,
         deformation,
@@ -919,7 +919,7 @@ function setup(
         reltol = Float64(reltol),
         abstol = Float64(abstol),
         threshold = Float64(threshold),
-        intensity_scale = _intensity_scale(kernels, ws.derived, problem.tspan),
+        radiation_scale = _intensity_scale(kernels, ws.derived, problem.tspan),
         time_scale = Float64(time_scale),
     )
     cells === nothing || _register_tables!(

@@ -466,8 +466,8 @@ function PyrolysisSolution(
         if beam !== nothing
             e, b = max(exposed_face(beam, ds), 1), transmitted_face(beam)
             A_e = ds.geometry.face_area[e]
-            x.radiation_transmitted[k] = ds.I[b] * ds.geometry.face_area[b] / A_e
-            x.volumetric_absorption[k] = ds.I[e] - x.radiation_transmitted[k]
+            x.radiation_transmitted[k] = ds.q[1, b] * ds.geometry.face_area[b] / A_e
+            x.volumetric_absorption[k] = ds.q[1, e] - x.radiation_transmitted[k]
         end
     end
     deactivation === nothing || replay_events!(deactivation, layout, Inf)

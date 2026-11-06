@@ -127,7 +127,7 @@ end
     u[mass_index(layout, 2, 1)] = 1.2 * 1400.0 * V
     @test check(u, nothing, 0.0)
     # A velocity off its balance row, and an intensity off its attenuation row.
-    for row in (velocity_index(layout, 4), intensity_index(layout, 2))
+    for row in (velocity_index(layout, 4), radiation_index(layout, 2, 1))
         u = copy(cp.u0)
         u[row] += 1e3 * cp.abstol[row] / cp.reltol
         @test check(u, nothing, 0.0)

@@ -7,7 +7,7 @@ using Pyrolysis.Integration
 using Pyrolysis.Integration: setup, integrate
 using Pyrolysis.Assembly: residual!, buffers, ResidualWorkspace
 using Pyrolysis.Meshes: n_cells, n_nodes
-using Pyrolysis.States: intensity_index, area_index, lateral_rate_index, velocity_index
+using Pyrolysis.States: radiation_index, area_index, lateral_rate_index, velocity_index
 using OrdinaryDiffEq: DiscreteCallback
 
 # The char-layer column of V-CPL-06 with a reaction heat (the energy-ledger
@@ -450,7 +450,8 @@ end
         residual!(du, u, def, t, ws)
         ds, c = buffers(ws, def, Float64)
         nodes = 1:n_nodes(topo)
-        intensity = max(intensity, maximum(f -> abs(du[intensity_index(layout, f)]), nodes))
+        intensity =
+            max(intensity, maximum(f -> abs(du[radiation_index(layout, f, 1)]), nodes))
         area = max(area, abs(du[area_index(layout)]) / u[area_index(layout)])
         rate = max(rate, abs(du[lateral_rate_index(layout)]) / rate_scale)
         sweep = sum(abs, c.θ .* ds.V_eval) + sum(abs, ds.geometry.face_area .* ds.w)
@@ -486,7 +487,7 @@ end
     ds, c = buffers(cp.ws, def, Float64)
     sweep = sum(abs, c.θ .* ds.V_eval) + sum(abs, ds.geometry.face_area .* ds.w)
     @test u[area_index(layout)] ≈ cp.u0[area_index(layout)] rtol = 1e-14
-    @test maximum(f -> abs(du[intensity_index(layout, f)]), nodes) <= 1e-10 * 5e4
+    @test maximum(f -> abs(du[radiation_index(layout, f, 1)]), nodes) <= 1e-10 * 5e4
     @test abs(du[area_index(layout)]) <= 1e-12 * u[area_index(layout)]
     @test maximum(nd -> abs(du[velocity_index(layout, nd)]), nodes) <= 1e-10 * sweep
 end

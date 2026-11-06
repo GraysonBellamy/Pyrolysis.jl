@@ -78,7 +78,8 @@ function ResidualWorkspace(def::ResidualDefinition, T0::AbstractVector{<:Real})
         n_cells(layout),
         n_faces(def.setup.topology),
         n_nodes(layout),
-        dimension(layout),
+        dimension(layout);
+        radiation_rows = radiation_rows(layout),
     )
     return ResidualWorkspace(ds, c, IdDict{DataType,Any}(), T_warm)
 end
@@ -109,7 +110,8 @@ function buffers(ws::ResidualWorkspace, def::ResidualDefinition, ::Type{T}) wher
         n_cells(layout),
         n_faces(def.setup.topology),
         n_nodes(layout),
-        dimension(layout),
+        dimension(layout);
+        radiation_rows = radiation_rows(layout),
     )
     ws.dual[T] = (ds, c)
     return (ds, c)::_buffer_type(def, T)

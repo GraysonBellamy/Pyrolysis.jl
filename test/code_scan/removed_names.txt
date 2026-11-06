@@ -130,6 +130,9 @@ get_mass_bc
 compute_surface_mass_flux
 outward_darcy_velocity
 ξ_inf
+has_intensities
+intensity_index
+r_intensity
 
 [markers]
 re:Darcy(?:–|—|-|/| )Fick

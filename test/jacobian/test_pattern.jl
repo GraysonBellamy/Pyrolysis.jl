@@ -187,7 +187,7 @@ _largest_row(S) = maximum(diff(sparse(transpose(S)).colptr))
         @test cj.n_colors == _expected(
             NC,
             is_moving(layout),
-            has_intensities(layout),
+            has_radiation(layout),
             has_chi(layout),
             reconstruction,
             prescribed,
@@ -196,6 +196,29 @@ _largest_row(S) = maximum(diff(sparse(transpose(S)).colptr))
     end
     # Constant in the cell count.
     @test all(==(counts[1]), counts)
+end
+
+# Each radiation row reads every radiation row of its own face and its two
+# neighbours, and the cells on either side of its face; each cell row reads
+# every radiation row of its two faces.
+@testset "radiation rows: $(R) per face, $(moving ? "moving" : "fixed")" for R in (1, 3),
+    moving in (false, true)
+
+    n = 6
+    topo = line_mesh(collect(range(0.0, 1.0; length = n + 1))).topology
+    layout = StateLayout(2, topo, TemperatureState(); moving, radiation_rows = R)
+    S = jacobian_pattern(layout, topo)
+    q(f, k) = radiation_index(layout, f, k)
+    faces = 1:(n+1)
+    for f in faces, k = 1:R
+        reached = Set((g, j) for g in faces, j = 1:R if S[q(f, k), q(g, j)])
+        @test reached == Set((g, j) for g = max(1, f-1):min(n+1, f+1), j = 1:R)
+        @test all(S[q(f, k), c] for i = max(1, f-1):min(n, f) for c in cell_rows(layout, i))
+    end
+    for i = 1:n, r in cell_rows(layout, i)
+        reached = Set((g, j) for g in faces, j = 1:R if S[r, q(g, j)])
+        @test reached == Set((g, j) for g in (i, i + 1), j = 1:R)
+    end
 end
 
 # ============================================================================

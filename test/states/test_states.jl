@@ -10,16 +10,19 @@ using Pyrolysis.States: StateLayout, state_length
 using Pyrolysis.Integration: setup
 
 @testset "state layout: interleaved blocks and row kinds" begin
-    for (moving, intensities, chi) in (
-        (false, false, false),
-        (true, false, false),
-        (false, true, false),
-        (true, true, false),
-        (true, true, true),
-        (true, false, true),
+    for (moving, R, chi) in (
+        (false, 0, false),
+        (true, 0, false),
+        (false, 1, false),
+        (true, 1, false),
+        (true, 1, true),
+        (true, 0, true),
+        (false, 3, false),
+        (true, 3, true),
     )
         NC, n = 3, 5
-        l = StateLayout(NC, n, TemperatureState(); moving, intensities, chi)
+        l = StateLayout(NC, n, TemperatureState(); moving, radiation_rows = R, chi)
+        @test radiation_rows(l) == R && has_radiation(l) == (R > 0)
         rows = Int[]
         for i = 1:n
             append!(rows, (mass_index(l, i, j) for j = 1:NC))
@@ -28,21 +31,26 @@ using Pyrolysis.Integration: setup
         end
         for nd = 1:(n+1)
             moving && append!(rows, (position_index(l, nd), velocity_index(l, nd)))
-            intensities && push!(rows, intensity_index(l, nd))
+            append!(rows, (radiation_index(l, nd, k) for k = 1:R))
         end
         chi && append!(rows, (area_index(l), lateral_rate_index(l)))
         @test sort(rows) == collect(1:state_length(l))
-        @test state_length(l) ==
-              n * (NC + 1 + 2chi) + (n + 1) * (2moving + intensities) + 2chi
+        @test state_length(l) == n * (NC + 1 + 2chi) + (n + 1) * (2moving + R) + 2chi
         # Interleaving: node n's block, then cell n's block.
         for i = 1:n
             @test first(cell_rows(l, i)) == last(node_rows(l, i)) + 1
             @test first(node_rows(l, i + 1)) == last(cell_rows(l, i)) + 1
         end
+        # The radiation rows are the last rows of every node block.
+        for nd = 1:(n+1), k = 1:R
+            @test radiation_index(l, nd, k) == last(node_rows(l, nd)) - R + k
+        end
+        R > 0 && @test_throws ArgumentError radiation_index(l, 1, R + 1)
+        R == 0 && @test_throws ArgumentError radiation_index(l, 1, 1)
         d = is_differential(l)
-        @test count(!, d) == (n + 1) * (moving + intensities) + 2chi
+        @test count(!, d) == (n + 1) * (moving + R) + 2chi
         moving && @test !d[velocity_index(l, 2)] && d[position_index(l, 2)]
-        intensities && @test !d[intensity_index(l, 1)]
+        @test !any(d[radiation_index(l, nd, k)] for nd = 1:(n+1), k = 1:R)
         @test mass_matrix(l) == Diagonal(Float64.(d))
         @test all(l.mask)
     end
@@ -488,7 +496,7 @@ end
         time_scale = dt,
     )
     layout, ref = cp.def.layout, cp.def.setup.reference
-    @test is_moving(layout) && has_chi(layout) && has_intensities(layout)
+    @test is_moving(layout) && has_chi(layout) && radiation_rows(layout) == 1
     tol = cp.abstol
     n = n_cells(layout)
     x = ref.positions
@@ -518,14 +526,14 @@ end
     end
     # Node rows: positions at the mass tolerance's share of the thinner
     # neighbouring cell, velocities that over the first step, the face
-    # intensities at the relative tolerance of the largest incident intensity.
+    # radiation rows at the relative tolerance of the largest incident intensity.
     I_scale = maximum(t -> 0.9 * 3e4 * (1 + 0.5 * sin(t)), range(0.0, 10.0; length = 101))
     w_tol = Float64[]
     for nd = 1:(n+1)
         h = min(nd > 1 ? x[nd] - x[nd-1] : Inf, nd <= n ? x[nd+1] - x[nd] : Inf)
         @test tol[position_index(layout, nd)] ≈ reltol * threshold * h rtol = 1e-14
         @test tol[velocity_index(layout, nd)] ≈ reltol * threshold * h / dt rtol = 1e-14
-        @test tol[intensity_index(layout, nd)] ≈ reltol * I_scale rtol = 1e-14
+        @test tol[radiation_index(layout, nd, 1)] ≈ reltol * I_scale rtol = 1e-14
         push!(w_tol, reltol * threshold * h / dt)
     end
     # On the stretched mesh a node's two cells differ, so the rule picks one.

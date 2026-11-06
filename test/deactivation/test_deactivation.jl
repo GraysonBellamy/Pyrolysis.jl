@@ -1093,8 +1093,8 @@ end
     ds, c = cp.ws.derived, cp.ws.contributions
     scale = sum(abs, c.θ .* ds.V_eval) + sum(abs, ds.geometry.face_area .* ds.w)
     @test all(abs(du[velocity_index(layout, nd)]) <= 1e-10 * scale for nd = 1:6)
-    @test all(abs(du[intensity_index(layout, f)]) <= 1e-12 * q for f = 1:6)
-    @test !layout.mask[intensity_index(layout, 7)]
+    @test all(abs(du[radiation_index(layout, f, 1)]) <= 1e-12 * q for f = 1:6)
+    @test !layout.mask[radiation_index(layout, 7, 1)]
 end
 
 @testset "the consistent sweep reports a velocity row it cannot satisfy" begin
@@ -1393,8 +1393,8 @@ end
                 nd = 1:n_nodes(layout) if layout.mask[velocity_index(layout, nd)]
             ]
             intensity = [
-                abs(du[intensity_index(layout, f)]) / q for
-                f = 1:(n_cells(layout)+1) if layout.mask[intensity_index(layout, f)]
+                abs(du[radiation_index(layout, f, 1)]) / q for
+                f = 1:(n_cells(layout)+1) if layout.mask[radiation_index(layout, f, 1)]
             ]
             push!(
                 results,
@@ -1523,7 +1523,7 @@ end
     du = similar(v)
     residual!(du, v, cp.def, sol.t[end], cp.ws)
     rows = [
-        k for k in (intensity_index(layout, f) for f in eachindex(cp.ws.derived.I)) if
+        k for k in (radiation_index(layout, f, 1) for f in axes(cp.ws.derived.q, 2)) if
         layout.mask[k]
     ]
     @test maximum(abs, du[rows]) < 1e-9

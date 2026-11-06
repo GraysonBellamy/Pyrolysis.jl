@@ -6,7 +6,8 @@
 	BeerLambertKernel{R<:RadiativeFluxBC} <: Kernel
 
 In-depth absorption of the radiative flux incident on the exposed face, with
-the intensity of every face an algebraic unknown of the state.
+the intensity of every face an algebraic unknown of the state: the face's one
+radiation row.
 
 The rows, one per face:
 
@@ -168,12 +169,13 @@ function contribute!(
     s = _first_live(kernel, ds)
     s == 0 && return c
     e = kernel.up[kernel.order[s]]
-    c.r_intensity[e] = ds.I[e] - incident_intensity(kernel, ds, t)
+    c.r_radiation[1, e] = ds.q[1, e] - incident_intensity(kernel, ds, t)
     @inbounds for k = s:length(kernel.order)
         i = kernel.order[k]
         up, down = kernel.up[i], kernel.down[i]
-        I_up, I_down = ds.I[up], ds.I[down]
-        c.r_intensity[down] = I_down - I_up * exp(-_optical_thickness(kernel, ds, topo, i))
+        I_up, I_down = ds.q[1, up], ds.q[1, down]
+        c.r_radiation[1, down] =
+            I_down - I_up * exp(-_optical_thickness(kernel, ds, topo, i))
         c.S_energy[i] += I_up * g.face_area[up] - I_down * g.face_area[down]
     end
     return c

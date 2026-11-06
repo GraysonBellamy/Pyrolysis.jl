@@ -123,7 +123,7 @@ end
     )
     def, ws, cj = cp.def, cp.ws, cp.jacobian
     layout = def.layout
-    @test has_intensities(layout)
+    @test has_radiation(layout)
     @test count(!, is_differential(layout)) == n + 1
     pattern = cj.pattern
     @test all(pattern[r, r] for r in axes(pattern, 1))
@@ -133,7 +133,7 @@ end
     residual!(du, cp.u0, def, 0.0, ws)
     @test all(isfinite, du)
     # The initial intensities satisfy their rows.
-    I_rows = [du[intensity_index(layout, f)] for f = 1:(n+1)]
+    I_rows = [du[radiation_index(layout, f, 1)] for f = 1:(n+1)]
     @test maximum(abs, I_rows) <= 1e-12 * 4e4
     residual!(du, cp.u0, def, 0.0, ws)
     @test (@allocated residual!(du, cp.u0, def, 0.0, ws)) == 0
@@ -169,7 +169,7 @@ end
         q = name === :kirchhoff ? _flux(t) : 4e4
         I_in = incident_intensity(kernel, ds, t)
         @test I_in ≈ a * q rtol = 1e-14
-        @test ds.I[kernel.exposed] ≈ I_in rtol = 1e-14
+        @test ds.q[1, kernel.exposed] ≈ I_in rtol = 1e-14
         # Exact cell averages: each cell absorbs I_up (1 − e^{−τ}), and the
         # sum is the entering intensity less the transmitted one.
         I_up = I_in
@@ -180,9 +180,9 @@ end
             @test c.S_energy[i] ≈ I_up * (1 - exp(-τ)) rtol = 1e-12
             I_up *= exp(-τ)
         end
-        @test ds.I[transmitted_face(kernel)] ≈ I_up rtol = 1e-12
+        @test ds.q[1, transmitted_face(kernel)] ≈ I_up rtol = 1e-12
         absorbed = sum(c.S_energy[i] for i = 1:7)
-        @test absorbed + ds.I[1] ≈ I_in rtol = 1e-12
+        @test absorbed + ds.q[1, 1] ≈ I_in rtol = 1e-12
     end
 end
 
@@ -218,7 +218,7 @@ end
             col = Vector(J[:, k])
             @test all(abs.(col .- fd) .<= 1e-6 .* max.(abs.(fd), row_floor))
         end
-        e = intensity_index(layout, 8)
+        e = radiation_index(layout, 8, 1)
         m = mass_index(layout, 7, 1)
         name === :kirchhoff ? (@test J[e, m] != 0) : (@test J[e, m] == 0)
         c = energy_index(layout, 7)
@@ -252,7 +252,7 @@ end
     )
     def, ws, cj = cp.def, cp.ws, cp.jacobian
     layout = def.layout
-    @test is_moving(layout) && has_intensities(layout)
+    @test is_moving(layout) && has_radiation(layout)
     du = zeros(length(cp.u0))
     J = jac_prototype(cj)
     for (state, u) in pairs(_states(cp))
@@ -265,7 +265,7 @@ end
             jacobian!(J, cj, u, 1.0)
             @test compare_entries(Matrix(J), Jd; rtol = 1e-12).passed
             if state === :u0
-                e, c = intensity_index(layout, 7), energy_index(layout, 6)
+                e, c = radiation_index(layout, 7, 1), energy_index(layout, 6)
                 if name === :kirchhoff
                     @test Jd[e, c] != 0
                 else
@@ -284,7 +284,7 @@ end
         problem = _translucent_slab(6; top = _radiation_tops.kirchhoff, coordinates)
         @test_throws ArgumentError setup(problem; radiation_model = BEER_LAMBERT)
         cp = setup(problem; radiation_model = SURFACE_ABSORPTION)
-        @test !has_intensities(cp.def.layout)
+        @test !has_radiation(cp.def.layout)
     end
 end
 
@@ -304,7 +304,7 @@ end
             radiation_model = BEER_LAMBERT,
         )
         cp = setup(problem; radiation_model = SURFACE_ABSORPTION)
-        @test !has_intensities(cp.def.layout)
+        @test !has_radiation(cp.def.layout)
     end
     problem = _translucent_slab(
         6;

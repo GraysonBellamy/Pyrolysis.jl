@@ -21,9 +21,9 @@ gradients), one otherwise.
   centers, the concentrations the neighbours' volumes, the relative fluxes
   everything the corrections of the cell's nodes read; under a prescribed
   mesh velocity with relative fluxes, the velocities of its nodes. On a line
-  it reads the intensities of its two faces and, under a variable cross
+  it reads every radiation row of its two faces and, under a variable cross
   section, the area.
-- A face-intensity row (a line) reaches the intensities of nodes
+- A radiation row of face `f` (a line) reaches every radiation row of nodes
   `f − 1 … f + 1`, the unknowns of the cells on either side of its face (the
   attenuation of the cell it leaves, the absorptivity of the exposed cell),
   on a moving mesh the positions of those nodes, and the area.
@@ -75,7 +75,8 @@ function jacobian_pattern(
     N = n_cells(layout)
     L = state_length(layout)
     D = dimension(layout)
-    moving, bl, chi = is_moving(layout), has_intensities(layout), has_chi(layout)
+    moving, chi = is_moving(layout), has_chi(layout)
+    R = radiation_rows(layout)
     multipliers = moving && closure_unknowns(layout) === :multipliers
     correction = closure isa BalanceRowClosure ? closure.correction : NoCorrection()
     adjacency = _adjacency(topo)
@@ -102,25 +103,25 @@ function jacobian_pattern(
                     end
                 end
             end
-            if bl
-                add!(r, intensity_index(layout, i))
-                add!(r, intensity_index(layout, i + 1))
+            for k = 1:R
+                add!(r, radiation_index(layout, i, k))
+                add!(r, radiation_index(layout, i + 1, k))
             end
             chi && add!(r, area_index(layout))
         end
     end
-    if bl
-        for f = 1:(N+1)
-            r = intensity_index(layout, f)
-            for nd = max(1, f-1):min(N+1, f+1)
-                add!(r, intensity_index(layout, nd))
-                moving && add!(r, position_index(layout, nd))
+    for f = 1:(N+1), kr = 1:R
+        r = radiation_index(layout, f, kr)
+        for nd = max(1, f-1):min(N+1, f+1)
+            for kc = 1:R
+                add!(r, radiation_index(layout, nd, kc))
             end
-            for k = max(1, f-1):min(N, f), c in cell_rows(layout, k)
-                add!(r, c)
-            end
-            chi && add!(r, area_index(layout))
+            moving && add!(r, position_index(layout, nd))
         end
+        for k = max(1, f-1):min(N, f), c in cell_rows(layout, k)
+            add!(r, c)
+        end
+        chi && add!(r, area_index(layout))
     end
     if has_deformation(layout)
         for i = 1:N, b = 1:D, a = 1:D

@@ -92,7 +92,7 @@ the mass rows take their reaction and face-flux parts; the energy row is
 with `Eᵢ` the energy sources plus the face energy fluxes and `Ṁᵢⱼ` the
 face-flux part of the mass rate. An external temperature-rate source `S_T`
 adds `S_T` to the temperature row and `(Σⱼ mᵢⱼ c_p,ⱼ) S_T` to the inventory row.
-The face-intensity rows take the residuals of their algebraic equations.
+The radiation rows take the residuals of their algebraic equations.
 
 On a moving mesh the position rows are `dxₙ/dt = wₙ` and the velocity rows
 take the closure's residuals; the history rows take their sources and face
@@ -145,10 +145,8 @@ function assemble_rows!(
         S_T = _energy_source(sources, ds, i, t)
         du[energy_index(layout, i)] = _energy_row(energy_state(layout), E, S_T, c, ds, i)
     end
-    if has_intensities(layout)
-        @inbounds for f = 1:n_faces(topo)
-            du[intensity_index(layout, f)] = c.r_intensity[f]
-        end
+    @inbounds for f = 1:n_faces(topo), k = 1:radiation_rows(layout)
+        du[radiation_index(layout, f, k)] = c.r_radiation[k, f]
     end
     if is_moving(layout)
         _motion_rows!(du, c, ds, layout)

@@ -116,8 +116,9 @@ automatic differentiation):
   tensor `k A` on a mesh of more than one dimension
 - `ε`, `a`: cell surface emissivities and absorptivities (the mixing-weighted
   sums, which stay in `[0, 1]`)
-- `I`, `α`: face intensities [W/m²] as stored, and cell absorption
-  coefficients at the positive-part concentrations [1/m] (in-depth radiation)
+- `q`, `α`: the radiation rows of every face as stored, row `k` of face `f`
+  at `q[k, f]` [W/m²], and the cell absorption coefficients at the
+  positive-part concentrations [1/m] (in-depth radiation)
 - `φ`, `P`, `mob`: the smoothly floored porosity, the ideal-gas pressure [Pa]
   and the Darcy mobility `κ/μ` with a smoothly floored viscosity [m²/(Pa·s)]
   (both gas transport models)
@@ -150,7 +151,7 @@ struct DerivedState{NC,T,G<:MeshGeometry}
     k_physical::Vector{T}
     ε::Vector{T}
     a::Vector{T}
-    I::Vector{T}
+    q::Matrix{T}
     α::Vector{T}
     φ::Vector{T}
     P::Vector{T}
@@ -205,7 +206,7 @@ function DerivedState{T}(
         zeros(T, n),
         zeros(T, n),
         zeros(T, n),
-        zeros(T, n_faces(topo)),
+        zeros(T, radiation_rows(layout), n_faces(topo)),
         zeros(T, n),
         zeros(T, n),
         zeros(T, n),
@@ -226,7 +227,7 @@ Map the state vector `u` to the derived state.
 Order: the live cells from the layout's mask; the geometry from the node
 positions (a fixed mesh keeps its precomputed geometry), with the node
 velocities or the closure's multipliers, and under a variable cross section
-the area and its lateral rate; the carried fields; the face intensities; the
+the area and its lateral rate; the carried fields; the radiation rows; the
 masses and their concentrations, the cell temperatures (the stored
 temperature, or the inversion of the enthalpy inventory), their trial clamp,
 the heat-capacity sum, the sensible enthalpies, the cell properties with the
@@ -267,10 +268,8 @@ function derive!(
             ds.F[D*(b-1)+a, i] = u[deformation_index(layout, i, a, b)]
         end
     end
-    if has_intensities(layout)
-        @inbounds for f in eachindex(ds.I)
-            ds.I[f] = u[intensity_index(layout, f)]
-        end
+    @inbounds for f in axes(ds.q, 2), k in axes(ds.q, 1)
+        ds.q[k, f] = u[radiation_index(layout, f, k)]
     end
 
     @inbounds for i = 1:n
@@ -307,7 +306,7 @@ function derive!(
         ds.k[i] = smooth_floor(k, CONDUCTIVITY_FLOOR)
         ds.ε[i], ds.a[i] = surface_properties_of_fractions(v, Tt, material)
         _gas_properties!(ds, i, ξ⁺, Tt, material, setup.gas, raw)
-        has_intensities(layout) && (ds.α[i] = effective_absorption(ξ⁺, material))
+        has_radiation(layout) && (ds.α[i] = effective_absorption(ξ⁺, material))
     end
     return ds
 end

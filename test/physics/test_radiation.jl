@@ -101,7 +101,7 @@ end
         # The beam entering the medium carries that absorptivity.
         @test Pyrolysis.Kernels.incident_intensity(kernel, ds, 0.0) ≈ ds.ε[i_top] * 50e3 rtol =
             1e-13
-        @test ds.I[kernel.exposed] ≈ ds.ε[i_top] * 50e3 rtol = 1e-13
+        @test ds.q[1, kernel.exposed] ≈ ds.ε[i_top] * 50e3 rtol = 1e-13
     end
 
     @testset "the absorption coefficient is Σ ξ_k α_k of each cell's composition" begin

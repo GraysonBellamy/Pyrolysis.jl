@@ -634,10 +634,10 @@ end
             Jd = _contained(cp, v; t = 0.3)
             # The beam enters through the receiver's far face (node 6): the
             # face beneath reads it, and no row reads the dead node's.
-            @test Jd[intensity_index(layout, 5), intensity_index(layout, 6)] != 0
+            @test Jd[radiation_index(layout, 5, 1), radiation_index(layout, 6, 1)] != 0
             @test all(
                 iszero,
-                Jd[1:end .!= intensity_index(layout, 7), intensity_index(layout, 7)],
+                Jd[1:end .!= radiation_index(layout, 7, 1), radiation_index(layout, 7, 1)],
             )
         end
     end
