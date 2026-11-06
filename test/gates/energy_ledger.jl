@@ -42,11 +42,16 @@
 #    ledger its last node before each event.
 # 4. An interior death: a five-cell column at order 0.5, reltol 1e-7, abstol 1e-9,
 #    with its third cell prepared just below the threshold beneath spent cells,
-#    a pressure tolerance of 1e-3 for the gas they then release, under an in-depth
-#    flux and on a mesh with a layer, a lateral shrinkage law and neither, through
-#    the callback on Lagrangian cells over 0.2 s. The closure is the conservation
-#    recorder's: the defect of the live inventories over the initial inventory, to
-#    hold 1e-12 in mass and 1e-9 in the extended energy.
+#    a pressure tolerance of 1e-3 for the gas they then release, through the
+#    callback on Lagrangian cells over 0.2 s: its flux absorbed in depth, by
+#    radiative transfer with a lateral shrinkage law and without one, and at the
+#    surface on a mesh with a layer and with a lateral shrinkage law. The closure
+#    is the conservation recorder's: the defect of the live inventories over the
+#    initial inventory, to hold 1e-12 in mass and 1e-9 in the extended energy.
+#    Under radiative transfer the report adds the radiation crossing the faces
+#    over the window and the largest difference, at the saved states, between
+#    what the live cells absorb and what crosses the faces, over the largest
+#    radiation entering.
 #
 # Run from the repository root:
 #   julia --project=test --startup-file=no --threads=1 test/gates/energy_ledger.jl
@@ -63,7 +68,9 @@ using ForwardDiff
 using LinearAlgebra: I
 using OrdinaryDiffEq: OrdinaryDiffEq, ODEFunction, ODEProblem, DiscreteCallback, Rodas5P
 using OrdinaryDiffEq: ContinuousCallback, CallbackSet
-using Pyrolysis.Deactivation: threshold_margin
+using Pyrolysis.Deactivation: threshold_margin, replay_events!
+using Pyrolysis.Kernels: RadiativeTransferKernel, find_kernel, contribute!, reset!
+using Pyrolysis.Kernels: exposed_face
 const Meshes = Pyrolysis.Meshes
 const States = Pyrolysis.States
 const Assembly = Pyrolysis.Assembly
@@ -371,7 +378,8 @@ function interior_closure(config, energy_state)
         name = :interior,
         components = (a, inert, gas),
         reactions = (Reaction(:burn, 1 => 3; A = 0.02, E = 0.0, h = 0.0, n = 0.5),),
-        lateral_shrinkage_law = config === :lateral ? (x -> 1 - 0.2x) : nothing,
+        lateral_shrinkage_law = config in (:lateral, :transfer_lateral) ?
+                                (x -> 1 - 0.2x) : nothing,
     )
     layered = config === :layers
     problem = PyrolysisProblem(
@@ -399,7 +407,9 @@ function interior_closure(config, energy_state)
         deactivation = true,
         threshold = 1e-2,
         energy_state,
-        radiation_model = config === :beam ? BEER_LAMBERT : SURFACE_ABSORPTION,
+        radiation_model = config === :beam ? BEER_LAMBERT :
+                          config in (:transfer, :transfer_lateral) ?
+                          RADIATIVE_TRANSFER : SURFACE_ABSORPTION,
         reltol = 1e-7,
         abstol = 1e-9,
         pressure_tolerance = 1e-3,
@@ -442,16 +452,58 @@ function interior_closure(config, energy_state)
         events = [(e.cell, e.receiver) for e in sol.events],
         mass = abs(audit.mass.defect) / abs(audit.mass.initial),
         energy = abs(audit.energy.defect) / abs(audit.energy.initial),
+        radiation = config in (:transfer, :transfer_lateral) ? crossing_report(sol) :
+                    nothing,
+    )
+end
+
+# Under radiative transfer: the radiation crossing the faces over the saved
+# window by the trapezoid [J/m²], and the largest difference at the saved states
+# between what the live cells absorb, from the kernel alone under the mask of
+# each state's time, and what crosses the faces, over the largest radiation
+# entering.
+function crossing_report(sol)
+    def = sol.definition
+    layout, topo = def.layout, def.setup.topology
+    kernel = find_kernel(RadiativeTransferKernel, def.kernels)
+    ws = Assembly.ResidualWorkspace(def, fill(600.0, Meshes.n_cells(topo)))
+    ds, c = Assembly.buffers(ws, def, Float64)
+    x = sol.extras
+    trapezoid(v) =
+        sum((v[k-1] + v[k]) * (sol.t[k] - sol.t[k-1]) / 2 for k = 2:length(sol.t))
+    worst = 0.0
+    for (k, (t, u)) in enumerate(zip(sol.t, sol.raw_solution.u))
+        replay_events!(sol.deactivation, layout, t)
+        States.derive!(ds, u, layout, def.setup)
+        reset!(c)
+        contribute!(c, kernel, ds, topo, def.setup.material, t)
+        S = sum(c.S_energy[i] for i = 1:Meshes.n_cells(topo) if ds.active[i]; init = 0.0)
+        A = ds.geometry.face_area[exposed_face(kernel, ds)]
+        crossing = x.radiation_absorbed[k] - x.radiation_emitted[k] - x.radiation_back[k]
+        worst = max(worst, abs(S / A - crossing))
+    end
+    replay_events!(sol.deactivation, layout, Inf)
+    return (;
+        absorbed = trapezoid(x.radiation_absorbed),
+        emitted = trapezoid(x.radiation_emitted),
+        back = trapezoid(x.radiation_back),
+        identity = worst / maximum(x.radiation_absorbed),
     )
 end
 
 interior_event = []
-for config in (:beam, :lateral, :layers), energy_state in (:temperature, :enthalpy)
+for config in (:beam, :transfer, :transfer_lateral, :lateral, :layers),
+    energy_state in (:temperature, :enthalpy)
+
     push!(interior_event, interior_closure(config, energy_state))
     println(interior_event[end])
     flush(stdout)
     interior_event[end].mass < 1e-12 && interior_event[end].energy < 1e-9 ||
         error("the interior event does not close: $(interior_event[end])")
+    r = interior_event[end].radiation
+    r === nothing ||
+        r.identity <= 1e-12 ||
+        error("the radiation crossing the faces is not what the cells absorb: $(r)")
 end
 
 refinement = []
@@ -598,13 +650,23 @@ open(joinpath(OUT, "energy_ledger.md"), "w") do io
         "the threshold, 0.2 s through the callback on Lagrangian cells, reltol 1e-7, abstol ",
         "1e-9. Closure: the conservation recorder's defect over the initial inventory.\n",
     )
-    println(io, "| deck | form | retcode | events | mass closure | energy closure |")
-    println(io, "|" * repeat("---|", 6))
+    println(
+        io,
+        "| deck | form | retcode | events | mass closure | energy closure | ",
+        "radiation absorbed [J/m²] | emitted [J/m²] | back [J/m²] | ",
+        "cells against the faces |",
+    )
+    println(io, "|" * repeat("---|", 10))
     for r in interior_event
+        rad = r.radiation
+        columns =
+            rad === nothing ? "— | — | — | —" :
+            "$(_g(rad.absorbed)) | $(_g(rad.emitted)) | $(_g(rad.back)) | " *
+            "$(_g(rad.identity))"
         println(
             io,
             "| $(r.config) | $(r.energy_state) | $(r.retcode) | $(r.events) | ",
-            "$(_g(r.mass)) | $(_g(r.energy)) |",
+            "$(_g(r.mass)) | $(_g(r.energy)) | $(columns) |",
         )
     end
 end
