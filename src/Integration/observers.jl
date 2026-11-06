@@ -153,7 +153,10 @@ function _BoundRecorder(rec::ConservationRecorder, cp::PreparedProblem, crossing
             ds, c=buffers(ws, def, Float64)
             v=zeros(3length(ids))
             for (g, j) in enumerate(ids)
-                v[g]=sum(c.S_mass[j, i] for i in eachindex(ds.active) if ds.active[i])
+                v[g]=sum(
+                    (c.S_mass[j, i] for i in eachindex(ds.active) if ds.active[i]);
+                    init = 0.0,
+                )
                 for f0 = 1:n_faces(def.setup.topology)
                     def.setup.topology.faces[f0].cells[2]==0 || continue
                     f=live_face(def.setup.topology, ds.active, f0)
@@ -173,7 +176,10 @@ function _BoundRecorder(rec::ConservationRecorder, cp::PreparedProblem, crossing
         (u, t)->begin
             residual!(du, u, def, t, ws)
             ds, _=buffers(ws, def, Float64)
-            [sum(ds.m[j, i] for i in eachindex(ds.active) if ds.active[i]) for j in ids]
+            [
+                sum((ds.m[j, i] for i in eachindex(ds.active) if ds.active[i]); init = 0.0)
+                for j in ids
+            ]
         end,
     )
     rec.species=[def.setup.material.components[j].name for j in ids]

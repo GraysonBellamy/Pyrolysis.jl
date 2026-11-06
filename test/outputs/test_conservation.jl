@@ -126,6 +126,66 @@ function _per_step_trapezoid(problem; energy_state)
     return (; energy = ΔE - acc[1], mass = ΔM + acc[2], inflow = acc[1], ΔE)
 end
 
+# An ablating column heated at its top: it decomposes to a gas that takes no
+# volume, so each cell empties, and the last one's inventories leave the live
+# region at the event that finds no cell left.
+function _burning_out(n; L = 1e-3, t_end = 20.0)
+    ρ, c, k = 1000.0, 1000.0, 1.0
+    R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
+    v = 2.0e-3
+    A = v^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (k / (ρ * c) * R * Tp^2)
+    solid = SolidComponent(:solid; ρ, c, k, λ = 1e-6, φ = 0.05)
+    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02)
+    return PyrolysisProblem(
+        mesh = uniform_mesh(L, n),
+        material = Material(
+            name = :ablator,
+            components = (solid, gas),
+            reactions = (Reaction(:ablate, 1 => 2; A, E, h = 1.0e6),),
+        ),
+        bc_set = BoundaryConditionSet(
+            thermal = (top = HeatFluxBC(2.8e6), bottom = AdiabaticBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> T0 + 1e5 * z,
+        ξ_initial = [z -> ρ, z -> 0.0],
+        tspan = (0.0, t_end),
+        output_times = collect(0.0:0.05:t_end),
+    )
+end
+
+# The recorder reads the live region's rates and inventories at the last step,
+# where no cell is live: the ledgers close on the inventories the last event
+# lost.
+@testset "the recorder follows a column to its burnout: moving = $(moving)" for moving in (
+    true,
+    false,
+)
+    rec = ConservationRecorder()
+    sol = Integration.solve(
+        _burning_out(4);
+        use_ale = moving,
+        deactivation = true,
+        callback = rec,
+        abstol = 1e-8,
+        reltol = 1e-6,
+        pressure_tolerance = 1e-3,
+    )
+    @test sol.outcome === :burned_out
+    @test rec.steps == sol.statistics.accepted
+    audit = conservation_audit(sol, rec)
+    @test audit.mass.final == 0 && audit.energy.final == 0
+    @test audit.mass.lost > 0
+    @test abs(audit.mass.relative) <= 1e-6
+    @test abs(audit.energy.relative) <= 1e-6
+    gas = gas_species_audit(sol, rec).species.gas
+    @test gas.final == 0
+    @test abs(gas.relative) <= 1e-6
+end
+
 @testset "the recorder on the gasifying column: $(energy) form" for energy in (
     :temperature,
     :enthalpy,
