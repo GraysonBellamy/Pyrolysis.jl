@@ -727,3 +727,321 @@ end
         @test ξs[end] / ξ0 < 1e-40
     end
 end
+
+@testset "Gray-slab and two-stream radiation references" begin
+    # A column of uneven cells: optical thicknesses around τ0, emissive powers
+    # around 10 kW/m² (σT⁴ at about 650 K).
+    column(N; τ0 = 0.3) = (
+        [τ0 * (1 + 0.5 * sin(1.3i)) for i = 1:N],
+        [1e4 * (1 + 0.3 * cos(0.7i)) for i = 1:N],
+    )
+    θ1, θ2 = deg2rad(20.0), deg2rad(73.0)
+
+    @testset "gray slab: black faces against the jump sum" begin
+        # The quadrature solution against the E₃ sum, which needs no angular
+        # quadrature; τ0 = 3 and 60 cells reach the Rosseland regime.
+        for (N, τ0) in ((1, 1e-3), (7, 0.05), (30, 0.4), (60, 3.0))
+            τ, B = column(N; τ0)
+            r = gray_slab_exact(τ, B; q = 2.5e4, B_amb = 450.0, B_b = 9e3)
+            exact = gray_slab_black_faces(τ, B; q = 2.5e4, B_amb = 450.0, B_b = 9e3)
+            @test maximum(abs, r.q .- exact) < 1e-12 * 2.5e4
+        end
+        # Limits of the closed form: a cold slab transmits 2qE₃(τ_L), an
+        # isothermal one emits B(1 − 2E₃(τ_L)), with E₃(0) = 1/2.
+        @test expint(3, 0.0) == 0.5
+        for τL in (1e-4, 0.3, 10.0)
+            τ = fill(τL / 5, 5)
+            @test gray_slab_black_faces(τ, zeros(5); q = 1.0)[end] ≈ 2expint(3, τL) rtol =
+                1e-14
+            @test -gray_slab_black_faces(τ, fill(1e4, 5))[1] ≈ 1e4 * (1 - 2expint(3, τL)) rtol =
+                1e-12
+        end
+    end
+
+    @testset "gray slab: isothermal enclosures have zero source" begin
+        faces = (
+            (0.9, :specular, 1.0, :specular),
+            (0.7, :diffuse, 0.4, :diffuse),
+            (0.6, :specular, 0.0, :specular),
+            (0.8, :diffuse, 0.0, :diffuse),
+            (0.5, :specular, 0.3, :diffuse),
+        )
+        for τ0 in (1e-3, 0.3, 3.0), (ε, top, ε_b, back) in faces
+            τ, _ = column(20; τ0)
+            Bc = 1e4
+            r = gray_slab_exact(
+                τ,
+                fill(Bc, 20);
+                ε,
+                top_reflection = top,
+                B_amb = Bc,
+                ε_b,
+                B_b = Bc,
+                back_reflection = back,
+            )
+            @test maximum(abs, r.S) < 1e-12 * Bc
+            @test abs(r.q_out - r.q_enter) < 1e-12 * Bc
+        end
+    end
+
+    @testset "gray slab: beams" begin
+        τ, B = column(25; τ0 = 0.1)
+        Z = zeros(25)
+        depth = [0.0; cumsum(τ)]
+        # Collimated and cone transmission through a cold, black-faced slab.
+        r = gray_slab_exact(τ, Z; q = 1.0, heater = :collimated)
+        @test maximum(abs, r.q .- exp.(-depth)) < 1e-15
+        r = gray_slab_exact(τ, Z; q = 1.0, heater = (θ1, θ2))
+        @test maximum(abs, r.q .- gray_slab_cone_transmission.(1.0, depth, θ1, θ2)) < 1e-12
+        @test gray_slab_cone_transmission(1.0, 0.3, 0.0, π / 2) ≈ 2expint(3, 0.3) rtol =
+            1e-14
+        # A collimated beam meeting reflecting faces against a cone narrowed
+        # to 0.1° about the normal, which reaches the radiosities through
+        # the angular quadrature instead (4.4e-7 apart when pinned).
+        for (ε, top, ε_b, back) in (
+            (0.8, :specular, 0.0, :diffuse),
+            (0.7, :diffuse, 0.5, :diffuse),
+            (0.9, :diffuse, 0.0, :specular),
+            (0.6, :specular, 0.0, :specular),
+        )
+            kw = (; ε, top_reflection = top, ε_b, back_reflection = back, q = 1.0)
+            a = gray_slab_exact(τ, Z; kw..., heater = :collimated)
+            b = gray_slab_exact(τ, Z; kw..., heater = (0.0, deg2rad(0.1)))
+            @test sum(abs, a.S .- b.S) < 2e-6
+        end
+        # Conservation with every input at once.
+        r = gray_slab_exact(
+            τ,
+            B;
+            ε = 0.7,
+            top_reflection = :diffuse,
+            q = 2e4,
+            heater = (θ1, θ2),
+            B_amb = 500.0,
+            ε_b = 0.5,
+            B_b = 3e3,
+        )
+        @test abs(sum(r.S) - (r.q_enter - r.q_out - r.q_back)) < 1e-11 * 2e4
+    end
+
+    # Two-stream configurations: thick, thin and mixed cells; every back;
+    # diffuse input on both faces; collimated and cone beams, reflected at the
+    # back into q⁺ or specularly; the medium starting at the first cell or
+    # deeper.
+    τ_mixed = [1e-6, 0.01, 0.5, 5.0, 0.2, 50.0, 1e-3, 0.8, 2.0, 0.05, 0.3, 1.0]
+    B_mixed = [1e4 * (1 + 0.3 * cos(0.7i)) for i = 1:12]
+    cone = two_stream_cone_beams(3e4, θ1, θ2; a = 0.9)
+    configurations = (
+        (; ε = 1.0, ε_b = 1.0, Q_b = 2e3, beams = ()),
+        (; ε = 0.9, ε_b = 0.0, beams = [TwoStreamBeam(1.0, 2e4)]),
+        (;
+            ε = 0.9,
+            ε_b = 0.6,
+            Q_b = 2e3,
+            beams = [TwoStreamBeam(1.0, 2e4), TwoStreamBeam(0.6, 9e3)],
+        ),
+        (; ε = 0.3, ε_b = 0.6, Q_b = 2e3, beams = cone),
+        (; ε = 0.96, ε_b = 0.0, beams = cone, beam_back = :specular),
+        (; ε = 0.5, ε_b = 0.0, beams = [TwoStreamBeam(0.8, 1e4)], beam_back = :specular),
+    )
+    scale = 3e4
+
+    @testset "two-stream: the rows hold, against a dense solve" begin
+        for c in configurations, first in (1, 4)
+            kw = (; c..., Q = 1.5e4, first)
+            r = two_stream_solve(τ_mixed, B_mixed; kw...)
+            res = two_stream_residual(r.qm, r.qp, r.Id, r.Iu, τ_mixed, B_mixed; kw...)
+            @test maximum(abs, res.thermal) < 1e-12 * scale
+            @test maximum(abs, res.down; init = 0.0) < 1e-12 * scale
+            @test maximum(abs, res.up; init = 0.0) < 1e-12 * scale
+            # The rows are affine in every flux: assembled as a matrix
+            # column by column and solved by LU, independently of the sweep.
+            N1, nb = length(τ_mixed) + 1, length(c.beams)
+            n = 2N1 + 2N1 * nb
+            unpack(u) = (
+                u[1:N1],
+                u[(N1+1):(2N1)],
+                reshape(u[(2N1+1):(2N1+N1*nb)], N1, nb),
+                reshape(u[(2N1+N1*nb+1):end], N1, nb),
+            )
+            rows(u) =
+                let x = two_stream_residual(unpack(u)..., τ_mixed, B_mixed; kw...)
+                    [vec(x.thermal); vec(x.down); vec(x.up)]
+                end
+            r0 = rows(zeros(n))
+            M = reduce(hcat, (rows([k == j ? 1.0 : 0.0 for k = 1:n]) .- r0 for j = 1:n))
+            dense = M \ (-r0)
+            @test maximum(abs, dense .- [r.qm; r.qp; vec(r.Id); vec(r.Iu)]) < 1e-11 * scale
+            # Energy: the sources add to what enters less what leaves.
+            @test abs(sum(r.S) - (r.q_enter - r.q_out - r.q_back)) < 1e-11 * scale
+            # Faces before the first cell of the medium hold nothing, and the
+            # medium solves as if it began there.
+            if first > 1
+                @test all(iszero, r.qm[1:(first-1)]) && all(iszero, r.qp[1:(first-1)])
+                t = two_stream_solve(
+                    τ_mixed[first:end],
+                    B_mixed[first:end];
+                    kw...,
+                    first = 1,
+                )
+                @test maximum(abs, r.qm[first:end] .- t.qm) < 1e-12 * scale
+                @test maximum(abs, r.qp[first:end] .- t.qp) < 1e-12 * scale
+            end
+        end
+    end
+
+    @testset "two-stream: an open back reflects 1 − ε_b of each beam into q⁺" begin
+        # Cells thin enough that the beams reach the back.
+        c = configurations[3]
+        cells = [1, 2, 3, 5, 7, 10]
+        r = two_stream_solve(τ_mixed[cells], B_mixed[cells]; c..., Q = 1.5e4)
+        arriving = sum(r.Id[end, :])
+        @test arriving > 1e4
+        @test r.qp[end] ≈ c.ε_b * c.Q_b + (1 - c.ε_b) * (r.qm[end] + arriving) rtol = 1e-14
+        @test r.q_back ≈ c.ε_b * (r.qm[end] + arriving - c.Q_b) rtol = 1e-12
+    end
+
+    @testset "two-stream: isothermal equilibrium" begin
+        Bc = 5.670374419e-8 * 650.0^4
+        worst = 0.0
+        for N in (1, 5, 40),
+            τ0 in (1e-6, 1e-2, 1.0, 50.0),
+            ε in (0.3, 0.96, 1.0),
+            ε_b in (0.0, 0.6, 1.0)
+
+            τ, _ = column(N; τ0)
+            r = two_stream_solve(τ, fill(Bc, N); ε, Q = Bc, ε_b, Q_b = Bc)
+            worst = max(worst, maximum(abs, r.S), abs(r.qm[1] - Bc), abs(r.qp[end] - Bc))
+        end
+        @test worst < 1e-14 * Bc
+    end
+
+    @testset "two-stream: closed forms" begin
+        D = 1.5
+        # An isothermal slab with diffuse inputs on both faces: the closed form
+        # against the sweep, over uneven cells of the same total.
+        for (ε, ε_b, Q, Q_b) in
+            ((0.8, 0.0, 2e4, 0.0), (0.4, 0.6, 5e3, 2e4), (1.0, 1.0, 0.0, 0.0)),
+            τL in (1e-3, 0.4, 6.0)
+
+            τ = column(9; τ0 = 1.0)[1]
+            τ .*= τL / sum(τ)
+            Bc = 1e4
+            r = two_stream_solve(τ, fill(Bc, 9); D, ε, Q, ε_b, Q_b)
+            c = two_stream_isothermal_slab(; B = Bc, x = D * τL, ε, Q, ε_b, Q_b)
+            @test maximum(
+                abs,
+                (
+                    r.qm[1] - c.qm_e,
+                    r.qp[1] - c.qp_e,
+                    r.qm[end] - c.qm_b,
+                    r.qp[end] - c.qp_b,
+                ),
+            ) < 1e-12 * 2e4
+            @test abs(sum(r.S) - (c.intake - c.q_back)) < 1e-11 * 2e4
+        end
+        # The net intake of an isothermal slab before a mirror, facing Q:
+        # ε(Q − B)(1 − t²)/(1 − (1 − ε)t²), t = e^{−Dτ_L}; zero at Q = B.
+        c = two_stream_isothermal_slab(; B = 1e4, x = D * 0.1, ε = 0.8, Q = 2e4, ε_b = 0.0)
+        t = exp(-D * 0.1)
+        @test c.intake ≈ 0.8 * 1e4 * (1 - t^2) / (1 - 0.2t^2) rtol = 1e-14
+        @test c.intake ≈ 2434.1 atol = 0.05
+        c = two_stream_isothermal_slab(; B = 1e4, x = 0.7, ε = 0.8, Q = 1e4, ε_b = 0.0)
+        @test c.intake == 0 && c.qm_e == 1e4 && c.qp_e == 1e4
+        # Emission into 0 K: an open black back, a mirror, one material on
+        # both faces; thin slabs keep their digits through expm1.
+        for x in (1e-9, 1e-6, 1e-3, 0.3, 5.0), ε in (0.3, 0.9, 1.0)
+            h, h2 = -expm1(-x), -expm1(-2x)
+            t = exp(-x)
+            B = 1e4
+            @test two_stream_slab_emission(B, x, ε, 1.0) ≈ ε * B * h rtol = 1e-14
+            @test two_stream_slab_emission(B, x, ε, 0.0) ≈ ε * B * h2 / (1 - (1 - ε) * t^2) rtol =
+                1e-14
+            @test two_stream_slab_emission(B, x, ε, ε) ≈ ε * B * h / (1 - (1 - ε) * t) rtol =
+                1e-14
+            for ε_b in (0.0, 0.5, 1.0)
+                τ = fill(x / D / 4, 4)
+                r = two_stream_solve(τ, fill(B, 4); D, ε, ε_b)
+                @test abs(r.q_out - two_stream_slab_emission(B, x, ε, ε_b)) < 1e-12 * B
+            end
+        end
+        # A linear emissive power, the boundary inputs set to the rows'
+        # particular solution: every face carries g·coth(Dτ/2).
+        for τc in (1e-3, 0.1, 1.0, 5.0)
+            N, g, x = 40, 50.0, D * τc
+            B = [2e4 - g * i for i = 1:N]
+            Q = B[1] + g / (-expm1(-x))
+            Q_b = B[N] - g / (-expm1(-x))
+            r = two_stream_solve(fill(τc, N), B; D, ε = 1.0, Q, ε_b = 1.0, Q_b)
+            @test maximum(abs, (r.qm .- r.qp) .- two_stream_linear_flux(g, x)) < 1e-12 * 2e4
+        end
+        @test two_stream_linear_flux(1.0, 0.7) ≈ coth(0.35) rtol = 1e-15
+        # A beam through a slab with no emission, reflected at the back into
+        # q⁺; with a mirror the absorbed flux is
+        # q0[1 − εtT_c/(1 − (1 − ε)t²)], T_c = e^{−τ_L/μ}.
+        for μ in (1.0, 0.6), ε in (0.3, 0.9), ε_b in (0.0, 0.6, 1.0), τL in (0.05, 1.0, 4.0)
+            q0 = 2e4
+            τ = column(10; τ0 = 1.0)[1]
+            τ .*= τL / sum(τ)
+            r = two_stream_solve(τ, zeros(10); D, ε, ε_b, beams = [TwoStreamBeam(μ, q0)])
+            c = two_stream_beam_slab(q0, τL, ε, ε_b; D, μ)
+            @test abs(r.q_out - c.q_out) < 1e-12 * q0
+            @test abs(r.q_back - c.q_back) < 1e-12 * q0
+            @test abs(sum(r.S) - c.absorbed) < 1e-12 * q0
+            if ε_b == 0
+                t, T_c = exp(-D * τL), exp(-τL / μ)
+                @test c.absorbed ≈ q0 * (1 - ε * t * T_c / (1 - (1 - ε) * t^2)) rtol = 1e-14
+            end
+        end
+    end
+
+    @testset "two-stream: the sweep allocates nothing" begin
+        w = TwoStreamWork(length(τ_mixed), length(cone))
+        sweep(w) = @allocated two_stream_sweep!(
+            w,
+            τ_mixed,
+            B_mixed;
+            ε = 0.9,
+            Q = 1.5e4,
+            ε_b = 0.6,
+            Q_b = 2e3,
+            beams = cone,
+            first = 3,
+        )
+        sweep(w)
+        @test sweep(w) == 0
+    end
+
+    @testset "beams of both references agree" begin
+        τ = column(120; τ0 = 0.15)[1]
+        Z = zeros(120)
+        # A collimated beam through black faces, and one reflected
+        # specularly by a mirror and by the exposed face: identical.
+        for (ε, ε_b, beam_back) in ((1.0, 1.0, :diffuse), (0.7, 0.0, :specular))
+            a = two_stream_solve(
+                τ,
+                Z;
+                ε,
+                ε_b,
+                beams = [TwoStreamBeam(1.0, ε * 1e4)],
+                beam_back,
+            )
+            b = gray_slab_exact(τ, Z; ε, ε_b, q = 1e4, heater = :collimated)
+            @test maximum(abs, a.S .- b.S) < 1e-12 * 1e4
+        end
+        # A cone carried by three directions against the exact cone: the
+        # shares add up, and the source misplaced is a small fraction of the
+        # flux (1.16e-4 of it when this tolerance was pinned; 2.1e-3 with two
+        # directions, 7.3e-6 with four).
+        @test sum(b.q0 for b in two_stream_cone_beams(1.0, θ1, θ2)) ≈ 1 rtol = 1e-15
+        a = two_stream_solve(
+            τ,
+            Z;
+            ε = 1.0,
+            ε_b = 1.0,
+            beams = two_stream_cone_beams(1e4, θ1, θ2),
+        )
+        b = gray_slab_exact(τ, Z; q = 1e4, heater = (θ1, θ2))
+        @test sum(abs, a.S .- b.S) / 1e4 < 2e-4
+    end
+end
