@@ -436,10 +436,10 @@ _radiation_scale(kernels::Tuple, ds, tspan) =
     find_kernel(RadiativeTransferKernel, kernels) === nothing ?
     _intensity_scale(kernels, ds, tspan) : _transfer_scale(kernels, ds, tspan)
 
-# Under radiative transfer, at least 1 W/m²: the largest diffuse radiation
-# arriving at either face over the solve window, and the emissive power at the
-# largest of the initial cell temperatures and the surroundings' temperatures
-# of the `RadiativeBC` members over the window.
+# Under radiative transfer, at least 1 W/m²: the largest radiation, diffuse
+# and beams, arriving at either face over the solve window, and the emissive
+# power at the largest of the initial cell temperatures and the surroundings'
+# temperatures of the `RadiativeBC` members over the window.
 function _transfer_scale(kernels::Tuple, ds, tspan)
     kernel = find_kernel(RadiativeTransferKernel, kernels)
     times = range(Float64(tspan[1]), Float64(tspan[2]); length = 101)
@@ -447,7 +447,7 @@ function _transfer_scale(kernels::Tuple, ds, tspan)
         kernel.back isa OpenBack ? (kernel.top, kernel.back.condition) : (kernel.top,)
     incoming, T_ref = 0.0, maximum(ds.T)
     for t in times, bc in conditions
-        incoming = max(incoming, abs(incoming_radiation(bc, t)))
+        incoming = max(incoming, abs(arriving_radiation(bc, t)))
         T_ref = max(T_ref, Kernels._surroundings_temperature(bc, t))
     end
     return max(1.0, incoming, STEFAN_BOLTZMANN * T_ref^4)
@@ -699,7 +699,8 @@ balance at the exposed cell's absorptivity, or the condition's own),
 emits, through the face fluxes of [`RadiativeTransferKernel`](@ref); the
 `RadiativeBC` and `RadiativeFluxBC` members of the `:top` and `:bottom`
 conditions are the radiation arriving from outside, and leave the surface
-balance).
+balance; a `RadiativeFluxBC` on `:top` arrives diffuse or as the beams of its
+`distribution`).
 
 `use_ale` moves the mesh with the solid: the mesh's pinned nodes (on a line
 the back node) stay at rest and every other node follows the cells' reaction

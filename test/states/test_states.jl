@@ -547,9 +547,10 @@ end
 end
 
 # Under radiative transfer every radiation row's tolerance is the relative
-# tolerance of one scale: the largest diffuse radiation arriving at either
-# face over the window, or the emissive power at the largest of the initial
-# cell temperatures and the surroundings' temperatures, whichever is larger.
+# tolerance of one scale: the largest radiation, diffuse and beams, arriving
+# at either face over the window, or the emissive power at the largest of the
+# initial cell temperatures and the surroundings' temperatures, whichever is
+# larger.
 @testset "radiative transfer rows: tolerance at the scale of the arriving and emitted radiation" begin
     material = _thinning_slab(law = nothing).material
     σ = STEFAN_BOLTZMANN
@@ -561,17 +562,28 @@ end
             RadiativeFluxBC(flux) + RadiativeBC(T_inf = 300.0),
             AdiabaticBC(),
             maximum(t -> flux(t) + σ * 300.0^4, times),
+            2,
+        ),
+        # A collimated beam beside a diffuse flux: their sum.
+        (
+            RadiativeFluxBC(flux; distribution = Collimated()) +
+            RadiativeFluxBC(5e3) +
+            RadiativeBC(T_inf = 300.0),
+            AdiabaticBC(),
+            maximum(t -> flux(t) + 5e3 + σ * 300.0^4, times),
+            3,
         ),
         # The surroundings are hotter than every cell; the back is open.
         (
             RadiativeBC(T_inf = t -> 900.0 + 20t, F = 0.5),
             RadiativeBC(T_inf = 350.0) + RadiativeFluxBC(2e3),
             σ * 1100.0^4,
+            2,
         ),
         # Cold surroundings: the cells' own emission is the larger.
-        (RadiativeBC(T_inf = 300.0), AdiabaticBC(), σ * 300.0^4),
+        (RadiativeBC(T_inf = 300.0), AdiabaticBC(), σ * 300.0^4, 2),
     )
-    for (top, bottom, scale) in cases
+    for (top, bottom, scale, R) in cases
         problem = PyrolysisProblem(;
             mesh = stretched_mesh(0.01, 6, 1.2),
             material,
@@ -583,9 +595,9 @@ end
         reltol = 1e-5
         cp = setup(problem; radiation_model = RADIATIVE_TRANSFER, reltol)
         layout = cp.def.layout
-        @test radiation_rows(layout) == 2
+        @test radiation_rows(layout) == R
         @test maximum(cp.T0) > 450.0
-        for nd = 1:n_nodes(layout), k = 1:2
+        for nd = 1:n_nodes(layout), k = 1:R
             row = radiation_index(layout, nd, k)
             @test cp.abstol[row] ≈ reltol * max(scale, σ * maximum(cp.T0)^4) rtol = 1e-14
         end

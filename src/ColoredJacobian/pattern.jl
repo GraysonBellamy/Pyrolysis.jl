@@ -25,8 +25,9 @@ gradients), one otherwise.
   section, the area.
 - A radiation row of face `f` (a line) reaches every radiation row of nodes
   `f − 1 … f + 1` or, given the kernel's `radiation_reach`, its own family at
-  `f` and at the face upstream of it in its direction of travel and the rows
-  its reach names at `f`; and the unknowns of the cells on either side of its
+  `f` and at the face upstream of it in its direction of travel, the rows
+  its reach names at `f` and, at the back face, the beams it reflects; and
+  the unknowns of the cells on either side of its
   face (the attenuation and emission of the cell it leaves, the emissivity
   or absorptivity of the exposed cell), on a moving mesh the positions of
   nodes `f − 1 … f + 1`, and the area.
@@ -138,6 +139,12 @@ function jacobian_pattern(
             add!(r, c)
         end
         chi && add!(r, area_index(layout))
+    end
+    if radiation_reach !== nothing
+        f = radiation_reach.back_face
+        for (kr, kc) in radiation_reach.back
+            add!(radiation_index(layout, f, kr), radiation_index(layout, f, kc))
+        end
     end
     if has_deformation(layout)
         for i = 1:N, b = 1:D, a = 1:D

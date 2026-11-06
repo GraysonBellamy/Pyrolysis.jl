@@ -9,7 +9,7 @@ using Pyrolysis.BoundaryConditions: BoundaryState, solve_boundary_temperature!
 using Pyrolysis.Meshes: boundary_faces
 using Pyrolysis.States
 using Pyrolysis.Kernels: ThermalBoundaryKernel, find_kernel
-using Pyrolysis.Kernels: RadiativeTransferKernel, MirrorBack, OpenBack
+using Pyrolysis.Kernels: RadiativeTransferKernel, MirrorBack, OpenBack, incoming_radiation
 using Pyrolysis.Assembly: residual!, buffers
 using Pyrolysis.Integration
 using Pyrolysis.Integration: setup
@@ -280,6 +280,66 @@ end
     @test maximum(abs, ds.q .- B_cell) <= 1e-12 * B
 end
 
+# The same slab facing surroundings at its own temperature and a collimated
+# heater q entering at the absorptivity a: the thermal field alone is in
+# equilibrium, so the slab gains what the beam leaves behind. The beam reaches
+# the mirror attenuated by T_c = e^{−τ_L} and joins q⁺ there; of that diffuse
+# flux ε t escapes per crossing and (1 − ε) t² returns, so the net intake is
+# a q [1 − ε t T_c/(1 − (1 − ε)t²)]. Under surface absorption the distribution
+# changes nothing.
+@testset "radiative transfer: a collimated heater through an isothermal slab" begin
+    ε, B, τ_L, L, n, a, q = 0.8, 1e4, 0.1, 0.01, 10, 0.6, 2e4
+    T_B = (B / STEFAN_BOLTZMANN)^(1 / 4)
+    solid = SolidComponent(
+        :solid,
+        ρ = 600.0,
+        c = 1500.0,
+        k = 0.15,
+        ε = ε,
+        α = τ_L / (600.0 * L),
+    )
+    mat = Material(name = :gray, components = (solid,), reactions = ())
+    problem(top) = PyrolysisProblem(
+        mesh = stretched_mesh(L, n, 1.2),
+        material = mat,
+        bc_set = BoundaryConditionSet(thermal = (top = top, bottom = AdiabaticBC())),
+        T_initial = z -> T_B,
+        tspan = (0.0, 1.0),
+    )
+    heater = RadiativeFluxBC(q; absorptivity = a, distribution = Collimated())
+    cp = setup(
+        problem(heater + RadiativeBC(T_inf = T_B));
+        radiation_model = RADIATIVE_TRANSFER,
+    )
+    du = zeros(length(cp.u0))
+    residual!(du, cp.u0, cp.def, 0.0, cp.ws)
+    ds, c = buffers(cp.ws, cp.def, Float64)
+    e = n + 1
+    gained = sum(c.S_energy) / ds.geometry.face_area[e]
+    t, T_c = exp(-1.5τ_L), exp(-τ_L)
+    @test gained ≈ a * q * (1 - ε * t * T_c / (1 - (1 - ε) * t^2)) rtol = 1e-12
+    @test round(gained; digits = 1) == 3223.1
+    @test ds.q[3, e] ≈ a * q rtol = 1e-14
+    @test ds.q[3, 1] ≈ a * q * T_c rtol = 1e-12
+    # A beam-only exposed face faces surroundings at 0 K.
+    @test incoming_radiation(heater, 0.0) == 0
+    @test radiation_rows(
+        setup(problem(heater); radiation_model = RADIATIVE_TRANSFER).def.layout,
+    ) == 3
+    for distribution in (Collimated(), Cone(0.2, 1.2))
+        bc(d) =
+            RadiativeFluxBC(q; absorptivity = a, distribution = d) +
+            RadiativeBC(T_inf = 300.0)
+        rate(d) = begin
+            sa = setup(problem(bc(d)); radiation_model = SURFACE_ABSORPTION)
+            r = zeros(length(sa.u0))
+            residual!(r, sa.u0, sa.def, 0.0, sa.ws)
+            r
+        end
+        @test rate(distribution) == rate(Diffuse())
+    end
+end
+
 # Under radiative transfer the radiation enters and leaves through the
 # exposed face, a gray interface at its cell's emissivity, and the back is a
 # mirror unless its condition has a radiative member.
@@ -334,6 +394,41 @@ end
         tspan = (0.0, 1.0),
     )
     @test radiation_rows(rt(surroundings).def.layout) == 2
+    # Beams enter at an absorptivity: their own, or a component's, unless a
+    # diffuse flux on the same deck would have to enter at it too.
+    collimated = RadiativeFluxBC(3e4; absorptivity = 0.8, distribution = Collimated())
+    cone = RadiativeFluxBC(3e4; distribution = Cone(0.2, 1.2; directions = 2))
+    p = _bc_problem(thermal(collimated); α = 200.0)
+    @test radiation_rows(rt(p).def.layout) == 3
+    beams = PyrolysisProblem(
+        mesh = mesh,
+        material = absorbing,
+        bc_set = thermal(cone + collimated + RadiativeBC(T_inf = 300.0)),
+        tspan = (0.0, 1.0),
+    )
+    @test radiation_rows(rt(beams).def.layout) == 2 + 2 + 1
+    with_diffuse = PyrolysisProblem(
+        mesh = mesh,
+        material = absorbing,
+        bc_set = thermal(cone + RadiativeFluxBC(1e3)),
+        tspan = (0.0, 1.0),
+    )
+    @test_throws r"component :s sets its own absorptivity" rt(with_diffuse)
+    # Beams enter through :top only.
+    p = _bc_problem(
+        thermal(
+            RadiativeBC(T_inf = 300.0),
+            RadiativeFluxBC(5e3; distribution = Collimated()),
+        );
+        α = 200.0,
+    )
+    @test_throws r"beams through :top only" rt(p)
+    sa(p)
+    # A cone lies between the normal and the face, its edges in order.
+    for (θ₁, θ₂) in ((0.5, 0.5), (0.6, 0.5), (-0.1, 0.5), (0.1, π / 2 + 0.01))
+        @test_throws ArgumentError Cone(θ₁, θ₂)
+    end
+    @test_throws ArgumentError Cone(0.1, 0.5; directions = 0)
     # Radiative members on :top and :bottom only.
     renamed = PyrolysisProblem(
         mesh = line_mesh(collect(range(0.0, 0.01; length = 7)); bottom = :back),

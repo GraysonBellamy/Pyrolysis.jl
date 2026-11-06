@@ -93,6 +93,34 @@ const _configurations = (
         ),
         options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
     ),
+    moving_radiative_transfer_cone = (
+        problem = () -> PyrolysisProblem(
+            mesh = uniform_mesh(0.01, 8),
+            material = _wood(),
+            bc_set = BoundaryConditionSet(
+                thermal = (
+                    top = RadiativeFluxBC(4e4; distribution = Cone(0.35, 1.27)) +
+                          RadiativeFluxBC(
+                              t -> 1e4 * (1 + 0.1t);
+                              absorptivity = 0.9,
+                              distribution = Collimated(),
+                          ) +
+                          RadiativeBC(T_inf = 300.0),
+                    bottom = AdiabaticBC(),
+                ),
+            ),
+            tspan = (0.0, 100.0),
+        ),
+        options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
+    ),
+    fixed_radiative_transfer_collimated = (
+        problem = () -> _column(
+            _pmma();
+            top = RadiativeFluxBC(5e4; distribution = Collimated()) +
+                  RadiativeBC(T_inf = 300.0),
+        ),
+        options = (radiation_model = RADIATIVE_TRANSFER,),
+    ),
     equidistribution = (
         problem = () -> _column(_pmma(); top = HeatFluxBC(50e3), stretch = 1.01),
         options = (

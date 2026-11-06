@@ -161,6 +161,9 @@ Create a solid component.
   temperature). `nothing` = Kirchhoff, `aⱼ = εⱼ(T)`. A `RadiativeFluxBC`
   without an explicit `absorptivity` absorbs at the mixture
   `a_eff = Σⱼ vⱼ aⱼ`, which equals `ε_eff` when no component sets this.
+  Under `RADIATIVE_TRANSFER` it applies to beams (`Collimated`, `Cone`)
+  only: diffuse radiation crosses the face at the emissivity, so a diffuse
+  `RadiativeFluxBC` is refused on a material where a component sets it.
 - `α=0.0`: Mass absorption coefficient [m²/kg] (Beer-Lambert in-depth
   absorption, unrelated to `absorptivity`)
 - `λ=nothing`: Condensed superficial transfer [m²/s]; explicit under `LumpedTransfer`

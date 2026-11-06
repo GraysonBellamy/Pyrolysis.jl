@@ -189,6 +189,39 @@ end
     @test check.monitor.last > 1
 end
 
+# Beam rows are checked as the thermal rows are, against their own flux and
+# their tolerance: a defect ten times that bound is rejected, a tenth of it
+# is not.
+@testset "domain check: beam rows against their own flux" begin
+    problem = PyrolysisProblem(
+        mesh = stretched_mesh(0.01, 6, 1.15),
+        material = _slab(6; radiating = true).material,
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = RadiativeFluxBC(3e4; distribution = Collimated()) +
+                      RadiativeBC(T_inf = 300.0),
+                bottom = AdiabaticBC(),
+            ),
+        ),
+        T_initial = z -> 300.0,
+        tspan = (0.0, 10.0),
+    )
+    cp = setup(problem; radiation_model = RADIATIVE_TRANSFER)
+    layout = cp.def.layout
+    @test radiation_rows(layout) == 3
+    check = DomainCheck(cp; max_consecutive = 3)
+    @test !check(cp.u0, nothing, 0.0)
+    row = radiation_index(layout, 4, 3)
+    @test cp.u0[row] > 0
+    bound = cp.reltol * cp.u0[row] + cp.abstol[row]
+    u = copy(cp.u0)
+    u[row] += 0.1 * bound
+    @test !check(u, nothing, 0.0)
+    u[row] = cp.u0[row] + 10 * bound
+    @test check(u, nothing, 0.0)
+    @test check.monitor.last > 1
+end
+
 @testset "domain check: a proposal the error test rejects is left to it" begin
     cp = setup(_slab(6; radiating = true); use_ale = true, radiation_model = BEER_LAMBERT)
     layout = cp.def.layout

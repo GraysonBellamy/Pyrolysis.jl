@@ -33,6 +33,7 @@ include("surface_balance.jl")
 # Thermal boundary conditions
 export AdiabaticBC, HeatFluxBC, ConvectiveBC, RadiativeBC, DirichletThermalBC
 export CombinedThermalBC, RadiativeFluxBC
+export AngularDistribution, Diffuse, Collimated, Cone
 
 # Mass boundary conditions
 export ImpermeableBC, MassFluxBC, GasReservoir, AmbientGasBC, MassTransferFilm

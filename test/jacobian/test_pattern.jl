@@ -79,17 +79,30 @@ function _material(NC; law = nothing, reacting = true)
     return Material(; name = :colors, components, reactions, lateral_shrinkage_law = law)
 end
 
-function _problem(NC, n; law = nothing, reacting = true, coordinates = Planar())
+# Diffuse incidence, a collimated heater (one beam) and a cone (three beams).
+const _heaters = (
+    diffuse = RadiativeFluxBC(3e4) + RadiativeBC(T_inf = 300.0),
+    collimated = RadiativeFluxBC(3e4; distribution = Collimated()) +
+                 RadiativeBC(T_inf = 300.0),
+    cone = RadiativeFluxBC(3e4; distribution = Cone(0.35, 1.27)) +
+           RadiativeBC(T_inf = 300.0),
+)
+
+function _problem(
+    NC,
+    n;
+    law = nothing,
+    reacting = true,
+    coordinates = Planar(),
+    heater = :diffuse,
+)
     mat = _material(NC; law, reacting)
     L = 0.01
     return PyrolysisProblem(
         mesh = stretched_mesh(L, n, 1.05; coordinates),
         material = mat,
         bc_set = BoundaryConditionSet(
-            thermal = (
-                top = RadiativeFluxBC(3e4) + RadiativeBC(T_inf = 300.0),
-                bottom = AdiabaticBC(),
-            ),
+            thermal = (top = _heaters[heater], bottom = AdiabaticBC()),
             mass = (
                 top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
                 bottom = ImpermeableBC(),
@@ -191,6 +204,34 @@ const _color_cases = (
         law = χ -> 1 - 0.3χ,
         reacting = true,
     ),
+    fixed_collimated = (
+        options = (radiation_model = RADIATIVE_TRANSFER,),
+        law = nothing,
+        reacting = true,
+        heater = :collimated,
+    ),
+    fixed_cone = (
+        options = (radiation_model = RADIATIVE_TRANSFER,),
+        law = nothing,
+        reacting = true,
+        heater = :cone,
+    ),
+    moving_cone = (
+        options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
+        law = nothing,
+        reacting = true,
+        heater = :cone,
+    ),
+    equidistribution_collimated = (
+        options = (
+            use_ale = true,
+            radiation_model = RADIATIVE_TRANSFER,
+            correction = EquidistributionCorrection(),
+        ),
+        law = nothing,
+        reacting = true,
+        heater = :collimated,
+    ),
 )
 
 # The largest number of stored entries in a row: the lower bound of any
@@ -201,7 +242,8 @@ _largest_row(S) = maximum(diff(sparse(transpose(S)).colptr))
     case = _color_cases[name]
     counts = Int[]
     for n in (6, 8, 12, 25)
-        cp = setup(_problem(NC, n; case.law, case.reacting); case.options...)
+        heater = get(case, :heater, :diffuse)
+        cp = setup(_problem(NC, n; case.law, case.reacting, heater); case.options...)
         cj = cp.jacobian
         layout = cp.def.layout
         reconstruction = find_kernel(RelativeFluxKernel, cp.def.kernels) !== nothing
@@ -249,29 +291,47 @@ end
 end
 
 # Under radiative transfer each family reads itself at its own face and at the
-# face upstream of it in its direction of travel, q⁻ (toward the back, node 1)
-# at the face above, q⁺ at the face below, and the two read each other at
-# their face; the cell rows read every row of their two faces, as before.
-@testset "radiation rows in their direction of travel: $(moving ? "moving" : "fixed")" for moving in
-                                                                                           (
-    false,
-    true,
-)
+# face upstream of it in its direction of travel, q⁻ and the beams (toward the
+# back, node 1) at the face above, q⁺ at the face below; q⁻ and q⁺ read each
+# other at their face, and at the back q⁺ reads every beam, which it
+# reflects. The cell rows read every row of their two faces, as before.
+@testset "radiation rows in their direction of travel: $(heater) heater, $(moving ? "moving" : "fixed")" for heater in
+                                                                                                             (
+        :diffuse,
+        :cone,
+    ),
+    moving in (false, true)
+
     n = 6
-    cp = setup(_problem(3, n); use_ale = moving, radiation_model = RADIATIVE_TRANSFER)
+    cp = setup(
+        _problem(3, n; heater);
+        use_ale = moving,
+        radiation_model = RADIATIVE_TRANSFER,
+    )
     layout, topo = cp.def.layout, cp.def.setup.topology
     kernel = find_kernel(RadiativeTransferKernel, cp.def.kernels)
+    R = radiation_rows(layout)
+    beams = 3:R
+    @test R == (heater === :cone ? 5 : 2)
     reach = radiation_reach(kernel)
-    @test reach.along == [1, -1] && reach.same_node == [[2], [1]]
+    @test reach.along == [1; -1; fill(1, length(beams))]
+    @test reach.same_node == [[[2], [1]]; [Int[] for _ in beams]]
+    @test reach.back_face == 1 && reach.back == [(2, k) for k in beams]
     S = cp.jacobian.pattern
     @test S == jacobian_pattern(cp.def)
     q(f, k) = radiation_index(layout, f, k)
     faces = 1:(n+1)
     for f in faces
-        reached(k) = Set((g, j) for g in faces, j = 1:2 if S[q(f, k), q(g, j)])
+        reached(k) = Set((g, j) for g in faces, j = 1:R if S[q(f, k), q(g, j)])
         @test reached(1) == Set([(f, 1), (f, 2), (min(f + 1, n + 1), 1)])
-        @test reached(2) == Set([(f, 2), (f, 1), (max(f - 1, 1), 2)])
-        for k = 1:2
+        @test reached(2) == union(
+            Set([(f, 2), (f, 1), (max(f - 1, 1), 2)]),
+            f == 1 ? Set((1, k) for k in beams) : Set{Tuple{Int,Int}}(),
+        )
+        for k in beams
+            @test reached(k) == Set([(f, k), (min(f + 1, n + 1), k)])
+        end
+        for k = 1:R
             @test all(
                 S[q(f, k), c] for i = max(1, f-1):min(n, f) for c in cell_rows(layout, i)
             )
@@ -281,8 +341,8 @@ end
         end
     end
     for i = 1:n, r in cell_rows(layout, i)
-        reached = Set((g, j) for g in faces, j = 1:2 if S[r, q(g, j)])
-        @test reached == Set((g, j) for g in (i, i + 1), j = 1:2)
+        reached = Set((g, j) for g in faces, j = 1:R if S[r, q(g, j)])
+        @test reached == Set((g, j) for g in (i, i + 1), j = 1:R)
     end
     # Every row of the family pattern that reads all of nodes f − 1 … f + 1
     # holds the directional rows.

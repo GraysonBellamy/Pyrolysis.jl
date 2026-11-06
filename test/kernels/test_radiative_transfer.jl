@@ -21,19 +21,23 @@ using Pyrolysis.ColoredJacobian
 using Pyrolysis.Integration
 using Pyrolysis.Integration: setup
 
+include(joinpath(@__DIR__, "..", "verification", "exact", "gauss_legendre.jl"))
 include(joinpath(@__DIR__, "..", "verification", "exact", "two_stream.jl"))
+include(joinpath(@__DIR__, "..", "verification", "exact", "gray_slab.jl"))
 
 # A semi-transparent decomposing slab: the virgin solid's emissivity and
 # density depend on temperature, its absorption coefficient differs from the
 # char's, so the radiation rows read the temperature and the composition of
-# their cells. No component sets an absorptivity: diffuse radiation enters at
-# the emissivity.
+# their cells. Unless `absorbing`, no component sets an absorptivity and
+# every radiation enters at the emissivity; with it the virgin solid absorbs
+# beams at 0.7, which no diffuse flux may accompany.
 function _slab(
     n;
     top,
     bottom = AdiabaticBC(),
     λ = 0.0,
     reacting = true,
+    absorbing = false,
     coordinates = Planar(),
     mesh = stretched_mesh(0.01, n, 1.15; coordinates),
 )
@@ -45,6 +49,7 @@ function _slab(
         c = (900.0, 1.5),
         k = (0.2, 2e-4),
         ε = (0.95, -1.5e-4),
+        absorptivity = absorbing ? 0.7 : nothing,
         α = 1.5,
     )
     char = SolidComponent(
@@ -78,13 +83,35 @@ function _slab(
 end
 
 _flux(t) = 3e4 * (1 + 0.5 * sin(t))
+_beam_absorptivity(t) = 0.85 + 0.05 * sin(t)
+_side_flux(t) = 5e3 * (1 + 0.1t)
+const _cone = Cone(deg2rad(20), deg2rad(73))
+# Diffuse incidence, surroundings only, a collimated heater entering at its own
+# absorptivity, and a cone beside a collimated beam entering at the exposed
+# cell's (their beam tuple mixes a constant and a time-varying flux).
 const _tops = (
     heated = RadiativeFluxBC(_flux) +
              RadiativeBC(T_inf = 300.0) +
              ConvectiveBC(h = 10.0, T_inf = 300.0),
     surroundings = RadiativeBC(T_inf = t -> 900.0 + 20t, F = 0.8) +
                    ConvectiveBC(h = 10.0, T_inf = 300.0),
+    collimated = RadiativeFluxBC(
+                     _flux;
+                     absorptivity = _beam_absorptivity,
+                     distribution = Collimated(),
+                 ) +
+                 RadiativeBC(T_inf = 300.0) +
+                 ConvectiveBC(h = 10.0, T_inf = 300.0),
+    cone = RadiativeFluxBC(2.5e4; distribution = _cone) +
+           RadiativeFluxBC(_side_flux; distribution = Collimated()) +
+           RadiativeBC(T_inf = 300.0) +
+           ConvectiveBC(h = 10.0, T_inf = 300.0),
 )
+# The radiation rows per face: q⁻, q⁺ and one row per beam.
+const _rows = (heated = 2, surroundings = 2, collimated = 3, cone = 6)
+# The beam tops run on the slab whose virgin solid sets its absorptivity
+# where no diffuse flux arrives: behind a mirror, not the open back.
+_absorbing(top, back) = top in (:collimated, :cone) && back === :mirror
 const _backs = (
     mirror = AdiabaticBC(),
     open = RadiativeBC(T_inf = 350.0) +
@@ -131,7 +158,13 @@ end
     λ in (0.0, 1e-5)
 
     cp = setup(
-        _slab(n; top = _tops[top], bottom = _backs[back], λ);
+        _slab(
+            n;
+            top = _tops[top],
+            bottom = _backs[back],
+            λ,
+            absorbing = _absorbing(top, back),
+        );
         energy_state = energy,
         radiation_model = RADIATIVE_TRANSFER,
     )
@@ -139,8 +172,8 @@ end
     layout = def.layout
     kernel = find_kernel(RadiativeTransferKernel, def.kernels)
     @test kernel.back isa (back === :mirror ? MirrorBack : OpenBack)
-    @test has_radiation(layout) && radiation_rows(layout) == 2
-    @test count(!, is_differential(layout)) == 2 * (n + 1)
+    @test has_radiation(layout) && radiation_rows(layout) == _rows[top]
+    @test count(!, is_differential(layout)) == _rows[top] * (n + 1)
     pattern = cj.pattern
     @test all(pattern[r, r] for r in axes(pattern, 1))
 
@@ -169,20 +202,30 @@ end
 # The rows solve the two-stream equations of the frozen cell properties: the
 # consistent fluxes are the exact solution of `exact/two_stream.jl`, the rows
 # at arbitrary trial fluxes are its residuals, and the cell sources its
-# sources, with the first live cell at the exposed boundary or below it.
-@testset "Radiative transfer: rows against the exact two-stream solution, $(back) back, first live cell $(s)" for back in
-                                                                                                                  keys(
-        _backs,
+# sources, with the first live cell at the exposed boundary or below it. The
+# beams enter at the condition's absorptivity or, without one, at the first
+# live cell's, which differs from its emissivity on the absorbing slab; the
+# beams reaching the back join q⁺ there.
+@testset "Radiative transfer: rows against the exact two-stream solution, $(top) top, $(back) back, first live cell $(s)" for top in
+                                                                                                                              (
+        :heated,
+        :collimated,
+        :cone,
     ),
+    back in keys(_backs),
     s in (1, 3)
 
     n = 7
-    top, bottom = _tops.heated, _backs[back]
-    cp =
-        setup(_slab(n; top, bottom, reacting = false); radiation_model = RADIATIVE_TRANSFER)
+    bc, bottom = _tops[top], _backs[back]
+    cp = setup(
+        _slab(n; top = bc, bottom, reacting = false, absorbing = _absorbing(top, back));
+        radiation_model = RADIATIVE_TRANSFER,
+    )
     def, ws = cp.def, cp.ws
     layout, topo, material = def.layout, def.setup.topology, def.setup.material
     kernel = find_kernel(RadiativeTransferKernel, def.kernels)
+    R = radiation_rows(layout)
+    @test R == _rows[top]
     u = copy(cp.u0)
     for i = 1:n
         u[energy_index(layout, i)] = 500.0 + 40i
@@ -197,39 +240,123 @@ end
     @test exposed_face(kernel, ds) == faces[s]
     τ = [ds.α[i] * _thickness(ds, i) for i in cells]
     B = [STEFAN_BOLTZMANN * ds.T_trial[i]^4 for i in cells]
+    a = ds.a[cells[s]]
+    beams =
+        top === :collimated ? [TwoStreamBeam(1.0, _beam_absorptivity(t) * _flux(t))] :
+        top === :cone ?
+        [
+            two_stream_cone_beams(2.5e4, deg2rad(20), deg2rad(73); a)
+            TwoStreamBeam(1.0, a * _side_flux(t))
+        ] : TwoStreamBeam[]
+    _absorbing(top, back) && @test abs(a - ds.ε[cells[s]]) > 0.05
     inputs = (;
         D = DIFFUSIVITY,
         ε = ds.ε[cells[s]],
-        Q = incoming_radiation(top, t),
+        Q = incoming_radiation(bc, t),
         ε_b = back === :open ? ds.ε[last(cells)] : 0.0,
         Q_b = back === :open ? incoming_radiation(bottom, t) : 0.0,
+        beams,
         first = s,
     )
     @test 0.1 < minimum(τ[s:end]) && maximum(τ) < 5
     exact = two_stream_solve(τ, B; inputs...)
-    scale = max(maximum(exact.qm), maximum(exact.qp))
+    scale = max(maximum(exact.qm), maximum(exact.qp), maximum(exact.Id; init = 0.0))
+    nb = length(beams)
+    @test R == 2 + nb
 
-    q = fill(NaN, 2, n + 1)
+    q = fill(NaN, R, n + 1)
     consistent_radiation!(q, kernel, ds, topo, t)
     @test maximum(abs, q[1, faces] .- exact.qm) <= 1e-12 * scale
     @test maximum(abs, q[2, faces] .- exact.qp) <= 1e-12 * scale
+    for h = 1:nb
+        @test maximum(abs, q[2+h, faces] .- exact.Id[:, h]) <= 1e-12 * scale
+    end
     @test all(iszero, q[:, faces[1:(s-1)]])
 
     # Arbitrary trial fluxes: the rows are the exact solution's residuals.
     qm = scale .* (0.5 .+ 0.4 .* sin.(1:(n+1)))
     qp = scale .* (0.5 .+ 0.4 .* cos.(1:(n+1)))
+    Id = scale .* (0.3 .+ 0.2 .* sin.((1:(n+1)) .+ (1:nb)'))
     ds.q[1, faces] .= qm
     ds.q[2, faces] .= qp
+    for h = 1:nb
+        ds.q[2+h, faces] .= Id[:, h]
+    end
     reset!(c)
     contribute!(c, kernel, ds, topo, material, t)
-    none = zeros(n + 1, 0)
-    rows = two_stream_residual(qm, qp, none, none, τ, B; inputs...)
+    Iu = zeros(n + 1, nb)
+    rows = two_stream_residual(qm, qp, Id, Iu, τ, B; inputs...)
     live = faces[s:end]
     @test maximum(abs, c.r_radiation[1, live] .- rows.thermal[1, s:end]) <= 1e-12 * scale
     @test maximum(abs, c.r_radiation[2, live] .- rows.thermal[2, s:end]) <= 1e-12 * scale
-    S = two_stream_sources(qm, qp, none, none; first = s)
+    for h = 1:nb
+        @test maximum(abs, c.r_radiation[2+h, live] .- rows.down[s:end, h]) <= 1e-12 * scale
+    end
+    S = two_stream_sources(qm, qp, Id, Iu; first = s)
     A = ds.geometry.face_area
     @test maximum(abs, [c.S_energy[i] / A[1] for i in cells] .- S) <= 1e-12 * scale
+end
+
+# A cone heater travels as three beams, the Gauss–Legendre nodes of its
+# direction cosine. Against the exact transmission of the cone through a cold
+# slab, the flux the beams carry to each face and the power each cell absorbs
+# from them are within 2×10⁻⁴ of the flux entering.
+@testset "Radiative transfer: a cone heater against the exact transmission" begin
+    n = 12
+    cp = setup(
+        _slab(
+            n;
+            top = RadiativeFluxBC(2.5e4; distribution = _cone) + RadiativeBC(T_inf = 300.0),
+            reacting = false,
+        );
+        radiation_model = RADIATIVE_TRANSFER,
+    )
+    def, ws = cp.def, cp.ws
+    layout, topo = def.layout, def.setup.topology
+    kernel = find_kernel(RadiativeTransferKernel, def.kernels)
+    @test radiation_rows(layout) == 5
+    ds, _ = buffers(ws, def, Float64)
+    derive!(ds, cp.u0, layout, def.setup)
+    cells, faces = kernel.order, _faces(kernel)
+    q = zeros(5, n + 1)
+    consistent_radiation!(q, kernel, ds, topo, 0.0)
+    entering = ds.a[cells[1]] * 2.5e4
+    depth = [0.0; cumsum([ds.α[i] * _thickness(ds, i) for i in cells])]
+    @test depth[end] > 3
+    exact =
+        [gray_slab_cone_transmission(entering, d, deg2rad(20), deg2rad(73)) for d in depth]
+    carried = vec(sum(q[3:5, faces]; dims = 1))
+    @test carried[1] ≈ entering rtol = 1e-14
+    @test maximum(abs, carried .- exact) <= 2e-4 * entering
+    @test maximum(abs, diff(carried) .- diff(exact)) <= 2e-4 * entering
+end
+
+# The beams of a cone carry shares of its flux proportional to their weight
+# times their direction cosine, which lie inside the cone: the nodes and
+# shares of `exact/two_stream.jl`'s cone. A collimated heater is one beam
+# along the normal.
+@testset "Radiative transfer: the directions of a heater's beams" begin
+    for (θ₁, θ₂) in ((0.0, π / 2), (deg2rad(20), deg2rad(73)), (0.3, 0.31)), d = 1:5
+        cone = Cone(θ₁, θ₂; directions = d)
+        cp = setup(
+            _slab(4; top = RadiativeFluxBC(1e4; distribution = cone), reacting = false);
+            radiation_model = RADIATIVE_TRANSFER,
+        )
+        source = only(find_kernel(RadiativeTransferKernel, cp.def.kernels).beams)
+        reference = two_stream_cone_beams(1.0, θ₁, θ₂; directions = d)
+        @test radiation_rows(cp.def.layout) == 2 + d
+        @test source.row == 3
+        @test maximum(abs, source.μ .- [b.μ for b in reference]) <= 1e-14
+        @test maximum(abs, source.w .- [b.q0 for b in reference]) <= 1e-14
+        @test sum(source.w) ≈ 1 rtol = 1e-14
+        @test all(cos(θ₂) .< source.μ .< cos(θ₁))
+    end
+    cp = setup(
+        _slab(4; top = RadiativeFluxBC(1e4; distribution = Collimated()), reacting = false);
+        radiation_model = RADIATIVE_TRANSFER,
+    )
+    source = only(find_kernel(RadiativeTransferKernel, cp.def.kernels).beams)
+    @test source.μ == [1.0] && source.w == [1.0] && source.row == 3
 end
 
 # An isothermal medium facing diffuse radiation at its own temperature on
@@ -276,16 +403,24 @@ end
 end
 
 # The cell sources telescope to the net flux through the exposed face less
-# the net flux through the back, at any trial fluxes, on a moving mesh too.
-@testset "Radiative transfer: the cell sources telescope, $(back) back, moving = $(moving)" for back in
-                                                                                                keys(
-        _backs,
+# the net flux through the back, beams included, at any trial fluxes, on a
+# moving mesh too.
+@testset "Radiative transfer: the cell sources telescope, $(top) top, $(back) back, moving = $(moving)" for top in
+                                                                                                            (
+        :heated,
+        :cone,
     ),
+    back in keys(_backs),
     moving in (false, true)
 
     n = 8
     cp = setup(
-        _slab(n; top = _tops.heated, bottom = _backs[back]);
+        _slab(
+            n;
+            top = _tops[top],
+            bottom = _backs[back],
+            absorbing = _absorbing(top, back),
+        );
         use_ale = moving,
         radiation_model = RADIATIVE_TRANSFER,
     )
@@ -303,27 +438,39 @@ end
         contribute!(c, kernel, ds, topo, material, 2.0)
         A = ds.geometry.face_area
         e, b = exposed_face(kernel, ds), kernel.down[last(kernel.order)]
-        net = A[e] * (ds.q[1, e] - ds.q[2, e]) - A[b] * (ds.q[1, b] - ds.q[2, b])
+        beams(f) = sum(ds.q[3:end, f]; init = 0.0)
+        net =
+            A[e] * (ds.q[1, e] - ds.q[2, e] + beams(e)) -
+            A[b] * (ds.q[1, b] + beams(b) - ds.q[2, b])
+        @test size(ds.q, 1) == _rows[top]
         @test sum(c.S_energy) ≈ net rtol = 1e-12
         @test all(iszero, c.S_energy[kernel.order[1:(s-1)]])
     end
 end
 
 # The radiation rows read the first live cell's emissivity, its temperature
-# dependence included, and every live cell's temperature and absorption
-# coefficient: the colored Jacobian's columns of the exposed cell's
-# temperature and virgin mass, and on a moving mesh of the exposed node's
-# position, against central differences of the residual, an oracle
-# independent of automatic differentiation.
-@testset "Radiative transfer: exposed-cell columns against central differences, moving = $(moving)" for moving in
-                                                                                                        (
-    false,
-    true,
-)
+# dependence included, the beams its absorptivity (behind a mirror on the
+# slab that sets one), and every live cell's
+# temperature and absorption coefficient: the colored Jacobian's columns of
+# the exposed cell's temperature and virgin mass, and on a moving mesh of the
+# exposed node's position, against central differences of the residual, an
+# oracle independent of automatic differentiation.
+@testset "Radiative transfer: exposed-cell columns against central differences, $(top) top, moving = $(moving)" for top in
+                                                                                                                    (
+        :heated,
+        :cone,
+    ),
+    moving in (false, true)
 
     n = 7
+    back = top === :cone ? :mirror : :open
     cp = setup(
-        _slab(n; top = _tops.heated, bottom = _backs.open);
+        _slab(
+            n;
+            top = _tops[top],
+            bottom = _backs[back],
+            absorbing = _absorbing(top, back),
+        );
         use_ale = moving,
         radiation_model = RADIATIVE_TRANSFER,
     )
@@ -333,7 +480,7 @@ end
     jacobian!(J, cj, cp.u0, 1.0)
     row_floor = vec(maximum(abs, J; dims = 2))
     columns = [(energy_index(layout, n), 1e-3), (mass_index(layout, n, 1), 1e-6)]
-    moving && push!(columns, (position_index(layout, n + 1), 1e-9))
+    moving && push!(columns, (position_index(layout, n + 1), 1e-8))
     for (k, h) in columns
         up, down = copy(cp.u0), copy(cp.u0)
         up[k] += h
@@ -352,6 +499,11 @@ end
     T, m = energy_index(layout, n), mass_index(layout, n, 1)
     @test J[e_down, T] != 0 && J[e_down, m] != 0
     @test J[e_up, T] != 0 && J[e_up, m] != 0
+    # A beam without its own absorptivity enters at the exposed cell's, which
+    # depends on its composition.
+    if top === :cone
+        @test all(J[radiation_index(layout, n + 1, k), m] != 0 for k = 3:6)
+    end
 end
 
 @testset "Radiative transfer on a moving mesh: $(energy) form, $(top) top" for energy in (
@@ -368,7 +520,7 @@ end
     )
     def, ws, cj = cp.def, cp.ws, cp.jacobian
     layout = def.layout
-    @test is_moving(layout) && radiation_rows(layout) == 2
+    @test is_moving(layout) && radiation_rows(layout) == _rows[top]
     du = zeros(length(cp.u0))
     residual!(du, cp.u0, def, 0.0, ws)
     @test maximum(abs, _radiation_residuals(du, layout)) <= 1e-12 * _q_scale(cp)

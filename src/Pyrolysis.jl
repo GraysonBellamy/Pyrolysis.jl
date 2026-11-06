@@ -143,6 +143,7 @@ export HeatFluxBC,
     CombinedThermalBC,
     DirichletThermalBC,
     AdiabaticBC
+export AngularDistribution, Diffuse, Collimated, Cone
 export ImpermeableBC, MassFluxBC, GasReservoir, AmbientGasBC, MassTransferFilm
 # Blowing models for ConvectiveBC and the gas data they read
 export AbstractBlowingModel,

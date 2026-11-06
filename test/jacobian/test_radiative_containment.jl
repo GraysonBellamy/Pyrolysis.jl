@@ -54,11 +54,22 @@ end
 
 const _top = RadiativeFluxBC(t -> 5e4 * (1 + 0.2 * sin(t))) + RadiativeBC(T_inf = 300.0)
 const _open = RadiativeBC(T_inf = 350.0) + ConvectiveBC(h = 10.0, T_inf = 300.0)
+# A collimated heater at its own absorptivity, and a cone beside a diffuse flux.
+const _collimated =
+    RadiativeFluxBC(
+        t -> 5e4 * (1 + 0.2 * sin(t));
+        absorptivity = t -> 0.9 - 0.01 * sin(t),
+        distribution = Collimated(),
+    ) + RadiativeBC(T_inf = 300.0)
+const _cone =
+    RadiativeFluxBC(4e4; distribution = Cone(0.35, 1.27)) +
+    RadiativeFluxBC(1e4) +
+    RadiativeBC(T_inf = 300.0)
 
-_column(mat, n; bottom = AdiabaticBC(), stretch = nothing) = PyrolysisProblem(
+_column(mat, n; top = _top, bottom = AdiabaticBC(), stretch = nothing) = PyrolysisProblem(
     mesh = stretch === nothing ? uniform_mesh(0.01, n) : stretched_mesh(0.01, n, stretch),
     material = mat,
-    bc_set = BoundaryConditionSet(thermal = (top = _top, bottom = bottom)),
+    bc_set = BoundaryConditionSet(thermal = (top = top, bottom = bottom)),
     tspan = (0.0, 100.0),
 )
 
@@ -96,6 +107,27 @@ const _configurations = (
             correction = EquidistributionCorrection(activation = (2.0, 0.5)),
         ),
         wood = false,
+    ),
+    eulerian_collimated = (
+        problem = n -> _column(_pmma(), n; top = _collimated, bottom = _open),
+        options = (;),
+        wood = false,
+        rows = 3,
+    ),
+    ale_darcy_cone = (
+        problem = n -> _column(_wood(α = 0.5), n; top = _cone, bottom = _open),
+        options = (use_ale = true,),
+        wood = true,
+        rows = 5,
+    ),
+    equidistribution_collimated = (
+        problem = n -> _column(_pmma(), n; top = _collimated, stretch = 1.05),
+        options = (
+            use_ale = true,
+            correction = EquidistributionCorrection(activation = (2.0, 0.5)),
+        ),
+        wood = false,
+        rows = 3,
     ),
 )
 
@@ -150,7 +182,7 @@ end
         config.options...,
     )
     def, ws, cj = cp.def, cp.ws, cp.jacobian
-    @test radiation_rows(def.layout) == 2
+    @test radiation_rows(def.layout) == get(config, :rows, 2)
     du = zeros(length(cp.u0))
     for (state, u) in pairs(_states(cp, config.wood))
         @testset "$state" begin
@@ -188,6 +220,9 @@ end
         :ale_darcy,
         :cross_section,
         :equidistribution,
+        :eulerian_collimated,
+        :ale_darcy_cone,
+        :equidistribution_collimated,
     ),
     energy in (:temperature, :enthalpy)
 

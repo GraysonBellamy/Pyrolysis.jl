@@ -62,7 +62,6 @@
 # Thus heat uses (−q(L), +q(0)), and species use (+J(L), −J(0)).
 
 using ForwardDiff
-using LinearAlgebra: SymTridiagonal, eigen
 using OrdinaryDiffEq
 using Pyrolysis
 using Pyrolysis.Materials: is_gas, n_components, n_reactions, participates_in_transport
@@ -262,13 +261,6 @@ function mms_theta(material, fields::MMSFields, z, t)
     NC = n_components(material)
     dξ_rxn = ntuple(j -> mms_rxn_source(material, j, ξ, T), NC)
     return Physics.volume_change_rate(promote(dξ_rxn...), T, material)
-end
-
-# Golub–Welsch Gauss–Legendre nodes/weights on [−1, 1].
-function _gauss_legendre(n::Int)
-    β = [k / sqrt(4.0 * k^2 - 1.0) for k = 1:(n-1)]
-    x, V = eigen(SymTridiagonal(zeros(n), β))
-    return x, 2 .* abs2.(V[1, :])
 end
 
 const _MMS_GL_NODES, _MMS_GL_WEIGHTS = _gauss_legendre(32)

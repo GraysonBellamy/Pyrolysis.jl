@@ -225,7 +225,63 @@ Base.:+(cbc1::CombinedThermalBC, cbc2::CombinedThermalBC) =
     CombinedThermalBC((cbc1.bcs..., cbc2.bcs...))
 
 """
-	RadiativeFluxBC{F,A} <: AbstractThermalBC
+	AngularDistribution
+
+How the radiation of a [`RadiativeFluxBC`](@ref) arrives at its face:
+[`Diffuse`](@ref), [`Collimated`](@ref) or [`Cone`](@ref). It sets where the
+radiation is absorbed under `RADIATIVE_TRANSFER` and has no effect under
+`SURFACE_ABSORPTION`.
+"""
+abstract type AngularDistribution end
+
+"""
+	Diffuse()
+
+Radiation arriving equally from every direction of the hemisphere above the
+face. Under `RADIATIVE_TRANSFER` it crosses the face at the emissivity of the
+cell beside it and travels on as hemispherical flux.
+"""
+struct Diffuse <: AngularDistribution end
+
+"""
+	Collimated()
+
+Radiation arriving along the face normal, as one beam.
+"""
+struct Collimated <: AngularDistribution end
+
+"""
+	Cone(θ₁, θ₂; directions = 3)
+
+Radiation of uniform intensity arriving between the polar angles `θ₁` and
+`θ₂` from the face normal [rad], `0 ≤ θ₁ < θ₂ ≤ π/2`: the view of a heater
+ring from the sample. It travels as `directions` beams, at the Gauss–Legendre
+nodes of the direction cosine `μ` over `[cos θ₂, cos θ₁]`, each carrying the
+share of the flux that its weight times its `μ` gives.
+
+# Example
+```julia
+Cone(deg2rad(20), deg2rad(73))   # a cone heater seen from the sample
+```
+"""
+struct Cone <: AngularDistribution
+    θ₁::Float64
+    θ₂::Float64
+    directions::Int
+    function Cone(θ₁::Real, θ₂::Real, directions::Integer)
+        0 <= θ₁ < θ₂ <= π / 2 || throw(
+            ArgumentError("a cone needs 0 ≤ θ₁ < θ₂ ≤ π/2 [rad], got θ₁ = $θ₁, θ₂ = $θ₂"),
+        )
+        directions >= 1 ||
+            throw(ArgumentError("a cone needs at least one direction, got $directions"))
+        return new(θ₁, θ₂, directions)
+    end
+end
+
+Cone(θ₁::Real, θ₂::Real; directions::Integer = 3) = Cone(θ₁, θ₂, directions)
+
+"""
+	RadiativeFluxBC{F,A,D} <: AbstractThermalBC
 
 External radiative heat source (e.g., cone heater, furnace, radiant panel).
 
@@ -234,11 +290,18 @@ which applies flux directly at the surface, `RadiativeFluxBC` accounts for:
 1. Surface absorptivity: fraction (absorptivity) enters material, rest is reflected
 2. Radiation distribution: controlled by `radiation_model` parameter in `solve()`
 
-The absorbed flux is: q_absorbed = absorptivity × incident_flux
-
-The distribution of absorbed radiation depends on the `radiation_model` passed to `solve()`:
-- `SURFACE_ABSORPTION`: absorbed at the exposed face, through the surface energy balance (opaque materials)
-- `BEER_LAMBERT`: In-depth volumetric absorption via Beer-Lambert law (semi-transparent)
+Where the absorbed radiation goes depends on the `radiation_model` passed to
+`solve()`:
+- `SURFACE_ABSORPTION`: `absorptivity × flux` is absorbed at the exposed face,
+  through the surface energy balance (opaque materials), whatever the
+  `distribution`
+- `BEER_LAMBERT`: `absorptivity × flux` is absorbed in depth as one beam along
+  the face normal
+- `RADIATIVE_TRANSFER`: the radiation crosses the face and is absorbed in depth.
+  [`Diffuse`](@ref) radiation crosses the exposed face at the emissivity of the
+  exposed cell, so it takes no `absorptivity`; [`Collimated`](@ref) and
+  [`Cone`](@ref) radiation enters as beams at the absorptivity. Only diffuse
+  radiation may arrive at `:bottom`.
 
 # Fields
 - `flux::F`: Incident radiative flux [W/m²] (constant or time-dependent)
@@ -251,6 +314,8 @@ The distribution of absorbed radiation depends on the `radiation_model` passed t
 	emission (see `SolidComponent`).
   - A constant value (e.g., 0.9)
   - A time-dependent function (e.g., t -> 0.9 + 0.05*t/100)
+- `distribution::D`: how the radiation arrives, an [`AngularDistribution`](@ref):
+  `Diffuse()` (default), `Collimated()` or `Cone(θ₁, θ₂)`.
 
 # Example
 ```julia
@@ -263,9 +328,8 @@ bc = RadiativeFluxBC(50e3, absorptivity=0.9)
 # Time-varying flux with dynamic absorptivity
 bc = RadiativeFluxBC(t -> 25e3 * (1 - exp(-t/10)))
 
-# Control radiation distribution via solve()
-solve(problem; radiation_model=SURFACE_ABSORPTION)  # Opaque material
-solve(problem; radiation_model=BEER_LAMBERT)        # Semi-transparent
+# A cone heater, absorbed in depth under RADIATIVE_TRANSFER
+bc = RadiativeFluxBC(25e3; distribution = Cone(deg2rad(20), deg2rad(73)))
 ```
 
 # Note
@@ -277,14 +341,19 @@ composition and temperature changes as material decomposes.
 Do NOT combine `RadiativeFluxBC` with `HeatFluxBC` for the same radiation source -
 this would double-count the energy input.
 """
-struct RadiativeFluxBC{F,A} <: AbstractThermalBC
+struct RadiativeFluxBC{F,A,D<:AngularDistribution} <: AbstractThermalBC
     flux::F           # Incident radiative flux [W/m²]
     absorptivity::A   # nothing = use effective, or constant, or function
+    distribution::D   # how the radiation arrives at the face
 end
 
-function RadiativeFluxBC(flux; absorptivity = nothing)
+function RadiativeFluxBC(
+    flux;
+    absorptivity = nothing,
+    distribution::AngularDistribution = Diffuse(),
+)
     validate_bc_params(α = _get_scalar_value(absorptivity))
-    return RadiativeFluxBC(flux, absorptivity)
+    return RadiativeFluxBC(flux, absorptivity, distribution)
 end
 
 # ============================================================================
