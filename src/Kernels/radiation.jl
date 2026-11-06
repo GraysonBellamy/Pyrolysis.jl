@@ -83,26 +83,7 @@ function BeerLambertKernel(
         ),
     )
     exposed = only(faces)
-    n = n_cells(topo)
-    up = zeros(Int, n)
-    down = zeros(Int, n)
-    order = Int[]
-    f, c = exposed, topo.faces[exposed].cells[1]
-    while c != 0
-        push!(order, c)
-        cf = topo.cells[c].faces
-        other = cf[1] == f ? cf[2] : cf[1]
-        up[c], down[c] = f, other
-        o, nb = topo.faces[other].cells
-        f, c = other, (o == c ? nb : o)
-    end
-    length(order) == n ||
-        throw(ArgumentError("the beam from :$tag does not cross every cell"))
-    d = zeros(2, n)
-    for c = 1:n
-        d[1, c] = DISTANCE_FLOOR_FRACTION * center_to_face_distance(g, topo, up[c], c)
-        d[2, c] = DISTANCE_FLOOR_FRACTION * center_to_face_distance(g, topo, down[c], c)
-    end
+    up, down, order, d = _column_tables(topo, g, exposed, tag)
     return BeerLambertKernel(source, exposed, up, down, order, d)
 end
 

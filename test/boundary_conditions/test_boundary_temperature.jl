@@ -24,7 +24,7 @@ using Pyrolysis.Materials: GaseousComponent, SolidComponent, Material, Reaction
 using Pyrolysis.BoundaryConditions: compute_boundary_heat_fluxes
 using Pyrolysis.Properties: mixture_emissivity, mixture_absorptivity
 using Pyrolysis.States: trial_temperature
-using Pyrolysis.Materials: SURFACE_ABSORPTION, STEFAN_BOLTZMANN
+using Pyrolysis.Materials: SURFACE_ABSORPTION, RADIATIVE_TRANSFER, STEFAN_BOLTZMANN
 using ForwardDiff
 
 # Test helper: a tiny inert single-solid material (no gas component). Tests
@@ -552,6 +552,69 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
             @test dq_bl ≈ -h_conv
         end
 
+        @testset "RADIATIVE_TRANSFER: radiation leaves the face balance" begin
+            # The surroundings' radiation, the incident flux and the emission
+            # cross the face through the radiation rows: the face balance keeps
+            # the convective flux alone.
+            h_conv, T_inf = 10.0, 300.0
+            convective = ConvectiveBC(h = h_conv, T_inf = T_inf)
+            combined = RadiativeFluxBC(I_incident) + RadiativeBC(T_inf = 900.0) + convective
+            face = _bc_face(T_s)
+            for b in (RadiativeBC(T_inf = 900.0), bc)
+                @test evaluate_bc_flux_and_derivative(
+                    b,
+                    T_s,
+                    t,
+                    ε_eff,
+                    RADIATIVE_TRANSFER,
+                ) == (0.0, 0.0)
+                @test evaluate_bc_flux_and_derivative(
+                    b,
+                    T_s,
+                    t,
+                    ε_eff,
+                    RADIATIVE_TRANSFER,
+                    face,
+                ) == (0.0, 0.0)
+            end
+            q, dq = evaluate_bc_flux_and_derivative(
+                combined,
+                T_s,
+                t,
+                ε_eff,
+                RADIATIVE_TRANSFER,
+                face,
+            )
+            @test q ≈ h_conv * (T_inf - T_s) rtol = 1e-14
+            @test dq ≈ -h_conv rtol = 1e-14
+            # The surface Newton under the model converges to the face
+            # temperature of the convective condition alone.
+            T_cell, k_eff, Δz_half = 850.0, 0.18, 23e-6
+            alone = _solve_bt(T_cell, k_eff, Δz_half, convective, t, ε_eff)
+            with = _solve_bt(
+                T_cell,
+                k_eff,
+                Δz_half,
+                combined,
+                t,
+                ε_eff;
+                radiation_model = RADIATIVE_TRANSFER,
+            )
+            @test with.converged
+            @test with.T_surface ≈ alone.T_surface rtol = 1e-12
+            # Under the surface models the same condition heats the face.
+            sa = _solve_bt(
+                T_cell,
+                k_eff,
+                Δz_half,
+                combined,
+                t,
+                ε_eff;
+                radiation_model = SURFACE_ABSORPTION,
+            )
+            @test with.T_surface < T_cell < sa.T_surface
+        end
+
         @testset "absorptivity = nothing absorbs at a_eff, emits at ε_eff" begin
             # `a_eff` is the material's surface-absorptivity mixture; every
             # overload takes it as a keyword defaulting to ε_eff (Kirchhoff).
@@ -936,7 +999,8 @@ end
     t = 0.0
     face = _bc_face(T_s)
 
-    for bc in (combined, standalone), model in (SURFACE_ABSORPTION, BEER_LAMBERT)
+    for bc in (combined, standalone),
+        model in (SURFACE_ABSORPTION, BEER_LAMBERT, RADIATIVE_TRANSFER)
 
         hf = compute_boundary_heat_fluxes(bc, T_s, t, ε_eff, model, face)
         q_applied, _ = evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff, model, face)
@@ -966,4 +1030,12 @@ end
     # (c) combined under SURFACE_ABSORPTION includes the absorbed flux.
     hf_sa = compute_boundary_heat_fluxes(combined, T_s, t, ε_eff, SURFACE_ABSORPTION, face)
     @test hf_sa.net ≈ ε_eff * 50e3 + q_rerad + q_conv rtol = 1e-12
+
+    # (d) combined under RADIATIVE_TRANSFER: the face carries the convection
+    #     alone; neither the incident flux nor the exchange with the
+    #     surroundings is absorbed or radiated at the face.
+    hf_rt = compute_boundary_heat_fluxes(combined, T_s, t, ε_eff, RADIATIVE_TRANSFER, face)
+    @test hf_rt.absorbed == 0.0 && hf_rt.reradiation == 0.0
+    @test hf_rt.net ≈ q_conv rtol = 1e-12
+    @test hf_rt.convection ≈ -q_conv rtol = 1e-12
 end

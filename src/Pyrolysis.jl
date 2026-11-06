@@ -155,7 +155,7 @@ export BoundaryConditionSet
 export background_gas_concentration
 
 # Radiation models
-export RadiationModel, SURFACE_ABSORPTION, BEER_LAMBERT
+export RadiationModel, SURFACE_ABSORPTION, BEER_LAMBERT, RADIATIVE_TRANSFER
 
 # The mesh
 export uniform_mesh, stretched_mesh, line_mesh, box_mesh, cell_mesh

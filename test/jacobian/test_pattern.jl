@@ -1,7 +1,8 @@
 using Test
 using SparseArrays
 using Pyrolysis
-using Pyrolysis.Materials: DepletionLimiter, BEER_LAMBERT, SURFACE_ABSORPTION
+using Pyrolysis.Materials:
+    DepletionLimiter, BEER_LAMBERT, SURFACE_ABSORPTION, RADIATIVE_TRANSFER
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.States: StateLayout, state_length
@@ -98,8 +99,9 @@ function _problem(NC, n; law = nothing, reacting = true, coordinates = Planar())
     )
 end
 
-# The color count against its model, `3NC + 9 + 2·bl + 7·χ` with `c = 0` and
-# `5NC + 13 + 2·bl + 11·χ` with the reconstruction of the relative fluxes.
+# The color count against its model, `3NC + 9 + 2R + 7·χ` with `c = 0` and
+# `5NC + 13 + 2R + 11·χ` with the reconstruction of the relative fluxes, `R`
+# the radiation rows per face: each family adds two colors.
 # That model is a moving mesh whose cell rows read their two node velocities;
 # at `c = 0` the cell rows read none (the velocities enter the position rows only), two colors
 # fewer, as under the equidistribution correction, whose node corrections
@@ -107,10 +109,10 @@ end
 # than the cell rows; only a prescribed velocity, the correction itself,
 # reaches them. A fixed mesh has no node block (four positions and the two
 # velocities), six fewer.
-_color_model(NC, bl, χ, reconstruction) =
-    reconstruction ? 5NC + 13 + 2bl + 11χ : 3NC + 9 + 2bl + 7χ
-_expected(NC, moving, bl, χ, reconstruction, prescribed) =
-    _color_model(NC, bl, χ, reconstruction) - (!moving ? 6 : prescribed ? 0 : 2)
+_color_model(NC, R, χ, reconstruction) =
+    reconstruction ? 5NC + 13 + 2R + 11χ : 3NC + 9 + 2R + 7χ
+_expected(NC, moving, R, χ, reconstruction, prescribed) =
+    _color_model(NC, R, χ, reconstruction) - (!moving ? 6 : prescribed ? 0 : 2)
 
 const _color_cases = (
     fixed = (options = (;), law = nothing, reacting = true),
@@ -119,7 +121,17 @@ const _color_cases = (
         law = nothing,
         reacting = true,
     ),
+    fixed_radiative_transfer = (
+        options = (radiation_model = RADIATIVE_TRANSFER,),
+        law = nothing,
+        reacting = true,
+    ),
     moving = (options = (use_ale = true,), law = nothing, reacting = true),
+    moving_radiative_transfer = (
+        options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
+        law = nothing,
+        reacting = true,
+    ),
     moving_beer_lambert = (
         options = (use_ale = true, radiation_model = BEER_LAMBERT),
         law = nothing,
@@ -128,6 +140,11 @@ const _color_cases = (
     cross_section = (options = (use_ale = true,), law = χ -> 1 - 0.3χ, reacting = true),
     cross_section_beer_lambert = (
         options = (use_ale = true, radiation_model = BEER_LAMBERT),
+        law = χ -> 1 - 0.3χ,
+        reacting = true,
+    ),
+    cross_section_radiative_transfer = (
+        options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
         law = χ -> 1 - 0.3χ,
         reacting = true,
     ),
@@ -150,6 +167,15 @@ const _color_cases = (
         options = (
             use_ale = true,
             radiation_model = BEER_LAMBERT,
+            correction = EquidistributionCorrection(),
+        ),
+        law = nothing,
+        reacting = true,
+    ),
+    equidistribution_radiative_transfer = (
+        options = (
+            use_ale = true,
+            radiation_model = RADIATIVE_TRANSFER,
             correction = EquidistributionCorrection(),
         ),
         law = nothing,
@@ -187,7 +213,7 @@ _largest_row(S) = maximum(diff(sparse(transpose(S)).colptr))
         @test cj.n_colors == _expected(
             NC,
             is_moving(layout),
-            has_radiation(layout),
+            radiation_rows(layout),
             has_chi(layout),
             reconstruction,
             prescribed,

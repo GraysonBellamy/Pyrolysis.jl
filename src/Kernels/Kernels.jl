@@ -36,6 +36,7 @@ include("reactions.jl")
 include("conduction.jl")
 include("gas_transport.jl")
 include("radiation.jl")
+include("radiative_transfer.jl")
 include("thermal_boundary.jl")
 include("gas_boundary.jl")
 include("relative_flux.jl")
@@ -45,6 +46,9 @@ export ReactionKernel
 export ConductionKernel, normal_conductivity, cell_gradient, gradient_support
 export GasTransportKernel, face_peclet
 export BeerLambertKernel, incident_intensity, sweep_intensities!, transmitted_face
+export RadiativeTransferKernel, MirrorBack, OpenBack, consistent_radiation!
+export radiative_transfer_rows, incoming_radiation
+export DIFFUSIVITY, INTERFACE_FLOOR
 export exposed_face
 export BoundaryPatch, ThermalBoundaryKernel, boundary_energy_flux, boundary_condition
 export conducted_flux, boundary_conductivity

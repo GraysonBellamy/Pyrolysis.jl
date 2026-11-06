@@ -5,14 +5,15 @@ analysis.
 
 JET's `@test_call` analyses `residual!` and the colored `jacobian!` at the
 concrete types `setup` builds, on a fixed mesh, a moving mesh with in-depth
-radiation and lumped wall and Darcy transport, and a moving mesh under the
+radiation (Beer–Lambert, and radiative transfer with an open back) and lumped
+wall and Darcy transport, and a moving mesh under the
 equidistribution correction, in both energy forms. Reports are limited to the
 package's own modules.
 """
 
 using Test
 using Pyrolysis
-using Pyrolysis.Materials: BEER_LAMBERT
+using Pyrolysis.Materials: BEER_LAMBERT, RADIATIVE_TRANSFER
 using Pyrolysis.Assembly: residual!
 using Pyrolysis.ColoredJacobian: jac_prototype, jacobian!
 using Pyrolysis.Closures: EquidistributionCorrection
@@ -77,6 +78,20 @@ const _configurations = (
     moving_beer_lambert_darcy = (
         problem = () -> _column(_wood(); top = RadiativeFluxBC(50e3)),
         options = (use_ale = true, radiation_model = BEER_LAMBERT),
+    ),
+    moving_radiative_transfer_darcy = (
+        problem = () -> PyrolysisProblem(
+            mesh = uniform_mesh(0.01, 8),
+            material = _wood(),
+            bc_set = BoundaryConditionSet(
+                thermal = (
+                    top = RadiativeFluxBC(50e3) + RadiativeBC(T_inf = 300.0),
+                    bottom = RadiativeBC(T_inf = 300.0),
+                ),
+            ),
+            tspan = (0.0, 100.0),
+        ),
+        options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
     ),
     equidistribution = (
         problem = () -> _column(_pmma(); top = HeatFluxBC(50e3), stretch = 1.01),

@@ -3,6 +3,7 @@ using ForwardDiff
 using LinearAlgebra
 using Pyrolysis
 using Pyrolysis.Materials: T_REF, T_PROPERTY_MIN, T_PROPERTY_MAX, BEER_LAMBERT
+using Pyrolysis.Materials: RADIATIVE_TRANSFER, STEFAN_BOLTZMANN
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.Meshes: MeshGeometry
@@ -543,6 +544,52 @@ end
     @test tol[area_index(layout)] ≈ reltol * ref.cross_section rtol = 1e-14
     @test tol[lateral_rate_index(layout)] ≈ minimum(w_tol) / (x[end] - x[1]) rtol = 1e-14
     @test length(tol) == state_length(layout)
+end
+
+# Under radiative transfer every radiation row's tolerance is the relative
+# tolerance of one scale: the largest diffuse radiation arriving at either
+# face over the window, or the emissive power at the largest of the initial
+# cell temperatures and the surroundings' temperatures, whichever is larger.
+@testset "radiative transfer rows: tolerance at the scale of the arriving and emitted radiation" begin
+    material = _thinning_slab(law = nothing).material
+    σ = STEFAN_BOLTZMANN
+    flux(t) = 3e4 * (1 + 0.5 * sin(t))
+    times = range(0.0, 10.0; length = 101)
+    cases = (
+        # The arriving radiation dominates.
+        (
+            RadiativeFluxBC(flux) + RadiativeBC(T_inf = 300.0),
+            AdiabaticBC(),
+            maximum(t -> flux(t) + σ * 300.0^4, times),
+        ),
+        # The surroundings are hotter than every cell; the back is open.
+        (
+            RadiativeBC(T_inf = t -> 900.0 + 20t, F = 0.5),
+            RadiativeBC(T_inf = 350.0) + RadiativeFluxBC(2e3),
+            σ * 1100.0^4,
+        ),
+        # Cold surroundings: the cells' own emission is the larger.
+        (RadiativeBC(T_inf = 300.0), AdiabaticBC(), σ * 300.0^4),
+    )
+    for (top, bottom, scale) in cases
+        problem = PyrolysisProblem(;
+            mesh = stretched_mesh(0.01, 6, 1.2),
+            material,
+            bc_set = BoundaryConditionSet(thermal = (; top, bottom)),
+            T_initial = z -> 400.0 + 1e4 * z,
+            ξ_initial = [z -> 1100.0 * (1 - 20z), z -> 300.0 * 20z, z -> 0.2],
+            tspan = (0.0, 10.0),
+        )
+        reltol = 1e-5
+        cp = setup(problem; radiation_model = RADIATIVE_TRANSFER, reltol)
+        layout = cp.def.layout
+        @test radiation_rows(layout) == 2
+        @test maximum(cp.T0) > 450.0
+        for nd = 1:n_nodes(layout), k = 1:2
+            row = radiation_index(layout, nd, k)
+            @test cp.abstol[row] ≈ reltol * max(scale, σ * maximum(cp.T0)^4) rtol = 1e-14
+        end
+    end
 end
 
 @testset "derived volumes on a moving mesh are the shells between the nodes: $(nameof(typeof(coords)))" for coords in

@@ -1,6 +1,7 @@
 using Test
 using Pyrolysis
 using Pyrolysis.Materials: DepletionLimiter, BEER_LAMBERT, SURFACE_ABSORPTION
+using Pyrolysis.Materials: RADIATIVE_TRANSFER, STEFAN_BOLTZMANN
 using Pyrolysis.States
 using Pyrolysis.Integration
 using Pyrolysis.Integration: setup, kencarp4_policy, rodas5p_policy, fbdf_policy
@@ -143,6 +144,49 @@ end
     @test !check(u, nothing, 0.0)
     @test m.failed
     @test occursin("consecutive", m.message)
+end
+
+# Under radiative transfer a radiation row is tested against its own flux. A
+# deck that starts at its surroundings' temperature has a tolerance scale of
+# σT∞⁴; heated to 900 K without radiation its rows carry the cells' emission,
+# eighty times that, and a defect ten times the scale's bound is within the
+# rows' own relative tolerance, while one a thousand times their own flux's
+# share is not.
+@testset "domain check: radiation rows against their own flux" begin
+    problem = PyrolysisProblem(
+        mesh = stretched_mesh(0.01, 6, 1.15),
+        material = _slab(6; radiating = true).material,
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = HeatFluxBC(3e4) + RadiativeBC(T_inf = 300.0),
+                bottom = AdiabaticBC(),
+            ),
+        ),
+        T_initial = z -> 300.0,
+        tspan = (0.0, 10.0),
+    )
+    cp = setup(problem; radiation_model = RADIATIVE_TRANSFER)
+    def, ws, layout = cp.def, cp.ws, cp.def.layout
+    row = radiation_index(layout, 4, 1)
+    q_scale = cp.abstol[row] / cp.reltol
+    @test q_scale ≈ STEFAN_BOLTZMANN * 300.0^4 rtol = 1e-12
+    check = DomainCheck(cp; max_consecutive = 3)
+    @test !check(cp.u0, nothing, 0.0)
+    hot = copy(cp.u0)
+    for i = 1:6
+        hot[energy_index(layout, i)] = 900.0
+    end
+    Integration._consistent_radiation!(hot, def, ws, 0.0)
+    @test !check(hot, nothing, 0.0)
+    @test hot[row] > 50 * q_scale
+    u = copy(hot)
+    u[row] += 20 * cp.reltol * q_scale
+    @test (u[row] - hot[row]) / (cp.reltol * q_scale + cp.abstol[row]) > 1
+    @test !check(u, nothing, 0.0)
+    @test check.monitor.last < 1
+    u[row] = hot[row] + 1e3 * cp.reltol * hot[row]
+    @test check(u, nothing, 0.0)
+    @test check.monitor.last > 1
 end
 
 @testset "domain check: a proposal the error test rejects is left to it" begin

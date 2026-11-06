@@ -16,7 +16,7 @@ Convention:
 
 using Test
 using Pyrolysis
-using Pyrolysis.Materials: BEER_LAMBERT
+using Pyrolysis.Materials: BEER_LAMBERT, RADIATIVE_TRANSFER, STEFAN_BOLTZMANN
 using Pyrolysis.Properties: mixture_emissivity, effective_absorption
 
 # Two solids with different ε so ε_eff is composition-dependent; non-zero
@@ -123,4 +123,67 @@ end
         end
         @test allunique(ds.α)
     end
+end
+
+# Under radiative transfer the exposed face is a gray interface whose
+# transmissivity is the first live cell's emissivity, at its temperature and
+# composition, for the radiation entering and for the radiation leaving: the
+# exposed row reads q⁻ = ε Q + (1 − ε) q⁺, so ε of the diffuse Q enters and
+# ε of the q⁺ arriving from inside leaves.
+@testset "Radiative transfer: the exposed face transmits at the first live cell's emissivity, both ways" begin
+    mat = _radiation_material()
+    n = 8
+    problem = PyrolysisProblem(
+        mesh = uniform_mesh(0.01, n),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = RadiativeFluxBC(50e3) + RadiativeBC(T_inf = 300.0),
+                bottom = AdiabaticBC(),
+            ),
+        ),
+        tspan = (0.0, 100.0),
+    )
+    cp = Pyrolysis.Integration.setup(problem; radiation_model = RADIATIVE_TRANSFER)
+    def, ws = cp.def, cp.ws
+    layout = def.layout
+    V = Pyrolysis.Problem.cell_volumes(problem.mesh)
+    u = copy(cp.u0)
+    T = [600.0 + 300.0 * (i - 1) / (n - 1) for i = 1:n]
+    for i = 1:n
+        u[Pyrolysis.States.energy_index(layout, i)] = T[i]
+        for (j, ξ) in enumerate(_radiation_composition(i))
+            u[Pyrolysis.States.mass_index(layout, i, j)] = ξ * V[i]
+        end
+    end
+    Pyrolysis.Integration._consistent_radiation!(u, def, ws, 0.0)
+    du = zeros(length(u))
+    Pyrolysis.Assembly.residual!(du, u, def, 0.0, ws)
+    ds, c = Pyrolysis.Assembly.buffers(ws, def, Float64)
+    K = Pyrolysis.Kernels
+    kernel = K.find_kernel(K.RadiativeTransferKernel, def.kernels)
+    Q = 50e3 + STEFAN_BOLTZMANN * 300.0^4
+    for i = 1:n
+        ξ = _radiation_composition(i)
+        @test ds.ε[i] ≈ mixture_emissivity(ξ, T[i], mat) rtol = 1e-13
+        @test ds.α[i] ≈ ξ[1] * 2.0 + ξ[2] * 50.0 rtol = 1e-13
+    end
+    e = n + 1
+    ε = ds.ε[n]
+    @test ds.q[1, e] ≈ ε * Q + (1 - ε) * ds.q[2, e] rtol = 1e-13
+    # The colored Jacobian: the exposed row reflects 1 − ε of q⁺.
+    J = Pyrolysis.ColoredJacobian.jac_prototype(cp.jacobian)
+    Pyrolysis.ColoredJacobian.jacobian!(J, cp.jacobian, u, 0.0)
+    r, col = Pyrolysis.States.radiation_index(layout, e, 1),
+    Pyrolysis.States.radiation_index(layout, e, 2)
+    @test J[r, col] ≈ -(1 - ε) rtol = 1e-13
+    # With the exposed cell dead the next cell's emissivity takes over, at the
+    # face below it.
+    ds.active[n] = false
+    K.reset!(c)
+    K.contribute!(c, kernel, ds, def.setup.topology, mat, 0.0)
+    ε′ = ds.ε[n-1]
+    @test ε′ != ε
+    @test c.r_radiation[1, n] ≈ ds.q[1, n] - (ε′ * Q + (1 - ε′) * ds.q[2, n]) rtol = 1e-13
+    @test c.r_radiation[1, e] == 0 && c.r_radiation[2, e] == 0
 end

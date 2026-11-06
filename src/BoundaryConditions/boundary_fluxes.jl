@@ -8,7 +8,7 @@ This module provides flux evaluation functions for all boundary condition types:
 
 using ..Materials: STEFAN_BOLTZMANN
 using ..Materials: evaluate_param, evaluate_param_T
-using ..Materials: RadiationModel, SURFACE_ABSORPTION, BEER_LAMBERT
+using ..Materials: RadiationModel, SURFACE_ABSORPTION, BEER_LAMBERT, RADIATIVE_TRANSFER
 
 # ============================================================================
 # Boundary Flux Decomposition for Diagnostics
@@ -33,11 +33,13 @@ Returns a NamedTuple with:
 
 Convention: `net` is the **applied** face flux — per component it matches
 `evaluate_bc_flux_and_derivative`, so the total satisfies the Newton balance
-`net = q_cond` at convergence. Under `BEER_LAMBERT` the incident radiation
-enters the domain *volumetrically*,
+`net = q_cond` at convergence. Under `BEER_LAMBERT` and `RADIATIVE_TRANSFER`
+the incident radiation enters the domain *volumetrically*,
 not through the face, so a `RadiativeFluxBC` contributes zero `absorbed` and
-zero `net` here; the volumetric deposit is reported separately as
-`extras.volumetric_absorption`. Under `SURFACE_ABSORPTION` the absorbed α·q_ext is applied at the face and included in `net`. For
+zero `net` here; under `BEER_LAMBERT` the volumetric deposit is reported
+separately as `extras.volumetric_absorption`. Under `RADIATIVE_TRANSFER` a
+`RadiativeBC` contributes zero as well: its exchange crosses the face through
+the radiation rows. Under `SURFACE_ABSORPTION` the absorbed α·q_ext is applied at the face and included in `net`. For
 combined BCs the components *and* `net` are summed over children — `net` is
 never recomputed from the components.
 """
@@ -49,7 +51,7 @@ function compute_boundary_heat_fluxes(
     radiation_model::RadiationModel;
     a_eff::Float64 = ε_eff,
 )
-    if radiation_model == BEER_LAMBERT
+    if radiation_model != SURFACE_ABSORPTION
         # In-depth absorption: the incident radiation enters volumetrically,
         # nothing is absorbed at the face, and the Newton balance applies zero
         # flux for this BC.
@@ -119,7 +121,7 @@ function compute_boundary_heat_fluxes(
     radiation_model::RadiationModel;
     a_eff::Float64 = ε_eff,
 )
-    q, _ = evaluate_bc_flux_and_derivative(bc, T_surface, t, ε_eff)
+    q, _ = evaluate_bc_flux_and_derivative(bc, T_surface, t, ε_eff, radiation_model)
     q_loss = -q
     return (
         absorbed = 0.0,

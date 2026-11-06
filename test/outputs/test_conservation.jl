@@ -7,7 +7,8 @@ using Pyrolysis.Integration
 using Pyrolysis.Integration: setup, integrate
 using Pyrolysis.Assembly: residual!, buffers, ResidualWorkspace
 using Pyrolysis.Meshes: n_cells, n_nodes
-using Pyrolysis.States: radiation_index, area_index, lateral_rate_index, velocity_index
+using Pyrolysis.States:
+    radiation_index, radiation_rows, area_index, lateral_rate_index, velocity_index
 using OrdinaryDiffEq: DiscreteCallback
 
 # The char-layer column of V-CPL-06 with a reaction heat (the energy-ledger
@@ -422,16 +423,20 @@ end
 end
 
 # The shrinking column absorbing in depth under KenCarp4: the saved states hold
-# every algebraic row, the face intensities among them, whose optical depths
+# every algebraic row, the radiation rows among them, whose optical depths
 # read the concentrations at the cross section the state's history gives, so
 # that row takes its value before them.
-@testset "the saved states hold their algebraic rows on a shrinking, absorbing column" begin
+@testset "the saved states hold their algebraic rows on a shrinking, absorbing column, $(model)" for model in
+                                                                                                     (
+    BEER_LAMBERT,
+    RADIATIVE_TRANSFER,
+)
     problem =
         _charring_column(; lateral_shrinkage_law = χ -> 1 - 0.3χ, absorption = (1.0, 2.0))
     sol = Integration.solve(
         problem;
         use_ale = true,
-        radiation_model = BEER_LAMBERT,
+        radiation_model = model,
         integrator_policy = kencarp4_policy(),
         _TOL...,
     )
@@ -450,15 +455,20 @@ end
         residual!(du, u, def, t, ws)
         ds, c = buffers(ws, def, Float64)
         nodes = 1:n_nodes(topo)
-        intensity =
-            max(intensity, maximum(f -> abs(du[radiation_index(layout, f, 1)]), nodes))
+        intensity = max(
+            intensity,
+            maximum(
+                abs(du[radiation_index(layout, f, k)]) for f in nodes for
+                k = 1:radiation_rows(layout)
+            ),
+        )
         area = max(area, abs(du[area_index(layout)]) / u[area_index(layout)])
         rate = max(rate, abs(du[lateral_rate_index(layout)]) / rate_scale)
         sweep = sum(abs, c.θ .* ds.V_eval) + sum(abs, ds.geometry.face_area .* ds.w)
         velocity =
             max(velocity, maximum(nd -> abs(du[velocity_index(layout, nd)]), nodes) / sweep)
     end
-    @info "absorbing shrinking column: algebraic rows of the saved states" intensity area rate velocity
+    @info "absorbing shrinking column: algebraic rows of the saved states" model intensity area rate velocity
     # The incident flux is 5e4 W/m²; the rows hold to round-off.
     @test intensity <= 1e-10 * 5e4
     @test area <= 1e-12
@@ -470,12 +480,16 @@ end
 end
 
 # A state whose cross section is off its law: `consistent_state!`, the setup's
-# and the deactivation event's path, sets the area before the intensities whose
-# optical depths read it, so every algebraic row holds.
-@testset "a consistent state holds its algebraic rows on a shrinking, absorbing column" begin
+# and the deactivation event's path, sets the area before the radiation rows
+# whose optical depths read it, so every algebraic row holds.
+@testset "a consistent state holds its algebraic rows on a shrinking, absorbing column, $(model)" for model in
+                                                                                                      (
+    BEER_LAMBERT,
+    RADIATIVE_TRANSFER,
+)
     problem =
         _charring_column(; lateral_shrinkage_law = χ -> 1 - 0.3χ, absorption = (1.0, 2.0))
-    cp = setup(problem; use_ale = true, radiation_model = BEER_LAMBERT, _TOL...)
+    cp = setup(problem; use_ale = true, radiation_model = model, _TOL...)
     def = cp.def
     layout = def.layout
     nodes = 1:n_nodes(def.setup.topology)
@@ -487,7 +501,10 @@ end
     ds, c = buffers(cp.ws, def, Float64)
     sweep = sum(abs, c.θ .* ds.V_eval) + sum(abs, ds.geometry.face_area .* ds.w)
     @test u[area_index(layout)] ≈ cp.u0[area_index(layout)] rtol = 1e-14
-    @test maximum(f -> abs(du[radiation_index(layout, f, 1)]), nodes) <= 1e-10 * 5e4
+    @test maximum(
+        abs(du[radiation_index(layout, f, k)]) for f in nodes for
+        k = 1:radiation_rows(layout)
+    ) <= 1e-10 * 5e4
     @test abs(du[area_index(layout)]) <= 1e-12 * u[area_index(layout)]
     @test maximum(nd -> abs(du[velocity_index(layout, nd)]), nodes) <= 1e-10 * sweep
 end

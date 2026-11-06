@@ -2,13 +2,14 @@ using Test
 using Logging
 using ForwardDiff
 using Pyrolysis
-using Pyrolysis.Materials: BEER_LAMBERT, SURFACE_ABSORPTION
+using Pyrolysis.Materials: BEER_LAMBERT, SURFACE_ABSORPTION, RADIATIVE_TRANSFER
 using Pyrolysis.Materials: STEFAN_BOLTZMANN, T_PROPERTY_MAX, R_GAS
 using Pyrolysis.Physics: TransportFailure
 using Pyrolysis.BoundaryConditions: BoundaryState, solve_boundary_temperature!
 using Pyrolysis.Meshes: boundary_faces
 using Pyrolysis.States
 using Pyrolysis.Kernels: ThermalBoundaryKernel, find_kernel
+using Pyrolysis.Kernels: RadiativeTransferKernel, MirrorBack, OpenBack
 using Pyrolysis.Assembly: residual!, buffers
 using Pyrolysis.Integration
 using Pyrolysis.Integration: setup
@@ -232,6 +233,128 @@ end
     @test_throws ArgumentError setup(problem; radiation_model = BEER_LAMBERT)
     sol = Integration.solve(problem; radiation_model = SURFACE_ABSORPTION)
     @test sol.retcode === :Success
+end
+
+# An isothermal slab of emissive power B and optical thickness τ_L behind a
+# gray exposed face of emissivity ε, a mirror at its back, facing diffuse
+# radiation Q: the rows are exact across each cell, so the net intake is the
+# closed form ε(Q − B)(1 − t²)/(1 − (1 − ε)t²), t = e^{−Dτ_L}, on any mesh,
+# and zero with q⁻ = q⁺ = B when Q = B. Several diffuse members add.
+@testset "radiative transfer: an isothermal slab facing diffuse radiation" begin
+    ε, B, τ_L, L, n = 0.8, 1e4, 0.1, 0.01, 10
+    T_B = (B / STEFAN_BOLTZMANN)^(1 / 4)
+    solid = SolidComponent(
+        :solid,
+        ρ = 600.0,
+        c = 1500.0,
+        k = 0.15,
+        ε = ε,
+        α = τ_L / (600.0 * L),
+    )
+    mat = Material(name = :gray, components = (solid,), reactions = ())
+    function intake(top)
+        p = PyrolysisProblem(
+            mesh = stretched_mesh(L, n, 1.2),
+            material = mat,
+            bc_set = BoundaryConditionSet(thermal = (top = top, bottom = AdiabaticBC())),
+            T_initial = z -> T_B,
+            tspan = (0.0, 1.0),
+        )
+        cp = setup(p; radiation_model = RADIATIVE_TRANSFER)
+        du = zeros(length(cp.u0))
+        residual!(du, cp.u0, cp.def, 0.0, cp.ws)
+        ds, c = buffers(cp.ws, cp.def, Float64)
+        e = n + 1
+        @test sum(c.S_energy) / ds.geometry.face_area[e] ≈ ds.q[1, e] - ds.q[2, e] rtol =
+            1e-12
+        return ds, ds.q[1, e] - ds.q[2, e]
+    end
+    t = exp(-1.5τ_L)
+    B_cell = STEFAN_BOLTZMANN * T_B^4
+    Q = 2e4
+    _, q = intake(RadiativeFluxBC(1.2e4) + RadiativeFluxBC(0.8e4))
+    @test q ≈ ε * (Q - B_cell) * (1 - t^2) / (1 - (1 - ε) * t^2) rtol = 1e-12
+    @test round(q; digits = 1) == 2434.1
+    ds, q = intake(RadiativeBC(T_inf = T_B))
+    @test abs(q) <= 1e-12 * B
+    @test maximum(abs, ds.q .- B_cell) <= 1e-12 * B
+end
+
+# Under radiative transfer the radiation enters and leaves through the
+# exposed face, a gray interface at its cell's emissivity, and the back is a
+# mirror unless its condition has a radiative member.
+@testset "radiative transfer: the face rules" begin
+    convective = ConvectiveBC(h = 10.0, T_inf = 300.0)
+    rt(problem) = setup(problem; radiation_model = RADIATIVE_TRANSFER)
+    sa(problem) = setup(problem; radiation_model = SURFACE_ABSORPTION)
+    thermal(top, bottom = AdiabaticBC()) = BoundaryConditionSet(thermal = (; top, bottom))
+    # The exposed face needs a radiative member.
+    for top in (convective, HeatFluxBC(1e4), AdiabaticBC())
+        p = _bc_problem(thermal(top); α = 200.0)
+        @test_throws r"needs a RadiativeBC or a RadiativeFluxBC on :top" rt(p)
+        @test !has_radiation(sa(p).def.layout)
+    end
+    # The interface's transmissivity is the cell's emissivity, both ways, and
+    # diffuse radiation enters at it.
+    for bc in (
+        thermal(RadiativeBC(ε = 0.9, T_inf = 300.0)),
+        thermal(RadiativeBC(T_inf = 300.0), RadiativeBC(ε = 0.5, T_inf = 300.0)),
+    )
+        @test_throws r"no ε" rt(_bc_problem(bc; α = 200.0))
+        sa(_bc_problem(bc; α = 200.0))
+    end
+    p = _bc_problem(thermal(RadiativeFluxBC(3e4; absorptivity = 0.8)); α = 200.0)
+    @test_throws r"no absorptivity" rt(p)
+    absorbing = Material(
+        name = :absorbing,
+        components = (
+            SolidComponent(
+                :s,
+                ρ = 600.0,
+                c = 1500.0,
+                k = 0.15,
+                α = 0.3,
+                absorptivity = 0.7,
+            ),
+        ),
+        reactions = (),
+    )
+    mesh = uniform_mesh(0.01, 6)
+    with_flux = PyrolysisProblem(
+        mesh = mesh,
+        material = absorbing,
+        bc_set = thermal(RadiativeFluxBC(3e4) + RadiativeBC(T_inf = 300.0)),
+        tspan = (0.0, 1.0),
+    )
+    @test_throws r"component :s sets its own absorptivity" rt(with_flux)
+    surroundings = PyrolysisProblem(
+        mesh = mesh,
+        material = absorbing,
+        bc_set = thermal(RadiativeBC(T_inf = 900.0)),
+        tspan = (0.0, 1.0),
+    )
+    @test radiation_rows(rt(surroundings).def.layout) == 2
+    # Radiative members on :top and :bottom only.
+    renamed = PyrolysisProblem(
+        mesh = line_mesh(collect(range(0.0, 0.01; length = 7)); bottom = :back),
+        material = _bc_material(α = 200.0),
+        bc_set = BoundaryConditionSet(
+            thermal = (top = RadiativeBC(T_inf = 300.0), back = RadiativeBC(T_inf = 300.0)),
+        ),
+        tspan = (0.0, 1.0),
+    )
+    @test_throws r"through :top and :bottom only" rt(renamed)
+    # The back: a mirror without a radiative member, open with one, a diffuse
+    # incident flux included.
+    for (bottom, kind) in (
+        (AdiabaticBC(), MirrorBack),
+        (convective, MirrorBack),
+        (RadiativeBC(T_inf = 300.0), OpenBack),
+        (RadiativeFluxBC(5e3) + convective, OpenBack),
+    )
+        cp = rt(_bc_problem(thermal(RadiativeBC(T_inf = 300.0), bottom); α = 200.0))
+        @test find_kernel(RadiativeTransferKernel, cp.def.kernels).back isa kind
+    end
 end
 
 @testset "surface absorption is the surface balance of the incident flux" begin
