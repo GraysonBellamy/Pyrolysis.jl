@@ -880,7 +880,7 @@ t_end_s = 20.0
 t_start_s = 0.0
 
 [source_hashes]
-"test/verification/casedefs.jl" = "88084bae2ac3257f7ec366c0ba1d4653f75f333110700ca3cbe63e926121e3b9"
+"test/verification/casedefs.jl" = "a6980104f7aff465160ef9fec42ec198125bb3c7d8640df07281e5037e306f57"
 "test/verification/cases/V-BO-01.jl" = "6a9a0620e6826dfbb16e11712b10f0ab66f99de00400d2076f11b782ea909cfa"
 "test/verification/cases/V-BO-02.jl" = "acd3d091fd64438cce6ba7a9539c3778436c2929995fb900f978c17638d2d123"
 "test/verification/cases/V-BO-03.jl" = "0045bdadc5e7519c439e5092d248f2057a3a6d5c59db5997e410d587a632a8f3"
@@ -916,7 +916,14 @@ t_start_s = 0.0
 "test/verification/cases/V-MMS-02.jl" = "01c8ee6bcd5b2c6ea54142c640012735c7f23a47704fe69b9e5320b4c5e2f80e"
 "test/verification/cases/V-MMS-03.jl" = "3fb29029eb33bc139acb13bbd8d9448d9e4d5d3c56f96ea8ee33bade5aabf170"
 "test/verification/cases/V-MMS-04.jl" = "000c92be9fb34a1488f721625beb2185d0a2bac9445284368679373229e41576"
+"test/verification/cases/V-MMS-05.jl" = "4aa4c2ccc5b11acdb1c6c8478a5980232d4f335beec5922144d47f234e7e258d"
 "test/verification/cases/V-RAD-01.jl" = "0cb10bab1edc957b59aa4fc02f91e1936a3f45dddf16025720837d674e04572b"
+"test/verification/cases/V-RAD-02.jl" = "2b8fad4ee2ce0c9efb8bedd955d948e00decb240fdca30e4c0f6fea5058a2dac"
+"test/verification/cases/V-RAD-03.jl" = "6a4f90d15dfff56d5a7263653e7c29ad52e791bc74cc7684fb82510ba96881d6"
+"test/verification/cases/V-RAD-04.jl" = "7538c789c587ea0a93007bbd47fc128f1676fb65a07c85f8d1f853ac1a9bf200"
+"test/verification/cases/V-RAD-05.jl" = "b8ac05ee18371af6b54230460c9a7658b617d7e3fa7bf0032ed9de5e47a01c9a"
+"test/verification/cases/V-RAD-06.jl" = "d47c3d769bd6429ca2680c533e234bb6b8a41aa6f7a27201bd3e2a6fcb5e81a6"
+"test/verification/cases/V-RAD-07.jl" = "56cfae21fad86b6895b0e89f6be4bdf5d42e2fe28b74097f604cfaa59776e140"
 "test/verification/cases/V-RX-01.jl" = "b45b95d241c567812d99ea5fdeff7dd4f1933bcdfd80c627b4cb4cc6ac32cc81"
 "test/verification/cases/V-RX-02.jl" = "873b9f138e37087b5ba9a38657887102b981064c81694629f059af03e9a9d2f0"
 "test/verification/cases/V-RX-03.jl" = "d6cfb6824cdceea54e3ca2a251b36ca2ccfdcc72aaf042374101bd478bd22f89"

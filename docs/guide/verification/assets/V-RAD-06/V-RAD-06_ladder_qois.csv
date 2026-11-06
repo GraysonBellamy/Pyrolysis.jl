@@ -1,0 +1,9 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+40,"the sample burns out, every cell deactivated",40.0,40.0,0.0,0.5,true
+40,"radiation crossing the faces against the cells' sources, every accepted step",6.063298011819521e-16,NaN,6.063298011819521e-16,1.0e-12,true
+40,"radiation entering, every accepted step",0.0,NaN,0.0,1.0e-12,true
+40,"energy closure of the live region",7.562581929940513e-8,NaN,7.562581929940513e-8,2.3e-7,true
+40,"mass closure of the live region",1.5213616916056375e-9,NaN,1.5213616916056375e-9,4.6e-9,true
+40,"radiation absorbed over the burn [J/m²]",1.1853394277833736e7,NaN,0.0,Inf,true
+40,"radiation emitted through the exposed face over the burn [J/m²]",1.4507521288172442e6,NaN,0.0,Inf,true
+40,"radiation leaving through the back over the burn [J/m²]",2.941116937647628e6,NaN,0.0,Inf,true

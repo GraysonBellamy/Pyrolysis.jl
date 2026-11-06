@@ -1,0 +1,11 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+20,"collimated heater, mirror back: every face against the closed form",2.7284841053187845e-16,NaN,2.7284841053187845e-16,1.0e-12,true
+20,"collimated heater, open back: every face against the closed form",2.7284841053187845e-16,NaN,2.7284841053187845e-16,1.0e-12,true
+20,"diffuse heater, mirror back: every face against the closed form",2.7284841053187845e-16,NaN,2.7284841053187845e-16,1.0e-12,true
+20,"diffuse heater, open back: every face against the closed form",3.637978807091713e-16,NaN,3.637978807091713e-16,1.0e-12,true
+20,"cone heater, mirror back: every face against the closed form",9.094947017729283e-17,NaN,9.094947017729283e-17,1.0e-12,true
+20,"cone heater, open back: every face against the closed form",9.370282327836321e-17,NaN,9.370282327836321e-17,1.0e-12,true
+20,"cone heater: three beams against the exact downward cone",2.408861582375721e-5,NaN,2.408861582375721e-5,0.0002,true
+20,"cone heater, mirror back: the field against two_stream_solve",4.5474735088646414e-17,NaN,4.5474735088646414e-17,1.0e-12,true
+20,"collimated heater, mirror back: flux leaving the exposed face against exact transfer",0.00931335127228826,NaN,0.00931335127228826,Inf,true
+20,"collimated heater, mirror back: L1 of the cell sources against exact transfer",0.029389764709705026,NaN,0.029389764709705026,Inf,true
