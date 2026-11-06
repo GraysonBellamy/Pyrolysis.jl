@@ -19,7 +19,7 @@ using Pyrolysis
 
 const OUT = joinpath(@__DIR__, "measurements")
 mkpath(OUT)
-const MMS_CASES = ("V-MMS-01", "V-MMS-02", "V-MMS-03", "V-MMS-04")
+const MMS_CASES = ("V-MMS-01", "V-MMS-02", "V-MMS-03", "V-MMS-04", "V-MMS-05")
 
 # The binding `name` of the module `m` in the latest world: the cases are
 # loaded into `m` at run time, in a newer world than the caller's.

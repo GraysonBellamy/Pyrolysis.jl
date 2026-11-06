@@ -1044,4 +1044,77 @@ end
         b = gray_slab_exact(τ, Z; q = 1e4, heater = (θ1, θ2))
         @test sum(abs, a.S .- b.S) / 1e4 < 2e-4
     end
+
+    # The continuous two-stream of the manufactured solutions (exact/mms.jl),
+    # checked against its limits and against the discrete rows, an independent
+    # code: the staircase of a smooth emissive power converges to it at second
+    # order.
+    @testset "continuous two-stream of the manufactured solutions" begin
+        σ = Pyrolysis.Materials.STEFAN_BOLTZMANN
+        D, L, κ, ε = 1.5, 0.01, 200.0, 0.8
+        β = D * κ
+        xs = range(0.0, L, length = 11)
+        backs = ((0.0, 0.0), (0.6, 1.0))   # (ε_b, Q_b / B): a mirror, an open back
+
+        # A medium facing its own temperature on both sides: q± = B, no source.
+        B0 = σ * 700.0^4
+        for (ε_b, r_b) in backs, x in xs
+            qm, qp = mms_two_stream(_ -> B0, x, L, κ; ε, Q = B0, ε_b, Q_b = r_b * B0)
+            @test abs(qm - B0) < 1e-12 * B0
+            @test abs(qp - B0) < 1e-12 * B0
+            @test abs(
+                mms_radiative_source(_ -> B0, x, L, κ; ε, Q = B0, ε_b, Q_b = r_b * B0),
+            ) < 1e-12 * β * B0
+        end
+
+        # B linear in depth with the face inputs of the particular solution
+        # q∓ = B ∓ g/β: no source, and the net flux −2g/β, Rosseland's at D = 3/2.
+        g, ε_b = 5e5, 0.6
+        B(x) = 1e4 + g * x
+        Q = (ε * B(0.0) - (2 - ε) * g / β) / ε
+        Q_b = (B(L) + g / β - (1 - ε_b) * (B(L) - g / β)) / ε_b
+        for x in xs
+            qm, qp = mms_two_stream(B, x, L, κ; ε, Q, ε_b, Q_b)
+            @test abs(qm - (B(x) - g / β)) < 1e-12 * B(L)
+            @test abs(qp - (B(x) + g / β)) < 1e-12 * B(L)
+            @test abs(mms_radiative_source(B, x, L, κ; ε, Q, ε_b, Q_b)) < 1e-12 * β * B(L)
+        end
+        @test -2g / β ≈ -(4 / (3κ)) * g rtol = 1e-15
+
+        # A smooth emissive power: the discrete rows on staircases of N cells
+        # (cell sources per unit volume at the cell centres) converge to the
+        # continuous source at second order, for either back.
+        Bs(x) = σ * (600.0 + 150.0 * sin(π * x / L) + 40.0 * x / L)^4
+        Q = σ * 800.0^4
+        for (ε_b, r_b) in backs
+            errors = map((500, 1000, 2000)) do N
+                Δ = L / N
+                xc = [(i - 0.5) * Δ for i = 1:N]
+                discrete = two_stream_solve(
+                    fill(κ * Δ, N),
+                    Bs.(xc);
+                    D,
+                    ε,
+                    Q,
+                    ε_b,
+                    Q_b = r_b * Q,
+                )
+                exact = [
+                    mms_radiative_source(Bs, x, L, κ; ε, Q, ε_b, Q_b = r_b * Q) for x in xc
+                ]
+                sqrt(sum(abs2, discrete.S ./ Δ .- exact) / N)
+            end
+            rates = log2.(errors[1:2] ./ errors[2:3])
+            @test all(r -> abs(r - 2) < 0.01, rates)
+            @test errors[3] < 1e-6 * β * Bs(L / 2)
+        end
+
+        # Positions are states on a moving mesh: dual numbers pass through,
+        # and the derivative is the source's.
+        S(x) = mms_radiative_source(Bs, x, L, κ; ε, Q, ε_b = 0.0)
+        for x in (0.001, 0.005, 0.009)
+            h = 1e-7
+            @test ForwardDiff.derivative(S, x) ≈ (S(x + h) - S(x - h)) / 2h rtol = 1e-6
+        end
+    end
 end

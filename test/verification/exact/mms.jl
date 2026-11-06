@@ -8,12 +8,14 @@
 # sources that make them the exact solution of the FULL coupled system, which
 # gives formal order-of-accuracy verification of the coupled operators.
 #
-# ## Continuous system targeted (Eulerian, partial-pressure transport, no radiation)
+# ## Continuous system targeted (Eulerian, partial-pressure transport)
 #
-#   ρcp(T,ξ) ∂T/∂t = −∂z q + S_adv + Q_rxn + S_T,      q = −k_eff(T,ξ) ∂z T
+#   ρcp(T,ξ) ∂T/∂t = −∂z q + S_adv + Q_rxn [+ S_rad] + S_T,   q = −k_eff(T,ξ) ∂z T
 #       ρcp    = Σⱼ ξⱼ cp_j(T)   (every component, gas included)
 #       S_adv = −Σ_g cp_g(T) J_g ∂z T
 #       Q_rxn  = −Σ_r h_r(T,ξ) r_r(ξ,T)
+#       S_rad  = Dκ(q⁺ + q⁻ − 2σT⁴)   under RADIATIVE_TRANSFER only, with q± the
+#                continuous two-stream of the manufactured T (`mms_two_stream`)
 #   ∂ξ_g/∂t = −∂z J_g + ω̇_g + S_ξg,   J_g = −Λ(T,ξ) M_g/(RT)·∂z p_g,  p_g = ξ_g RT/(φ M_g)
 #   ∂ξ_s/∂t =            ω̇_s + S_ξs                          (condensed phases)
 #
@@ -190,15 +192,24 @@ end
 Manufactured energy source in **K/s** (state-derivative units — see design
 decision 1):
 
-S_T(z,t) = ∂tT* + w·∂zT* + (∂z q* − S_adv* − Q_rxn*) / ρcp(T*,ξ*)
+S_T(z,t) = ∂tT* + w·∂zT* + (∂z q* − S_adv* − Q_rxn* − S_rad*) / ρcp(T*,ξ*)
 
 Added to the energy row, it makes T* the exact solution of the continuous
 energy equation; a function of (z,t) alone, it leaves the Jacobian exact.
 `w = nothing` (fixed mesh, or prescribed motion, whose sources are Eulerian)
 drops the chain-rule term; under induced motion pass the reaction-driven
-`w(z,t)`.
+`w(z,t)`. `radiation = nothing` drops the radiative term; under radiative
+transfer pass the continuous radiative source `S_rad*(z,t)` [W/m³] of the
+manufactured fields (built with [`mms_radiative_source`](@ref)).
 """
-function mms_energy_source(material, fields::MMSFields, z, t; w = nothing)
+function mms_energy_source(
+    material,
+    fields::MMSFields,
+    z,
+    t;
+    w = nothing,
+    radiation = nothing,
+)
     T = fields.T(z, t)
     ξ = mms_xi_tuple(fields, z, t)
     ρcp = sum(ξ[j] * material.components[j].heat_capacity(T) for j in eachindex(ξ))
@@ -210,7 +221,76 @@ function mms_energy_source(material, fields::MMSFields, z, t; w = nothing)
     if w !== nothing
         S += w(z, t) * ForwardDiff.derivative(ζ -> fields.T(ζ, t), z)
     end
+    if radiation !== nothing
+        S -= radiation(z, t) / ρcp
+    end
     return S
+end
+
+# ----------------------------------------------------------------------------
+# Radiative transfer: the continuous gray two-stream source
+# ----------------------------------------------------------------------------
+
+const _MMS_RADIATION_NODES = _gauss_legendre(32)
+
+# ∫ₐᵇ f by Gauss–Legendre on the nodes above, generic in the number type.
+function _mms_quadrature(f, a, b)
+    x, w = _MMS_RADIATION_NODES
+    mid, half = (a + b) / 2, (b - a) / 2
+    s = zero(f(mid))
+    for k in eachindex(x)
+        s += w[k] * f(mid + half * x[k])
+    end
+    return half * s
+end
+
+"""
+    mms_two_stream(B, x, L, κ; ε, Q, ε_b = 0.0, Q_b = 0.0, D = 1.5) -> (q⁻, q⁺)
+
+The hemispherical fluxes [W/m²] at the depth `x` below the exposed face of a
+gray column of thickness `L` and uniform absorption coefficient `κ` [1/m]
+whose emissive power is `B(x)` [W/m²] (x = 0 the exposed face, x = L the
+back): the continuous two-stream of the solver's rows,
+
+    dq⁻/dx = β(B − q⁻),   −dq⁺/dx = β(B − q⁺),   β = Dκ,
+
+with the solver's gray faces: q⁻(0) = εQ + (1 − ε)q⁺(0) at the exposed face
+(transmissivity `ε`, diffuse incoming flux `Q`) and
+q⁺(L) = ε_b Q_b + (1 − ε_b)q⁻(L) at the back (`ε_b = 0`: a mirror). With
+P = e^{−βL}, I⁻(x) = ∫₀ˣ βB e^{−β(x−s)} ds and I⁺(x) = ∫ₓᴸ βB e^{−β(s−x)} ds,
+
+    q⁻(x) = q⁻(0) e^{−βx} + I⁻(x),   q⁺(x) = q⁺(L) e^{−β(L−x)} + I⁺(x),
+
+and the two face values solve the 2×2 system of the face rows, written out.
+The integrals are 32-point Gauss–Legendre: B is smooth and βL is of order
+one in the cases that use this, so they are exact to round-off. Generic in
+the number type, so `x` and `L` may be dual numbers.
+"""
+function mms_two_stream(B, x, L, κ; ε, Q, ε_b = 0.0, Q_b = 0.0, D = 1.5)
+    β = D * κ
+    P = exp(-β * L)
+    down(y) = _mms_quadrature(s -> β * B(s) * exp(-β * (y - s)), zero(y), y)
+    up(y) = _mms_quadrature(s -> β * B(s) * exp(-β * (s - y)), y, L)
+    I_back, I_top = down(L), up(zero(L))
+    ρ, ρ_b = 1 - ε, 1 - ε_b
+    qm_top = (ε * Q + ρ * I_top + ρ * P * (ε_b * Q_b + ρ_b * I_back)) / (1 - ρ * ρ_b * P^2)
+    qp_back = ε_b * Q_b + ρ_b * (qm_top * P + I_back)
+    return qm_top * exp(-β * x) + down(x), qp_back * exp(-β * (L - x)) + up(x)
+end
+
+"""
+    mms_radiative_source(B, x, L, κ; ε, Q, ε_b = 0.0, Q_b = 0.0, D = 1.5)
+
+The continuous radiative source S_rad = Dκ(q⁺ + q⁻ − 2B) [W/m³] at the depth
+`x`, the power absorbed less the power emitted per unit volume, with the
+fluxes of [`mms_two_stream`](@ref). Passed as `radiation` to `solve_mms`
+(as a function of position and time), it makes the manufactured fields
+exact under `RADIATIVE_TRANSFER`, and the radiation rows' discretization
+error reaches the temperature through it.
+"""
+function mms_radiative_source(B, x, L, κ; D = 1.5, kwargs...)
+    qm, qp = mms_two_stream(B, x, L, κ; D, kwargs...)
+    return D * κ * (qp + qm - 2 * B(x))
 end
 
 """
@@ -378,6 +458,10 @@ Keywords:
 - `dt=nothing`: fixed step (sets `adaptive=false`) for temporal-order sweeps.
 - `saveat=nothing`: defaults to `problem.output_times` if non-empty, else the
   final time.
+- `radiation_model = SURFACE_ABSORPTION`: the solve's radiation model.
+- `radiation = nothing`: under `RADIATIVE_TRANSFER`, the continuous radiative
+  source `(z, t) -> S_rad*` [W/m³] of the manufactured fields, which the
+  energy source removes (`mms_energy_source`).
 """
 function solve_mms(
     problem,
@@ -391,6 +475,8 @@ function solve_mms(
     saveat = nothing,
     maxiters::Int = 10^6,
     energy_state::Symbol = :temperature,
+    radiation_model = SURFACE_ABSORPTION,
+    radiation = nothing,
 )
     material = problem.material
     save_times = if saveat !== nothing
@@ -409,11 +495,12 @@ function solve_mms(
     NC = n_components(material)
     w = motion === nothing ? nothing : motion.w
     mass = (z, t) -> ntuple(j -> mms_species_source(material, fields, j, z, t; w), Val(NC))
-    energy = (z, t) -> mms_energy_source(material, fields, z, t; w)
+    energy = (z, t) -> mms_energy_source(material, fields, z, t; w, radiation)
     step_kwargs = dt === nothing ? (;) : (dt = dt, adaptive = false)
     sol = solve(
         problem;
         energy_state,
+        radiation_model,
         use_ale,
         correction,
         abstol,
