@@ -377,7 +377,7 @@ full rate at any concentration (Chapter 4, §4.10; Technical Reference §6).
 abstract type AngularDistribution end
 Diffuse()                                  # the default distribution
 Collimated()
-Cone(θ₁, θ₂; directions = 3)               # radians, 0 ≤ θ₁ < θ₂ ≤ π/2
+Cone(θ₁, θ₂; directions = 3)               # radians, 0 ≤ θ₁ < θ₂ ≤ π/2, cos θ₂ < cos θ₁
 ```
 
 | Value | Behaviour |

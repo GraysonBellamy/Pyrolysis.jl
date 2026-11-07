@@ -6813,8 +6813,12 @@ absorptivity $a_{\text{eff}}$ (5.22b) of the first live cell. Under a cone of un
 intensity the flux per unit direction cosine is proportional to the cosine, so the
 beams sit at the Gauss–Legendre nodes $\mu_h$ of $[\cos\theta_2,\cos\theta_1]$, and each
 carries a share $w_h$ of the flux proportional to its Gauss–Legendre weight times
-$\mu_h$, divided by $(\cos^2\theta_1 - \cos^2\theta_2)/2$, the integral of the cosine
-over that interval, so that $\sum_h w_h = 1$ (`_beam_directions`).
+$\mu_h$, divided by the sum of these products, the quadrature's integral of the cosine
+over that interval, which is $(\cos^2\theta_1 - \cos^2\theta_2)/2$ to round-off; so
+$\sum_h w_h = 1$ however narrow the cone (`_beam_directions`). A cone whose
+$\cos\theta_1$ and $\cos\theta_2$ round to the same double, as below a width of
+about $10^{-8}$ rad at the normal, is a single direction and is refused, with
+`Collimated()` named.
 Three directions reproduce the downward field of a cone heater within
 $2.4\times10^{-5}$ of the absorbed flux against the exact cone integral on V-RAD-02's
 slab, which asserts $2\times10^{-4}$.

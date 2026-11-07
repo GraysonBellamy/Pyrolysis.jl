@@ -3397,7 +3397,9 @@ Fields:
   only: `Diffuse()` (the default), equally from every direction of the
   hemisphere; `Collimated()`, one beam along the face normal; or
   `Cone(θ₁, θ₂; directions = 3)`, uniform between the polar angles `θ₁ < θ₂`
-  [rad] from the normal, carried as `directions` beams.
+  [rad] from the normal, carried as `directions` beams. A cone whose two
+  cosines round to the same `Float64`, as below a width of about 10⁻⁸ rad at
+  the normal, is refused: describe it with `Collimated()`.
 
 **Its behavior depends on the `radiation_model` keyword passed to `solve()`**
 (see §7.4 and Technical Reference §8):
@@ -11517,7 +11519,7 @@ full rate at any concentration (Chapter 4, §4.10; Technical Reference §6).
 abstract type AngularDistribution end
 Diffuse()                                  # the default distribution
 Collimated()
-Cone(θ₁, θ₂; directions = 3)               # radians, 0 ≤ θ₁ < θ₂ ≤ π/2
+Cone(θ₁, θ₂; directions = 3)               # radians, 0 ≤ θ₁ < θ₂ ≤ π/2, cos θ₂ < cos θ₁
 ```
 
 | Value | Behaviour |

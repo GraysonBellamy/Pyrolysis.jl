@@ -360,6 +360,43 @@ end
     @test source.μ == [1.0] && source.w == [1.0] && source.row == 3
 end
 
+# A cone's shares sum to one however narrow it is, down to the resolution of
+# its cosines; below it the cone is a single direction and is refused, with
+# `Collimated()` named. Near the normal the cosines merge below a width of
+# about 1e-8 rad.
+@testset "Radiative transfer: the beams of a narrow cone" begin
+    for θ₁ in (0.0, 0.3, 1.2), width in (1e-7, 1e-6, 1e-5, 1e-4, 1e-3), d in (1, 3)
+        cone = Cone(θ₁, θ₁ + width; directions = d)
+        cp = setup(
+            _slab(4; top = RadiativeFluxBC(1e4; distribution = cone), reacting = false);
+            radiation_model = RADIATIVE_TRANSFER,
+        )
+        source = only(find_kernel(RadiativeTransferKernel, cp.def.kernels).beams)
+        @test abs(sum(source.w) - 1) <= 4 * eps()
+        @test all(>(0), source.w)
+        @test all(cos(θ₁ + width) .<= source.μ .<= cos(θ₁))
+        @test all(isfinite, cp.u0)
+    end
+    # Resolved away from the normal at a width that loses the cosines' squares.
+    source = only(
+        find_kernel(
+            RadiativeTransferKernel,
+            setup(
+                _slab(
+                    4;
+                    top = RadiativeFluxBC(1e4; distribution = Cone(0.3, 0.3 + 1e-9)),
+                    reacting = false,
+                );
+                radiation_model = RADIATIVE_TRANSFER,
+            ).def.kernels,
+        ).beams,
+    )
+    @test abs(sum(source.w) - 1) <= 4 * eps()
+    for (θ₁, θ₂) in ((0.0, 1e-8), (0.0, 1e-9), (0.3, nextfloat(0.3)))
+        @test_throws r"Collimated\(\)" Cone(θ₁, θ₂)
+    end
+end
+
 # An isothermal medium facing diffuse radiation at its own temperature on
 # both faces, or on its exposed face with a mirror behind it, is in
 # equilibrium at every optical thickness and emissivity: q⁻ = q⁺ = B and no

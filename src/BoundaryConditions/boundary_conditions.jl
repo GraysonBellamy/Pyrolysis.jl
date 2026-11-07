@@ -266,7 +266,9 @@ Radiation of uniform intensity arriving between the polar angles `θ₁` and
 `θ₂` from the face normal [rad], `0 ≤ θ₁ < θ₂ ≤ π/2`: the view of a heater
 ring from the sample. It travels as `directions` beams, at the Gauss–Legendre
 nodes of the direction cosine `μ` over `[cos θ₂, cos θ₁]`, each carrying the
-share of the flux that its weight times its `μ` gives.
+share of the flux that its weight times its `μ` gives. A cone so narrow that
+`cos θ₂` and `cos θ₁` round to the same `Float64` is refused: it is a beam
+along one direction, which [`Collimated`](@ref) describes at the normal.
 
 # Example
 ```julia
@@ -283,6 +285,13 @@ struct Cone <: AngularDistribution
         )
         directions >= 1 ||
             throw(ArgumentError("a cone needs at least one direction, got $directions"))
+        cos(θ₂) < cos(θ₁) || throw(
+            ArgumentError(
+                "the cone between θ₁ = $θ₁ and θ₂ = $θ₂ [rad] is narrower than the " *
+                "resolution of their cosines, cos θ₁ = cos θ₂ = $(cos(θ₁)): " *
+                "describe a single direction at the normal with Collimated()",
+            ),
+        )
         return new(θ₁, θ₂, directions)
     end
 end

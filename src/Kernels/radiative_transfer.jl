@@ -168,14 +168,15 @@ end
 
 # The direction cosines of a distribution's beams and the share of the flux
 # each carries. Under a cone of uniform intensity the flux per unit μ is
-# proportional to μ, so a node's share is its weight times μ over ∫ μ dμ.
+# proportional to μ, so a node's share is its weight times μ over the
+# quadrature's ∫ μ dμ, Σ ω μ, which Gauss–Legendre integrates exactly.
 _beam_directions(::Collimated) = ([1.0], [1.0])
 function _beam_directions(c::Cone)
     μ₁, μ₂ = cos(c.θ₁), cos(c.θ₂)
     x, ω = _gauss_legendre(c.directions)
-    mid, half = (μ₁ + μ₂) / 2, (μ₁ - μ₂) / 2
-    μ = mid .+ half .* x
-    return μ, half .* ω .* μ ./ ((μ₁^2 - μ₂^2) / 2)
+    μ = (μ₁ + μ₂) / 2 .+ (μ₁ - μ₂) / 2 .* x
+    ωμ = ω .* μ
+    return μ, ωμ ./ sum(ωμ)
 end
 
 # The beam sources of `members`, their rows numbered from `row`.
