@@ -122,7 +122,7 @@ const _configurations = (
         problem = () -> _column(_pmma(); top = HeatFluxBC(50e3), stretch = 1.01),
         options = (
             use_ale = true,
-            correction = EquidistributionCorrection(activation = (2.0, 0.5)),
+            correction = EquidistributionCorrection(activation = (0.99, 0.5)),
         ),
     ),
 )
