@@ -8,7 +8,7 @@ This module provides flux evaluation functions for all boundary condition types:
 
 using ..Materials: STEFAN_BOLTZMANN
 using ..Materials: evaluate_param, evaluate_param_T
-using ..Materials: RadiationModel, SURFACE_ABSORPTION, BEER_LAMBERT, RADIATIVE_TRANSFER
+using ..Materials: RadiationModel, SURFACE_ABSORPTION, RADIATIVE_TRANSFER
 
 # ============================================================================
 # Boundary Flux Decomposition for Diagnostics
@@ -33,11 +33,9 @@ Returns a NamedTuple with:
 
 Convention: `net` is the **applied** face flux — per component it matches
 `evaluate_bc_flux_and_derivative`, so the total satisfies the Newton balance
-`net = q_cond` at convergence. Under `BEER_LAMBERT` and `RADIATIVE_TRANSFER`
-the incident radiation enters the domain *volumetrically*,
-not through the face, so a `RadiativeFluxBC` contributes zero `absorbed` and
-zero `net` here; under `BEER_LAMBERT` the volumetric deposit is reported
-separately as `extras.volumetric_absorption`. Under `RADIATIVE_TRANSFER` a
+`net = q_cond` at convergence. Under `RADIATIVE_TRANSFER` the incident
+radiation enters the domain *volumetrically*, not through the face, so a
+`RadiativeFluxBC` contributes zero `absorbed` and zero `net` here, and a
 `RadiativeBC` contributes zero as well: its exchange crosses the face through
 the radiation rows, reported as `extras.radiation_absorbed`,
 `radiation_emitted` and `radiation_back`. Under `SURFACE_ABSORPTION` the absorbed α·q_ext is applied at the face and included in `net`. For

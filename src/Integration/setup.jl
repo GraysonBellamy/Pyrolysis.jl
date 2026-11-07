@@ -404,7 +404,6 @@ function _kernels(
         !gas_can_move(problem) ? () :
         (GasTransportKernel(gas, topo, g0, problem.bc_set, material, laws),)
     radiation =
-        radiation_model === BEER_LAMBERT ? (BeerLambertKernel(topo, g0, problem.bc_set),) :
         radiation_model === RADIATIVE_TRANSFER ?
         (RadiativeTransferKernel(topo, g0, problem.bc_set, material),) : ()
     boundary = ThermalBoundaryKernel(
@@ -429,20 +428,16 @@ end
 
 # The radiation rows per face of a radiation model.
 _radiation_rows(model::RadiationModel, bc_set) =
-    model === BEER_LAMBERT ? 1 :
     model === RADIATIVE_TRANSFER ? radiative_transfer_rows(bc_set) : 0
 
-# The scale of the radiation rows' tolerances [W/m²].
-_radiation_scale(kernels::Tuple, ds, tspan) =
-    find_kernel(RadiativeTransferKernel, kernels) === nothing ?
-    _intensity_scale(kernels, ds, tspan) : _transfer_scale(kernels, ds, tspan)
-
-# Under radiative transfer, at least 1 W/m²: the largest radiation, diffuse
-# and beams, arriving at either face over the solve window, and the emissive
-# power at the largest of the initial cell temperatures and the surroundings'
-# temperatures of the `RadiativeBC` members over the window.
+# The scale of the radiation rows' tolerances [W/m²], at least 1: under
+# radiative transfer the largest radiation, diffuse and beams, arriving at
+# either face over the solve window, and the emissive power at the largest of
+# the initial cell temperatures and the surroundings' temperatures of the
+# `RadiativeBC` members over the window.
 function _transfer_scale(kernels::Tuple, ds, tspan)
     kernel = find_kernel(RadiativeTransferKernel, kernels)
+    kernel === nothing && return 1.0
     times = range(Float64(tspan[1]), Float64(tspan[2]); length = 101)
     conditions =
         kernel.back isa OpenBack ? (kernel.top, kernel.back.condition) : (kernel.top,)
@@ -452,15 +447,6 @@ function _transfer_scale(kernels::Tuple, ds, tspan)
         T_ref = max(T_ref, Kernels._surroundings_temperature(bc, t))
     end
     return max(1.0, incoming, STEFAN_BOLTZMANN * T_ref^4)
-end
-
-# The largest incident intensity over the solve window [W/m²], at least 1: the
-# scale of the face-intensity tolerances.
-function _intensity_scale(kernels::Tuple, ds, tspan)
-    kernel = find_kernel(BeerLambertKernel, kernels)
-    kernel === nothing && return 1.0
-    times = range(Float64(tspan[1]), Float64(tspan[2]); length = 101)
-    return max(1.0, maximum(t -> abs(incident_intensity(kernel, ds, t)), times))
 end
 
 # The area and its lateral rate under a variable cross section: one kernel
@@ -498,7 +484,6 @@ function _consistent_algebraic!(u, def::ResidualDefinition, ws::ResidualWorkspac
         _consistent_lateral!(du, u, def, ws, t)
         _consistent_lateral!(du, u, def, ws, t)
     end
-    _consistent_intensities!(u, def, ws, t)
     _consistent_radiation!(u, def, ws, t)
     cl === nothing && return nothing
     residual!(du, u, def, t, ws)
@@ -573,10 +558,10 @@ end
 
 Overwrite the algebraic unknowns of `u` with the values that satisfy their
 rows at time `t`, given its differential unknowns: under a variable cross
-section the area and its lateral rate first, since the intensities' optical
-depths and the history rates read the concentrations at the area; then the
-face intensities by the attenuation recurrence from the exposed face; then
-the node velocities or the cells' multipliers by the mesh closure. The
+section the area and its lateral rate first, since the radiation rows'
+optical depths and the history rates read the concentrations at the area;
+then the face fluxes of radiative transfer; then the node velocities or the
+cells' multipliers by the mesh closure. The
 integrator starts from such a state; a closure row left above round-off is
 an error.
 """
@@ -590,21 +575,6 @@ function consistent_state!(
     left === nothing || error(
         "the closure's consistent unknowns leave a row at $(left[1]) (scale $(left[2]))",
     )
-    return u
-end
-
-# The face intensities of `u` that satisfy their algebraic rows at time `t`:
-# the consistent values the integrator starts from.
-function _consistent_intensities!(u, def::ResidualDefinition, ws::ResidualWorkspace, t)
-    layout = def.layout
-    kernel = find_kernel(BeerLambertKernel, def.kernels)
-    kernel === nothing && return u
-    ds = ws.derived
-    derive!(ds, u, layout, def.setup)
-    sweep_intensities!(view(ds.q, 1, :), kernel, ds, def.setup.topology, t)
-    for f in axes(ds.q, 2), k in axes(ds.q, 1)
-        u[radiation_index(layout, f, k)] = ds.q[k, f]
-    end
     return u
 end
 
@@ -632,7 +602,7 @@ _register_kernel!(
     t::SlotTables,
     k::Union{ConductionKernel,GasTransportKernel,ThermalBoundaryKernel},
 ) = register_tables!(t, :face, k.d_floor)
-_register_kernel!(t::SlotTables, k::Union{BeerLambertKernel,RadiativeTransferKernel}) =
+_register_kernel!(t::SlotTables, k::RadiativeTransferKernel) =
     register_tables!(t, :matrix, k.d_floor)
 function _register_kernel!(t::SlotTables, k::RelativeFluxKernel)
     register_tables!(t, :matrix, k.ε)
@@ -694,9 +664,8 @@ the state, the tolerance vector and the colored Jacobian. The coordinate system 
 the thermal and mass conditions are keyed by its boundary tags.
 
 `radiation_model` is `SURFACE_ABSORPTION` (the incident flux enters the surface
-balance at the exposed cell's absorptivity, or the condition's own),
-`BEER_LAMBERT` (it is absorbed in depth, through the face intensities of
-[`BeerLambertKernel`](@ref)) or `RADIATIVE_TRANSFER` (every cell absorbs and
+balance at the exposed cell's absorptivity, or the condition's own) or
+`RADIATIVE_TRANSFER` (every cell absorbs and
 emits, through the face fluxes of [`RadiativeTransferKernel`](@ref); the
 `RadiativeBC` and `RadiativeFluxBC` members of the `:top` and `:bottom`
 conditions are the radiation arriving from outside, and leave the surface
@@ -967,7 +936,7 @@ function setup(
         reltol = Float64(reltol),
         abstol = Float64(abstol),
         threshold = Float64(threshold),
-        radiation_scale = _radiation_scale(kernels, ws.derived, problem.tspan),
+        radiation_scale = _transfer_scale(kernels, ws.derived, problem.tspan),
         time_scale = Float64(time_scale),
     )
     cells === nothing || _register_tables!(

@@ -20,7 +20,7 @@ model. Coupled species/thermal roots are assembled in `Kernels/gas_boundary.jl`.
 
 using ..Materials: STEFAN_BOLTZMANN, T_PROPERTY_MIN, T_PROPERTY_MAX
 using ..Materials: evaluate_param, evaluate_param_T
-using ..Materials: RadiationModel, SURFACE_ABSORPTION, BEER_LAMBERT, RADIATIVE_TRANSFER
+using ..Materials: RadiationModel, SURFACE_ABSORPTION, RADIATIVE_TRANSFER
 using ForwardDiff
 using StaticArrays: SVector
 using ..Physics: primal, bounded_transport_root, implicit_transport_root, TransportFailure
@@ -246,8 +246,8 @@ function evaluate_bc_flux_and_derivative end
 
 Radiation-model aware variant used by the boundary temperature solve.
 
-It keeps `RadiativeFluxBC` consistent with the residual: under `BEER_LAMBERT`
-and `RADIATIVE_TRANSFER` the incident radiation is absorbed in depth and
+It keeps `RadiativeFluxBC` consistent with the residual: under
+`RADIATIVE_TRANSFER` the incident radiation is absorbed in depth and
 contributes **zero** boundary flux here; under `SURFACE_ABSORPTION` it is
 absorbed at the surface, at the surface absorptivity. Under
 `RADIATIVE_TRANSFER` a `RadiativeBC` contributes zero as well: its exchange
@@ -450,7 +450,7 @@ end
 # absorbs at the material's mixture surface absorptivity `a_eff` (= ε_eff
 # unless a component overrides it).
 # - SURFACE_ABSORPTION: treat as boundary heat flux for correct T_surface
-# - BEER_LAMBERT, RADIATIVE_TRANSFER: handled volumetrically, return 0 to avoid
+# - RADIATIVE_TRANSFER: handled volumetrically, return 0 to avoid
 #   double-counting
 # ----------------------------------------------------------------------------
 @inline function evaluate_bc_flux_and_derivative(

@@ -133,6 +133,16 @@ outward_darcy_velocity
 has_intensities
 intensity_index
 r_intensity
+BEER_LAMBERT
+BeerLambertKernel
+incident_intensity
+sweep_intensities!
+transmitted_face
+_intensity_scale
+_consistent_intensities!
+volumetric_absorption
+radiation_transmitted
+beer_lambert
 
 [markers]
 re:Darcy(?:–|—|-|/| )Fick

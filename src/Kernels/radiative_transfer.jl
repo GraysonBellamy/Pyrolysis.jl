@@ -385,6 +385,13 @@ end
     return 0
 end
 
+"""
+	exposed_face(kernel, ds) -> Int
+
+The face the radiation enters through: the upstream face of the first live
+cell from the exposed boundary (the boundary face itself while no cell is
+dead), zero when no cell is live.
+"""
 @inline function exposed_face(kernel::RadiativeTransferKernel, ds)
     s = _first_live(kernel, ds)
     return s == 0 ? 0 : kernel.up[kernel.order[s]]

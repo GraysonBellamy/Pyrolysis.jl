@@ -295,8 +295,6 @@ Where the absorbed radiation goes depends on the `radiation_model` passed to
 - `SURFACE_ABSORPTION`: `absorptivity × flux` is absorbed at the exposed face,
   through the surface energy balance (opaque materials), whatever the
   `distribution`
-- `BEER_LAMBERT`: `absorptivity × flux` is absorbed in depth as one beam along
-  the face normal
 - `RADIATIVE_TRANSFER`: the radiation crosses the face and is absorbed in depth.
   [`Diffuse`](@ref) radiation crosses the exposed face at the emissivity of the
   exposed cell, so it takes no `absorptivity`; [`Collimated`](@ref) and

@@ -141,8 +141,6 @@ struct DomainCheck{D<:ResidualDefinition,W<:ResidualWorkspace}
     time::Base.RefValue{Float64}
     abstol::Vector{Float64}
     reltol::Float64
-    radiation_scale::Float64
-    relative_radiation::Bool
     balance_cell::Vector{Int}
     max_consecutive::Int
     monitor::ConstraintMonitor
@@ -171,8 +169,6 @@ function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
             balance[cl.row_node[k]] = k
         end
     end
-    q_scale =
-        has_radiation(layout) ? cp.abstol[radiation_index(layout, 1, 1)] / cp.reltol : 1.0
     gas, gas_masses = _gas_data(def.setup.material)
     return DomainCheck(
         def,
@@ -182,8 +178,6 @@ function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
         Ref(NaN),
         cp.abstol,
         cp.reltol,
-        q_scale,
-        find_kernel(RadiativeTransferKernel, def.kernels) !== nothing,
         balance,
         max_consecutive,
         ConstraintMonitor(),
@@ -456,8 +450,7 @@ evaluated into `check.du`:
   its node times its face area;
 - the pinned node's row and a prescribed-velocity row: `S = |wₙ|`, `a` the
   node's velocity tolerance;
-- a radiation row: `S` its own flux under `RADIATIVE_TRANSFER`, otherwise the
-  radiation scale; `a` its tolerance;
+- a radiation row: `S` its own flux; `a` its tolerance;
 - the area row: `S = |A|`; the lateral-rate row: `S = |θ_A|` plus the
   volume-weighted mean `|θ|`; `a` their tolerances.
 
@@ -494,8 +487,7 @@ function constraint_residual(check::DomainCheck, ds, c, t)
     @inbounds for f = 1:n_nodes(layout), k = 1:radiation_rows(layout)
         row = radiation_index(layout, f, k)
         mask[row] || continue
-        S = check.relative_radiation ? abs(ds.q[k, f]) : check.radiation_scale
-        worst = max(worst, abs(du[row]) / (rtol * S + tol[row]))
+        worst = max(worst, abs(du[row]) / (rtol * abs(ds.q[k, f]) + tol[row]))
     end
     if has_chi(layout)
         A = area_index(layout)

@@ -5,7 +5,7 @@ cached native code instead of compiling the solver.
 
 A solve compiles two layers. The integrator (OrdinaryDiffEq's stepper, its
 linear solve and the callbacks) compiles for the solver configuration only:
-whether the mesh moves, whether in-depth radiation adds algebraic rows on a
+whether the mesh moves, whether radiative transfer adds algebraic rows on a
 fixed mesh, and whether cells are deactivated. `solve` hands it
 problem-independent function and callback types (`ErasedRHS`,
 `ErasedJacobian`), so the problem's types do not enter. The kernels, the state
@@ -16,7 +16,8 @@ energy state. A workload therefore caches the integrator for every problem
 solved in its configuration, and the kernels for the problems whose types it
 shares.
 
-The workloads cover fixed and moving meshes, both radiation models,
+The workloads cover fixed and moving meshes, both radiation models (the
+heater diffuse and, once, collimated),
 lumped transfer with closed or open Darcy channels, deactivation, and both
 energy formulations. Multispecies dusty-gas workloads exercise an external
 mass film coupled to a thermal film. Each workload is also executed by the
@@ -29,8 +30,8 @@ const _WORKLOAD_CELLS = 8
 
 # Constant-property materials in the constructors' plain forms. A permeable
 # solid (`darcy`) opens the Darcy channel. The two-component solid absorbs
-# strongly, so that under Beer–Lambert absorption its residue keeps absorbing
-# the beam and the 1 mm decks burn out within their horizon.
+# strongly, so that under radiative transfer its residue keeps absorbing and
+# the 1 mm decks burn out within their horizon.
 function _workload_material_2(; darcy::Bool)
     return Material(
         name = :workload_2,
@@ -99,10 +100,11 @@ function _workload_material_3(; darcy::Bool)
     )
 end
 
-# The cone boundary conditions with an explicit vacuum reservoir.
-function _workload_bcs(q)
+# The cone boundary conditions with an explicit vacuum reservoir, the heater's
+# radiation arriving as `distribution`.
+function _workload_bcs(q; distribution = Diffuse())
     thermal = (
-        top = RadiativeFluxBC(q) +
+        top = RadiativeFluxBC(q; distribution) +
               RadiativeBC(T_inf = 300.0) +
               ConvectiveBC(h = 10.0, T_inf = 300.0),
         bottom = AdiabaticBC(),
@@ -114,11 +116,11 @@ function _workload_bcs(q)
     )
 end
 
-function _workload_problem(material; L, q, t_end)
+function _workload_problem(material; L, q, t_end, distribution = Diffuse())
     return PyrolysisProblem(
         mesh = uniform_mesh(L, _WORKLOAD_CELLS),
         material = material,
-        bc_set = _workload_bcs(q),
+        bc_set = _workload_bcs(q; distribution),
         tspan = (0.0, t_end),
         dt_initial = 1e-3,
         output_times = collect(range(0.0, t_end, length = 5)),
@@ -196,7 +198,7 @@ function _precompile_workloads()
         name = join(
             (
                 moving ? "moving" : "fixed",
-                radiation === BEER_LAMBERT ? "beer_lambert" : "surface",
+                radiation === RADIATIVE_TRANSFER ? "radiative_transfer" : "surface",
                 darcy ? "lumped_darcy" : "lumped_wall",
                 (deactivation ? ("deactivation",) : ())...,
                 string(nc),
@@ -215,7 +217,7 @@ function _precompile_workloads()
         return nothing
     end
     for moving in (false, true),
-        radiation in (SURFACE_ABSORPTION, BEER_LAMBERT),
+        radiation in (SURFACE_ABSORPTION, RADIATIVE_TRANSFER),
         darcy in (false, true),
         deactivation in (false, true)
 
@@ -233,9 +235,25 @@ function _precompile_workloads()
         _workload_material_3,
         3;
         moving = true,
-        radiation = BEER_LAMBERT,
+        radiation = RADIATIVE_TRANSFER,
         darcy = true,
         deactivation = false,
+    )
+    # The heater's radiation as one collimated beam.
+    push!(
+        workloads,
+        "moving_radiative_transfer_collimated_lumped_wall_2" =>
+            () -> solve(
+                _workload_problem(
+                    _workload_material_2(; darcy = false);
+                    L = 0.01,
+                    q = 50e3,
+                    t_end = 20.0,
+                    distribution = Collimated(),
+                );
+                use_ale = true,
+                radiation_model = RADIATIVE_TRANSFER,
+            ),
     )
     add!(
         _workload_material_2,

@@ -35,7 +35,6 @@ include("contributions.jl")
 include("reactions.jl")
 include("conduction.jl")
 include("gas_transport.jl")
-include("radiation.jl")
 include("radiative_transfer.jl")
 include("thermal_boundary.jl")
 include("gas_boundary.jl")
@@ -45,7 +44,6 @@ export Kernel, Contributions, reset!, contribute!, find_kernel
 export ReactionKernel
 export ConductionKernel, normal_conductivity, cell_gradient, gradient_support
 export GasTransportKernel, face_peclet
-export BeerLambertKernel, incident_intensity, sweep_intensities!, transmitted_face
 export RadiativeTransferKernel, MirrorBack, OpenBack, consistent_radiation!
 export radiative_transfer_rows, radiation_reach, incoming_radiation, arriving_radiation
 export radiation_crossing

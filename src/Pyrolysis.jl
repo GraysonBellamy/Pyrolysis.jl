@@ -9,7 +9,7 @@ solid (Arbitrary Lagrangian–Eulerian).
 - Multi-component materials with temperature-dependent properties
 - Arrhenius-type decomposition kinetics (single and multi-step)
 - Gas generation and transport through porous char
-- In-depth radiation absorption (Beer-Lambert)
+- Radiative transfer through semi-transparent solids
 - Material volume changes (shrinkage, swelling, intumescence)
 - Surface regression and internal interface motion
 - Surface burnout by cell deactivation
@@ -156,7 +156,7 @@ export BoundaryConditionSet
 export background_gas_concentration
 
 # Radiation models
-export RadiationModel, SURFACE_ABSORPTION, BEER_LAMBERT, RADIATIVE_TRANSFER
+export RadiationModel, SURFACE_ABSORPTION, RADIATIVE_TRANSFER
 
 # The mesh
 export uniform_mesh, stretched_mesh, line_mesh, box_mesh, cell_mesh

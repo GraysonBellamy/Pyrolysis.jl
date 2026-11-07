@@ -154,8 +154,8 @@ Create a solid component.
 - `k`: Thermal conductivity [W/(m·K)] (number or property function)
 - `ε=0.9`: Surface emissivity [-] (number or property function of `T`, same
   forms as `k`). Evaluated at the cell temperature in the mixing rule
-  `ε_eff = Σⱼ vⱼ εⱼ(T)`, so the surface-emission and Beer-Lambert Jacobians
-  carry `dε/dT`.
+  `ε_eff = Σⱼ vⱼ εⱼ(T)`, so the surface-emission and radiative-transfer
+  Jacobians carry `dε/dT`.
 - `absorptivity=nothing`: Constant surface absorptivity [-] for *incident*
   radiation (a property of the heater spectrum, not of the surface
   temperature). `nothing` = Kirchhoff, `aⱼ = εⱼ(T)`. A `RadiativeFluxBC`
@@ -164,8 +164,8 @@ Create a solid component.
   Under `RADIATIVE_TRANSFER` it applies to beams (`Collimated`, `Cone`)
   only: diffuse radiation crosses the face at the emissivity, so a diffuse
   `RadiativeFluxBC` is refused on a material where a component sets it.
-- `α=0.0`: Mass absorption coefficient [m²/kg] (Beer-Lambert in-depth
-  absorption, unrelated to `absorptivity`)
+- `α=0.0`: Mass absorption coefficient [m²/kg] (absorption and emission
+  through the solid under `RADIATIVE_TRANSFER`, unrelated to `absorptivity`)
 - `λ=nothing`: Condensed superficial transfer [m²/s]; explicit under `LumpedTransfer`
 - `κ=0.0`: Permeability [m²] for Darcy flow (0 = impermeable)
 - `ρ_intrinsic=nothing`: Skeletal/intrinsic density of the cell-wall material
