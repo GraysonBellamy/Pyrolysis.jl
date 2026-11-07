@@ -29,7 +29,7 @@ The whole API assumes four conventions (Technical Reference §2 and §3):
 
 ## 16.1 What `using Pyrolysis` gives you, and what it does not
 
-The top-level `Pyrolysis` module exports a curated surface of 103 names. The
+The top-level `Pyrolysis` module exports a curated surface of 107 names. The
 package is organized in submodules, and most of their names are not
 re-exported at the top level. There are three ways to reach a name:
 
@@ -50,7 +50,7 @@ re-exported at the top level. There are three ways to reach a name:
    `Internal` are not part of the stable API and may move or change between
    minor releases (Chapter 11, §11.9).
 
-The 103 top-level exports, by group:
+The 107 top-level exports, by group:
 
 | Group | Exports | Section |
 |---|---|---|
@@ -59,7 +59,7 @@ The 103 top-level exports, by group:
 | Reactions | `Reaction`, `DepletionLimiter` | 16.2.3, 16.2.5 |
 | Mixing | `MixingRule`, `PARALLEL`, `SERIES`, `WEIGHTED`, `BRUGGEMAN`, `CARMAN_KOZENY`, `MixingSpec`, `MaterialMixing` | 16.2.4 |
 | Property functions | `ConstantProperty`, `LinearProperty`, `PolynomialProperty`, `SutherlandProperty`, `ArrheniusProperty`, `TableProperty`, `CallableProperty`, `StateDependentProperty` | 16.2.2 |
-| Radiation models | `RadiationModel`, `SURFACE_ABSORPTION`, `BEER_LAMBERT` | 16.2.6 |
+| Radiation models | `RadiationModel`, `SURFACE_ABSORPTION`, `RADIATIVE_TRANSFER`, `AngularDistribution`, `Diffuse`, `Collimated`, `Cone` | 16.2.6 |
 | Thermal conditions | `AdiabaticBC`, `HeatFluxBC`, `ConvectiveBC`, `RadiativeBC`, `RadiativeFluxBC`, `DirichletThermalBC`, `CombinedThermalBC` | 16.4.1 |
 | Mass conditions | `ImpermeableBC`, `MassFluxBC`, `AmbientGasBC`, `GasReservoir`, `MassTransferFilm` | 16.4.2 |
 | Pressure conditions | `NeumannPressureBC`, `ConvectivePressureBC` | 16.4.3 |
@@ -85,7 +85,7 @@ them by name, for example `using Pyrolysis.Problem: initial_fields`.
 | `DeactivationEvent`, `CellDeactivation`, `replay_events!`, `top_live_cell`, `threshold_margin` | `Pyrolysis.Deactivation` |
 | `residual!`, `ResidualDefinition`, `ResidualWorkspace`, `NoSources`, `VolumetricSources` | `Pyrolysis.Assembly` |
 | `jac_prototype`, `jacobian!`, `jacobian_pattern`, `color_count`, `dense_jacobian`, `missing_entries`, `compare_entries` | `Pyrolysis.ColoredJacobian` |
-| `StateLayout`, `state_length`, `mass_index`, `energy_index`, `position_index`, `velocity_index`, `intensity_index`, `is_differential`, `mass_matrix` | `Pyrolysis.States` |
+| `StateLayout`, `state_length`, `mass_index`, `energy_index`, `position_index`, `velocity_index`, `radiation_index`, `is_differential`, `mass_matrix` | `Pyrolysis.States` |
 | `IntegratorPolicy`, `DomainCheck`, `consistent_state!`, `default_linear_solver`, `DT_AFTER_EVENT`, `CORRECTION_BAND`, `MAX_CONSTRAINT_REJECTIONS`, `FAILURE_MEMORY_GROWTH`, `FAILURE_MEMORY_STEPS` | `Pyrolysis.Integration` |
 | `residues`, `vanishes`, `EQUIDISTRIBUTION_TIME`, `ACTIVATION_TIME_FACTOR` | `Pyrolysis.Closures` |
 
@@ -106,7 +106,7 @@ each using only those before it. Everything a submodule exports is reachable as
 | `Physics` | reaction kinetics, the diffusive gas flux at a face, volume change, the ideal-gas pressure, `background_gas_concentration` |
 | `Meshes` | the face-based mesh (`Mesh`, `MeshTopology`, `MeshGeometry`, `geometry!`), the coordinate systems, the line constructors, and the meshes of two and three dimensions (`box_mesh`, `cell_mesh`) |
 | `States` | the state layout and its index functions, the energy states, the caloric laws, the per-cell reference data and tolerances, the state mapping (`derive!`) |
-| `Kernels` | the physics kernels: reactions, conduction, gas transport, in-depth radiation, the thermal boundary, the relative fluxes of a correction |
+| `Kernels` | the physics kernels: reactions, conduction, gas transport, radiative transfer, the thermal boundary, the relative fluxes of a correction |
 | `Closures` | the mesh motion: the balance rows of a line, the multiplier closure of other meshes, the corrections, the cross-section rows |
 | `Assembly` | the residual `residual!(du, u, def, t, ws)`, its definition and buffers, the external sources |
 | `Deactivation` | cell deactivation: the threshold test, the merge, the events and their replay |
@@ -372,17 +372,29 @@ full rate at any concentration (Chapter 4, §4.10; Technical Reference §6).
 ### 16.2.6 The `RadiationModel` enum
 
 ```julia
-@enum RadiationModel SURFACE_ABSORPTION BEER_LAMBERT
+@enum RadiationModel SURFACE_ABSORPTION RADIATIVE_TRANSFER
+
+abstract type AngularDistribution end
+Diffuse()                                  # the default distribution
+Collimated()
+Cone(θ₁, θ₂; directions = 3)               # radians, 0 ≤ θ₁ < θ₂ ≤ π/2
 ```
 
 | Value | Behaviour |
 |---|---|
-| `SURFACE_ABSORPTION` | the default: the absorbed incident flux `a·q` of a `RadiativeFluxBC` enters the surface energy balance (an opaque material); the component absorption coefficients are not read |
-| `BEER_LAMBERT` | exponential in-depth absorption through the components' `α`; the face intensities join the state as algebraic rows; planar coordinates only |
+| `SURFACE_ABSORPTION` | the default: the absorbed incident flux `a·q` of a `RadiativeFluxBC` and the exchange of a `RadiativeBC` enter the surface energy balance (an opaque material); the component absorption coefficients are not read |
+| `RADIATIVE_TRANSFER` | gray two-stream radiative transfer through the solid: every cell absorbs and emits at the components' `α`, the two hemispherical fluxes of every face (and one beam per direction of a collimated or cone heater) join the state as algebraic rows, and the radiative conditions contribute nothing to the surface balance; a planar line only |
+
+| Distribution | How a `RadiativeFluxBC` arrives under `RADIATIVE_TRANSFER` |
+|---|---|
+| `Diffuse()` | equally from every direction of the hemisphere; crosses the exposed face at the cell's `ε_eff` and takes no `absorptivity` |
+| `Collimated()` | one beam along the face normal, entering at the `absorptivity` (or the cell's `a_eff`) |
+| `Cone(θ₁, θ₂; directions)` | uniform intensity between the polar angles `θ₁ < θ₂`, carried as `directions` beams at the Gauss–Legendre nodes of the direction cosine |
 
 The model is chosen by `solve`'s `radiation_model` keyword (§16.7; Chapter 8,
-§8.8). The re-radiation (`RadiativeBC`) and convection (`ConvectiveBC`) losses
-apply under every model.
+§8.8); the distribution by `RadiativeFluxBC`'s `distribution` keyword, read under
+`RADIATIVE_TRANSFER` only. The convection (`ConvectiveBC`) loss applies at the face
+under every model.
 
 ---
 
@@ -483,17 +495,17 @@ node `n + 1`, so the Jacobian is banded:
 | Block | Holds | Present when |
 |---|---|---|
 | node `k` | position `x_k` [m] and velocity `w_k` [m/s] | moving mesh (`use_ale = true`) |
-| node `k` | intensity `I_k` of the face at the node [W/m²] | `radiation_model = BEER_LAMBERT` |
+| node `k` | the radiative fluxes of the face at the node: `I⁻_k`, `I⁺_k`, then one beam per heater direction [W/m²] | `radiation_model = RADIATIVE_TRANSFER` |
 | cell `i` | masses `m_i1 … m_i,NC` [kg] and the energy state (`T_i` [K], or `H_i` [J] under `energy_state = :enthalpy`) | always |
 | cell `i` | conversion-history pair `G_i`, `M_i` [kg] | variable cross section |
 | global | cross-section area `A` [m²] and lateral strain rate `θ_A` [1/s] | variable cross section |
 
-The node velocities, the face intensities, `A` and `θ_A` are algebraic rows;
+The node velocities, the radiative face fluxes, `A` and `θ_A` are algebraic rows;
 the others are differential. Read a raw state only through the index functions
 of `Pyrolysis.States` on the layout of a set-up problem, `cp.def.layout`
 (`state_length`, `mass_index(layout, i, j)`, `energy_index(layout, i)`,
 `position_index(layout, k)`, `velocity_index(layout, k)`,
-`intensity_index(layout, f)`, `history_index(layout, i, a)`,
+`radiation_index(layout, f, k)`, `history_index(layout, i, a)`,
 `area_index(layout)`, `lateral_rate_index(layout)`, `is_differential(layout)`,
 `mass_matrix(layout)`). Chapter 6 (§6.6), Chapter 11 (§11.9.2) and Technical
 Reference §15.1 describe the layout.
@@ -513,7 +525,7 @@ and `BoundaryConditionSet` are top-level exports.
 | `HeatFluxBC` | `HeatFluxBC(flux)`, a number or `t -> q` | `flux` |
 | `ConvectiveBC` | `ConvectiveBC(; h, T_inf, blowing = NoBlowing())` | `R_b h (T_∞ − T_s)`, `R_b` the blowing model's ratio (one without outflow) |
 | `RadiativeBC` | `RadiativeBC(; ε = nothing, T_inf, F = 1.0)` | `ε σ (F T_∞⁴ − T_s⁴)`, `F` the view factor to the surroundings (irradiation only); `ε = nothing` is the exposed cell's effective emissivity |
-| `RadiativeFluxBC` | `RadiativeFluxBC(flux; absorptivity = nothing)` | `a q(t)`, incident external radiation; `absorptivity = nothing` is the exposed cell's effective absorptivity |
+| `RadiativeFluxBC` | `RadiativeFluxBC(flux; absorptivity = nothing, distribution = Diffuse())` | `a q(t)`, incident external radiation; `absorptivity = nothing` is the exposed cell's effective absorptivity; `distribution` (`Diffuse()`, `Collimated()`, `Cone(θ₁, θ₂)`) is read under `RADIATIVE_TRANSFER` |
 | `DirichletThermalBC` | `DirichletThermalBC(T)`, a number or `t -> T` | holds `T_s = T` |
 | `CombinedThermalBC` | `bc1 + bc2 + …` | the sum of its members |
 
@@ -529,14 +541,15 @@ Notes:
   components' `absorptivity` where set and their emissivity otherwise
   (Kirchhoff), so with no component absorptivity it equals the effective
   emissivity.
-- How a `RadiativeFluxBC` acts depends on `radiation_model`: under
-  `SURFACE_ABSORPTION` the absorbed flux `a q` enters the surface balance; under
-  `BEER_LAMBERT` the condition contributes zero to the surface balance and the
-  absorbed flux enters the first live cell as the intensity of its exposed face,
-  through the `:top` faces only (a `RadiativeFluxBC` on another tag is refused).
-  Under `BEER_LAMBERT` the `:top` condition holds at most one `RadiativeFluxBC`:
-  a second is refused with an `ArgumentError`, and sources sharing one absorptivity
-  are combined in a single flux function.
+- How a `RadiativeFluxBC` and a `RadiativeBC` act depends on `radiation_model`: under
+  `SURFACE_ABSORPTION` the absorbed flux `a q` and the exchange `ε σ (F T_∞⁴ − T_s⁴)`
+  enter the surface balance; under `RADIATIVE_TRANSFER` both contribute zero to the
+  surface balance and feed the radiation rows instead: a diffuse flux and the
+  surroundings' `F σ T_∞⁴` cross the face at the cell's `ε_eff`, a collimated or cone
+  flux enters as beams at `a`. Radiative
+  transfer refuses a `RadiativeBC` with its own `ε`, a diffuse `RadiativeFluxBC` with
+  its own `absorptivity` or on a material where a component sets one, a beam on a tag
+  other than `:top`, and a `:top` condition with no radiative member (Chapter 5, §5.6).
 - An adiabatic face, a `HeatFluxBC` alone, or a `DirichletThermalBC` alone, is
   applied in closed form. Any other condition sets the surface temperature `T_s` by a Newton
   solve of the surface energy balance `q_BC(T_s) = k_eff (T_s − T_cell)/d`
@@ -546,7 +559,8 @@ Notes:
   (Chapter 5, §5.4; Technical Reference §12.2). The flux of a time-dependent
   condition is evaluated at every right-hand-side evaluation.
 - Combine conditions with `+`:
-  `RadiativeFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0) + ConvectiveBC(h = 10.0, T_inf = 300.0)`.
+  `RadiativeFluxBC(50e3) + RadiativeBC(T_inf = 300.0) + ConvectiveBC(h = 10.0, T_inf = 300.0)`,
+  which runs under either radiation model.
 
 ### 16.4.2 Mass and reservoir conditions
 
@@ -807,12 +821,12 @@ faces they name unless noted.
 | `thickness_history` | m | distance from the first node to the outermost live node |
 | `min_cell_thickness` | m | thickness of the thinnest live cell |
 | `surface_mass_flux` | kg·m⁻²·s⁻¹ | outward mass flux of the `:top` faces |
-| `surface_heat_flux_net` | W·m⁻² | heat flux the `:top` condition applies, positive into the domain (under a prescribed temperature, the conducted flux); excludes the incident flux absorbed in depth under `BEER_LAMBERT` |
+| `surface_heat_flux_net` | W·m⁻² | heat flux the `:top` condition applies, positive into the domain (under a prescribed temperature, the conducted flux); holds no radiation under `RADIATIVE_TRANSFER` |
 | `surface_heat_flux_absorbed` | W·m⁻² | incident radiation absorbed at the face |
 | `surface_heat_flux_reradiation`, `surface_heat_flux_convection` | W·m⁻² | re-radiative and convective losses, positive leaving |
 | `surface_heat_flux_conduction` | W·m⁻² | flux conducted from the `:top` faces into their cells, `k (T_s − T_cell)/d` |
 | `surface_blowing_ratio`, `surface_pooling_factor`, `surface_face_fraction`, `surface_face_buoyancy` | – | blowing diagnostics of the `:top` balance (1, 1, 0 and 1 without outflow or without a blowing model) |
-| `volumetric_absorption`, `radiation_transmitted` | W·m⁻² | intensity absorbed in depth and leaving through the last face of the beam, per unit exposed area (zero without `BEER_LAMBERT`) |
+| `radiation_absorbed`, `radiation_emitted`, `radiation_back` | W·m⁻² | radiation crossing the exposed face inward and outward, and the net radiation leaving through the back face (zero at a mirror), per unit face area; their balance is what the cells take in (zero without `RADIATIVE_TRANSFER`) |
 | `surface_emissivity`, `surface_conductivity` | –, W·m⁻¹·K⁻¹ | emissivity and conductivity of the cell under the `:top` faces |
 | `back_heat_flux` | W·m⁻² | heat flux the `:bottom` condition applies, positive into the domain |
 | `MLR_gauge` | kg·m⁻²·s⁻¹ | mass-loss rate per unit initial `:top` area, `mass_loss_rate · A(t)/A₀` |
@@ -855,7 +869,7 @@ match.
 | Choice | Selected by | Values | Default |
 |---|---|---|---|
 | Mesh motion | `use_ale` | fixed, moving (`w = v_s + c`) | fixed |
-| Radiation | `radiation_model` | `SURFACE_ABSORPTION`, `BEER_LAMBERT` | `SURFACE_ABSORPTION` |
+| Radiation | `radiation_model` | `SURFACE_ABSORPTION`, `RADIATIVE_TRANSFER` | `SURFACE_ABSORPTION` |
 | Gas transport | material model and complete mass conditions | `LumpedTransfer` or `DustyGas`; EOS for every gas-bearing material, including sealed gas | from the problem |
 | Cross section | the material's `lateral_shrinkage_law` | fixed, variable (needs `use_ale = true` and planar coordinates) | fixed |
 | Energy state | `energy_state` | `:temperature`, `:enthalpy` | `:temperature` |
@@ -869,7 +883,7 @@ Choosing for common scenarios:
 
 - TGA-like or fixed slab: the defaults (a fixed mesh, `SURFACE_ABSORPTION`).
 - Cone calorimeter with recession: `use_ale = true` with
-  `radiation_model = SURFACE_ABSORPTION` (opaque) or `BEER_LAMBERT`
+  `radiation_model = SURFACE_ABSORPTION` (opaque) or `RADIATIVE_TRANSFER`
   (semi-transparent).
 - Burnout of a layer: add `deactivation = true`; on a moving mesh `setup`
   installs the equidistribution correction (Chapter 10).
@@ -883,8 +897,10 @@ Choosing for common scenarios:
 
 A combination that is not implemented is refused by `setup` with an
 `ArgumentError` before anything is integrated: a lateral shrinkage law without
-`use_ale` or on a non-planar mesh; `BEER_LAMBERT` on a non-planar mesh or with
-a `RadiativeFluxBC` on a tag other than `:top`; a correction without
+`use_ale` or on a non-planar mesh; `RADIATIVE_TRANSFER` on a non-planar mesh,
+without a radiative condition on `:top`, with a `RadiativeBC` that gives its own `ε`,
+with a diffuse `RadiativeFluxBC` that gives its own `absorptivity` (or on a material
+where a component sets one), or with a beam on a tag other than `:top`; a correction without
 `use_ale`; a `PrescribedCorrection` with a reacting material or with deactivation;
 an explicit `lagrangian` list that omits a
 layer interface under the equidistribution correction; with deactivation, a
@@ -899,7 +915,7 @@ layer interface under the equidistribution correction; with deactivation, a
 |---|---|---|---|
 | `energy_state` | `Symbol` | `:temperature` | The energy unknown of each cell: `:temperature` (the cell temperature) or `:enthalpy` (the sensible-enthalpy inventory) |
 | `abstol` | `Real` | `1e-8` | Absolute tolerance of the temperature rows [K]; the enthalpy rows take `threshold · m_s,i(0) · c_p,ref · abstol`, the other rows derive theirs from `reltol` and `threshold` |
-| `reltol` | `Real` | `1e-6` | Relative tolerance of every row; also scales the mass, position, velocity, intensity and cross-section tolerances, the domain test's constraint allowance, and the widening of a located event's threshold |
+| `reltol` | `Real` | `1e-6` | Relative tolerance of every row; also scales the mass, position, velocity, radiation and cross-section tolerances, the domain test's constraint allowance, and the widening of a located event's threshold |
 | `threshold` | `Real` or `nothing` | `nothing`, which is `1e-2`, or with `deactivation` at an order other than one `conversion_threshold/10` | `ε_m`, the deactivation threshold as a fraction of a cell's reference; also scales the mass and position tolerances, with or without `deactivation` |
 | `pressure_tolerance` | `Real` | `1.0` | Absolute local pressure-error budget [Pa], with proposed-state pore/thermal/geometry sensitivities |
 | `maxiters` | `Int` | `1_000_000` | Maximum number of integrator steps |
@@ -912,7 +928,7 @@ layer interface under the equidistribution correction; with deactivation, a
 | `progress` | `Bool` | `false` | Draw a progress bar, a read-only observer |
 | `use_ale` | `Bool` | `false` | Move the mesh: the node positions and velocities join the state, `w = v_s + c` |
 | `min_thickness` | `Real` | `1e-6` | On a moving mesh, end with `:Terminated` and outcome `:min_thickness` when the live thickness falls below it [m]; must be positive |
-| `radiation_model` | `RadiationModel` | `SURFACE_ABSORPTION` | `SURFACE_ABSORPTION` or `BEER_LAMBERT` (§16.2.6) |
+| `radiation_model` | `RadiationModel` | `SURFACE_ABSORPTION` | `SURFACE_ABSORPTION` or `RADIATIVE_TRANSFER` (§16.2.6) |
 | `integrator_policy` | `IntegratorPolicy` | `default_policy()` | The integrator with its restart and observer-flag rules and its linear solver (§16.8) |
 | `sources` | sources object | `NoSources()` | External volumetric sources for verification: `Pyrolysis.Assembly.VolumetricSources(mass, energy)` |
 | `deactivation` | `Bool` | `false` | Deactivate cells whose condensed mass, or at an order other than one whose reactive inventory, falls below `threshold` of its reference (§16.11) |
@@ -948,7 +964,7 @@ it starts empty):
 | gas component mass | initial `pressure_tolerance · M_j · φ_i · V_i/(N_g R T_i)` [kg], supplemented by the proposed-state pressure norm |
 | node position (moving mesh) | `reltol · threshold · h_n`, `h_n` the smallest initial size of the cells around node `n`; no relative share |
 | node velocity (moving mesh) | the position tolerance over `dt` |
-| face intensity (`BEER_LAMBERT`) | `reltol` times the largest incident intensity over the time span (at least 1 W/m²) |
+| radiation row (`RADIATIVE_TRANSFER`) | `reltol` times the largest radiation arriving from outside over the time span or `σT⁴` of the hottest initial cell or surroundings, whichever is larger (at least 1 W/m²) |
 | conversion-history pair (lateral shrinkage) | the cell's mass tolerance |
 | cross-section area and lateral rate (lateral shrinkage) | `reltol · A₀`; the smallest node-velocity tolerance over the initial thickness |
 

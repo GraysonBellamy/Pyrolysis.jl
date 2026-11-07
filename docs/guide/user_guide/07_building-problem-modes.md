@@ -166,7 +166,7 @@ nothing is dispatched on during the integration. The choices:
 | Choice | Selected by | Values | Default |
 |---|---|---|---|
 | Mesh motion | `use_ale` keyword | fixed (`false`), moving (`true`) | fixed |
-| Radiation | `radiation_model` keyword | `SURFACE_ABSORPTION`, `BEER_LAMBERT` | `SURFACE_ABSORPTION` |
+| Radiation | `radiation_model` keyword | `SURFACE_ABSORPTION`, `RADIATIVE_TRANSFER` | `SURFACE_ABSORPTION` |
 | Gas transport | material model and complete mass conditions | `LumpedTransfer` or `DustyGas`; EOS for every gas-bearing material, including sealed gas | from the problem |
 | Cross section | the material's `lateral_shrinkage_law` | fixed, variable | fixed |
 | Energy state | `energy_state` keyword | `:temperature`, `:enthalpy` | `:temperature` |
@@ -255,60 +255,69 @@ correction and refuses one (§4.14).
 
 ## 7.4 Radiation model (`radiation_model`)
 
-![Matching slabs with surface deposition and Beer–Lambert face intensities, absorbed cell power, transmitted radiation and intensity decreasing with inward depth.](../../assets/figures/07_radiation.svg)
+![Two matching slabs: surface absorption deposits the absorbed flux at the face; radiative transfer carries downward and upward fluxes at every face, a dashed beam into the depth, and a mirror at the back; a chart of the two fluxes against depth.](../../assets/figures/07_radiation.svg)
 
-**Figure 7. Where applied radiation is absorbed (schematic).** `SURFACE_ABSORPTION` applies `RadiativeFluxBC` at the surface. Beer–Lambert introduces face-intensity unknowns and deposits the entering-minus-leaving radiant power in each cell. The exponential inset illustrates uniform optical thickness $\alpha L=2$; its depth coordinate $L-z$ increases inward, opposite to the common $+z$ direction. Radiation remaining at the back face is transmitted rather than absorbed.
+**Figure 7. Where radiation is absorbed (schematic).** Under `SURFACE_ABSORPTION` the absorbed flux `a·q_inc` enters the surface energy balance and no cell absorbs radiation. Under `RADIATIVE_TRANSFER` each face carries the hemispherical fluxes `I⁻` (toward the back) and `I⁺` (toward the exposed face); the exposed face transmits the fraction `ε` of the cell beside it in both directions, a collimated or cone heater travels as beams, every cell absorbs and emits, and a back without a radiative condition reflects everything. The chart gives `I⁻` and `I⁺` of the worked slab of Technical Reference §8.8 at its consistent start, over the absorbed heater flux `εq`: they meet at the mirror.
 
-Where the incident radiation is absorbed is selected by the `radiation_model` keyword, which
-takes a `RadiationModel` value:
+Where radiation is absorbed, and whether the solid emits from its depth, is selected by the
+`radiation_model` keyword, which takes a `RadiationModel` value:
 
 | Value | Meaning | Unknowns added |
 |---|---|---|
-| `SURFACE_ABSORPTION` (default) | The incident flux of a `RadiativeFluxBC` is absorbed at the exposed surface, through the surface energy balance (opaque material). Component `α` values are not read. | none |
-| `BEER_LAMBERT` | In-depth exponential absorption, `I(z) = I_e exp(−∫ α_eff dz)`, with `α_eff = Σ_j ξ_j α_j` from the components' mass absorption coefficients `α` [m²/kg]. | one intensity per face, algebraic |
+| `SURFACE_ABSORPTION` (default) | The incident flux of a `RadiativeFluxBC` is absorbed at the exposed surface, through the surface energy balance, and a `RadiativeBC` exchanges radiation there (opaque material). Component `α` values are not read. | none |
+| `RADIATIVE_TRANSFER` | Radiation travels through the solid as two hemispherical fluxes, every cell absorbing and emitting at `α_eff = Σ_j ξ_j α_j` from the components' mass absorption coefficients `α` [m²/kg] and at its temperature; a collimated or cone heater travels as beams. | two fluxes per face plus one per beam direction, algebraic |
 
 ```julia
 # Opaque material: absorb the cone flux at the surface
 sol = solve(problem; radiation_model = SURFACE_ABSORPTION)
 
-# Semi-transparent material: absorb in depth (needs α on the components)
-sol = solve(problem; radiation_model = BEER_LAMBERT)
+# Semi-transparent material: radiative transfer through the solid (needs α on the
+# components, no ε on a RadiativeBC, no absorptivity on a diffuse RadiativeFluxBC)
+sol = solve(problem; radiation_model = RADIATIVE_TRANSFER)
 ```
 
 ### 7.4.1 How radiation enters the energy equation
 
 The *incident* radiative flux comes from a `RadiativeFluxBC` in the thermal entry of the
-`:top` tag (a cone heater, for instance). The `radiation_model` keyword decides where that
-flux is deposited:
+`:top` tag (a cone heater, for instance), the surroundings' radiation from a `RadiativeBC`.
+The `radiation_model` keyword decides where they act:
 
 - With `SURFACE_ABSORPTION`, the absorbed flux `a·q_inc` enters the surface energy balance at
   the exposed face, raising `T_s`; `a` is the condition's own `absorptivity` when it gives
   one, otherwise the exposed cell's effective absorptivity (Kirchhoff's law, the emissivity,
-  unless a component sets its own `absorptivity`). Nothing is deposited in depth.
-- With `BEER_LAMBERT`, the exposed face's intensity is `I_e = a·q_inc(t)` and every other
-  face's intensity is the one above it attenuated across the cell, `exp(−α_eff Δz)`; each
-  cell absorbs the difference between the intensity entering and leaving it, the exact cell
-  average of the attenuated beam, and the intensity leaving the back face is transmitted out
-  of the domain (`sol.extras.radiation_transmitted`). The face intensities are algebraic rows
-  of the state, so the Jacobian stays banded. The `RadiativeFluxBC` then contributes nothing
-  to the surface balance.
+  unless a component sets its own `absorptivity`). A `RadiativeBC` exchanges
+  `ε·σ·(F·T_∞⁴ − T_s⁴)` at the face. Nothing is absorbed or emitted in depth.
+- With `RADIATIVE_TRANSFER`, the exposed face is a gray interface that transmits the exposed
+  cell's `ε_eff` in both directions: the diffuse radiation arriving (each diffuse
+  `RadiativeFluxBC`'s flux and each `RadiativeBC`'s `F·σ·T_∞⁴`) crosses it inward at
+  `ε_eff`, a collimated or cone heater enters as beams carrying `a·q_inc`, and the solid's
+  upward flux crosses it outward at `ε_eff`. Inside, each cell absorbs what reaches it and
+  emits `σT⁴` at its absorption coefficient, the rows integrating the transfer across every
+  cell exactly. A back with no radiative condition is a mirror; one with a `RadiativeBC` an
+  open gray face. The radiative conditions contribute nothing to the surface balance, which
+  keeps convection, prescribed fluxes and conduction. The fluxes are algebraic rows of the
+  state, so the Jacobian stays banded.
 
-Under every model `RadiativeBC` (re-radiation, `Fεσ(T_∞⁴ − T_s⁴)`) and `ConvectiveBC` act at
-the boundary, and a time-varying incident flux is evaluated at the time of every residual
-evaluation, so a ramped or stepped cone flux is tracked exactly.
+Under every model a `ConvectiveBC` acts at the boundary, and a time-varying incident flux
+is evaluated at the time of every residual evaluation, so a ramped or stepped cone flux is
+tracked exactly.
 
 ### 7.4.2 Restrictions and choosing a model
 
-- `BEER_LAMBERT` needs planar coordinates, and the incident flux enters through the `:top`
-  faces only: a `RadiativeFluxBC` on another tag is refused with an `ArgumentError`.
-- `BEER_LAMBERT` with `α = 0` on every component absorbs nothing in depth: the whole absorbed
-  share of the incident flux passes through and leaves through the back face. No warning is
-  given; check `sol.extras.volumetric_absorption` and `sol.extras.radiation_transmitted`.
+- `RADIATIVE_TRANSFER` needs a planar line and a `RadiativeBC` or `RadiativeFluxBC` on
+  `:top`; it refuses a `RadiativeBC` with its own `ε`, a diffuse `RadiativeFluxBC` with its
+  own `absorptivity` or on a material where a component sets one, and a beam on any tag
+  other than `:top` (§5.6).
+- `RADIATIVE_TRANSFER` with `α = 0` on every component absorbs nothing in depth: what crosses
+  the exposed face reaches the back, where a mirror returns it and an open back lets it go.
+  No warning is given; check `sol.extras.radiation_absorbed`, `radiation_emitted` and
+  `radiation_back`.
 - `SURFACE_ABSORPTION` ignores the components' `α`, without a warning.
 
 Choose the model by the optical thickness `τ = α_eff·L`: `SURFACE_ABSORPTION` for opaque
-chars (`τ ≫ 1`), `BEER_LAMBERT` for semi-transparent polymers and foams. See Technical
-Reference §8 for the models.
+chars (`τ ≫ 1`), `RADIATIVE_TRANSFER` for semi-transparent polymers and foams, with a mesh
+that resolves the emission (`α_eff·Δz ≤ 0.5`, §6.3). See Technical Reference §8 for the
+models.
 
 ---
 
@@ -452,8 +461,8 @@ evaluated, not which terms appear:
 Here `ρc_p = Σ_j ξ_j c_p,j` sums every component, pore gas included; `q = −k∇T` is the
 conducted flux; `J_g` are the gas mass fluxes relative to the mesh and `h_g` the gas sensible
 enthalpies, so the second term is the sensible heat the moving gas exchanges with the matrix
-it crosses (`−Σ_g c_p,g J_g·∇T`); `Q_rad` is the in-depth radiation source (`BEER_LAMBERT`
-only); and `Q_rxn = −Σ_r h_r r_r` is the reaction heat (`h_r > 0` endothermic).
+it crosses (`−Σ_g c_p,g J_g·∇T`); `Q_rad` is the radiation a cell absorbs less what it
+emits (`RADIATIVE_TRANSFER` only); and `Q_rxn = −Σ_r h_r r_r` is the reaction heat (`h_r > 0` endothermic).
 
 The solver assembles it in flux form. Every face carries the conducted heat and the sensible
 enthalpy `Σ_j J_j h_j(T_f)` of the gas crossing it at the face temperature; every cell's row
@@ -489,7 +498,7 @@ heat storage. In the pinned source these controls are `SOLVE_PRESSURE`,
 the V2 user guide's `QSG_MODEL` name is not an accepted input in that
 revision. Its driver has no separate gas-temperature solve. Match boundary
 exchange and radiation as well as these switches (Technical Reference
-§§7.8.2, 8.7.2 and 9.12.2); copying coefficients alone does not establish
+§§7.8.2, 8.9.2 and 9.12.2); copying coefficients alone does not establish
 the same thermal problem.
 
 ### 7.7.1 Boundary energy control surface
@@ -539,12 +548,13 @@ runs. The rows of the state:
 | energy state (`T_i` or `H_i`), per cell | always | differential |
 | node position `x_k`, per node | moving mesh | differential |
 | node velocity `w_k`, per node | moving mesh | algebraic (the volume-balance rows) |
-| face intensity `I_f`, per face | `BEER_LAMBERT` | algebraic (the attenuation rows) |
+| radiative fluxes `I⁻_f`, `I⁺_f`, per face, and one beam per heater direction | `RADIATIVE_TRANSFER` | algebraic (the transfer rows) |
 | conversion history `G_i`, `M_i`, per cell | lateral shrinkage law | differential |
 | cross section `A` and lateral rate `θ_A`, one each | lateral shrinkage law | algebraic |
 
 With `n` cells and `NC` components the state has `n(NC + 1)` rows, plus `2(n + 1)` on a
-moving mesh, `n + 1` under `BEER_LAMBERT` and `2n + 2` under a lateral shrinkage law. The
+moving mesh, `(n + 1)(2 + B)` under `RADIATIVE_TRANSFER` with `B` beam directions (zero for a
+diffuse heater) and `2n + 2` under a lateral shrinkage law. The
 system is a mass-matrix differential-algebraic system `M du/dt = f(u, t)`, the algebraic rows
 having no time derivative, and `setup` makes the algebraic unknowns consistent with their rows
 before the solve starts (Chapter 8, Technical Reference §15). Because the masses are the
@@ -552,7 +562,7 @@ states, mass is conserved exactly.
 
 The residual runs its kernels in a fixed order, each present only when the problem needs it:
 the reactions (when the material has reactions), the gas transport (lumped or dusty-gas transport),
-the in-depth radiation (`BEER_LAMBERT`), the conduction, the thermal boundary conditions,
+the radiative transfer (`RADIATIVE_TRANSFER`), the conduction, the thermal boundary conditions,
 and, under a correction, the relative fluxes of the inventories across the moving faces;
 then, on a moving mesh, the volume-balance rows. You do not choose a path through the code;
 you make the choices and `setup` builds the residual that implements them. To see what it
@@ -607,7 +617,7 @@ material, not from a `solve` keyword.
 |---|---|---|---|---|---|
 | TGA-like thin sample, no recession | `false` | `SURFACE_ABSORPTION` | lumped | fixed | `false` |
 | Cone calorimeter, opaque charring solid | `true` | `SURFACE_ABSORPTION` | lumped or dusty-gas transport | fixed or variable | `false` |
-| Cone calorimeter, semi-transparent polymer to burnout | `true` | `BEER_LAMBERT` (set `α`) | lumped | fixed | `true` |
+| Cone calorimeter, semi-transparent polymer to burnout | `true` | `RADIATIVE_TRANSFER` (set `α`) | lumped | fixed | `true` |
 | Intumescent coating (swelling) | `true` | `SURFACE_ABSORPTION` | lumped gas transport (`κ > 0`) | variable (swelling law) | `false` |
 | Pressure-driven char, pressure-treated wood | `true` | `SURFACE_ABSORPTION` | lumped gas transport (`κ > 0`) | fixed or variable | `false` |
 
@@ -716,7 +726,7 @@ than the deactivation threshold, so a burnout solve of it would get no correctio
   - *deactivation* is a keyword, and on a moving mesh `setup` installs the equidistribution
     correction when a layer can burn out.
 - The choices fix the rows of the state (masses and energy per cell; positions and
-  velocities on a moving mesh; face intensities under `BEER_LAMBERT`; the conversion history
+  velocities on a moving mesh; the radiative face fluxes under `RADIATIVE_TRANSFER`; the conversion history
   and the cross section under a lateral law) and the kernels of the residual.
 - There is one energy equation, assembled in flux form with the gas enthalpy carried across
   the faces and DSC-style reaction heats. Outflow carries surface enthalpy; inflow

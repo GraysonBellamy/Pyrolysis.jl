@@ -158,7 +158,11 @@ a combination it does not implement:
 | Message (abridged) | Cause | Remedy |
 |---|---|---|
 | `material … has a lateral_shrinkage_law, which needs a moving mesh: solve with use_ale = true` | a variable cross section on a fixed mesh | `use_ale = true` |
-| `a lateral shrinkage law needs planar coordinates`; `in-depth radiation needs planar coordinates` | a `Cylindrical()` or `Spherical()` mesh with a lateral law or `BEER_LAMBERT` | a planar mesh, or `SURFACE_ABSORPTION` |
+| `a lateral shrinkage law needs planar coordinates`; `in-depth radiation needs planar coordinates` | a `Cylindrical()` or `Spherical()` mesh with a lateral law or `RADIATIVE_TRANSFER` | a planar mesh, or `SURFACE_ABSORPTION` |
+| `radiative transfer needs a RadiativeBC or a RadiativeFluxBC on :top` | `RADIATIVE_TRANSFER` with no radiative member on the exposed face | add a `RadiativeBC(T_inf = …)` or the heater's `RadiativeFluxBC` to `:top` |
+| `under radiative transfer a face's emissivity is that of its cell: give the RadiativeBC on :… no ε` | a `RadiativeBC(ε = …)` under `RADIATIVE_TRANSFER` | drop `ε`: the face transmits the cell's `ε_eff` both ways |
+| `diffuse radiation enters at the emissivity of the cell: give the diffuse RadiativeFluxBC on :… no absorptivity`; `… component :… sets its own absorptivity` | a diffuse `RadiativeFluxBC` with an `absorptivity`, or on a material where a component sets one, under `RADIATIVE_TRANSFER` | drop the `absorptivity`, or send the heater in as beams (`distribution = Collimated()` or `Cone(θ₁, θ₂)`) |
+| `radiative transfer takes beams through :top only` | a collimated or cone `RadiativeFluxBC` on another tag | `distribution = Diffuse()` there |
 | `the lateral shrinkage law must be positive and finite on [-0.001, 1.001]`; `… must equal one at zero conversion` | a law that vanishes or is not one at `χ̄ = 0` | a law such as `χ̄ -> 1 - 0.3χ̄` |
 | `a correction moves the mesh relative to the solid, which needs use_ale = true` | a `correction` other than `NoCorrection()` on a fixed mesh | `use_ale = true` |
 | `reaction :r has an order other than one, whose cells must keep their material, … give no correction` | a `correction` with a reaction of order other than one | give no correction (§4.14) |
@@ -209,7 +213,7 @@ smallest factor, when
   `1 − Σⱼ mⱼ/(ρⱼ(T) V)` lies outside `[0, 1]` by more than the skeletal volume of
   its mass tolerances;
 - an **algebraic row's** scaled residual exceeds one: the node-velocity balance
-  rows on a moving mesh, the face intensities under `BEER_LAMBERT`, the cross
+  rows on a moving mesh, the radiation rows under `RADIATIVE_TRANSFER`, the cross
   section and its lateral rate under a lateral shrinkage law (§15.3.3).
 
 `sol.statistics.domain_rejections` counts them. A few are normal on a fast
@@ -240,8 +244,8 @@ stops, not whether it stops.
 ### 15.3.3 Constraint rejections and `:Failure`
 
 The algebraic rows carry no time derivative: on a moving mesh the node
-velocities satisfy the cells' volume balance, under `BEER_LAMBERT` the face
-intensities satisfy the attenuation recurrence from the exposed face, and under
+velocities satisfy the cells' volume balance, under `RADIATIVE_TRANSFER` the
+radiative face fluxes satisfy the transfer across each cell and the boundary rows, and under
 a lateral shrinkage law the cross section and its lateral rate satisfy their
 closure. The domain test holds each row to `rtol · S + a`, with `S` the scale of
 its own equation and `a` the absolute tolerance of its unknown, so tightening
@@ -310,13 +314,14 @@ a live cell ends the solve with `:Terminated`, outcome `:interior`, and
 `succeeded(sol) == false`. The solution up to the stop is valid. On a moving mesh the
 same stop comes from a cell that empties beneath a skin, cells that still hold
 `VOID_SKIN` thresholds or more (§10.7). A layer that empties from within, as one does
-when the temperature maximum lies below the surface under in-depth absorption, ends
-the solve at the first such void: the model cannot carry heat across it. The verification
-case V-BO-05 runs the PMMA-on-Kaowool deck of V-BO-01 with in-depth absorption on a
-fixed mesh and stops at 259.6 s with outcome `:interior`: the surface cell persists as
-a low-density skin while the cells beneath it empty. A material that regresses
+when the temperature maximum lies below the surface under radiative transfer, ends
+the solve at the first such void: the model has no gap to represent it. The verification
+case V-BO-05 runs the PMMA-on-Kaowool deck of V-BO-01 under radiative transfer on a
+fixed mesh and stops at 157.0 s (120 cells) with outcome `:interior`: the PMMA beneath
+the surface empties nearly uniformly, the exposed cell slowest, and a cell 0.15 mm
+below the surface crosses the threshold first. A material that regresses
 belongs on a moving mesh (`use_ale = true`), where its cells thin instead of
-emptying; V-BO-01 burns the same layer out on a moving mesh in one invocation, with the
+emptying; V-BO-01 burns the same layer out on a moving mesh in two invocations, with the
 correction. Without the correction, and at an order other than one, which has none, a
 tail's void under spent cells closes and is reported by `interior_events(sol)`, and a
 void beneath a skin stops the solve here too.
@@ -356,13 +361,13 @@ toward zero width and the step collapses as it approaches it; turn on
 
 ### 15.4.6 The end-of-layer burst
 
-Just after a layer deactivates, the per-step mass-loss rate can spike: at 30
-cells across the layer the largest per-step rate can exceed the main peak, up
-to threefold on a mesh graded toward the surface, and it falls below the main
-peak by 60 to 120 cells. The peak sampled at the output times is within
-tolerance from 30 cells. Inside the supported envelope the burst converges
-under refinement; a quantity read at every accepted step (with a callback)
-needs the finer mesh (Chapter 10).
+Just after a layer deactivates, the per-step mass-loss rate can spike. On the
+verification decks the largest per-step rate stays below the main peak except on
+a mesh graded toward the surface at 30 cells, where it exceeds it by up to 9.5 %;
+from 60 cells it stays below there too. Inside the supported envelope the burst converges under
+refinement; outside it, at 100 kW/m² on the V-BO-01 deck for instance, it may not,
+and a quantity read at every accepted step (with a callback) needs a refinement
+study (Chapter 10).
 
 ---
 
@@ -538,24 +543,26 @@ The radiation model is the `radiation_model` keyword of `solve` (default
 | Model | An incident `RadiativeFluxBC` | Absorption coefficients `α_j` | Rows added |
 |---|---|---|---|
 | `SURFACE_ABSORPTION` | its absorbed share enters the surface energy balance | not read | none |
-| `BEER_LAMBERT` | absorbed in depth through the face intensities; it contributes nothing to the surface balance | read | one face intensity per node (algebraic); on a fixed mesh these make the system a mass-matrix DAE |
+| `RADIATIVE_TRANSFER` | carried through the solid by the radiation rows, crossing the exposed face at the cell's `ε_eff` (diffuse) or as beams (collimated, cone); it contributes nothing to the surface balance | read; every cell also emits | two hemispherical fluxes per node, plus one per beam direction (algebraic); on a fixed mesh these make the system a mass-matrix DAE |
 
 Under `SURFACE_ABSORPTION` the absorbed share `a·q` is the condition's
 `absorptivity`, or the exposed cell's mixture absorptivity, times the incident
-flux. `BEER_LAMBERT` needs planar coordinates.
+flux. `RADIATIVE_TRANSFER` needs a planar line and a radiative condition on `:top`,
+and refuses a `RadiativeBC` with its own `ε` and a diffuse `RadiativeFluxBC` with its
+own `absorptivity` (§15.2.3).
 
 ### 15.9.2 "Nothing absorbs", or "it never burns out"
 
 `solve` prints no warning for a model that does not match the material:
 
-- Under `BEER_LAMBERT` with every `α_j = 0` the beam crosses the slab and leaves
-  through the back face. `sol.extras.volumetric_absorption` and
-  `sol.extras.radiation_transmitted` show where the absorbed flux went (both per
-  unit exposed area).
+- Under `RADIATIVE_TRANSFER` with every `α_j = 0` the radiation crosses the slab:
+  a mirror back (no radiative condition on `:bottom`) returns it, an open back lets
+  it go. `sol.extras.radiation_absorbed`, `radiation_emitted` and `radiation_back`
+  show where it went (per unit face area).
 - Under `SURFACE_ABSORPTION` the `α_j` are not read at all; switch to
-  `BEER_LAMBERT` for depth penetration.
-- Under `BEER_LAMBERT`, a semi-transparent layer on a non-absorbing substrate or
-  an insulated back absorbs a falling share of the beam as it thins, so its last
+  `RADIATIVE_TRANSFER` for depth penetration.
+- Under `RADIATIVE_TRANSFER`, a semi-transparent layer on a non-absorbing substrate
+  with an open back absorbs a falling share of the radiation as it thins, so its last
   fraction burns slowly; V-BO-03 measures the share that leaves through the back
   face of a transparent substrate rising toward one.
 
@@ -566,11 +573,13 @@ Choose the model by the optical thickness `τ = α L`:
 | `τ = α·L` | Regime | Model |
 |---|---|---|
 | > 10 | optically thick | `SURFACE_ABSORPTION` |
-| < 10 | semi-transparent | `BEER_LAMBERT` |
+| < 10 | semi-transparent | `RADIATIVE_TRANSFER` |
 
 `SURFACE_ABSORPTION` on a semi-transparent sample concentrates the absorbed flux
-at the surface and overheats it; `BEER_LAMBERT` on an opaque char adds the
-intensity rows and their coupling for no benefit (Technical Reference §8).
+at the surface and overheats it; `RADIATIVE_TRANSFER` on an opaque char adds the
+radiation rows and their coupling for little benefit, and an optically thick cell
+adds a radiative conductivity of about `4σT³Δz` unless the mesh resolves the emission
+(`α_eff·Δz ≤ 0.5`; Technical Reference §8.6).
 
 ### 15.9.4 Time-varying incident flux
 
@@ -578,8 +587,9 @@ A flux given as a function of time (`RadiativeFluxBC(t -> 25e3 * (1 - exp(-t / 1
 is evaluated at every residual evaluation. `solve` has no list of times the
 integrator must step to, so a flux feature shorter than the steps the error
 test would take across it (a short pulse) can be stepped over: bound the step
-with `dtmax` (§15.12.1). Under `BEER_LAMBERT` the face-intensity tolerances
-scale with the largest incident flux over the time span, sampled at 101 times.
+with `dtmax` (§15.12.1). Under `RADIATIVE_TRANSFER` the radiation rows' tolerances
+scale with the largest radiation arriving over the time span, sampled at 101 times,
+or with `σT⁴` of the hottest initial cell or surroundings if that is larger.
 
 ---
 
@@ -656,8 +666,9 @@ progress bar unless `progress = true`.
 Work top to bottom; each item is cheap to try and the early ones dominate.
 
 1. **Cells.** Each cell carries its `NC` component masses and one energy
-   unknown; a moving mesh adds a position and a velocity per node, `BEER_LAMBERT`
-   one face intensity per node, and a lateral shrinkage law two history unknowns
+   unknown; a moving mesh adds a position and a velocity per node,
+   `RADIATIVE_TRANSFER` two fluxes per node and one more per beam direction, and a
+   lateral shrinkage law two history unknowns
    per cell and two global rows that read every cell. Use the smallest mesh
    that converges the quantities you need (Technical Reference §18.5 and
    `examples/convergence_douglas_fir.jl`), and grade cells toward the surface
@@ -683,9 +694,11 @@ Work top to bottom; each item is cheap to try and the early ones dominate.
 5. **`dtmax`.** The step-size ceiling (default `Inf`) does not speed a solve up.
    Set it when a time-dependent condition has features shorter than the steps
    the error test would take across them (§15.9.4).
-6. **The radiation model.** `BEER_LAMBERT` adds one algebraic row per face, each
-   intensity coupled to every cell outward of it. Do not pay for in-depth
-   absorption the optical thickness does not call for (§15.9.3).
+6. **The radiation model.** `RADIATIVE_TRANSFER` adds two algebraic rows per face,
+   and one more per beam direction of a collimated or cone heater, each family two
+   more Jacobian colors; the rows are banded, and the step count follows where the
+   heater's energy is absorbed. Do not pay for radiative transfer the optical
+   thickness does not call for (§15.9.3).
 7. **Observers.** A `ConservationRecorder` evaluates the residual four times per
    accepted step (three Gauss–Legendre points and the inventories after the
    step) in a workspace of its own: use it for audits, not for production

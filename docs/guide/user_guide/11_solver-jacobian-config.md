@@ -41,9 +41,9 @@ M du/dt = f(u, t)
 
 with `M` diagonal: one on the differential rows (the component masses, the
 energy state, the node positions, the conversion-history pair), zero on the
-algebraic rows (the node velocities of a moving mesh, the face intensities
-under `BEER_LAMBERT`, the cross-section area and its lateral rate). On a
-fixed mesh without in-depth radiation every row is differential and `M = I`.
+algebraic rows (the node velocities of a moving mesh, the radiative face fluxes
+under `RADIATIVE_TRANSFER`, the cross-section area and its lateral rate). On a
+fixed mesh without radiative transfer every row is differential and `M = I`.
 With it go (see `src/Integration/solve.jl`):
 
 - the **colored Jacobian** and its sparsity prototype (§11.2);
@@ -90,7 +90,7 @@ the columns grouped by a coloring so that one dual-number evaluation of the
 residual yields many columns at once. It is exact to round-off (the test
 suite holds it to the dense reference at a relative `1e-12`, §11.7), it
 covers every coupling the residual has, including the moving-mesh and
-in-depth-radiation couplings, and nothing about it is configurable: `solve`
+radiative-transfer couplings, and nothing about it is configurable: `solve`
 has no Jacobian keyword, and an unknown keyword is a Julia `MethodError`.
 
 ### 11.2.1 The pattern
@@ -103,8 +103,9 @@ correction, whose face states are reconstructed from two cells upwind) and,
 on a moving mesh, the positions of their nodes; a node's velocity row reaches
 its cell's other node, the cell's masses and energy (through the strain
 rate) and, under the correction, what the corrections of the cell's nodes
-read; a face-intensity row reaches the neighbouring intensities and the
-cells on either side of its face. Every row holds its diagonal. The pattern
+read; a radiation row reaches its own family at its face and at the next face
+along its direction, the other hemispherical flux at its face, and the cells on
+either side of its face. Every row holds its diagonal. The pattern
 is fixed for the solve: deactivation masks rows without changing it
 (Chapter 10).
 
@@ -116,8 +117,10 @@ residual (`MAX_CHUNK`), so a Jacobian costs a few residual evaluations
 whatever the mesh size. The preparation runs once, in `setup`; each
 evaluation then reuses it at any state and time. For scale: the
 PMMA-on-Kaowool deck of Chapter 10 at 15 PMMA cells (46 cells, 3
-components) takes 12 colors on a fixed mesh (184 unknowns), and 28 on a
-moving mesh with in-depth radiation and the correction (325 unknowns).
+components) takes 12 colors on a fixed mesh (184 unknowns), and 30 on a
+moving mesh with radiative transfer and the correction (372 unknowns). Each
+radiation family adds two colors: a diffuse heater has two families (the two
+hemispherical fluxes), a collimated one three and a three-direction cone five.
 
 Because the derivatives of the material properties enter through dual
 numbers, every property function is evaluated at dual-number arguments: a
@@ -197,7 +200,7 @@ derivatives on the differential rows, started from that re-evaluated
 derivative. In a fast mode, such as the surface cell's pore gas exchanging with
 the reservoir, the re-evaluation carries the stage solve's residual amplified
 by the step over the mode's time scale, and the interpolant spreads it between
-the step's ends. The algebraic rows (the node velocities, the face intensities,
+the step's ends. The algebraic rows (the node velocities, the radiative face fluxes,
 the cross section under lateral shrinkage) are interpolated linearly between
 the ends, which leaves them off the values their constraints give at the
 interpolated differential rows; the cross section sets every cell's pore
@@ -307,7 +310,8 @@ the cell's initial condensed mass; a temperature row `abstol`; an enthalpy
 row (`energy_state = :enthalpy`) `threshold` times the cell's initial
 condensed mass, a reference heat capacity and `abstol`, so a cell at the
 threshold resolves its temperature as the temperature form does; a
-face-intensity row `reltol` times the largest incident intensity; a node
+radiation row `reltol` times the largest radiation arriving from outside or
+`σT⁴` of the hottest initial cell or surroundings, whichever is larger; a node
 position `reltol · threshold` times the smallest initial size of the cells
 around it, and its velocity that over `dt`. `setup` builds the vector
 (`cp.abstol`); Chapter 8 discusses the choice.
@@ -379,7 +383,7 @@ residual you have extended or a state you suspect.
 ```julia
 using Pyrolysis, Pyrolysis.Internal
 
-cp = setup(problem; use_ale = true, deactivation = true, radiation_model = BEER_LAMBERT)
+cp = setup(problem; use_ale = true, deactivation = true, radiation_model = RADIATIVE_TRANSFER)
 sol = integrate(cp; min_thickness = 1e-3)
 
 # A saved state after the burnout: the mask of its time first.
@@ -424,7 +428,7 @@ Building the colored Jacobian is the expensive part of `setup`, so a study
 that integrates one problem several ways sets it up once:
 
 ```julia
-cp = setup(problem; use_ale = true, deactivation = true, radiation_model = BEER_LAMBERT)
+cp = setup(problem; use_ale = true, deactivation = true, radiation_model = RADIATIVE_TRANSFER)
 sol_rodas = integrate(cp; min_thickness = 1e-3)
 sol_fbdf  = integrate(cp; min_thickness = 1e-3,
                       integrator_policy = fbdf_policy(StructuredKLU()))
@@ -447,12 +451,12 @@ OrdinaryDiffEq expects, with the layout's mass matrix:
 using Pyrolysis, Pyrolysis.Internal
 using OrdinaryDiffEq: ODEFunction, ODEProblem, Rodas5P, AutoFiniteDiff
 
-cp = setup(problem; radiation_model = BEER_LAMBERT)      # a fixed mesh: no events, no motion
+cp = setup(problem; radiation_model = RADIATIVE_TRANSFER)  # a fixed mesh: no events, no motion
 layout = cp.def.layout
 
 rhs!(du, u, p, t) = residual!(du, u, cp.def, t, cp.ws)
 jac!(J, u, p, t) = jacobian!(J, cp.jacobian, u, t)
-f = ODEFunction(rhs!; mass_matrix = mass_matrix(layout),   # the intensity rows are algebraic
+f = ODEFunction(rhs!; mass_matrix = mass_matrix(layout),   # the radiation rows are algebraic
                 jac = jac!, jac_prototype = jac_prototype(cp.jacobian))
 ode = ODEProblem(f, copy(cp.u0), problem.tspan)
 raw = solve(ode, Rodas5P(autodiff = AutoFiniteDiff(), linsolve = StructuredKLU());
@@ -497,7 +501,7 @@ using Pyrolysis.Internal   # everything the submodules export, in one place
 |---|---|
 | The residual (Assembly) | `residual!`, `ResidualDefinition`, `ResidualWorkspace`, `buffers`, `NoSources`, `VolumetricSources` |
 | The Jacobian (ColoredJacobian) | `ColoredJacobianCache`, `jac_prototype`, `jacobian!`, `jacobian_pattern`, `color_count`, `dense_jacobian`, `missing_entries`, `compare_entries` |
-| The layout (States) | `StateLayout`, `state_length`, `mass_index`, `energy_index`, `history_index`, `position_index`, `velocity_index`, `intensity_index`, `area_index`, `lateral_rate_index`, `cell_rows`, `node_rows`, `is_differential`, `mass_matrix`, `DerivedState`, `derive!` |
+| The layout (States) | `StateLayout`, `state_length`, `mass_index`, `energy_index`, `history_index`, `position_index`, `velocity_index`, `radiation_index`, `radiation_rows`, `has_radiation`, `area_index`, `lateral_rate_index`, `cell_rows`, `node_rows`, `is_differential`, `mass_matrix`, `DerivedState`, `derive!` |
 | The integration (Integration) | `consistent_state!`, `inadmissible`, `DomainCheck`, `IntegratorPolicy`, `DT_AFTER_EVENT`, `FAILURE_MEMORY_GROWTH`, `FAILURE_MEMORY_STEPS`, `default_linear_solver`, `CORRECTION_BAND` |
 | Deactivation | `CellDeactivation`, `DeactivationEvent`, `deactivate!`, `threshold_margin`, `top_live_cell`, `replay_events!` |
 | The mesh motion (Closures) | `BalanceRowClosure`, `LayerCorrection`, `residues`, `vanishes`, `EQUIDISTRIBUTION_TIME`, `ACTIVATION_TIME_FACTOR` |
@@ -508,7 +512,7 @@ may move or change between minor releases; prefer the top-level exports in
 production code. The meshes of two and three dimensions (`box_mesh`,
 `cell_mesh`) and their closure (`PotentialClosure`) are residual-level
 building blocks: `setup` accepts them, but a full solve on them is not a
-supported user path, and gas transport, in-depth radiation, the variable
+supported user path, and gas transport, radiative transfer, the variable
 cross section, the correction and deactivation are refused there.
 
 ### 11.9.2 Reading a set-up problem
@@ -524,7 +528,8 @@ Chapter 10) and the external sources (`sources`).
 The layout places every unknown. On a line the state is a sequence of node
 and cell blocks, node 1, cell 1, node 2, …, cell N, node N + 1, so the
 Jacobian is banded: a node block holds the node's position and velocity on a
-moving mesh and the intensity of the face at that node under `BEER_LAMBERT`;
+moving mesh and the radiative fluxes of the face at that node under
+`RADIATIVE_TRANSFER`;
 a cell block holds the component masses, the energy state and, under a
 variable cross section, the conversion-history pair; the cross-section area
 and its lateral rate close the vector. Read a raw state only through the
@@ -538,13 +543,14 @@ u[mass_index(layout, i, j)]          # mass of component j in cell i [kg]
 u[energy_index(layout, i)]           # T [K] (or H [J] under energy_state = :enthalpy)
 u[position_index(layout, n)]         # node n's position [m] (moving mesh)
 u[velocity_index(layout, n)]         # node n's velocity [m/s] (moving mesh)
+u[radiation_index(layout, n, 1)]     # I⁻ of the face at node n [W/m²] (radiative transfer; 2 is I⁺)
 is_differential(layout)              # true on the rows with a time derivative
 layout.mask                          # the live rows
 ```
 
 Which configuration a problem gets follows from the problem and the
 keywords, never from a mode argument: `use_ale` moves the mesh,
-`radiation_model` adds the intensity rows, a permeable condensed component
+`radiation_model` adds the radiation rows, a permeable condensed component
 selects lumped gas transport, a `lateral_shrinkage_law` adds the
 cross-section rows, and `energy_state` picks the energy unknown (Chapter 7).
 
@@ -571,10 +577,10 @@ sol = solve(problem; integrator_policy = default_policy(UMFPACKFactorization()))
 sol = solve(problem; integrator_policy = fbdf_policy(UMFPACKFactorization()))
 
 # (e) Burnout on a moving mesh (Chapter 10); nothing about the solver changes.
-sol = solve(problem; use_ale = true, deactivation = true, radiation_model = BEER_LAMBERT)
+sol = solve(problem; use_ale = true, deactivation = true, radiation_model = RADIATIVE_TRANSFER)
 
 # (f) Set up once, integrate twice.
-cp = setup(problem; use_ale = true, deactivation = true, radiation_model = BEER_LAMBERT)
+cp = setup(problem; use_ale = true, deactivation = true, radiation_model = RADIATIVE_TRANSFER)
 sol1 = integrate(cp)
 sol2 = integrate(cp; integrator_policy = fbdf_policy(StructuredKLU()))
 ```

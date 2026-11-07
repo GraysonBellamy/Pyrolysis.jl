@@ -219,11 +219,19 @@ sample.
   you can see where the answer stops moving.
 - **Cost grows with the state.** Each cell carries `NC + 1` unknowns (its `NC` component
   masses and its energy state); a moving mesh adds two per node (position and velocity),
-  in-depth radiation one per face, a variable cross section two per cell and two for the
-  column (§6.6, §7.8). The state is ordered so that the Jacobian is banded, its bandwidth
+  radiative transfer two per face plus one per beam of a collimated or cone heater, a
+  variable cross section two per cell and two for the column (§6.6, §7.8). The state is ordered so that the Jacobian is banded, its bandwidth
   set by the component count rather than the cell count (a variable cross section adds two
   dense rows), so the work of each step grows roughly in proportion to the cells. Time a
   short run at two resolutions rather than guessing.
+- **Radiative transfer needs the emission resolved.** Under `RADIATIVE_TRANSFER` each cell
+  emits at its own temperature, so keep the optical thickness of a cell, `α_eff·Δz`, at or
+  below 0.5 where the solid's own radiation matters: there the discrete radiative
+  conductivity is within 5 % of the continuum's, at 1 it is 18 % high, and in an optically
+  thick cell it tends to `4σT³Δz` instead of vanishing. An optically thick exposed cell
+  emits at its centre temperature, so grade the mesh toward the surface
+  (`stretched_mesh`) when the surface is much hotter than the cell beneath it (Technical
+  Reference §8.6).
 - **Burnout needs its own resolution.** A solve that deactivates cells through a burnout is
   verified at stated cell counts across the vanishing layer; Chapter 10 gives them.
 - **Run a convergence study.** Solve the same problem at increasing `n_cells` and watch a
@@ -298,8 +306,8 @@ ball = uniform_mesh(0.01, 40; coordinates = Spherical())   # the whole sphere, 4
 Conduction, reactions, gas transport, surface absorption and the moving mesh are
 implemented in every coordinate system. Deactivation is not refused on a radial mesh, but
 the burnout path of Chapter 10 is verified on planar decks only. Two models need planar
-coordinates and are refused with an `ArgumentError` otherwise: in-depth radiation
-(`radiation_model = BEER_LAMBERT`) and the variable cross section (§6.4.3).
+coordinates and are refused with an `ArgumentError` otherwise: radiative transfer
+(`radiation_model = RADIATIVE_TRANSFER`) and the variable cross section (§6.4.3).
 
 ### 6.4.2 The cross-section measure `A₀`
 
@@ -439,12 +447,12 @@ banded.
 | Block | Holds | Present when |
 |---|---|---|
 | node `k` | position `x_k` [m], velocity `w_k` [m/s] | moving mesh (`use_ale = true`) |
-| node `k` | intensity `I_k` of the face at that node [W/m²] | `radiation_model = BEER_LAMBERT` |
+| node `k` | the radiative fluxes of the face at that node: `I⁻_k` toward the back, `I⁺_k` toward the exposed face, then one beam per heater direction [W/m²] | `radiation_model = RADIATIVE_TRANSFER` |
 | cell `i` | masses `m_{i,1} … m_{i,NC}` [kg], energy state (`T_i` [K] or `H_i` [J]) | always |
 | cell `i` | conversion history `G_i`, `M_i` [kg] | variable cross section |
 | global | cross section `A` [m²], lateral strain rate `θ_A` [1/s] | variable cross section |
 
-The node velocities, the face intensities, `A` and `θ_A` are algebraic unknowns (rows of the
+The node velocities, the radiative face fluxes, `A` and `θ_A` are algebraic unknowns (rows of the
 system without a time derivative); the others are differential. A fixed mesh carries no node
 unknowns at all: its geometry is constant. Never compute an index by hand; the layout of a
 set-up problem gives every index through functions of `Pyrolysis.States` (reachable through
@@ -481,7 +489,7 @@ The `use_ale` keyword of `solve` (default `false`) decides whether the nodes mov
 
 With `use_ale = false`, every node is pinned for the whole solve. The geometry (cell
 centres, volumes, face positions) is constant, and the state holds only the cell blocks (and
-the face intensities under `BEER_LAMBERT`). This is the right choice for problems whose
+the radiative face fluxes under `RADIATIVE_TRANSFER`). This is the right choice for problems whose
 thickness does not change appreciably: TGA-like idealizations, inert or weakly reacting
 slabs, and conduction studies. On a fixed mesh a reacting material that loses mass becomes
 less dense in place; its surface does not recede.

@@ -184,15 +184,16 @@ quantities divide by the current area of the faces they name unless noted.
 | `thickness_history` | m | Distance from the first node to the outermost live node |
 | `min_cell_thickness` | m | Thickness of the thinnest live cell |
 | `surface_mass_flux` | kg·m⁻²·s⁻¹ | Outward mass flux of the `:top` faces only (cf. `mass_loss_rate`) |
-| `surface_heat_flux_net` | W·m⁻² | Heat flux the `:top` condition applies at the face, positive into the domain (under a prescribed temperature, the conducted flux); under `BEER_LAMBERT` the incident flux enters in depth and is not part of it |
-| `surface_heat_flux_absorbed` | W·m⁻² | Incident radiation absorbed at the face |
-| `surface_heat_flux_reradiation` | W·m⁻² | Re-radiative loss, positive leaving |
+| `surface_heat_flux_net` | W·m⁻² | Heat flux the `:top` condition applies at the face, positive into the domain (under a prescribed temperature, the conducted flux); under `RADIATIVE_TRANSFER` radiation crosses the face through the radiation rows and is not part of it |
+| `surface_heat_flux_absorbed` | W·m⁻² | Incident radiation absorbed at the face (zero under `RADIATIVE_TRANSFER`) |
+| `surface_heat_flux_reradiation` | W·m⁻² | Re-radiative loss, positive leaving (zero under `RADIATIVE_TRANSFER`) |
 | `surface_heat_flux_convection` | W·m⁻² | Convective loss, positive leaving |
 | `surface_heat_flux_conduction` | W·m⁻² | Flux conducted from the `:top` faces into their cells, `k (T_s − T_cell)/d` |
 | `surface_blowing_ratio`, `surface_pooling_factor`, `surface_face_fraction`, `surface_face_buoyancy` | – | Blowing diagnostics of the `:top` surface balance (1, 1, 0 and 1 without outflow or without a blowing model; §5.2.3) |
-| `volumetric_absorption` | W·m⁻² | Intensity the cells absorbed in depth, per unit exposed area; zero unless `radiation_model = BEER_LAMBERT` |
-| `radiation_transmitted` | W·m⁻² | Intensity leaving through the last face of the in-depth beam, per unit exposed area; zero unless `BEER_LAMBERT` |
-| `surface_emissivity` | – | Emissivity of the cell under the `:top` faces |
+| `radiation_absorbed` | W·m⁻² | Radiation crossing the exposed face inward: the diffuse radiation arriving at the face times its cell's `ε_eff`, plus every beam entering; zero unless `radiation_model = RADIATIVE_TRANSFER` |
+| `radiation_emitted` | W·m⁻² | Radiation crossing the exposed face outward; zero unless `RADIATIVE_TRANSFER` |
+| `radiation_back` | W·m⁻² | Net radiation leaving through the back face, zero at a mirror; zero unless `RADIATIVE_TRANSFER` |
+| `surface_emissivity` | – | Emissivity of the cell under the `:top` faces (under `RADIATIVE_TRANSFER` the exposed face's transmissivity, both ways) |
 | `surface_conductivity` | W·m⁻¹·K⁻¹ | Conductivity normal to the first `:top` face with which it conducts into its cell (on a mesh of more dimensions `n·K·n` of the cell's complete tensor) |
 | `back_heat_flux` | W·m⁻² | Heat flux the `:bottom` condition applies, positive into the domain |
 | `MLR_gauge` | kg·m⁻²·s⁻¹ | Mass-loss rate per unit initial area of the `:top` faces (cone gauge convention) |
@@ -209,8 +210,8 @@ quantities divide by the current area of the faces they name unless noted.
 For a top condition of incident radiation, re-radiation and convection, the surface
 decomposition closes as `net = absorbed − reradiation − convection`, and the surface
 balance makes `net` equal `surface_heat_flux_conduction` at convergence. Under
-`BEER_LAMBERT`, `volumetric_absorption + radiation_transmitted` is the absorbed share
-`a·q` of the incident flux.
+`RADIATIVE_TRANSFER`, `radiation_absorbed − radiation_emitted − radiation_back` is the
+radiation the live cells take in, per unit area, at every saved time.
 
 ```julia
 gen_rate  = solution.extras.gas_generation_rate    # kg/(m²·s)

@@ -247,9 +247,17 @@ Fields:
   the heater's geometry, so a cone calorimeter uses `F = 1`.
 
 Its temperature derivative is `dq_BC/dT_s = −4·ε_eff·σ·T_s³`. When `ε` is a
-function of temperature, the solver **neglects** the `dε/dT` term in this
-derivative; this slightly slows Newton convergence but does not change the
-converged root (see Technical Reference §12.2).
+function of temperature, the derivative also carries the `dε/dT` term: the
+surface Newton and its implicit derivative differentiate the complete flux (see
+Technical Reference §12.2.3).
+
+That is the condition under `SURFACE_ABSORPTION`. Under `RADIATIVE_TRANSFER` a
+`RadiativeBC` contributes nothing to the surface balance: the surroundings'
+`F·σ·T_∞⁴` joins the diffuse radiation arriving at its face, which crosses into
+the solid at the exposed cell's `ε_eff`, and the solid's own emission leaves through
+the same face from the radiation rows. Its `ε` must then be `nothing`; `setup`
+refuses one given explicitly, since the face transmits the cell's emissivity in
+both directions (§5.6). On `:bottom` it makes the back an open gray face.
 
 ### 5.2.5 `DirichletThermalBC` — prescribed temperature
 
@@ -277,6 +285,8 @@ bare flux with no absorptivity or in-depth treatment).
 bc = RadiativeFluxBC(25e3)                          # incident 25 kW/m², a = a_eff
 bc = RadiativeFluxBC(50e3, absorptivity = 0.9)      # fixed absorptivity
 bc = RadiativeFluxBC(t -> 25e3*(1 - exp(-t/10)))    # time-varying flux
+bc = RadiativeFluxBC(25e3; distribution = Collimated())                    # one beam along the normal
+bc = RadiativeFluxBC(25e3; distribution = Cone(deg2rad(20), deg2rad(73)))  # a cone heater ring
 ```
 
 Fields:
@@ -289,6 +299,11 @@ Fields:
   is exactly `ε_eff`; setting one lets the absorbed heater flux differ from the
   re-radiation without splitting the BC. Either way it tracks composition and
   temperature automatically. You can override with a constant or `a(t)`.
+- `distribution` — how the radiation arrives, read under `RADIATIVE_TRANSFER`
+  only: `Diffuse()` (the default), equally from every direction of the
+  hemisphere; `Collimated()`, one beam along the face normal; or
+  `Cone(θ₁, θ₂; directions = 3)`, uniform between the polar angles `θ₁ < θ₂`
+  [rad] from the normal, carried as `directions` beams.
 
 **Its behavior depends on the `radiation_model` keyword passed to `solve()`**
 (see §7.4 and Technical Reference §8):
@@ -296,16 +311,19 @@ Fields:
 | `radiation_model` (in `solve`) | What `RadiativeFluxBC` does |
 |---|---|
 | `SURFACE_ABSORPTION` | Absorbed flux `a·q_inc` deposited as a surface boundary heat flux (opaque material) |
-| `BEER_LAMBERT` | Boundary flux is **zero**; the absorbed `a·q_inc` enters the first live cell as the intensity of its exposed face and is absorbed in depth (`extras.volumetric_absorption`); what leaves the last face is transmitted (`extras.radiation_transmitted`) |
+| `RADIATIVE_TRANSFER` | Boundary flux is **zero**. A `Diffuse()` flux crosses the exposed face at the first live cell's `ε_eff`; a `Collimated()` or `Cone` flux enters as beams carrying `a·q_inc`; either way it is absorbed in depth (`extras.radiation_absorbed` counts what crosses the face inward) |
 
-Under `BEER_LAMBERT` the incident radiation enters through the `:top` face only:
-a `RadiativeFluxBC` on any other tag is refused with an `ArgumentError`. With
-`absorptivity = nothing` the absorbed fraction is the effective absorptivity of
-the first live cell. Under `BEER_LAMBERT` that number is the fraction of the
-flux that enters the material (one minus the surface reflectance, 0.92–0.96
-for PMMA), not the opaque absorptivity; under surface absorption it is the
-absorptivity to the heater's spectrum, which for wood and clear polymers lies
-0.02–0.09 below the emission emissivity (Technical Reference §5.8.2).
+Under `RADIATIVE_TRANSFER` the diffuse members of a condition add to the diffuse
+radiation and each beam member adds its own beams. `absorptivity` belongs to beams: a diffuse member with its
+own `absorptivity`, or any diffuse member on a material where a component sets
+`absorptivity`, is refused, since diffuse radiation crosses the face at the
+emissivity. Beams enter through `:top` only; a diffuse member on `:bottom` makes the
+back an open gray face, and a radiative member on any other tag is refused. For a
+beam, `absorptivity` is the fraction of the flux that enters the material (one minus
+the surface reflectance, 0.92–0.96 for PMMA), not the opaque absorptivity; under
+surface absorption it is the absorptivity to the heater's spectrum, which for wood
+and clear polymers lies 0.02–0.09 below the emission emissivity (Technical Reference
+§5.8.2).
 
 The boundary flux from this BC has `dq_BC/dT_s = 0` (it is the *incoming* source
 and does not depend on the surface temperature).
@@ -440,23 +458,51 @@ The two radiation models are selected by the `radiation_model` keyword of
 radiation BC type: the incoming radiation is always a `RadiativeFluxBC` in the
 thermal slot (§5.2.6), and the surface's own emission a `RadiativeBC` (§5.2.4).
 
-| `radiation_model` | Where the absorbed incident flux goes | Requirements |
+| `radiation_model` | Where radiation is absorbed and emitted | Requirements |
 |---|---|---|
-| `SURFACE_ABSORPTION` (default) | the surface balance of the face carrying the `RadiativeFluxBC` (opaque material) | — |
-| `BEER_LAMBERT` | in depth, through algebraic face intensities attenuated cell by cell with the components' `α` | the `RadiativeFluxBC` on `:top` only; planar coordinates; `α > 0` on the absorbing components |
+| `SURFACE_ABSORPTION` (default) | at the face: the `RadiativeFluxBC` and the `RadiativeBC` act in the surface balance of their face (opaque material) | — |
+| `RADIATIVE_TRANSFER` | through the solid: the radiation crosses the exposed face at the exposed cell's `ε_eff` both ways and every cell absorbs and emits at its `α` | a `RadiativeBC` or `RadiativeFluxBC` on `:top`; a planar line (a component with `α = 0` is transparent; nothing checks it) |
 
-Under `BEER_LAMBERT` the face intensities are unknowns of the state, each tied to
-its neighbour by the exact attenuation across one cell, so the Jacobian stays
-banded (Technical Reference §8.3). An in-depth radiative transfer with
-re-emission (a P1 model) is not implemented.
+Under `RADIATIVE_TRANSFER` the radiation field is two hemispherical fluxes per face,
+toward the back and toward the exposed face, plus one beam per direction of a
+collimated or cone heater, all unknowns of the state solved with it; each is tied to
+its neighbour by the exact transfer across one cell, so the Jacobian stays banded
+(Technical Reference §8.3). How each face behaves:
+
+| Face | Its condition | What the radiation rows do |
+|---|---|---|
+| `:top`, the exposed face | must hold a `RadiativeBC` or a `RadiativeFluxBC` | a gray interface at the exposed cell's `ε_eff` both ways, open to the diffuse radiation of its members (`F·σ·T_∞⁴` per `RadiativeBC`, the flux of each `Diffuse()` `RadiativeFluxBC`); beams enter there |
+| `:bottom`, the back | no `RadiativeBC` or `RadiativeFluxBC` | a mirror: it reflects everything that reaches it, beams included, which travel back up as diffuse radiation |
+| `:bottom` | a `RadiativeBC` and/or a `Diffuse()` `RadiativeFluxBC` | an open gray face at the last cell's `ε_eff`, facing the radiation of its members |
+
+`setup` refuses, under `RADIATIVE_TRANSFER`: a `:top` condition with neither member;
+a `RadiativeBC` with its own `ε` on any tag; a diffuse `RadiativeFluxBC` with its own
+`absorptivity`, or on a material where a component sets `absorptivity`; a collimated
+or cone `RadiativeFluxBC` on any tag other than `:top`; a radiative member on a tag
+other than `:top` and `:bottom`; more than one `:top` face; and a mesh of more than
+one dimension or non-planar coordinates. A substrate under the sample (an insulation
+board, a holder) is best modelled as cells of its own material, which then absorb and
+emit through the same rows.
+
+When you set up a deck:
+
+- **The mesh.** Each cell emits at its own temperature, so the cell size sets how well
+  the emission is resolved: keep `α_eff·Δz ≤ 0.5` where the solid's own radiation
+  matters (within 5 % of the continuum's radiative conductivity), and grade the mesh
+  toward the surface for an opaque char, whose exposed cell emits at its centre
+  temperature (§6.3; Technical Reference §8.6).
+- **The conductivity.** `k` is the conductive part under radiative transfer: the rows
+  carry the solid's radiation at its `α`, so a Rosseland `T³` term for that band is not
+  added to `k` (§3.2.1).
 
 For a solver comparison, distinguish incident irradiation, absorbed
 irradiation and net heat entering the material. ThermaKin2Ds can assign
 absorbed radiation to a selected element; the pinned Gpyro V2 boundary path
 can attenuate positive net radiation after re-radiation is subtracted; FDS's
-optional two-flux model includes internal emission. Copying the same incident
+optional two-flux model includes internal emission, with a different angular
+factor from ours. Copying the same incident
 flux and absorption coefficient does not reproduce all three treatments.
-Match the deposition and loss model using Technical Reference §§8.7 and
+Match the deposition and loss model using Technical Reference §§8.9 and
 12.11 before comparing temperature histories.
 
 ---
@@ -509,14 +555,15 @@ RadiativeFluxBC(t -> 25e3 * (1 - exp(-t / 10)))
 # Warming ambient in a convective loss term
 ConvectiveBC(h = 10.0, T_inf = t -> 300 + 0.5 * t)
 
-# Pulsed mass extraction
-MassFluxBC(t -> t < 50 ? 0.0 : -1e-3)
+# Pulsed mass extraction: MMA drawn out after 50 s [kg/(m² s)], positive outward;
+# a flux given as a function needs the temperature it would enter at
+MassFluxBC(fluxes = (MMA = t -> t < 50 ? 0.0 : 1e-3,), inflow_temperature = (MMA = 300.0,))
 ```
 
 > **Note on time-varying radiation flux.** Every condition parameter is
 > evaluated at the time of each residual evaluation — constant and time-varying
-> alike, with no up-front constancy detection; under `BEER_LAMBERT` the
-> exposed-face intensity row is `I_e = a·q_inc(t)` at that time. A ramped or modulated
+> alike, with no up-front constancy detection; under `RADIATIVE_TRANSFER` the
+> exposed face's rows read `q_inc(t)` at that time. A ramped or modulated
 > flux is therefore always tracked. You do not need to do anything special —
 > just supply `t -> …` as the flux.
 
@@ -676,23 +723,29 @@ bc_set = BoundaryConditionSet(
 solution = solve(problem; radiation_model = SURFACE_ABSORPTION)
 ```
 
-### 5.11.2 Semi-transparent polymer (in-depth absorption)
+### 5.11.2 Semi-transparent polymer (radiative transfer)
 
-Same incoming radiation, but absorbed in depth via Beer–Lambert (requires
-absorption coefficients on the components):
+Same incoming radiation, but carried through the solid, every cell absorbing and
+emitting (requires absorption coefficients `α` on the components):
 
 ```julia
 bc_set = BoundaryConditionSet(
     thermal = (
-        top = RadiativeFluxBC(50e3) +          # a defaults to a_eff (= ε_eff by Kirchhoff)
-              RadiativeBC(T_inf = 300.0) +
+        top = RadiativeFluxBC(50e3) +          # diffuse: crosses the face at the cell's ε_eff
+              RadiativeBC(T_inf = 300.0) +     # no ε: the face uses the cell's
               ConvectiveBC(h = 10.0, T_inf = 300.0),
-        bottom = AdiabaticBC(),
+        bottom = AdiabaticBC(),                # a mirror for the radiation
     ),
     mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
-solution = solve(problem; radiation_model = BEER_LAMBERT)
+solution = solve(problem; radiation_model = RADIATIVE_TRANSFER)
 ```
+
+A cone heater's radiation arrives within a cone of directions rather than
+diffusely; `RadiativeFluxBC(50e3; distribution = Cone(deg2rad(20), deg2rad(73)))`
+sends it in as three beams, and `Collimated()` as one beam along the normal. A sample
+whose back faces open surroundings takes `bottom = RadiativeBC(T_inf = 300.0)`, an
+open gray back.
 
 ### 5.11.3 Furnace temperature program on the exposed face
 
@@ -736,9 +789,10 @@ named flow measure when the exterior instead has a hydraulic resistance.
 
 - **`radiation_model` defaults to `SURFACE_ABSORPTION`.** A `RadiativeFluxBC` is
   always applied: under the default it is absorbed at the surface (the absorbed
-  flux is applied as a boundary heat flux). Choose `BEER_LAMBERT`
-  (semi-transparent) for the in-depth distribution; the `RadiativeFluxBC` must then
-  sit on `:top`.
+  flux is applied as a boundary heat flux). Choose `RADIATIVE_TRANSFER`
+  (semi-transparent) to carry radiation through the solid; the exposed face then
+  needs a `RadiativeBC` or `RadiativeFluxBC`, a `RadiativeBC` takes no `ε`, and a
+  diffuse `RadiativeFluxBC` no `absorptivity` (§5.6).
 
 - **Only thermal and mass BCs go in the set.** `BoundaryConditionSet` accepts
   only `AbstractThermalBC` and `AbstractMassBC` payloads — a wrong-kind BC

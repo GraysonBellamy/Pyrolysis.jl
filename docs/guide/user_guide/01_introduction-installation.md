@@ -89,8 +89,9 @@ To set expectations up front, the model does **not** support:
   Technical Reference §6).
 - Temperature- or pressure-dependent pre-exponential factors, and distributed
   activation-energy tooling.
-- In-depth emission and scattering: in-depth radiation is the Beer–Lambert
-  absorption of the incident flux (see Technical Reference §8).
+- Scattering, spectral bands and a refractive index: radiative transfer in the
+  solid is gray, non-scattering, with the interface's transmissivity its cell's
+  emissivity (see Technical Reference §8.10).
 
 ---
 
@@ -103,7 +104,7 @@ To set expectations up front, the model does **not** support:
 | Temperature-dependent properties | `LinearProperty`, `PolynomialProperty`, `TableProperty`, … | TR §4 |
 | Multi-step Arrhenius kinetics | A tuple of `Reaction`s on the `Material` | TR §6 |
 | Effective (mixture) properties, mixing rules | `MixingSpec`, `MaterialMixing` | TR §5 |
-| Surface / in-depth radiation | `solve(...; radiation_model = …)` + `RadiativeFluxBC` | TR §8 |
+| Surface absorption / radiative transfer in the solid | `solve(...; radiation_model = …)` + `RadiativeFluxBC`, `RadiativeBC` | TR §8 |
 | Pressure-driven gas transport | Set `κ > 0` on a solid/liquid component | TR §9 |
 | Volume change, swelling, intumescence | Bulk density `ρ` of the condensed components (a light product swells) | TR §10 |
 | Lateral shrinkage / variable cross-section | `lateral_shrinkage_law` on the `Material` (with `use_ale = true`) | TR §10 |
@@ -120,8 +121,9 @@ A few features carry caveats; this guide flags them plainly wherever they
 appear:
 
 - The radiation models you can pass to `solve` are `SURFACE_ABSORPTION`, the
-  default, and `BEER_LAMBERT`. `BEER_LAMBERT` needs planar coordinates (see
-  Technical Reference §8).
+  default, and `RADIATIVE_TRANSFER`. `RADIATIVE_TRANSFER` needs a planar line and
+  a radiative condition on the exposed face, and refuses some inputs that surface
+  absorption takes (§5.6; Technical Reference §8.4.4).
 - **Burnout** (`deactivation = true`) removes cells whose condensed mass falls
   below a fraction of their initial condensed mass, in events located inside
   the step. The state keeps its size; an event is a discrete change of the
@@ -478,7 +480,8 @@ stable, user-facing API. The top-level exports cover:
   `fuller_diffusivity`, `BlowingFace`, `blowing_state`, `blowing_ratio`,
   `blowing_factor`); and `background_gas_concentration` for pore-air
   initialization in lumped gas transport problems.
-- **Radiation models:** `RadiationModel`, `SURFACE_ABSORPTION`, `BEER_LAMBERT`.
+- **Radiation models:** `RadiationModel`, `SURFACE_ABSORPTION`, `RADIATIVE_TRANSFER`; the
+  heater distributions `AngularDistribution`, `Diffuse`, `Collimated`, `Cone`.
 - **The mesh:** `uniform_mesh`, `stretched_mesh`, `line_mesh`, `box_mesh`,
   `cell_mesh`, the coordinate systems `Planar`, `Cylindrical`, `Spherical`, and
   the mesh's parts `MeshTopology`, `MeshGeometry`.
