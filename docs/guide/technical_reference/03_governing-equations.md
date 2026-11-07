@@ -5,9 +5,9 @@ Pyrolysis.jl solves *before* it is discretized, and the discrete unknowns that c
 it. We introduce the continuum state (temperature $T$ and component mass
 concentrations $\xi_j$), the integrated unknowns of every cell (the component masses
 $m_{j,i}$ and one energy state), and the further unknowns carried only when their
-physics is on (node positions and velocities on a moving mesh, face intensities under
-Beer–Lambert radiation, the conversion-history pair and the cross-section rows under a
-lateral-shrinkage law), then derive each conservation law: condensed-phase mass,
+physics is on (node positions and velocities on a moving mesh, the face fluxes of
+the radiation field under radiative transfer, the conversion-history pair and the
+cross-section rows under a lateral-shrinkage law), then derive each conservation law: condensed-phase mass,
 per-species transport, the energy balance and the temperature equation it implies, the
 ideal-gas pressure closure, and Darcy momentum. The chapter is deliberately a
 *statement and justification* of the continuum model; the discrete operators that
@@ -109,8 +109,10 @@ layout from the problem and the solve keywords; §15.1):
   $n=1,\dots,n+1$, on a moving mesh (`use_ale = true`). The positions are differential
   unknowns, $dz_n/dt = w_n$; the velocities are algebraic, each held by the volume
   balance of one cell (§3.6.3, §11.3).
-- **Face intensities** $I_f$ [W·m⁻²], one per face, under `BEER_LAMBERT`: algebraic
-  unknowns that satisfy the attenuation of the beam across each cell (§3.3.3, §8).
+- **Face fluxes of the radiation field** [W·m⁻²] under `RADIATIVE_TRANSFER`: the two
+  hemispherical fluxes $I^-_f$, $I^+_f$ of every face and one beam $I_{h,f}$ per
+  direction of a collimated or cone heater, algebraic unknowns that satisfy the exact
+  transfer across each cell (§3.3.3, §8).
 - The **conversion-history pair** $(G_i, m_{\mathrm{dry},i})$ [kg] of every cell and the
   global **cross-section area** $A$ [m²] with its **lateral strain rate** $\theta_A$
   [s⁻¹] under a lateral-shrinkage law: the pair differential, $A$ and $\theta_A$
@@ -121,10 +123,10 @@ near it and the Jacobian is banded:
 
 $$
 \boldsymbol u =
-\bigl[\,\underbrace{z_1, w_1, I_1}_{\text{node }1},\;
+\bigl[\,\underbrace{z_1, w_1, I^\pm_1}_{\text{node }1},\;
 \underbrace{m_{1,1},\dots,m_{N_C,1},\,T_1,\,G_1,\,m_{\mathrm{dry},1}}_{\text{cell }1},\;
-\underbrace{z_2, w_2, I_2}_{\text{node }2},\;\dots,\;
-\underbrace{z_{n+1}, w_{n+1}, I_{n+1}}_{\text{node }n+1},\;
+\underbrace{z_2, w_2, I^\pm_2}_{\text{node }2},\;\dots,\;
+\underbrace{z_{n+1}, w_{n+1}, I^\pm_{n+1}}_{\text{node }n+1},\;
 A,\;\theta_A \,\bigr],
 $$
 
@@ -132,16 +134,17 @@ with $T_i$ the energy state (the inventory $H_i$ under `energy_state = :enthalpy
 and each entry present only in its configuration. On a line its length is
 
 $$
-N_{\mathrm{state}} = (n+1)\,(2\delta_{\mathrm{mov}} + \delta_{\mathrm{BL}})
+N_{\mathrm{state}} = (n+1)\,(2\delta_{\mathrm{mov}} + N_{\mathrm{rad}})
 + n\,(N_C + 1 + 2\delta_{\chi}) + 2\delta_{\chi},
 $$
 
-where $\delta_{\mathrm{mov}}$, $\delta_{\mathrm{BL}}$, $\delta_\chi$ equal one on a
-moving mesh, under Beer–Lambert radiation and under a lateral-shrinkage law, and zero
-otherwise. For three components on four cells the state has 16 rows on a fixed mesh;
-36 on a moving mesh under a lateral-shrinkage law, of which 7 are algebraic (the five
-node velocities, $A$ and $\theta_A$); and 41 with Beer–Lambert radiation added, of
-which 12 are algebraic. The integrator's mass matrix is diagonal — one on the
+where $\delta_{\mathrm{mov}}$ and $\delta_\chi$ equal one on a moving mesh and under a
+lateral-shrinkage law, and zero otherwise, and $N_{\mathrm{rad}}$ is the number of
+radiation rows per face, zero without radiative transfer and $2 + N_{\mathrm{beam}}$
+with it (§8.1.2). For three components on four cells the state has 16 rows on a fixed
+mesh; 36 on a moving mesh under a lateral-shrinkage law, of which 7 are algebraic (the
+five node velocities, $A$ and $\theta_A$); and 46 with radiative transfer and a diffuse
+heater added, of which 17 are algebraic. The integrator's mass matrix is diagonal — one on the
 differential rows, zero on the algebraic ones — so the semi-discrete system is the
 semi-explicit DAE $\mathsf M\,d\boldsymbol u/dt = \boldsymbol f(\boldsymbol u, t)$
 (§15.4).
@@ -153,7 +156,7 @@ volume of a moving cell enters only through $\xi=m/V$, so a change of volume nee
 dilation term in any row (§11.3.4).
 
 > **Implementation notes.** The state layout and its index functions (`mass_index`,
-> `energy_index`, `position_index`, `velocity_index`, `intensity_index`,
+> `energy_index`, `position_index`, `velocity_index`, `radiation_index`,
 > `history_index`, `area_index`, `lateral_rate_index`) are
 > `StateLayout{NC,E,Mov,Rad,Chi,D,U,Car}` in `src/States/layout.jl`; the state mapping
 > `derive!` (`src/States/derived.jl`) is the only reader of $\boldsymbol u$ and fills
@@ -480,18 +483,17 @@ makes net conductive *outflow* cool the cell. At a face the flux is discretized 
 distance-weighted harmonic-mean conductivity (resistance-in-series), reducing to the
 ordinary harmonic mean on a uniform mesh; the full derivation is in §7.
 
-**Radiation.** $Q_{\mathrm{rad}}$ is the volumetric radiation absorption and is
-entirely model-dependent. For `SURFACE_ABSORPTION` it is zero —
+**Radiation.** $Q_{\mathrm{rad}}$ is the volumetric radiative source, absorption less
+emission, and is entirely model-dependent. For `SURFACE_ABSORPTION` it is zero —
 the absorbed flux $a\,q_{\mathrm{inc}}$ of a `RadiativeFluxBC` enters through the
 *surface energy balance* (boundary Newton solve, §12.3.5), not as a volumetric
-deposit. For `BEER_LAMBERT` it follows
-the in-depth attenuation $q''' = \alpha I(z)$ with
-$I(z) = I_{\mathrm{inc}}\exp(-\int\alpha\,dz')$: the face intensities are algebraic
-unknowns, each satisfying $0 = I_{\mathrm{down}} - I_{\mathrm{up}}\,e^{-\alpha_i\Delta z_i}$
-across its cell (and $0 = I_e - a\,q_{\mathrm{inc}}$ at the exposed face), and cell $i$
-absorbs $I_{\mathrm{up}}A_{\mathrm{up}} - I_{\mathrm{down}}A_{\mathrm{down}}$, the exact
-cell integral of $\alpha I$. The two models, their mutual exclusivity, and their
-numerics are the subject of §8.
+deposit. For `RADIATIVE_TRANSFER` it is the divergence of the two-stream field,
+$Q_{\mathrm{rad}} = (\alpha/\bar\mu)(I^+ + I^- - 2\sigma T^4)$ plus what the beams of a
+collimated or cone heater deposit: the face fluxes are algebraic unknowns, each
+satisfying the exact transfer across its cell, and cell $i$ absorbs what enters through
+its two faces less what leaves, $S^{\mathrm{rad}}_i$ of (8.6), the exact cell integral of
+$Q_{\mathrm{rad}}$ for its constant emission. The two models, their mutual exclusivity,
+and their numerics are the subject of §8.
 
 **Reaction heat.** With the internal sign convention $h_r>0$ endothermic,
 
@@ -512,8 +514,8 @@ the smoothly-gated Arrhenius form of §6, evaluated at the trial temperature.
 > sign documented in-source ("Note the negative sign!"). Reaction rates and heats are
 > evaluated together by `evaluate_reactions!` (same file), called per cell by
 > `ReactionKernel` (`src/Kernels/reactions.jl`), which adds $Q_{\mathrm{rxn},i}V_i$ to the
-> cell's energy source. The Beer–Lambert rows and cell sources are formed by
-> `BeerLambertKernel` (`src/Kernels/radiation.jl`).
+> cell's energy source. The radiative transfer rows and cell sources are formed by
+> `RadiativeTransferKernel` (`src/Kernels/radiative_transfer.jl`).
 
 ### 3.3.4 Gas enthalpy flux and surface energy
 
@@ -807,7 +809,7 @@ first-principles-vs-empirical discussion are in §10.
 
 The PDE system of §3.1.3 is incomplete until every flux and source is expressed in terms
 of the state — the masses and the energy state, and the node positions and velocities,
-face intensities, history pair and cross-section unknowns where they are carried. The
+radiative face fluxes, history pair and cross-section unknowns where they are carried. The
 table below inventories the closures and points to the chapter where each is derived.
 This is the contract that makes the residual a *pure function* of the state.
 
@@ -820,7 +822,7 @@ This is the contract that makes the residual a *pure function* of the state.
 | Reaction rate $r_r$ | Arrhenius | $A_r e^{-E_r/R_gT}\prod_j\xi_j^{n_{r,j}}$, tanh gates, one-sided limiter, at the trial temperature | §6 |
 | Species source $\omega_j$ | stoichiometry | $\sum_r\nu_{r,j}r_r$ | §6 |
 | Reaction heat $Q_{\mathrm{rxn}}$ | enthalpy of reaction at the local temperature | $-\sum_r h_r(T,\xi)\,r_r$ | §6 |
-| Radiation source $Q_{\mathrm{rad}}$ | radiation model | surface balance / Beer–Lambert face intensities | §8 |
+| Radiation source $Q_{\mathrm{rad}}$ | radiation model | surface balance / gray two-stream face fluxes with exact cell integration | §8 |
 | Gas enthalpy flux | conservative face flux | interior face-temperature closure; outward surface enthalpy and specified incoming reservoir enthalpy | §7, §12 |
 | Wall and molecular gas flux | lumped transfer or dusty-gas friction | partial-pressure driving force, one consistent face pressure, total-flux interface matching | §9 |
 | Gas advective flux | donor pore density × Darcy velocity | $p_{j,up}M_jv/(RT_{up})$ in each half-cell | §9 |

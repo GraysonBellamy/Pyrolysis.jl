@@ -27,7 +27,7 @@ Conventions used in this chapter (binding, from §2, Nomenclature):
   advances (§15): per cell the component masses and the energy state (the
   temperature, or the sensible-enthalpy inventory); on a moving mesh the node
   positions and node velocities, the velocities algebraic rows; under
-  `BEER_LAMBERT` the face intensities, algebraic rows; under a lateral
+  `RADIATIVE_TRANSFER` the radiative face fluxes, algebraic rows; under a lateral
   shrinkage law the conversion-history pair of every cell and the
   cross-section rows. $M$ is diagonal, with zeros on the algebraic rows.
 - $\mathbf{y}=\mathcal{O}(\mathbf{u},\boldsymbol{\theta})\in\mathbb{R}^{m}$ is a

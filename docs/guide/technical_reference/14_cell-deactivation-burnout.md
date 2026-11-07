@@ -207,15 +207,18 @@ first reaches $\varepsilon_m$. A narrower band (or none) stops the run at a cell
 above it: the layer then leaves a few cells at a time, and a crossing cell below
 the threshold may lie inward of a live one and leave from under it (§14.3.4). On
 the five burnout decks
-of the supported envelope that fraction is 0.4 to 3.9 % at
-$\varepsilon_m=3\times10^{-3}$ and 1.4 to 9.9 % at $\varepsilon_m=10^{-2}$; on
-the mixed-composition layer of V-BO-07 the other cells still hold up to about
-6 % of their initial mass when the first crosses $\varepsilon_m$.
+of the supported envelope the largest fraction a band of 0.1 merges is 0.3 to 9.9 % at
+$\varepsilon_m=3\times10^{-3}$ and 1.0 to 10 % at $\varepsilon_m=10^{-2}$; where a layer
+leaves in more than one invocation (the uniform layer and the graded mesh at the default
+threshold, the convective-loss deck at both), its slowest cells still held more than
+the band when the first crossed. On the mixed-composition layer of V-BO-07 the other
+cells hold up to 3.9 % of their initial mass when the first crosses
+$\varepsilon_m=10^{-2}$.
 
 ### 14.2.4 The supported envelope
 
-The burnout path (the equidistribution correction with its layer time set at
-activation, the near-threshold band, located deactivation events) is verified
+The burnout path (the equidistribution correction with its layer time estimated
+twice, the near-threshold band, located deactivation events) is verified
 under joint refinement of the mesh and the tolerance on five decks built on
 the 5.9 mm PMMA layer on Kaowool under 50 kW/m² of V-BO-01: a uniform mesh, a
 mesh graded threefold toward the surface (V-BO-06), a layer with a second,
@@ -224,17 +227,20 @@ convective loss in place of re-radiation and an adiabatic back. The numerical
 parameters are $\varepsilon_m$, $\varepsilon_{\rm band}$, $(r_{\rm hi},r_{\rm
 lo})$, the layer time, the tolerance and the cells across the layer; the
 material parameters are those of the decks. Inside the envelope every quantity
-of interest (complete burnout, the mass lost, the peak mass-loss rate and its
-time, the burnout time, the mass ledger) is within tolerance at every
-resolution and the burst at the end of a layer converges under refinement:
-$\varepsilon_m=3\times10^{-3}$ with $\varepsilon_{\rm band}=0.1$ on all five
-decks from 30 cells across the layer (10 on the 1 mm layer), and the default
-$\varepsilon_m=10^{-2}$ with $\varepsilon_{\rm band}=0.1$ on the single-solid
-layers from 30 cells (60 on the convective-loss deck) but not on the mixed
-layer, whose burst stops converging between 120 and 240 cells. The number of
-invocations is reported, not a criterion: one on every deck inside the
-envelope except the convective-loss deck at $10^{-2}$, which takes two from 60
-cells. The full statement, with its limits, is User Guide chapter 10.
+of interest of its deck (complete burnout, the mass lost, the mass ledger and, with a
+radiative face, a converged surface balance at every accepted step) is within tolerance at every resolution and the
+burst at the end of a layer converges under refinement: $\varepsilon_m=10^{-2}$ with $\varepsilon_{\rm band}=0.1$, the default, on all five decks
+from 30 cells across the layer (10 on the 1 mm layer) under the default activation, and
+from 60 cells on the mixed layer and the convective-loss deck under $(0.7,0.3)$; and
+$\varepsilon_m=3\times10^{-3}$ with $\varepsilon_{\rm band}=0.1$ on the uniform and 1 mm
+layers and the convective-loss deck from 30 cells (60 under $(0.7,0.3)$ on the last), on
+the graded mesh from 60, and on the mixed layer from 60 under the default activation
+only, since under $(0.7,0.3)$ it does not burn out at 30 and 60 cells. The
+number of invocations is reported, not a criterion: at the default threshold two on
+the uniform layer and the graded mesh, one on the mixed and 1 mm layers and three or
+four on the convective-loss deck; at $3\times10^{-3}$ one on every deck but the
+convective-loss deck, which takes two or three. The full statement, with its limits,
+is User Guide chapter 10.
 
 ---
 
@@ -276,8 +282,8 @@ The state layout carries a mask over its rows, `layout.mask::BitVector`
 energy row is; the state mapping copies that into `ds.active` at every residual
 evaluation (`derive!`). Deactivating cell $i$ masks every row of its cell block
 (masses, energy state, history pair) and every row of its far node, the node
-away from the receiver (position, velocity and, under `BEER_LAMBERT`, the face
-intensity).
+away from the receiver (position, velocity and, under `RADIATIVE_TRANSFER`, the
+radiative fluxes of the face at that node).
 
 The row assembly writes a dead row as (`_dead_rows!`,
 `src/Assembly/residual.jl`)
@@ -294,8 +300,8 @@ differential unknown keeps its value and contributes no error; a dead algebraic
 unknown is held at zero. The kernels read no dead cell either: an interior face
 contributes only when both of its cells are live, every boundary condition
 applies on the face that bounds the live cells on its side (`live_face`,
-`src/Meshes/topology.jl`), the in-depth beam enters through the upstream face
-of the first live cell, the balance row of a dead cell carries no velocity, the
+`src/Meshes/topology.jl`), the radiation rows take the upstream face of the first
+live cell as the exposed face, the balance row of a dead cell carries no velocity, the
 correction is zero at every node beside a dead cell, and the cross-section rows
 sum the live cells' history pairs only. The live rows therefore do not depend on
 the dead unknowns, and the system splits into the live problem and a block of
@@ -304,8 +310,8 @@ identity rows.
 What the dead rows hold after an event is set by the transfer (§14.3.3): zero
 masses; the merged temperature in the temperature form, zero in the enthalpy
 form; on a moving mesh node positions collapsed onto the receiver's far face
-with zero velocities; face intensities of zero, written by the consistent sweep
-that follows every event. The outputs read the mask of each saved time:
+with zero velocities; radiative face fluxes of zero, written by the consistent
+sweep that follows every event. The outputs read the mask of each saved time:
 `sol.T`, `sol.ξ` and `sol.cell_centers` are `NaN` in a dead cell, `sol.m` is
 zero there, and node positions beyond the outermost live node are `NaN`
 (§14.6).
@@ -599,13 +605,15 @@ Lagrangian cells the tail a receiver takes delays it past its inward neighbour, 
 crosses first under a receiver holding $\varepsilon(e^{k\tau}+1)$ at $k\tau<0.48$; at
 order one this is V-BO-11. That void is the transfer's: the cells above it are spent,
 the run leaves, and the column closes over it, each such event marked `interior`
-(`interior_events`). Under in-depth absorption a cell beneath the surface can instead
-empty under cells that still hold their material, a pocket that is physical in PMMA and
-that the model has no gap to carry heat across. A live cell outward of the run is a
-skin when it holds `VOID_SKIN` $=10$ thresholds or more of its reference, or has no
-reference. On 17 decks, 163 crossings of the first kind hold 1.07 to 5.99 thresholds and
-45 under in-depth absorption 29 to 4760; 10 sits in the gap. The rule reads magnitude
-alone, so a thin, nearly spent skin reads as spent.
+(`interior_events`). A cell beneath the surface can instead empty under cells that
+still hold their material, a pocket that is physical in PMMA and that the model has no
+gap to represent (§14.4). A live cell outward of the run is a skin when it holds
+`VOID_SKIN` $=10$ thresholds or more of its reference, or has no reference. A crossing
+of the first kind holds a few thresholds (1.07 to 5.99 over 163 crossings on 17
+decks); 10 sits above them. The rule reads magnitude alone, so a thin, nearly spent
+skin reads as spent: on the fixed mesh of V-BO-05 under radiative transfer, where the
+PMMA empties nearly uniformly beneath its surface, the cells outward of the first
+crossing hold 1.0 to 1.4 thresholds.
 
 ### 14.3.5 The event in the integrator: location and the safety net
 
@@ -634,8 +642,8 @@ rows and checks the result:
 1. under a variable cross section the area and its lateral rate, in two
    passes, since the history rates the lateral rate reads depend on the
    concentrations at the area;
-2. the face intensities by the attenuation recurrence from the exposed face
-   (`_consistent_intensities!`), at that area, which writes zero on the faces
+2. the radiative face fluxes by the closed-form sweep from the new exposed face
+   (`consistent_radiation!`, §8.7.2), at that area, which writes zero on the faces
    upstream of the first live cell;
 3. the node velocities by one sweep of the balance rows from the pinned node
    (`_consistent_algebraic!`, §15.4); a velocity row left above round-off
@@ -701,27 +709,29 @@ PMMA cell deactivates as the top live cell, the run loses exactly the layer's
 mass and ends on the bare substrate, and the maximum live-cell temperature over
 every accepted step is 915 K.
 
-Under in-depth absorption the temperature maximum of a regressing
-non-charring polymer lies below the surface, so the exposed cell reacts slowest.
+Under radiative transfer the temperature maximum of a regressing
+non-charring polymer lies below the surface, since the exposed cell loses its
+emission and convection at the face, so the exposed cell reacts slowest.
 On a fixed mesh it keeps its volume and loses concentration: it persists as a
 low-density skin while the cells beneath it empty, and the layer gasifies from
 within. The first cell below its threshold then lies inward of a live cell, the
 pass of §14.3.4 cannot take it, and the solve ends with return code
 `:Terminated`, outcome `:interior` and a warning naming the cell. On the deck of
-V-BO-05 (the V-BO-01 deck, in-depth absorption included, on a fixed mesh) this
-happens before any deactivation, when the lowest PMMA cell, next to the
-Kaowool, crosses $\varepsilon_m$: at 260.35, 259.79, 259.62 and 259.57 s at 30,
-60, 120 and 240 cells, both energy forms within 5 ms, with the maximum live-cell
-temperature below 1000 K.
+V-BO-05 (the V-BO-01 deck under radiative transfer, on a fixed mesh) the PMMA near
+the surface empties nearly uniformly, the exposed cell slowest, and a cell 0.1–0.15
+mm below the surface crosses $\varepsilon_m$ first while the cells above it still hold
+1.0 to 1.4 thresholds: at 157.5, 157.0 and 156.95 s at 60, 120 and 240 cells, before
+any deactivation. At 30 cells the exposed cell reaches the threshold first and goes,
+and the next crossing, one cell beneath the new exposed cell, stops the solve at
+172.5 s. Both energy forms agree within 3 ms, and the maximum live-cell temperature
+is 692 K.
 
-The stop is deliberate. A void cell conducts with the gas conductivity and
-absorbs nothing, and nothing in the model carries heat across a void by
-radiation: the in-depth model absorbs and does not emit, and the only emission
-is the surface balance's at the exposed face. The beam transmitted through a
-void column lands on the first condensed cell below it, which can return that
-heat upward only by conduction through the gas, so continued past its first
-void the deck would heat the substrate beneath it far outside the property
-bracket. On a moving mesh the configuration rarely arises under the correction: an
+The stop is deliberate. The pass of §14.3.4 removes a cell only into the live cell
+beneath its run, and on a fixed mesh only the outermost live cell can go, so a cell
+emptied beneath a live skin has no way out; kept, it is a cell of pore gas between
+the skin and the condensed cell below, a cavity the model does not represent: its
+faces are not the gray surfaces of a gap, and the nearly empty cell, whose
+concentrations keep falling, is what the threshold exists to remove. On a moving mesh the configuration rarely arises under the correction: an
 emptying cell collapses, and the correction brings the layer to the threshold
 together. A crossing cell under spent cells leaves and the column closes over it; beneath
 a skin the solve stops as it does here (§14.3.4).
@@ -1013,7 +1023,7 @@ $\varepsilon_m$, a remaining crossing inward of a live cell ending the solve wit
 1. **Interior voids.** The model carries no conduction or radiation model for a
    gas gap. On a fixed mesh a cell below the threshold inward of a live cell ends
    the solve with outcome `:interior` (§14.4), which a non-charring polymer under
-   in-depth absorption reaches before its first deactivation. A moving mesh stops the
+   radiative transfer reaches before its first deactivation. A moving mesh stops the
    same way beneath a skin, and closes only a void under spent cells (§14.3.4). The
    skin is read from magnitude, at a limit measured on the decks there.
 2. **One invocation per layer is not guaranteed.** The correction and the band
@@ -1021,18 +1031,16 @@ $\varepsilon_m$, a remaining crossing inward of a live cell ending the solve wit
    (§14.2.4), but graded meshes, heterogeneous layers and non-uniform reaction
    work against it; the number of invocations is reported, and a band narrower
    than what the slowest cell keeps takes the layer a few cells at a time.
-3. **The burst after a layer's deactivation.** At 30 cells across the layer the
-   largest per-step rate just after a layer's deactivation can exceed the main
-   peak, up to threefold on the graded mesh; it falls below the main peak by 60
-   to 120 cells, and the peak sampled at the output times is within tolerance
-   from 30 cells. On the mixed layer of V-BO-07 at the default
-   $\varepsilon_m=10^{-2}$ the burst stops converging between 120 and 240 cells;
-   $\varepsilon_m=3\times10^{-3}$ converges there.
+3. **The burst after a layer's deactivation.** Inside the envelope the largest
+   per-step rate just after a layer's deactivation stays below the main peak on
+   every deck but the graded mesh at 30 cells, where it exceeds it by up to 9.5 %;
+   outside it the burst need not converge (§18.8.2).
 4. **The envelope's extent.** Materials outside the five decks (other materials,
    thicker or charring layers, higher heating) are not inside the envelope by
-   that study; the V-BO-01 ladder at 25 and 100 kW/m², at half and twice its
-   pre-exponential factor and with its flux stepped after activation, at 30 to
-   120 cells, passes, the hot decks with two invocations.
+   that study. The V-BO-01 ladder at 25 and 100 kW/m², at half and twice its
+   pre-exponential factor and with its flux halved or raised by half at 150 s, at
+   30 to 120 cells, passes the same QoIs in one or two invocations; its burst
+   converges on all but the 100 kW/m² deck and the raised flux (§18.8.2).
 5. **Element death is residual-level.** Deactivation on a mesh of more than one
    dimension is refused by `setup`; element death is tested at the residual and
    Jacobian level only (§14.5).

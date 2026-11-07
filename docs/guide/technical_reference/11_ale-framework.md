@@ -409,8 +409,8 @@ line, and a line mesh pins its first node.
 **Consistent velocities.** The integrator starts from a state whose algebraic rows
 hold. `consistent_velocities!` sweeps (11.9) once from the pinned node: the
 corrections read positions only, so one pass is exact. `setup` calls it for
-the initial state (through `consistent_state!`, which also sets the face intensities
-and the cross-section rows), and every deactivation event calls it again after its
+the initial state (through `consistent_state!`, which also sets the radiative face
+fluxes and the cross-section rows), and every deactivation event calls it again after its
 transfer, a dead cell's row node taking zero velocity (Chapter 14). A velocity row left
 above round-off by the sweep is an error at setup; at an event it ends the solve with
 return code `:Failure` and a warning that no consistent node velocities exist.
@@ -892,7 +892,9 @@ where its rate has grown, enters through a second switch of each cell,
 $$
 a^{\text{lo}}_i = \mathcal S(x_i - 1),
 $$
-with $x_i$ the argument of $\mathcal S$ in (11.22): zero while the cell keeps at least
+with $x_i$ the argument of $\mathcal S$ in (11.22),
+$x_i = \big(\ln r_{\text{hi}} - \ln(\Delta z_i/\Delta z_i(0))\big)/(\ln r_{\text{hi}} - \ln r_{\text{lo}})$:
+zero while the cell keeps at least
 $r_{\text{lo}}$ of its initial thickness, one at and below $r_{\text{lo}}^2/r_{\text{hi}}$
 of it ($1/30$ by default), and $C^1$ in $\ln\Delta z$ between. A node's
 $a^{\text{lo}}_i$ is the smooth "or" of its two cells', as for $a_i$, and the node

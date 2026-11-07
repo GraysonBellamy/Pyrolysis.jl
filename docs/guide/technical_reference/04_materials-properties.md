@@ -205,13 +205,13 @@ consumed downstream:
 | `gas_transfer_coeff` | $\lambda_j(T)$ | m²·s⁻¹ | S, L | $\lambda_\mathrm{eff}$ (Ch. 5), gas diffusion (Ch. 9) |
 | `permeability` | $\kappa_j(T)$ | m² | S, L | $\kappa_\mathrm{eff}$ (Ch. 5), Darcy velocity (Ch. 9) |
 | `emissivity` | $\varepsilon_j(T)$ | – | all | $\varepsilon_\mathrm{eff}$ (Ch. 5), radiative BC (Ch. 12) |
-| `surface_absorptivity` | $a_j$ (or `nothing` ⇒ $\varepsilon_j(T)$) | – | S, L | $a_\mathrm{eff}$ (§5.8.2), incident-flux BC (Ch. 12), Beer–Lambert incident intensity (Ch. 8) |
+| `surface_absorptivity` | $a_j$ (or `nothing` ⇒ $\varepsilon_j(T)$) | – | S, L | $a_\mathrm{eff}$ (§5.8.2), incident-flux BC (Ch. 12), the beams of a collimated or cone heater under radiative transfer (Ch. 8) |
 | `absorption_coeff` | $\alpha_j$ | m²·kg⁻¹ | all | $\alpha_\mathrm{eff}=\sum_j\xi_j\alpha_j$ (Ch. 5, 8) |
 | `molar_mass` | $M_j$ | kg·mol⁻¹ | G | $\rho_g$ (§4.3), $P$ (Ch. 9), Chapman–Enskog estimate (§5.10) |
 
 Note that $\alpha_j$ is a **mass-basis** absorption coefficient [m²·kg⁻¹]; it is
 multiplied by concentration to give the volumetric (extinction) absorption
-coefficient $\alpha_\mathrm{eff}=\sum_j\xi_j\alpha_j$ [m⁻¹] used by Beer–Lambert
+coefficient $\alpha_\mathrm{eff}=\sum_j\xi_j\alpha_j$ [m⁻¹] used by the radiative transfer rows
 radiation (Chapter 8), at the positive-part concentrations. Condensed
 superficial transfer is explicit under the lumped model and uses condensed
 matrix weights. Its value is constitutive data, independent of gas loading.
@@ -772,8 +772,8 @@ residual evaluation $t$ is a plain number: a dual-number time is not supported,
 and the time derivative of the right-hand side is zero or a finite difference
 (§15.5.1). Where a
 time-dependent parameter meets the state, the kernel promotes it explicitly
-(the Beer–Lambert kernel adds `zero` of the state's element type to the incident
-flux it evaluates), and parameter sensitivities are finite differences of whole
+(the thermal boundary kernel adds `zero` of the state's element type to a
+prescribed flux it evaluates), and parameter sensitivities are finite differences of whole
 solves (Chapter 17).
 
 **Temperature-dependent parameters** (`evaluate_param_T(param, T)`):

@@ -712,26 +712,24 @@ reactions, so an exothermic reaction ($h_r<0$) produces $Q>0$.
 
 ### 7.5.2 Radiation source $Q_{\text{rad}}$ (dispatch only)
 
-The absorbed radiation depends on the radiation model of the solve (`radiation_model`):
+The radiative source depends on the radiation model of the solve (`radiation_model`):
 
 - **`SURFACE_ABSORPTION`**: no volumetric source. The absorbed flux
   $a\,q_{\text{inc}}$ of a `RadiativeFluxBC` is applied through the surface energy balance of
   its face (§12.3.5), not as a volumetric deposit (opaque surface: the absorbed power raises
   $T_s$ directly).
-- **`BEER_LAMBERT`**: in-depth absorption, $q'''(z)=\alpha(z)I(z)$ with
-  $I(z)=I_{\text{inc}}\exp(-\!\int\!\alpha\,dz')$. The face intensities are algebraic unknowns
-  of the state, with the rows $0 = I_{\text{down}} - I_{\text{up}}\,e^{-\alpha_i\Delta_i}$ for
-  every live cell along the beam and $0 = I_e - a\,q_{\text{inc}}$ at the face the beam enters
-  (the upstream face of the first live cell). The beam kernel (`BeerLambertKernel`,
-  `src/Kernels/radiation.jl`) adds to each live cell's energy source
-  $I_{\text{up}}A_{\text{up}} - I_{\text{down}}A_{\text{down}}$ [W], the exact cell average of
-  the attenuated beam, and the radiative member of the boundary condition contributes zero to
-  the surface balance.
+- **`RADIATIVE_TRANSFER`**: every cell absorbs and emits. The two hemispherical fluxes
+  $I^\pm_f$ of every face, and the beams of a collimated or cone heater, are algebraic
+  unknowns of the state whose rows are the exact transfer across each live cell (8.5). The
+  radiative transfer kernel (`RadiativeTransferKernel`,
+  `src/Kernels/radiative_transfer.jl`) adds to each live cell's energy source what enters
+  through its two faces less what leaves, $S^{\text{rad}}_i$ of (8.6) [W], and the radiative
+  members of the boundary conditions contribute zero to the surface balance.
 
-The full derivation of each model — the Beer–Lambert cell-averaged form, the intensity rows,
-the energy-equation coupling and the regime diagnostics — is the subject of **§8 (Thermal
-Radiation)**. For the purposes of the energy assembly here, the absorbed radiation is part of
-the cell's energy source $S_{E,i}$ in (7.8).
+The full derivation of each model — the two-stream equations, the exact cell integration,
+the rows and their boundaries, the energy-equation coupling and the mesh criterion — is the
+subject of **§8 (Thermal Radiation)**. For the purposes of the energy assembly here, the
+radiative source is part of the cell's energy source $S_{E,i}$ in (7.8).
 
 ---
 
@@ -762,8 +760,8 @@ rather than skipped (§15.2). The sequence is:
    2. the **gas transport** (if gas can move): the interior gas mass fluxes, the enthalpy
       they carry at the face temperature (7.14) and the face's added conduction, and the
       outward mass fluxes of the boundary faces (§9, §7.4.2);
-   3. the **in-depth radiation** (`BEER_LAMBERT`): the intensity residuals and the absorbed
-      power (§7.5.2);
+   3. the **radiative transfer** (`RADIATIVE_TRANSFER`): the residuals of the radiation
+      rows and every cell's radiative source (§7.5.2, §8);
    4. **conduction**: the interior conductive fluxes (7.1) (and, in more dimensions, the
       cells' least-squares gradients, §7.1.3);
    5. the **thermal boundary**: the surface energy balance of every live boundary face, its
@@ -776,7 +774,7 @@ rather than skipped (§15.2). The sequence is:
    (§10, §11.3).
 6. **The external sources** (`add_sources!`): a manufactured mass source, for verification.
 7. **The row assembly** (`assemble_rows!`): the scatter (7.4) of every face flux, the mass
-   rows (7.12), the energy row (7.9) or (7.10), the intensity, motion, history and
+   rows (7.12), the energy row (7.9) or (7.10), the radiation, motion, history and
    cross-section rows, and last the dead rows of deactivated cells, which become identity rows
    (zero derivative on a differential row, the unknown itself on an algebraic one, §14.3.1).
    It is the only writer of `du`.
@@ -822,11 +820,11 @@ The kernels write into a pre-allocated buffer of contributions (`Contributions{N
 | `F_mass` | $N_C\times n_{\text{faces}}$ | mass flux of every component per unit face area along the face normal | $\text{kg}\,\text{m}^{-2}\text{s}^{-1}$ |
 | `F_energy` | $n_{\text{faces}}$ | energy flux per unit face area along the normal: conduction and the enthalpy carried by the mass fluxes | $\text{W}\,\text{m}^{-2}$ |
 | `S_mass` | $N_C\times n_{\text{cells}}$ | reaction mass source of every component, $\omega_{j,i}V_i$ | $\text{kg}\,\text{s}^{-1}$ |
-| `S_energy` | $n_{\text{cells}}$ | cell energy source: reaction heat and absorbed radiation, without the formation term | W |
+| `S_energy` | $n_{\text{cells}}$ | cell energy source: reaction heat and the radiative source, without the formation term | W |
 | $\theta$ | $n_{\text{cells}}$ | cell strain rate (mesh closure) | $\text{s}^{-1}$ |
 | `M_flux` | $N_C\times n_{\text{cells}}$ | face-flux part of every mass rate, $\dot M_{j,i}$ (7.4), filled by the assembler | $\text{kg}\,\text{s}^{-1}$ |
 | `T_face` | $n_{\text{faces}}$ | face temperatures; on a boundary face the surface temperature of its energy balance | K |
-| `r_intensity` | $n_{\text{faces}}$ | residuals of the face-intensity rows (`BEER_LAMBERT`) | $\text{W}\,\text{m}^{-2}$ |
+| `r_radiation` | $N_{\text{rad}}\times n_{\text{faces}}$ | residuals of the radiation rows (`RADIATIVE_TRANSFER`) | $\text{W}\,\text{m}^{-2}$ |
 | `r_velocity` | $D\cdot n_{\text{nodes}}$ | residuals of the node-velocity rows (moving mesh) | those of the rows (§11.3) |
 | `r_multiplier` | $n_{\text{cells}}$ | residuals of the closure multipliers (potential closure, more dimensions) | those of the rows (§11.3.5) |
 | `F_carried`, `S_carried` | $2\times n_{\text{faces}}$, $2\times n_{\text{cells}}$ | flux and source of the conversion-history pair (variable cross section) | $\text{kg}\,\text{m}^{-2}\text{s}^{-1}$, $\text{kg}\,\text{s}^{-1}$ |
@@ -884,7 +882,7 @@ $-\sum_g c_g\mathbf J_g\cdot\nabla T$. These terms correspond to our
 1D temperature balance after the conservative face enthalpy flux and species
 balance are combined. The reaction-heat sign must be converted. TK also
 includes its own deformation and absorption-weighted re-radiation terms;
-these must be matched separately (§§8.7, 10.11). Its 2D equation contains
+these must be matched separately (§§8.9, 10.11). Its 2D equation contains
 transverse transport absent from a 1D Pyrolysis.jl solve.
 
 ### 7.8.2 Gpyro V2

@@ -2,7 +2,7 @@
 # diagrams retain only labels needed to read the geometry and physical transfers.
 # Figure 4's switch is evaluated by the implementation, supplied by generate.jl.
 
-function first_batch(activation_curve)
+function first_batch(activation_curve, slab)
     svg(
         "01_mesh_anatomy",
         "Figure 1. Finite-Volume Mesh (Schematic)",
@@ -289,63 +289,60 @@ function first_batch(activation_curve)
 
     svg(
         "07_radiation",
-        "Figure 7. Radiation Absorption (Schematic)",
-        "Matching slabs receive radiation from the right: surface absorption deposits it at the boundary, while Beer–Lambert attenuation distributes absorption through cells and transmits the remainder. The plotted intensity uses uniform optical depth alpha L equal to two.";
-        height = 480,
+        "Figure 7. Where Radiation Is Absorbed (Schematic)",
+        "Matching slabs receive radiation from the right. Surface absorption takes the absorbed flux into the surface balance at the face. Radiative transfer carries a downward and an upward hemispherical flux at every face, crosses the exposed face at the emissivity of the cell beside it both ways, sends a collimated heater in as a beam, and reflects everything at a mirror back. The chart gives the two fluxes of the worked slab of Technical Reference section 8.8, from the solver.";
+        height = 500,
     ) do io
+        nodes = [90, 190, 290, 390, 490]
         label(io, 65, 95, "Surface Absorption"; weight = "bold")
-        label(io, 65, 260, "Beer–Lambert Absorption"; weight = "bold")
-        for (y, shades) in
-            ((140, fill(PALE, 4)), (310, ["#f5f5f5", "#ebebeb", "#dddddd", "#cccccc"]))
-            meshstrip(io, [90, 190, 290, 390, 490], y; h = 60, ids = false, fills = shades)
-            line(io, 600, y+30, 502, y+30; arrow = "orange", color = ORANGE, width = 2.5)
+        meshstrip(io, nodes, 125; h = 60, ids = false)
+        line(io, 600, 155, 502, 155; arrow = "orange", color = ORANGE, width = 2.5)
+        line(io, 490, 115, 490, 195; color = ORANGE, width = 4)
+        label(io, 550, 140, "a q_{inc}"; anchor = "middle", color = ORANGE)
+        label(io, 290, 215, "Surface balance at the face"; anchor = "middle", size = 18)
+        label(io, 65, 270, "Radiative Transfer"; weight = "bold")
+        y0, h = 300, 90
+        meshstrip(io, nodes, y0; h, ids = false, fills = ["#ebebeb", "#ebebeb", "#ebebeb", "#ebebeb"])
+        for x in nodes[2:end]
+            line(io, x - 6, y0 + 22, x - 46, y0 + 22; arrow = "orange", color = ORANGE, width = 2)
         end
-        line(io, 490, 130, 490, 210; color = ORANGE, width = 4)
-        label(io, 550, 135, "a q_{inc}"; anchor = "middle", color = ORANGE)
-        for (j, x) in enumerate([490, 390, 290, 190, 90])
-            label(io, x, 296, "I_{$(j-1)}"; anchor = "middle", color = ORANGE, size = 18)
-            j < 5 && line(
-                io,
-                x-8,
-                340,
-                x-88,
-                340;
-                arrow = "orange",
-                color = ORANGE,
-                width = 3-0.5j,
-            )
+        for x in nodes[1:(end-1)]
+            line(io, x + 6, y0 + 48, x + 46, y0 + 48; arrow = "blue", color = BLUE, width = 2)
         end
-        line(io, 80, 340, 40, 340; arrow = "orange", color = ORANGE)
-        label(io, 65, 403, "Transmitted"; size = 18, color = ORANGE)
-        label(
-            io,
-            315,
-            403,
-            "Absorption per Area: I_{in} − I_{out}";
-            anchor = "middle",
-            size = 18,
-        )
-        line(io, 200, 443, 470, 443; arrow = "ink")
-        label(io, 185, 450, "z = 0"; anchor = "end", size = 18)
-        label(io, 490, 450, "z = L"; size = 18)
+        line(io, 600, y0 + 72, 98, y0 + 72; arrow = "orange", color = ORANGE, width = 1.6, dash = "7 5")
+        line(io, 602, y0 + 22, 498, y0 + 22; arrow = "orange", color = ORANGE, width = 2.5)
+        line(io, 498, y0 + 48, 602, y0 + 48; arrow = "blue", color = BLUE, width = 2.5)
+        label(io, 452, y0 - 8, "I^{−}"; anchor = "middle", color = ORANGE, size = 20)
+        label(io, 452, y0 + h + 24, "I^{+}"; anchor = "middle", color = BLUE, size = 20)
+        label(io, 612, y0 + 28, "ε"; color = INK, size = 20)
+        label(io, 612, y0 + 80, "beam"; color = ORANGE, size = 17)
+        line(io, 90, y0 - 10, 90, y0 + h + 10; color = INK, width = 5)
+        label(io, 80, y0 + h + 30, "Mirror"; anchor = "middle", size = 17)
+        label(io, 290, y0 + h + 54, "Every cell absorbs and emits"; anchor = "middle", size = 18)
+        line(io, 200, 478, 470, 478; arrow = "ink")
+        label(io, 185, 485, "z = 0"; anchor = "end", size = 18)
+        label(io, 490, 485, "z = L"; size = 18)
+        depth, Im, Ip = slab
         X, Y = chart_axes(
             io,
-            810,
+            820,
             145,
             320,
             225;
             xlim = (0, 1),
-            ylim = (0, 1),
+            ylim = (0, 1.05),
             xticks = [(0, "0"), (0.5, "0.5"), (1, "1")],
             yticks = [(0, "0"), (0.5, "0.5"), (1, "1")],
             xlabel = "Inward Depth (L − z)/L",
-            ylabel = "I / I₀",
+            ylabel = "Flux / εq",
         )
-        r = range(0, 1; length = 101)
-        polyline(io, X.(r), Y.(exp.(-2 .* r)); color = ORANGE)
-        for r = 0:0.25:1
-            circle(io, X(r), Y(exp(-2r)), 4; fill = ORANGE)
+        polyline(io, X.(depth), Y.(Im); color = ORANGE)
+        polyline(io, X.(depth), Y.(Ip); color = BLUE)
+        for k in eachindex(depth)
+            circle(io, X(depth[k]), Y(Im[k]), 4; fill = ORANGE)
+            circle(io, X(depth[k]), Y(Ip[k]), 4; fill = BLUE)
         end
-        label(io, 970, 110, "αL = 2"; anchor = "middle", size = 21)
+        key(io, 990, 110, "I^{−}", ORANGE)
+        key(io, 1080, 110, "I^{+}", BLUE)
     end
 end

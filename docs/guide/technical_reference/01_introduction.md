@@ -33,7 +33,7 @@ The state of the material is described, in every finite-volume cell $i$, by:
 - the **component masses** $m_{j,i}$ [kg] of every chemical component $j \in \{1,\dots,N_C\}$ — the integrated unknowns; the **mass concentrations** $\xi_{j,i} = m_{j,i}/V_i$ [kg·m⁻³] that every constitutive law reads are derived from them — and
 - one **energy state**: the cell temperature $T_i$ [K] (the default), or the cell's sensible-enthalpy inventory $H_i = \sum_j m_{j,i}\,h_j(T_i)$ [J] (`energy_state = :enthalpy`), from which the temperature is recovered (§1.4.2).
 
-The choice of mass concentration $\xi_j$ (rather than mass fraction $Y_j = \xi_j/\rho$) as the constitutive species variable is deliberate: it makes the species conservation law a plain transport equation with a reaction source, with no embedded density derivative, and it is the form first-order kinetics naturally produce; a reaction of any other order reads its reactant's conversion against a constant of the cell, its reference (§6.1, §6.4). Integrating the cell masses themselves makes the discrete mass balance exact: a cell's mass changes only by its reaction sources and its face fluxes, and a moving cell's change of volume needs no correction term (§3.2, §11.3.4). Further unknowns are introduced only when the corresponding physics is enabled — on a moving mesh (`use_ale = true`) the node positions $z_n$ (differential) and node velocities $w_n$ (algebraic, held by the cells' volume balances; §11.3); under `BEER_LAMBERT` the face intensities $I_f$ (algebraic; §8); under a lateral-shrinkage law the conversion-history pair $(G_i, m_{\mathrm{dry},i})$ of every cell and the cross-section area $A$ with its lateral strain rate $\theta_A$ (algebraic; §10).
+The choice of mass concentration $\xi_j$ (rather than mass fraction $Y_j = \xi_j/\rho$) as the constitutive species variable is deliberate: it makes the species conservation law a plain transport equation with a reaction source, with no embedded density derivative, and it is the form first-order kinetics naturally produce; a reaction of any other order reads its reactant's conversion against a constant of the cell, its reference (§6.1, §6.4). Integrating the cell masses themselves makes the discrete mass balance exact: a cell's mass changes only by its reaction sources and its face fluxes, and a moving cell's change of volume needs no correction term (§3.2, §11.3.4). Further unknowns are introduced only when the corresponding physics is enabled — on a moving mesh (`use_ale = true`) the node positions $z_n$ (differential) and node velocities $w_n$ (algebraic, held by the cells' volume balances; §11.3); under `RADIATIVE_TRANSFER` the hemispherical fluxes $I^\pm_f$ of every face and the beams of a collimated or cone heater (algebraic; §8); under a lateral-shrinkage law the conversion-history pair $(G_i, m_{\mathrm{dry},i})$ of every cell and the cross-section area $A$ with its lateral strain rate $\theta_A$ (algebraic; §10).
 
 ### 1.2.1 Intended applications
 
@@ -71,12 +71,12 @@ The organizing principle of Pyrolysis.jl is a **single generalized model with op
 | Energy state | `energy_state` (`:temperature`, the default, or `:enthalpy`) | the energy row of every cell carries $T_i$ or $H_i$ (§1.4.2, §3.3.5) |
 | Mesh motion | `use_ale` | node positions (differential) and node velocities (algebraic, the balance rows of `BalanceRowClosure`) join the state; without it every node is pinned |
 | Mesh correction | `correction`; by default a rule | `EquidistributionCorrection` where the mesh moves, cells are deactivated and some cell, converted completely, would fall below the deactivation threshold; the inventories then cross the faces at the relative velocity (`RelativeFluxKernel`, §11.7) |
-| Radiation | `radiation_model` | under `BEER_LAMBERT` the face intensities (algebraic) and `BeerLambertKernel`; otherwise the incident flux enters the surface energy balance (§8) |
+| Radiation | `radiation_model` | under `RADIATIVE_TRANSFER` the face fluxes of the radiation field (algebraic) and `RadiativeTransferKernel`; otherwise the incident flux enters the surface energy balance (§8) |
 | Gas transport | material model and mass conditions | `LumpedTransfer` or `DustyGas`; sealed gas retains its pore EOS |
 | Cross section | the material's `lateral_shrinkage_law` | the conversion-history pair per cell and the global rows of $A$ and $\theta_A$ (`LateralShrinkage`, §10); needs `use_ale = true` |
 | Burnout | `deactivation`, `threshold`, `band` | `CellDeactivation`: an event that removes cells whose condensed mass, or at an order other than one whose reactive inventory, falls below the threshold (§14) |
 
-The kernels run in a fixed order, each present only when its physics is: `ReactionKernel`, `GasTransportKernel`, `BeerLambertKernel`, `ConductionKernel`, `ThermalBoundaryKernel`, `RelativeFluxKernel` (`_kernels`, `src/Integration/setup.jl`). The order matters where one kernel reads another's output: the surface energy balance of the thermal boundary kernel reads the outward gas fluxes of the gas transport for its blowing models and for the enthalpy those fluxes carry (§7.6, §15.3).
+The kernels run in a fixed order, each present only when its physics is: `ReactionKernel`, `GasTransportKernel`, `RadiativeTransferKernel`, `ConductionKernel`, `ThermalBoundaryKernel`, `RelativeFluxKernel` (`_kernels`, `src/Integration/setup.jl`). The order matters where one kernel reads another's output: the surface energy balance of the thermal boundary kernel reads the outward gas fluxes of the gas transport for its blowing models and for the enthalpy those fluxes carry (§7.6, §15.3).
 
 The layout's type parameters are read by `@inline` accessors with zero runtime cost:
 
@@ -92,7 +92,7 @@ The entry point `residual!(du, u, def::ResidualDefinition, t, ws::ResidualWorksp
 
 The same opt-in philosophy governs the constitutive layers. Each of the following is off (or set to its cheapest closure) by default and is enabled only when the problem requires it:
 
-- **Radiation in depth.** `SURFACE_ABSORPTION`, the default, routes the incident flux of a `RadiativeFluxBC` through the surface energy balance, with no volumetric deposit, at $O(1)$ cost; `BEER_LAMBERT` resolves exponential in-depth absorption through face intensities that are algebraic unknowns of the state, which keeps the Jacobian banded. The two models are mutually exclusive (§8).
+- **Radiation in depth.** `SURFACE_ABSORPTION`, the default, routes the incident flux of a `RadiativeFluxBC` through the surface energy balance, with no volumetric deposit, at $O(1)$ cost; `RADIATIVE_TRANSFER` carries radiation through the solid, every cell absorbing and emitting, as a gray two-stream field of face fluxes that are algebraic unknowns of the state, which keeps the Jacobian banded. The two models are mutually exclusive (§8).
 - **Gas transport.** The material declares lumped superficial transfer or dusty-gas
   friction. Both include independent Darcy permeability and use the same pore
   EOS and conservative total-flux interface matching (Chapter 9).
@@ -351,8 +351,9 @@ Reaction and gas/solid enthalpy accounting still matter (§7.8.3).
 FDS permits concentration-order, oxygen and temperature factors in its reaction
 rates. Pyrolysis.jl supports the concentration-order factor but omits the explicit
 oxygen and temperature-power factors. FDS offers surface absorption by default
-and a two-flux model for in-depth absorption and emission; Pyrolysis.jl's
-in-depth option is an incident Beer–Lambert beam without internal emission.
+and a two-flux model for in-depth absorption and emission. Pyrolysis.jl's
+radiative transfer is also a two-stream model with emission; it differs in the angular
+factor, the exact cell integration and the implicit coupling (§8.9.3).
 The implemented FDS thickness rule is discussed in §10.11.3, including a
 discrepancy between the 6.11.0 manual and source.
 
@@ -423,7 +424,7 @@ The Technical Reference Guide proceeds from continuum theory to discretization t
 - **§4 Materials & Property Functions** and **§5 Effective Properties & Mixing Rules** — the constitutive layer: components, phases, property-function types and the derivatives automatic differentiation takes of them, skeletal porosity, and the conductivity/transfer/permeability mixing rules.
 - **§6 Reaction Kinetics** — the Arrhenius rate law, smooth temperature gates, the one-sided depletion limiter, stoichiometry, and the heat-of-reaction source.
 - **§7 Heat Conduction, Gas Convection & Energy Assembly** — Fourier conduction, the gas enthalpy flux, the energy rows, and the residual sequence.
-- **§8 Thermal Radiation** — the two radiation models and the Beer–Lambert face intensities.
+- **§8 Thermal Radiation** — surface absorption and radiative transfer in the solid: the two-stream rows, the boundaries, the source and the mesh criterion.
 - **§9 Gas-Phase Mass Transport & Pressure** and **§10 Volume Change & Lateral Shrinkage** — diffusive and Darcy fluxes, the ideal-gas pressure, the strain rate, the conversion-history pair and the cross-section rows.
 - **§11 The ALE Framework**, **§12 Boundary & Initial Conditions**, **§13 Finite-Volume Discretization**, **§14 Cell Deactivation and Burnout** — the discretization, the moving mesh and its correction, and burnout.
 - **§15 Temporal Integration, the DAE, and the Colored Jacobian**, **§16 Conservation Ledgers and the Audit**, **§17 Sensitivity Analysis**, **§18 Verification & Validation** — the numerical engine, the audits, and the V&V program.
@@ -473,7 +474,7 @@ The physics below is absent from the model. It is ordered by its expected effect
 
 **Niche or future**
 
-- Spectral (two-band) radiation and in-depth emission from glowing char or from a semi-transparent polymer (for black PMMA the radiative conductivity it would add is about 0.045 W·m⁻¹·K⁻¹ at 650 K, a fifth of the room-temperature conductivity and half of the value a cone-calibrated law assigns at that temperature, §5.5, §8.2.2); a model of that kind would add further algebraic intensity rows to the state, as the Beer–Lambert face intensities do (§8).
+- Spectral (banded) radiation and a refractive index in the radiative transfer rows: each band would repeat the rows of §8.3 with its own absorption coefficient and share of the emission, and a refractive index would change the interface's reflectivities (§8.10).
 - Substrate reflection; scattering ($\sigma_s$ is not modeled); view-factor edge fall-off.
 - Species-pair-dependent molecular diffusivities and thermal-transpiration effects beyond the declared common-diffusivity dusty-gas closure.
 - Liquid free-water capillarity (relevant only above the fiber-saturation point, about 30 % moisture content) and bound-water diffusion ($\sqrt{Dt} \approx 0.25$ mm over a cone test, negligible at fire heating rates).
