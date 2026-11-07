@@ -7462,9 +7462,11 @@ sol = solve(problem; use_ale = true, deactivation = true, radiation_model = RADI
             correction = NoCorrection())
 ```
 
-`EquidistributionCorrection` refuses a non-positive `τ` and an activation
-without `0 < r_lo < r_hi`; any correction other than `NoCorrection()` needs
-`use_ale = true`. Under
+`EquidistributionCorrection` refuses a non-positive `τ`, an activation
+without `0 < r_lo < r_hi`, and under `ActivationTime()` an `r_hi` of 1 or
+more, since the first estimate is taken when a cell first falls below `r_hi`
+of its initial thickness (a fixed `τ` accepts any `r_hi`); any correction
+other than `NoCorrection()` needs `use_ale = true`. Under
 `NoCorrection()` the band defaults to the threshold, so only the cells
 already below the threshold go in an event, one invocation to a cell or so: a tail
 handed to a receiver delays it past its inward neighbour, so cells leave from under
@@ -12437,7 +12439,7 @@ PrescribedCorrection(w)
 |---|---|---|
 | `NoCorrection()` | the mesh moves with the solid, `c = 0` | — |
 | `EquidistributionCorrection` `τ` | the layer's equidistribution time `τ_eq` [s]: an `ActivationTime` rule, or one positive number for every layer | `ActivationTime()` |
-| `activation` | `(r_hi, r_lo)`, `0 < r_lo < r_hi`: a cell's switch is zero while it keeps at least `r_hi` of its initial thickness and one at and below `r_lo` | `(0.3, 0.1)` |
+| `activation` | `(r_hi, r_lo)`, `0 < r_lo < r_hi`, `r_hi < 1` under `ActivationTime()`: a cell's switch is zero while it keeps at least `r_hi` of its initial thickness and one at and below `r_lo` | `(0.3, 0.1)` |
 | `layers` | `:vanishing` moves only the layers deactivation can remove; `:all` every layer | `:vanishing` |
 | `ActivationTime` `λ` | `λ_τ`: each estimate of the layer's `τ_eq` is `λ_τ` times its thickness `L_layer` over its thinning rate, both taken when a cell first falls below `r_hi` and again below `r_lo` (§10.5.3) | `1.8` |
 | `PrescribedCorrection` `w` | the mesh velocity `w(x, t)` [m/s] over a solid at rest (verification); needs a non-reacting material and no deactivation | required |

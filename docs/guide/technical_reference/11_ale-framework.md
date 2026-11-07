@@ -882,6 +882,9 @@ $$
 $$
 the first ($k = 1$) when a cell of the layer first falls below $r_{\text{hi}}$ of its
 initial thickness, the second ($k = 2$) when a cell first falls below $r_{\text{lo}}$.
+A cell starts at its initial thickness, so the first estimate needs
+$r_{\text{hi}} < 1$: `ActivationTime` refuses $r_{\text{hi}} \ge 1$, which a fixed
+$\tau$ accepts.
 $\lambda_\tau$ is the keyword `λ` of `ActivationTime`, by default
 `ACTIVATION_TIME_FACTOR` = 1.8, so a layer equalizes in about
 $\tau_{\text{eq},k}/\pi^2 \approx 0.18$ of the life $L_{\text{layer}}/|\dot L_{\text{layer}}|$

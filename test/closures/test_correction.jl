@@ -295,6 +295,12 @@ end
     )
     @test_throws ArgumentError EquidistributionCorrection(τ = 0.0)
     @test_throws ArgumentError EquidistributionCorrection(activation = (0.1, 0.3))
+    # An estimated time needs a cell to fall below r_hi; a fixed τ takes any r_hi.
+    for r_hi in (1.0, 1.5)
+        @test_throws r"needs r_hi < 1" EquidistributionCorrection(activation = (r_hi, 0.5))
+        @test EquidistributionCorrection(τ = 720.0, activation = (r_hi, 0.5)).r_hi == r_hi
+    end
+    @test EquidistributionCorrection(activation = (0.99, 0.5)).τ isa ActivationTime
 
     # The band defaults to CORRECTION_BAND when the bound correction moves some
     # layer, to the threshold otherwise.

@@ -547,9 +547,11 @@ sol = solve(problem; use_ale = true, deactivation = true, radiation_model = RADI
             correction = NoCorrection())
 ```
 
-`EquidistributionCorrection` refuses a non-positive `τ` and an activation
-without `0 < r_lo < r_hi`; any correction other than `NoCorrection()` needs
-`use_ale = true`. Under
+`EquidistributionCorrection` refuses a non-positive `τ`, an activation
+without `0 < r_lo < r_hi`, and under `ActivationTime()` an `r_hi` of 1 or
+more, since the first estimate is taken when a cell first falls below `r_hi`
+of its initial thickness (a fixed `τ` accepts any `r_hi`); any correction
+other than `NoCorrection()` needs `use_ale = true`. Under
 `NoCorrection()` the band defaults to the threshold, so only the cells
 already below the threshold go in an event, one invocation to a cell or so: a tail
 handed to a receiver delays it past its inward neighbour, so cells leave from under

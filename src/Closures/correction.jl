@@ -61,9 +61,10 @@ when its first cell falls below `r_lo`, each time from the layer's thickness
 The first estimate holds the activated cells together while the layer's rate
 still rises; the second, taken nearer the layer's end, is blended in over the
 correction's second switch ([`EquidistributionCorrection`](@ref)), so neither
-estimate changes the right-hand side where it is taken. A layer not thinning
-at its first estimate has no correction until its second; one not thinning at
-its second keeps its first. The rate scales with the physical rates and `λ` is
+estimate changes the right-hand side where it is taken. The first estimate
+needs a cell to fall below `r_hi`, so the activation's `r_hi` must be below 1.
+A layer not thinning at its first estimate has no correction until its
+second; one not thinning at its second keeps its first. The rate scales with the physical rates and `λ` is
 a pure number, so a deck whose rates are all multiplied by `s` gets `τ/s`; no
 estimate reads the solve's horizon. Before the first estimate the layer has no
 time and no gain, and a cell that re-activates after the second changes
@@ -95,8 +96,9 @@ activation `aₙ = 1 − (1 − aₙ₋₁)(1 − aₙ)` is the smooth "or" of t
 switches `aᵢ = S(xᵢ)`, `xᵢ = (ln r_hi − ln(hᵢ/hᵢ(0))) / (ln r_hi − ln r_lo)`,
 `S(x) = x²(3 − 2x)` clamped to `[0, 1]`, with `activation = (r_hi, r_lo)`:
 zero while a cell keeps at least `r_hi` of its initial thickness, one at and
-below `r_lo`, `C¹` in `ln h` between. Under [`ActivationTime`](@ref) the
-layer's first estimate `τ₁` gives the time above and its second `τ₂` enters
+below `r_lo`, `C¹` in `ln h` between. Under [`ActivationTime`](@ref) `r_hi`
+must be below 1, while a fixed `τ` accepts any `r_hi`, and the layer's first
+estimate `τ₁` gives the time above and its second `τ₂` enters
 through the cells' second switches `bᵢ = S(xᵢ − 1)`, zero at and above `r_lo`
 and one at and below `r_lo²/r_hi`:
 
@@ -134,6 +136,15 @@ function EquidistributionCorrection(;
             "the activation needs 0 < r_lo < r_hi, got (r_hi, r_lo) = $activation",
         ),
     )
+    τ isa ActivationTime &&
+        r_hi >= 1 &&
+        throw(
+            ArgumentError(
+                "an ActivationTime takes a layer's first estimate when one of its cells " *
+                "first falls below r_hi of its initial thickness, so it needs r_hi < 1, " *
+                "got (r_hi, r_lo) = $activation; a fixed τ accepts any activation",
+            ),
+        )
     layers in (:vanishing, :all) ||
         throw(ArgumentError("layers must be :vanishing or :all, got $(repr(layers))"))
     return EquidistributionCorrection(

@@ -421,7 +421,7 @@ end
         energy_state = energy,
         correction = EquidistributionCorrection(
             τ = ActivationTime(),
-            activation = (1.5, 0.5),
+            activation = (0.99, 0.4),
         ),
     )
     corr = cp.def.closure.correction
