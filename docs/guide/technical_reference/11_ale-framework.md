@@ -15,7 +15,8 @@ $$
 where the solid velocity $\mathbf v_s$ satisfies the volume balance of every cell
 (the *balance rows*, §11.3) and the correction $\mathbf c$ is zero unless the mesh is
 asked to move relative to the solid: by the equidistribution correction that carries a
-vanishing layer to burnout in one event (§11.7), or by a prescribed mesh velocity for
+vanishing layer's cells to burnout together, in one or two events (§11.7), or by a
+prescribed mesh velocity for
 verification (§11.7.7). Wherever $\mathbf c \ne 0$ every inventory crosses the faces
 of the mesh at the relative velocity $-\mathbf c$ (the *relative fluxes*, §11.6). The
 per-cell component masses are the states, so mass is conserved exactly, and the
@@ -791,7 +792,7 @@ reach the threshold one at a time, each an event that restarts the integrator, a
 last cells of the layer become very thin and stiff before they go. The
 equidistribution correction moves the mesh relative to the solid inside a layer that
 deactivation can remove, so that the layer's cells thin together, reach the threshold
-together and, with the near-threshold band, leave in one event
+together and, with the near-threshold band, leave in one or two events
 (`EquidistributionCorrection`, `src/Closures/correction.jl`).
 
 ### 11.7.2 The node correction
@@ -920,7 +921,7 @@ re-activates later changes nothing.
 
 The rate scales with the physical rates and $\lambda_\tau$ is a pure number, so a deck
 whose rates are all multiplied by $s$ gets both times divided by $s$, which a test
-asserts in dimensionless time; no estimate reads the solve's horizon. The 5.9 mm PMMA
+asserts in dimensionless time. The 5.9 mm PMMA
 layer of V-BO-01 at 50 kW/m² (60 cells) gets about 868 s at its first estimate, at
 $t \approx$ 74 s, and 509 s at its second, at 160 s.
 

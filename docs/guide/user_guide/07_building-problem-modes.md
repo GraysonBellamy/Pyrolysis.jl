@@ -237,7 +237,8 @@ On a moving mesh with deactivation on, `setup` installs the **equidistribution c
 and again near its end, `ActivationTime()`) when some layer can vanish: its components, converted completely, leave
 less condensed mass than `threshold` of what it started with (`Pyrolysis.Closures.residues`
 gives the fraction each component leaves). The correction moves the mesh relative to the
-solid, thinning a vanishing layer's cells together so that the layer leaves in one event;
+solid, thinning a vanishing layer's cells together so that the layer leaves in one or two
+events;
 the near-threshold band then defaults to `0.1`. Otherwise (a fixed mesh, deactivation off,
 or a charring layer whose residue stays above the threshold) the solve has no correction
 and a moving mesh moves with the solid. A reaction of order other than one gets no

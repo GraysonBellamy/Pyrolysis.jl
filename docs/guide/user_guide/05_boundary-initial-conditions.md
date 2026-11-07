@@ -94,7 +94,7 @@ the surface temperature `T_s` (§5.4). Every flux is reported with the **positiv
 | `AdiabaticBC` | `0` | — |
 | `HeatFluxBC` | `q(t)` (prescribed) | `flux` |
 | `ConvectiveBC` | `h·(T_∞ − T_s)` | `h`, `T_inf` |
-| `RadiativeBC` | `ε_eff·σ·(F·T_∞⁴ − T_s⁴)` | `ε` (`nothing`), `T_inf`, `F` (`1.0`) |
+| `RadiativeBC` | `ε_eff·σ·(F·T_∞⁴ − T_s⁴)` under `SURFACE_ABSORPTION`; zero at the face under `RADIATIVE_TRANSFER` | `ε` (`nothing`), `T_inf`, `F` (`1.0`) |
 | `RadiativeFluxBC` | `a·q_inc` (model-dependent) | `flux`, `absorptivity` (`nothing` ⇒ `a_eff`) |
 | `DirichletThermalBC` | enforces `T_s = T` | `T` |
 | `CombinedThermalBC` | `Σ_i q_BC,i` | built via `+` |

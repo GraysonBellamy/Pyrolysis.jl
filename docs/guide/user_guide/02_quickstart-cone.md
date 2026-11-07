@@ -274,7 +274,7 @@ Other thermal BCs available (full reference in UG 5 / Technical Reference §12):
 | `AdiabaticBC()` | `0` | perfect insulation |
 | `HeatFluxBC(q)` | prescribed `q` or `q(t)` | `+` into domain; not subject to absorptivity |
 | `ConvectiveBC(; h, T_inf)` | `h(T_∞ − T_s)` | `h`, `T_inf` may be functions of `t` |
-| `RadiativeBC(; ε, T_inf, F)` | `ε·σ·(F·T_∞⁴ − T_s⁴)` | re-radiation; `F` scales the surroundings' irradiation only; `ε = nothing` ⇒ `ε_eff` |
+| `RadiativeBC(; ε, T_inf, F)` | `ε·σ·(F·T_∞⁴ − T_s⁴)` under `SURFACE_ABSORPTION`; zero at the face under `RADIATIVE_TRANSFER` | re-radiation; `F` scales the surroundings' irradiation only; `ε = nothing` ⇒ `ε_eff` |
 | `RadiativeFluxBC(flux; absorptivity)` | `a·flux`, `a` the absorptivity (model-dependent) | incident external radiation |
 | `DirichletThermalBC(T)` | enforces `T_s = T` | fixed-temperature face |
 | `bc1 + bc2 + …` | sum | `CombinedThermalBC` |
@@ -480,9 +480,10 @@ radiation crossing the faces is reported through `solution.extras.radiation_abso
 This deck cannot switch as it stands: radiative transfer refuses a diffuse
 `RadiativeFluxBC` with its own `absorptivity` and a `RadiativeBC` with its own `ε`,
 since the interface's transmissivity is the cell's emissivity both ways. To run it
-in depth, give the components their absorption coefficients `α`, drop the two
-keywords (or send the heater in as a beam, `RadiativeFluxBC(q; absorptivity,
-distribution = Collimated())`, which may keep its absorptivity), and pass
+in depth, give the components their absorption coefficients `α`, drop `absorptivity`
+from the heater and `ε` from every `RadiativeBC`, the back's included (or send the
+heater in as a beam, `RadiativeFluxBC(q; absorptivity, distribution = Collimated())`,
+which may keep its absorptivity), and pass
 `radiation_model = RADIATIVE_TRANSFER`. It also needs a planar line. See §5.6 and
 Technical Reference §8.
 

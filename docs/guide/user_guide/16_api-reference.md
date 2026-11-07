@@ -1439,6 +1439,8 @@ Technical Reference chapter.
 | `ConvectiveBC` `blowing` | `NoBlowing()` |
 | `RadiativeBC` `ε`, `F` | `nothing` (the effective emissivity), `1.0` |
 | `RadiativeFluxBC` `absorptivity` | `nothing` (the effective absorptivity, the effective emissivity unless a component sets `absorptivity`) |
+| `RadiativeFluxBC` `distribution` | `Diffuse()` |
+| `Cone` `directions` | `3` |
 | `BoundaryConditionSet` `thermal` / `mass` | `(top = AdiabaticBC(), bottom = AdiabaticBC())` / `(top = ImpermeableBC(), bottom = ImpermeableBC())` |
 | `background_gas_concentration` `P` | `101325.0` Pa |
 | `AmbientGasBC` `film` | `nothing` |

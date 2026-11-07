@@ -655,7 +655,7 @@ Conventions:
 | $\dot m_g$, $\dot m''$, $\dot m''_k$ | Outward gas mass flux at the surface ($\dot m''$ in the blowing models, $\dot m''_k$ of species *k*; §12.3.3) | kg·m⁻²·s⁻¹ |
 | $\dot m_{\text{out}}$ | Outflow rate of the live region, positive leaving, $\sum_{f\in\mathcal{F}_{\text{live}}} \sum_j F_{j,f} A_f$ (§16.3.2) | kg·s⁻¹ |
 | $\dot M_{j,i}$ | Face-flux part of the mass rate of component *j* in cell *i*, $-\sum_f s_{if} A_f F_{j,f}$ | kg·s⁻¹ |
-| $\text{mob}_i$, $\text{mob}_f$ | Gas mobility $\kappa/\mu$ of cell *i*; interface fluxes use each half-cell mobility (§5.7.4, §9.6; overload M1) | m²·Pa⁻¹·s⁻¹ |
+| $\text{mob}_i$, $\text{mob}_f$ | Gas mobility $\kappa/\mu$ of cell *i*; interface fluxes use each half-cell mobility (§5.13.2, §9.6; overload M1) | m²·Pa⁻¹·s⁻¹ |
 | $N_j$, $n_j$ | Species mass flux and molar flux relative to the skeleton | kg·m⁻²·s⁻¹; mol·m⁻²·s⁻¹ |
 | $N_C$ (`NC`) | Number of chemical components (type parameter) | – |
 | $N_R$ (`NR`) | Number of reactions (type parameter) | – |
@@ -664,7 +664,7 @@ Conventions:
 | $N_{\text{rad}}$, $N_{\text{beam}}$ | Radiation rows per face under radiative transfer, $2 + N_{\text{beam}}$ / beam directions of the `:top` heaters (§8.1.2, §8.7.1) | – |
 | $\mathsf{N}_i$ | Normal matrix of the least-squares gradient of cell *i*, $\sum_k w_k \mathbf{d}_k \mathbf{d}_k^{T}$ (§13.6.4) | – |
 | $n$ | Number of finite-volume cells | – |
-| $n_c$ | Number of colors of the colored Jacobian (§15.7) | – |
+| $n_c$ | Number of colors of the colored Jacobian (§15.6) | – |
 | $n_{\text{layer}}$ | Number of cells across a layer of the equidistribution correction; its gain is $n_{\text{layer}}^{2}/\tau_{\text{eq}}$ (§11.7.2; overload N1) | – |
 | $n_{\text{nodes}}$, $n_{\text{faces}}$ | Number of mesh nodes / faces (= n+1 in 1D) | – |
 | $n_{i,j}$, $n_s$ | Reaction order of reaction *i* w.r.t. reactant *j*, an order on the conversion for $n \ne 1$ | – |
@@ -1862,7 +1862,7 @@ mesh frame introduces **no advection term** in any equation. The correction is z
 unless an equidistribution correction is installed: by default `setup` installs one
 where the mesh moves, cells are deactivated and some cell, converted completely, would
 fall below the deactivation threshold, so that the cells of a vanishing layer thin
-together and leave in one event (§11.7, §14.2.1). Under it every inventory — each
+together and leave in one or two events (§11.7, §14.2.1). Under it every inventory — each
 component's mass, the sensible enthalpy it carries and the conversion-history pair —
 crosses the faces at the relative velocity $-c$ (§11.6). The mesh kinematics, the
 geometric conservation law and the correction are derived in full in §11 (The ALE
@@ -2074,7 +2074,7 @@ regimes. The most important, with the section that quantifies or discusses each:
   gas storage is retained. A separate pressure-evolution equation, as in
   Gpyro V2, is an alternative choice of dependent variable; neither Darcy model
   resolves acoustic momentum waves (§9.2).
-- **First-order upwind advection** for the gas advective flux (§3.5.1); no TVD or
+- **First-order upwind advection** for the gas advective flux (§13.7.3); no TVD or
   MUSCL limiter on the gas advection. The scheme is monotone but numerically
   diffusive where the cell Péclet number exceeds one, and its upwind switch is a kink
   in the residual (§17.7.6).
@@ -3681,7 +3681,7 @@ pore-gas viscosity curve in the `gas_viscosity` field, and under gas
 transport the state mapping evaluates it at the cell's trial temperature and
 floors the result smoothly at `MU_FLOOR`,
 `μ_i = smooth_floor(material.gas_viscosity(T_trial,i), 10⁻¹² Pa·s)`, the
-denominator of the cell mobility (§5.7.4; `src/States/derived.jl`). A material
+denominator of the cell mobility (§5.13.2; `src/States/derived.jl`). A material
 that says nothing carries `SutherlandProperty()` — the air triple above — so
 this reduces to (5.24).
 
@@ -6872,7 +6872,7 @@ Under `RADIATIVE_TRANSFER`, `setup` and the kernel's constructor refuse, with an
 - a diffuse `RadiativeFluxBC` with its own `absorptivity`, and any diffuse
   `RadiativeFluxBC` on a material where a component sets `absorptivity`.
 
-No check compares the material with the model: `SURFACE_ABSORPTION` with non-zero
+No check compares the absorption coefficients with the model: `SURFACE_ABSORPTION` with non-zero
 $\alpha_j$ (not read) and `RADIATIVE_TRANSFER` with every $\alpha_j = 0$ (a transparent
 column: the radiation crossing the exposed face reaches the back, where a mirror
 returns it) both run without a warning.
@@ -7108,7 +7108,8 @@ area under a variable cross section. Among the radiation rows the reach is
 directional (`radiation_reach`): $I^-$ and each beam read their own family at $f$ and
 at the face upstream of $f$, $I^+$ its own at $f$ and at the face toward the back;
 $I^-$ and $I^+$ at the same face read each other, since any face can become the
-exposed face; and at the back face $I^+$ reads every beam arriving there. Each cell row
+exposed face and the back reflects $I^-$ into $I^+$; and at the back face $I^+$ reads
+every beam arriving there. Each cell row
 reads every family at its two faces. The pattern is built from these reaches
 (§15.11). Each family adds exactly two colors to the coloring, which a test asserts
 against its color model (`test/jacobian/test_pattern.jl`). The derivatives are those of the colored
@@ -7132,7 +7133,7 @@ face rules and their refusals. The verification suite adds:
 
 | case | checks |
 |---|---|
-| V-RAD-01 | a slab in an enclosure at its own temperature: every face flux $\sigma T_\infty^4$ and every source zero to $10^{-12}\sigma T_\infty^4$ for $\alpha L = 10^{-3}$–$10^3$, $\varepsilon = 0.3$–1, three meshes, both backs; through time integration $\lvert T - T_h\rvert \le 10^{-8}$ K |
+| V-RAD-01 | a slab in an enclosure at its own temperature: every face flux $\sigma T_\infty^4$ and every source zero to $10^{-12}\sigma T_\infty^4$ for $\alpha L = 10^{-3}$–$10^3$, $\varepsilon = 0.3$–1, three meshes, both backs; through time integration $\lvert T - T_\infty\rvert \le 10^{-8}$ K |
 | V-RAD-02 | a heater through a slab, collimated, diffuse and cone, both backs, against closed forms to $10^{-12}$ of $\varepsilon q$; three cone beams against the exact cone integral |
 | V-RAD-03 | an isothermal slab emitting to 0 K, against closed forms independent of the mesh, to $10^{-12}$ of $\sigma T^4$ |
 | V-RAD-04 | a linear emissive power: the net flux $\Delta\mathcal B\coth\big(\tau_i/(2\bar\mu)\big)$ at every face to $10^{-12}$; the approach to Rosseland reported |
@@ -7201,11 +7202,12 @@ MW·m⁻³ in the exposed cell to 3.039 MW·m⁻³ in the last.
 With `RadiativeFluxBC(50e3; distribution = Collimated())` the heater enters as a beam at
 $a_{\text{eff}} = 0.9$: 45000.0 W·m⁻² at the exposed face, $45\,000\,e^{-1} = 16\,554.6$
 W·m⁻² at the mirror, which turns it into $I^+$. The slab then absorbs 41658.9 W·m⁻²,
-`radiation_emitted` is 3754.5 W·m⁻², and the cell sources run from 4.935 MW·m⁻³ at the
+`radiation_emitted` is 3754.4 W·m⁻², and the cell sources run from 4.935 MW·m⁻³ at the
 top through a minimum of 3.849 MW·m⁻³ in the fourth cell from the back to 4.072
 MW·m⁻³ in the last, which the reflected flux heats from below. With
 `radiation_model = SURFACE_ABSORPTION` the same deck absorbs 45000 W·m⁻² at the face,
-conducted into the slab, and nothing in depth.
+of which 43972 W·m⁻² is conducted in at the start, the rest re-radiated, and nothing in
+depth.
 
 ---
 
@@ -7236,8 +7238,8 @@ Pyrolysis.jl. Its deposition is different: the absorbed radiation of a step is
 assigned to one element, the one with the largest share (`MAX`) or one sampled from
 the absorption distribution (`RAND`), whose shares come from the linear part of each
 element's optical thickness (TK §3). The emission $\varepsilon\sigma T^4$ is that of the
-same element and is scaled by the fraction absorbed when more than 0.1 % is
-transmitted, so emission and absorption share one kernel (TK Eqs. 12 and 23). The
+same element, scaled by the fraction of the external radiation absorbed (TK Eq. 12), so
+emission and absorption share one kernel (TK Eqs. 12 and 23). The
 model has no radiative transport between elements and no diffuse field; Pyrolysis.jl
 absorbs and emits in every cell and carries what each emits to the others.
 
@@ -7297,9 +7299,8 @@ establish a gray-band solid model.
 
 ### 8.9.4 Sources and numerical evidence
 
-TK Eqs. 11–12, 23 and §3 describe its attenuation, emission and deposition, and its
-`Boundary.cpp` implements them. GP Eqs. 7, 66–67 and V2 user guide §§4.2, 8 are checked
-against the linked V2 routines. FDS's
+TK Eqs. 11–12, 23 and §3 describe its attenuation, emission and deposition. GP Eqs. 7,
+66–67 and V2 user guide §§4.2, 8 are checked against the linked V2 routines. FDS's
 [radiation equations](https://github.com/firemodels/fds/blob/FDS-6.11.0/Manuals/FDS_Technical_Reference_Guide/Solid_Chapter.tex#L52-L90),
 [two-flux implementation](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2255-L2295)
 and [insulated back](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2152-L2160)
@@ -7311,11 +7312,13 @@ solver's own burning PMMA runs (10 and 25 kW·m⁻² collimated, 50 % and 10 % o
 PMMA left): the thermal field's flux leaving the exposed face moves by at most 0.0044
 of the absorbed heater flux, and with the heater's beam converted at the mirror by at
 most 0.016; the cell sources of the top half millimetre move by 0.039–0.068 in the $L_1$ norm
-(0.046–0.081 over the sample with the heater's beam converted at the mirror); and
-the exposed cell, which the closure underweights in the thin limit, absorbs 0.755–0.791
-of its exact share. V-RAD-02 reports the conversion at the back against a specular mirror
-on its slab. No case compares the in-depth radiation of Pyrolysis.jl with another
-code's: each of the three differs in a way §8.9.1–§8.9.3 name, and a matched
+(0.046–0.081 over the sample with the heater's beam converted at the mirror); with
+the same heater diffuse, attenuated as $e^{-D\tau}$ where exact transfer gives
+$2E_3(\tau)$, the flux leaving moves by at most 0.0024 and the sources over the sample
+by 0.012–0.051; and the exposed cell, which the closure underweights in the thin
+limit, absorbs 0.755–0.791 of its exact share. V-RAD-02 reports the conversion at the
+back against a specular mirror on its slab. No case compares the in-depth radiation of
+Pyrolysis.jl with another code's: each of the three differs in a way §8.9.1–§8.9.3 name, and a matched
 comparison would test those choices rather than the discretization. User Guide §5.6
 explains the heater and surroundings choices for comparisons.
 
@@ -9043,7 +9046,8 @@ $$
 where the solid velocity $\mathbf v_s$ satisfies the volume balance of every cell
 (the *balance rows*, §11.3) and the correction $\mathbf c$ is zero unless the mesh is
 asked to move relative to the solid: by the equidistribution correction that carries a
-vanishing layer to burnout in one event (§11.7), or by a prescribed mesh velocity for
+vanishing layer's cells to burnout together, in one or two events (§11.7), or by a
+prescribed mesh velocity for
 verification (§11.7.7). Wherever $\mathbf c \ne 0$ every inventory crosses the faces
 of the mesh at the relative velocity $-\mathbf c$ (the *relative fluxes*, §11.6). The
 per-cell component masses are the states, so mass is conserved exactly, and the
@@ -9819,7 +9823,7 @@ reach the threshold one at a time, each an event that restarts the integrator, a
 last cells of the layer become very thin and stiff before they go. The
 equidistribution correction moves the mesh relative to the solid inside a layer that
 deactivation can remove, so that the layer's cells thin together, reach the threshold
-together and, with the near-threshold band, leave in one event
+together and, with the near-threshold band, leave in one or two events
 (`EquidistributionCorrection`, `src/Closures/correction.jl`).
 
 ### 11.7.2 The node correction
@@ -9948,7 +9952,7 @@ re-activates later changes nothing.
 
 The rate scales with the physical rates and $\lambda_\tau$ is a pure number, so a deck
 whose rates are all multiplied by $s$ gets both times divided by $s$, which a test
-asserts in dimensionless time; no estimate reads the solve's horizon. The 5.9 mm PMMA
+asserts in dimensionless time. The 5.9 mm PMMA
 layer of V-BO-01 at 50 kW/m² (60 cells) gets about 868 s at its first estimate, at
 $t \approx$ 74 s, and 509 s at its second, at 160 s.
 
@@ -13914,7 +13918,7 @@ deactivation, and the enthalpy form once.
 
 The Jacobian $J=\partial\boldsymbol f/\partial\boldsymbol u$ is the forward-mode
 derivative of the whole residual, evaluated on a sparsity pattern built from
-the mesh connectivity (§15.11) with its columns colored (§15.7). There is one
+the mesh connectivity (§15.11) with its columns colored. There is one
 Jacobian and no option that selects another: every solve uses it, and the dense
 forward-mode Jacobian of §15.13 is the reference it is tested against.
 
@@ -16412,7 +16416,7 @@ touches them. The coverage matrix in
 `docs/guide/verification/comparison_coverage.md` identifies full and partial matches.
 Both FDS and Gpyro cover V-HC-01/02/04/05, V-RX-01, V-RX-02a–c, V-RX-04,
 V-RX-05a–b, V-CPL-03 P1/P2/P3 and the subcritical V-CPL-04 steady profile.
-Gpyro additionally covers V-HC-03, V-RAD-01, the apparent-heat-capacity route
+Gpyro additionally covers V-HC-03, the apparent-heat-capacity route
 of V-CPL-01, V-GT-07/08 and V-RX-05c. The FDS flux-input restriction is
 discussed in §12.11.3.
 A series marked `crosscode = true` is drawn as a muted
@@ -16434,7 +16438,7 @@ In particular, FDS V-RX-05a–b uses `ADJUST_H=F` to match the specified local
 reaction heat. No gas-transport comparison is attributed to FDS, and the
 V-CPL-04 comparison does not extend to the upper-temperature-gated runaway branch.
 
-The reports compare accuracy, and each case compares cost at matched accuracy: for each external run, that code's cheapest run at least as accurate against this code's cheapest mesh and solver tolerance at least as accurate on every scored reference. The ratio is a cost at equal accuracy for that problem, not a pure solver speedup; on the smallest problems the external times are mostly input, setup and output. See the [comparison basis](guide/verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions and time refinement. ThermaKin2Ds cannot express V-RAD-01, V-CPL-01, V-RX-02a/c or the pressure-driven V-GT-02–06 and V-GT-08; the [coverage matrix](guide/verification/comparison_coverage.md) gives the reasons.
+The reports compare accuracy, and each case compares cost at matched accuracy: for each external run, that code's cheapest run at least as accurate against this code's cheapest mesh and solver tolerance at least as accurate on every scored reference. The ratio is a cost at equal accuracy for that problem, not a pure solver speedup; on the smallest problems the external times are mostly input, setup and output. See the [comparison basis](guide/verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions and time refinement. ThermaKin2Ds cannot express V-CPL-01, V-RX-02a/c or the pressure-driven V-GT-02–06 and V-GT-08; the [coverage matrix](guide/verification/comparison_coverage.md) gives the reasons.
 
 ---
 
@@ -17006,8 +17010,9 @@ smooth solutions: the two-point face gradient and the harmonic-mean face coeffic
 are $O(\Delta z^2)$ on a uniform mesh, and the distance-weighted forms keep second order
 on smoothly stretched meshes (§13.6). The verification suite asserts the orders against
 exact solutions where it can: expected order 2 (each observed order above 1.5 and their
-mean above 1.8) for V-HC-01, 02c, 03 and 05, V-RAD-01, V-GT-01, V-CPL-04 and V-MMS-01
-and 03, and above 1.7 with a mean above 1.9 for V-MMS-04; V-HC-01 observes 1.991 and
+mean above 1.8) for V-HC-01, 02c, 03 and 05, V-GT-01, V-CPL-04 and V-MMS-01 and 03,
+above 1.7 with a mean above 1.9 for V-MMS-04, and above 1.8 for the radiative transfer
+of V-RAD-07 and V-MMS-05, with means above 1.8 and 1.85; V-HC-01 observes 1.991 and
 1.998. V-GT-02 expects first order (observed 0.89 and 0.94), the signature of the
 first-order upwind Darcy advection (§13.7.3, §18.7.3). The boundary faces are first-order
 (§13.12); the manufactured-solution cases impose fluxes there so that they do not cap
@@ -17475,11 +17480,12 @@ The V&V coverage above has gaps that a user should weigh:
 
 1. **MMS coverage.** The manufactured-solution driver (§18.2) covers the coupled residual
    on a fixed mesh (conduction with temperature-dependent properties, two-step kinetics
-   with reaction heat, lumped wall gas transport) and the moving mesh under prescribed and
-   reaction-driven motion. In-depth radiation, gas transport, the variable cross
-   section and deactivation are verified by exact solutions and ledgers (V-RAD-01,
-   V-GT-02, V-CPL-03, V-BO-04) rather than by a manufactured order study, and the boundary
-   faces enter the manufactured cases as imposed fluxes only.
+   with reaction heat, lumped wall gas transport), the moving mesh under prescribed and
+   reaction-driven motion, and radiative transfer with a smooth, uniform absorption
+   coefficient and no beam (V-MMS-05). Gas transport, the variable cross section and
+   deactivation are verified by exact solutions and ledgers (V-GT-02, V-CPL-03, V-BO-04)
+   rather than by a manufactured order study, and the boundary faces enter the
+   manufactured cases as imposed fluxes only.
 
 2. **Convergence reference is self-consistent, not exact, for the full cases.** The
    convergence studies of the validation cases use the finest mesh as the reference
@@ -17509,7 +17515,7 @@ The V&V coverage above has gaps that a user should weigh:
    estimates and the empirical shrinkage laws are unvalidated or simplified, and cases that
    lean on them inherit that uncertainty.
 
-7. **Cross-code coverage.** ThermaKin2Ds cannot express V-RAD-01, V-CPL-01,
+7. **Cross-code coverage.** ThermaKin2Ds cannot express V-CPL-01,
    V-RX-02a/c or the pressure-driven gas cases, and its runs can be reproduced
    only where its non-redistributable source is available. FDS has no
    gas-transport comparison. The MaCFP-2 PMMA community submissions, committed under

@@ -140,7 +140,7 @@ Conventions:
 | $\dot m_g$, $\dot m''$, $\dot m''_k$ | Outward gas mass flux at the surface ($\dot m''$ in the blowing models, $\dot m''_k$ of species *k*; §12.3.3) | kg·m⁻²·s⁻¹ |
 | $\dot m_{\text{out}}$ | Outflow rate of the live region, positive leaving, $\sum_{f\in\mathcal{F}_{\text{live}}} \sum_j F_{j,f} A_f$ (§16.3.2) | kg·s⁻¹ |
 | $\dot M_{j,i}$ | Face-flux part of the mass rate of component *j* in cell *i*, $-\sum_f s_{if} A_f F_{j,f}$ | kg·s⁻¹ |
-| $\text{mob}_i$, $\text{mob}_f$ | Gas mobility $\kappa/\mu$ of cell *i*; interface fluxes use each half-cell mobility (§5.7.4, §9.6; overload M1) | m²·Pa⁻¹·s⁻¹ |
+| $\text{mob}_i$, $\text{mob}_f$ | Gas mobility $\kappa/\mu$ of cell *i*; interface fluxes use each half-cell mobility (§5.13.2, §9.6; overload M1) | m²·Pa⁻¹·s⁻¹ |
 | $N_j$, $n_j$ | Species mass flux and molar flux relative to the skeleton | kg·m⁻²·s⁻¹; mol·m⁻²·s⁻¹ |
 | $N_C$ (`NC`) | Number of chemical components (type parameter) | – |
 | $N_R$ (`NR`) | Number of reactions (type parameter) | – |
@@ -149,7 +149,7 @@ Conventions:
 | $N_{\text{rad}}$, $N_{\text{beam}}$ | Radiation rows per face under radiative transfer, $2 + N_{\text{beam}}$ / beam directions of the `:top` heaters (§8.1.2, §8.7.1) | – |
 | $\mathsf{N}_i$ | Normal matrix of the least-squares gradient of cell *i*, $\sum_k w_k \mathbf{d}_k \mathbf{d}_k^{T}$ (§13.6.4) | – |
 | $n$ | Number of finite-volume cells | – |
-| $n_c$ | Number of colors of the colored Jacobian (§15.7) | – |
+| $n_c$ | Number of colors of the colored Jacobian (§15.6) | – |
 | $n_{\text{layer}}$ | Number of cells across a layer of the equidistribution correction; its gain is $n_{\text{layer}}^{2}/\tau_{\text{eq}}$ (§11.7.2; overload N1) | – |
 | $n_{\text{nodes}}$, $n_{\text{faces}}$ | Number of mesh nodes / faces (= n+1 in 1D) | – |
 | $n_{i,j}$, $n_s$ | Reaction order of reaction *i* w.r.t. reactant *j*, an order on the conversion for $n \ne 1$ | – |

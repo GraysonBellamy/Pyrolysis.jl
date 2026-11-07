@@ -500,8 +500,7 @@ estimate is taken once; a cell that re-activates later changes nothing.
 
 The rate scales with the physical rates and `λ_τ` is a pure number, so a deck
 whose rates are all multiplied by `s` gets both times divided by `s`, and the
-correction scales with it; one fixed `τ` for every deck does not. No estimate
-reads the solve's time span.
+correction scales with it; one fixed `τ` for every deck does not.
 
 The estimates are located events of their own, so each is taken at the
 crossing, not at the end of a step. After the solve, the bound correction

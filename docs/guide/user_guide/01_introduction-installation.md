@@ -66,7 +66,7 @@ When transferring an existing model, work through the checks in this order:
 |:---|:---|:---|
 | Composition, material density properties and mixing | §§1.3, 3.2–3.5 | §§2, 4.8 and 5.15 |
 | Reaction rate, yields and heat basis | §§4.4–4.9 | §6.9 |
-| Thermal boundaries and radiation | §§5.2–5.6 | §§7.8, 8.7, 12.11 |
+| Thermal boundaries and radiation | §§5.2–5.6 | §§7.8, 8.9, 12.11 |
 | Gas transport, storage and carried energy | §§7.5–7.7 | §9.12 |
 | Deformation and burnout criteria | Chapters 6 and 10 | §§10.11, 11.9, 14.8 |
 | Numerical controls and reported observables | §§9.5, 9.7–9.8, 12.6 | §§13.11, 15.14, 16.9 |

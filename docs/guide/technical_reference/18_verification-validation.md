@@ -291,7 +291,7 @@ touches them. The coverage matrix in
 `docs/guide/verification/comparison_coverage.md` identifies full and partial matches.
 Both FDS and Gpyro cover V-HC-01/02/04/05, V-RX-01, V-RX-02a–c, V-RX-04,
 V-RX-05a–b, V-CPL-03 P1/P2/P3 and the subcritical V-CPL-04 steady profile.
-Gpyro additionally covers V-HC-03, V-RAD-01, the apparent-heat-capacity route
+Gpyro additionally covers V-HC-03, the apparent-heat-capacity route
 of V-CPL-01, V-GT-07/08 and V-RX-05c. The FDS flux-input restriction is
 discussed in §12.11.3.
 A series marked `crosscode = true` is drawn as a muted
@@ -313,7 +313,7 @@ In particular, FDS V-RX-05a–b uses `ADJUST_H=F` to match the specified local
 reaction heat. No gas-transport comparison is attributed to FDS, and the
 V-CPL-04 comparison does not extend to the upper-temperature-gated runaway branch.
 
-The reports compare accuracy, and each case compares cost at matched accuracy: for each external run, that code's cheapest run at least as accurate against this code's cheapest mesh and solver tolerance at least as accurate on every scored reference. The ratio is a cost at equal accuracy for that problem, not a pure solver speedup; on the smallest problems the external times are mostly input, setup and output. See the [comparison basis](../verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions and time refinement. ThermaKin2Ds cannot express V-RAD-01, V-CPL-01, V-RX-02a/c or the pressure-driven V-GT-02–06 and V-GT-08; the [coverage matrix](../verification/comparison_coverage.md) gives the reasons.
+The reports compare accuracy, and each case compares cost at matched accuracy: for each external run, that code's cheapest run at least as accurate against this code's cheapest mesh and solver tolerance at least as accurate on every scored reference. The ratio is a cost at equal accuracy for that problem, not a pure solver speedup; on the smallest problems the external times are mostly input, setup and output. See the [comparison basis](../verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions and time refinement. ThermaKin2Ds cannot express V-CPL-01, V-RX-02a/c or the pressure-driven V-GT-02–06 and V-GT-08; the [coverage matrix](../verification/comparison_coverage.md) gives the reasons.
 
 ---
 
@@ -885,8 +885,9 @@ smooth solutions: the two-point face gradient and the harmonic-mean face coeffic
 are $O(\Delta z^2)$ on a uniform mesh, and the distance-weighted forms keep second order
 on smoothly stretched meshes (§13.6). The verification suite asserts the orders against
 exact solutions where it can: expected order 2 (each observed order above 1.5 and their
-mean above 1.8) for V-HC-01, 02c, 03 and 05, V-RAD-01, V-GT-01, V-CPL-04 and V-MMS-01
-and 03, and above 1.7 with a mean above 1.9 for V-MMS-04; V-HC-01 observes 1.991 and
+mean above 1.8) for V-HC-01, 02c, 03 and 05, V-GT-01, V-CPL-04 and V-MMS-01 and 03,
+above 1.7 with a mean above 1.9 for V-MMS-04, and above 1.8 for the radiative transfer
+of V-RAD-07 and V-MMS-05, with means above 1.8 and 1.85; V-HC-01 observes 1.991 and
 1.998. V-GT-02 expects first order (observed 0.89 and 0.94), the signature of the
 first-order upwind Darcy advection (§13.7.3, §18.7.3). The boundary faces are first-order
 (§13.12); the manufactured-solution cases impose fluxes there so that they do not cap
@@ -1354,11 +1355,12 @@ The V&V coverage above has gaps that a user should weigh:
 
 1. **MMS coverage.** The manufactured-solution driver (§18.2) covers the coupled residual
    on a fixed mesh (conduction with temperature-dependent properties, two-step kinetics
-   with reaction heat, lumped wall gas transport) and the moving mesh under prescribed and
-   reaction-driven motion. In-depth radiation, gas transport, the variable cross
-   section and deactivation are verified by exact solutions and ledgers (V-RAD-01,
-   V-GT-02, V-CPL-03, V-BO-04) rather than by a manufactured order study, and the boundary
-   faces enter the manufactured cases as imposed fluxes only.
+   with reaction heat, lumped wall gas transport), the moving mesh under prescribed and
+   reaction-driven motion, and radiative transfer with a smooth, uniform absorption
+   coefficient and no beam (V-MMS-05). Gas transport, the variable cross section and
+   deactivation are verified by exact solutions and ledgers (V-GT-02, V-CPL-03, V-BO-04)
+   rather than by a manufactured order study, and the boundary faces enter the
+   manufactured cases as imposed fluxes only.
 
 2. **Convergence reference is self-consistent, not exact, for the full cases.** The
    convergence studies of the validation cases use the finest mesh as the reference
@@ -1388,7 +1390,7 @@ The V&V coverage above has gaps that a user should weigh:
    estimates and the empirical shrinkage laws are unvalidated or simplified, and cases that
    lean on them inherit that uncertainty.
 
-7. **Cross-code coverage.** ThermaKin2Ds cannot express V-RAD-01, V-CPL-01,
+7. **Cross-code coverage.** ThermaKin2Ds cannot express V-CPL-01,
    V-RX-02a/c or the pressure-driven gas cases, and its runs can be reproduced
    only where its non-redistributable source is available. FDS has no
    gas-transport comparison. The MaCFP-2 PMMA community submissions, committed under

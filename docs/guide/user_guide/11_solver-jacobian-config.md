@@ -104,8 +104,10 @@ on a moving mesh, the positions of their nodes; a node's velocity row reaches
 its cell's other node, the cell's masses and energy (through the strain
 rate) and, under the correction, what the corrections of the cell's nodes
 read; a radiation row reaches its own family at its face and at the next face
-along its direction, the other hemispherical flux at its face, and the cells on
-either side of its face. Every row holds its diagonal. The pattern
+upstream along its direction, a hemispherical row also the other hemispherical
+flux at its face, the upward row at the back face every beam arriving there, and
+every radiation row the cells on either side of its face. Every row holds its
+diagonal. The pattern
 is fixed for the solve: deactivation masks rows without changing it
 (Chapter 10).
 

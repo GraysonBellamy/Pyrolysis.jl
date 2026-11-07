@@ -731,7 +731,7 @@ mesh frame introduces **no advection term** in any equation. The correction is z
 unless an equidistribution correction is installed: by default `setup` installs one
 where the mesh moves, cells are deactivated and some cell, converted completely, would
 fall below the deactivation threshold, so that the cells of a vanishing layer thin
-together and leave in one event (§11.7, §14.2.1). Under it every inventory — each
+together and leave in one or two events (§11.7, §14.2.1). Under it every inventory — each
 component's mass, the sensible enthalpy it carries and the conversion-history pair —
 crosses the faces at the relative velocity $-c$ (§11.6). The mesh kinematics, the
 geometric conservation law and the correction are derived in full in §11 (The ALE
@@ -943,7 +943,7 @@ regimes. The most important, with the section that quantifies or discusses each:
   gas storage is retained. A separate pressure-evolution equation, as in
   Gpyro V2, is an alternative choice of dependent variable; neither Darcy model
   resolves acoustic momentum waves (§9.2).
-- **First-order upwind advection** for the gas advective flux (§3.5.1); no TVD or
+- **First-order upwind advection** for the gas advective flux (§13.7.3); no TVD or
   MUSCL limiter on the gas advection. The scheme is monotone but numerically
   diffusive where the cell Péclet number exceeds one, and its upwind switch is a kink
   in the residual (§17.7.6).

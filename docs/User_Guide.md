@@ -95,7 +95,7 @@ When transferring an existing model, work through the checks in this order:
 |:---|:---|:---|
 | Composition, material density properties and mixing | §§1.3, 3.2–3.5 | §§2, 4.8 and 5.15 |
 | Reaction rate, yields and heat basis | §§4.4–4.9 | §6.9 |
-| Thermal boundaries and radiation | §§5.2–5.6 | §§7.8, 8.7, 12.11 |
+| Thermal boundaries and radiation | §§5.2–5.6 | §§7.8, 8.9, 12.11 |
 | Gas transport, storage and carried energy | §§7.5–7.7 | §9.12 |
 | Deformation and burnout criteria | Chapters 6 and 10 | §§10.11, 11.9, 14.8 |
 | Numerical controls and reported observables | §§9.5, 9.7–9.8, 12.6 | §§13.11, 15.14, 16.9 |
@@ -889,7 +889,7 @@ Other thermal BCs available (full reference in UG 5 / Technical Reference §12):
 | `AdiabaticBC()` | `0` | perfect insulation |
 | `HeatFluxBC(q)` | prescribed `q` or `q(t)` | `+` into domain; not subject to absorptivity |
 | `ConvectiveBC(; h, T_inf)` | `h(T_∞ − T_s)` | `h`, `T_inf` may be functions of `t` |
-| `RadiativeBC(; ε, T_inf, F)` | `ε·σ·(F·T_∞⁴ − T_s⁴)` | re-radiation; `F` scales the surroundings' irradiation only; `ε = nothing` ⇒ `ε_eff` |
+| `RadiativeBC(; ε, T_inf, F)` | `ε·σ·(F·T_∞⁴ − T_s⁴)` under `SURFACE_ABSORPTION`; zero at the face under `RADIATIVE_TRANSFER` | re-radiation; `F` scales the surroundings' irradiation only; `ε = nothing` ⇒ `ε_eff` |
 | `RadiativeFluxBC(flux; absorptivity)` | `a·flux`, `a` the absorptivity (model-dependent) | incident external radiation |
 | `DirichletThermalBC(T)` | enforces `T_s = T` | fixed-temperature face |
 | `bc1 + bc2 + …` | sum | `CombinedThermalBC` |
@@ -1095,9 +1095,10 @@ radiation crossing the faces is reported through `solution.extras.radiation_abso
 This deck cannot switch as it stands: radiative transfer refuses a diffuse
 `RadiativeFluxBC` with its own `absorptivity` and a `RadiativeBC` with its own `ε`,
 since the interface's transmissivity is the cell's emissivity both ways. To run it
-in depth, give the components their absorption coefficients `α`, drop the two
-keywords (or send the heater in as a beam, `RadiativeFluxBC(q; absorptivity,
-distribution = Collimated())`, which may keep its absorptivity), and pass
+in depth, give the components their absorption coefficients `α`, drop `absorptivity`
+from the heater and `ε` from every `RadiativeBC`, the back's included (or send the
+heater in as a beam, `RadiativeFluxBC(q; absorptivity, distribution = Collimated())`,
+which may keep its absorptivity), and pass
 `radiation_model = RADIATIVE_TRANSFER`. It also needs a planar line. See §5.6 and
 Technical Reference §8.
 
@@ -3188,7 +3189,7 @@ the surface temperature `T_s` (§5.4). Every flux is reported with the **positiv
 | `AdiabaticBC` | `0` | — |
 | `HeatFluxBC` | `q(t)` (prescribed) | `flux` |
 | `ConvectiveBC` | `h·(T_∞ − T_s)` | `h`, `T_inf` |
-| `RadiativeBC` | `ε_eff·σ·(F·T_∞⁴ − T_s⁴)` | `ε` (`nothing`), `T_inf`, `F` (`1.0`) |
+| `RadiativeBC` | `ε_eff·σ·(F·T_∞⁴ − T_s⁴)` under `SURFACE_ABSORPTION`; zero at the face under `RADIATIVE_TRANSFER` | `ε` (`nothing`), `T_inf`, `F` (`1.0`) |
 | `RadiativeFluxBC` | `a·q_inc` (model-dependent) | `flux`, `absorptivity` (`nothing` ⇒ `a_eff`) |
 | `DirichletThermalBC` | enforces `T_s = T` | `T` |
 | `CombinedThermalBC` | `Σ_i q_BC,i` | built via `+` |
@@ -4797,7 +4798,8 @@ On a moving mesh with deactivation on, `setup` installs the **equidistribution c
 and again near its end, `ActivationTime()`) when some layer can vanish: its components, converted completely, leave
 less condensed mass than `threshold` of what it started with (`Pyrolysis.Closures.residues`
 gives the fraction each component leaves). The correction moves the mesh relative to the
-solid, thinning a vanishing layer's cells together so that the layer leaves in one event;
+solid, thinning a vanishing layer's cells together so that the layer leaves in one or two
+events;
 the near-threshold band then defaults to `0.1`. Otherwise (a fixed mesh, deactivation off,
 or a charring layer whose residue stays above the threshold) the solve has no correction
 and a moving mesh moves with the solid. A reaction of order other than one gets no
@@ -5759,7 +5761,7 @@ The `radiation_model` keyword selects where the radiation of the `RadiativeFluxB
 | Value | Physics | State and Jacobian |
 |---|---|---|
 | `SURFACE_ABSORPTION` (default) | The absorbed flux `a·q` and the re-radiation `ε·σ·(F·T_∞⁴ − T_s⁴)` act in the surface energy balance (opaque materials); component absorption coefficients are not read | no extra rows |
-| `RADIATIVE_TRANSFER` | Radiation travels through the solid, every cell absorbing and emitting at its absorption coefficient and temperature (semi-transparent materials) | two algebraic flux rows per face, plus one per beam direction; the Jacobian stays banded, each family adding two colours |
+| `RADIATIVE_TRANSFER` | Radiation travels through the solid, every cell absorbing and emitting at its absorption coefficient and temperature (semi-transparent materials) | two algebraic flux rows per face, plus one per beam direction; the Jacobian stays banded, each family adding two colors |
 
 ```julia
 solve(problem; radiation_model = SURFACE_ABSORPTION)   # opaque char, wood
@@ -5840,7 +5842,7 @@ The keywords:
 | `deactivation` | `false` | Deactivate cells during the solve |
 | `threshold` | `1e-2`; `conversion_threshold/10` at an order other than one | `ε_m`; a cell that starts with no condensed mass, or at such an order with no reactive lineage, never deactivates |
 | `band` | `max(threshold, 0.1)` when the equidistribution correction moves a layer, else `threshold` | `ε_band` in `[threshold, 1)`: on a moving mesh, the contiguous cells below this fraction around a cell that crosses `ε_m` go with it |
-| `correction` | by rule (§8.7) | On a moving mesh with `deactivation`, the equidistribution correction makes a layer's cells thin together and leave in one event |
+| `correction` | by rule (§8.7) | On a moving mesh with `deactivation`, the equidistribution correction makes a layer's cells thin together and leave in one or two events |
 
 Each event is located inside the step at the first time a live cell reaches its
 threshold and applied at the interpolated state there. At the end of every step,
@@ -7415,8 +7417,7 @@ estimate is taken once; a cell that re-activates later changes nothing.
 
 The rate scales with the physical rates and `λ_τ` is a pure number, so a deck
 whose rates are all multiplied by `s` gets both times divided by `s`, and the
-correction scales with it; one fixed `τ` for every deck does not. No estimate
-reads the solve's time span.
+correction scales with it; one fixed `τ` for every deck does not.
 
 The estimates are located events of their own, so each is taken at the
 crossing, not at the end of a step. After the solve, the bound correction
@@ -7790,8 +7791,10 @@ on a moving mesh, the positions of their nodes; a node's velocity row reaches
 its cell's other node, the cell's masses and energy (through the strain
 rate) and, under the correction, what the corrections of the cell's nodes
 read; a radiation row reaches its own family at its face and at the next face
-along its direction, the other hemispherical flux at its face, and the cells on
-either side of its face. Every row holds its diagonal. The pattern
+upstream along its direction, a hemispherical row also the other hemispherical
+flux at its face, the upward row at the back face every beam arriving there, and
+every radiation row the cells on either side of its face. Every row holds its
+diagonal. The pattern
 is fixed for the solve: deactivation masks rows without changing it
 (Chapter 10).
 
@@ -12583,6 +12586,8 @@ Technical Reference chapter.
 | `ConvectiveBC` `blowing` | `NoBlowing()` |
 | `RadiativeBC` `ε`, `F` | `nothing` (the effective emissivity), `1.0` |
 | `RadiativeFluxBC` `absorptivity` | `nothing` (the effective absorptivity, the effective emissivity unless a component sets `absorptivity`) |
+| `RadiativeFluxBC` `distribution` | `Diffuse()` |
+| `Cone` `directions` | `3` |
 | `BoundaryConditionSet` `thermal` / `mass` | `(top = AdiabaticBC(), bottom = AdiabaticBC())` / `(top = ImpermeableBC(), bottom = ImpermeableBC())` |
 | `background_gas_concentration` `P` | `101325.0` Pa |
 | `AmbientGasBC` `film` | `nothing` |

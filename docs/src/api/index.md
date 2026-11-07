@@ -18,7 +18,7 @@ cheat-sheet.
 | [Property functions](properties.md) | The eight property-function types |
 | [Reactions](reactions.md) | `Reaction`, the depletion limiter |
 | [Boundary conditions](boundary_conditions.md) | Thermal, mass, and pressure conditions; blowing; `BoundaryConditionSet` |
-| [Radiation](radiation.md) | `RadiationModel` selection |
+| [Radiation](radiation.md) | `RadiationModel` selection and the angular distributions of a heater |
 | [Meshes](meshes.md) | The mesh constructors, coordinate systems, topology and geometry |
 | [Problem](problem.md) | `PyrolysisProblem` and the initial-condition profiles |
 | [Solving](solve.md) | `solve`, `setup`, `integrate`, integrator policies, the mesh correction, `parameter_sweep` |

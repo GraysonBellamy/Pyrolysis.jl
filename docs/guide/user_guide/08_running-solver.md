@@ -455,7 +455,7 @@ The `radiation_model` keyword selects where the radiation of the `RadiativeFluxB
 | Value | Physics | State and Jacobian |
 |---|---|---|
 | `SURFACE_ABSORPTION` (default) | The absorbed flux `a·q` and the re-radiation `ε·σ·(F·T_∞⁴ − T_s⁴)` act in the surface energy balance (opaque materials); component absorption coefficients are not read | no extra rows |
-| `RADIATIVE_TRANSFER` | Radiation travels through the solid, every cell absorbing and emitting at its absorption coefficient and temperature (semi-transparent materials) | two algebraic flux rows per face, plus one per beam direction; the Jacobian stays banded, each family adding two colours |
+| `RADIATIVE_TRANSFER` | Radiation travels through the solid, every cell absorbing and emitting at its absorption coefficient and temperature (semi-transparent materials) | two algebraic flux rows per face, plus one per beam direction; the Jacobian stays banded, each family adding two colors |
 
 ```julia
 solve(problem; radiation_model = SURFACE_ABSORPTION)   # opaque char, wood
@@ -536,7 +536,7 @@ The keywords:
 | `deactivation` | `false` | Deactivate cells during the solve |
 | `threshold` | `1e-2`; `conversion_threshold/10` at an order other than one | `ε_m`; a cell that starts with no condensed mass, or at such an order with no reactive lineage, never deactivates |
 | `band` | `max(threshold, 0.1)` when the equidistribution correction moves a layer, else `threshold` | `ε_band` in `[threshold, 1)`: on a moving mesh, the contiguous cells below this fraction around a cell that crosses `ε_m` go with it |
-| `correction` | by rule (§8.7) | On a moving mesh with `deactivation`, the equidistribution correction makes a layer's cells thin together and leave in one event |
+| `correction` | by rule (§8.7) | On a moving mesh with `deactivation`, the equidistribution correction makes a layer's cells thin together and leave in one or two events |
 
 Each event is located inside the step at the first time a live cell reaches its
 threshold and applied at the interpolated state there. At the end of every step,

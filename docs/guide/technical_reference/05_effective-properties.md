@@ -637,7 +637,7 @@ pore-gas viscosity curve in the `gas_viscosity` field, and under gas
 transport the state mapping evaluates it at the cell's trial temperature and
 floors the result smoothly at `MU_FLOOR`,
 `μ_i = smooth_floor(material.gas_viscosity(T_trial,i), 10⁻¹² Pa·s)`, the
-denominator of the cell mobility (§5.7.4; `src/States/derived.jl`). A material
+denominator of the cell mobility (§5.13.2; `src/States/derived.jl`). A material
 that says nothing carries `SutherlandProperty()` — the air triple above — so
 this reduces to (5.24).
 

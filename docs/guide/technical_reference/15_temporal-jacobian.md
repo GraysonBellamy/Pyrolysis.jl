@@ -555,7 +555,7 @@ deactivation, and the enthalpy form once.
 
 The Jacobian $J=\partial\boldsymbol f/\partial\boldsymbol u$ is the forward-mode
 derivative of the whole residual, evaluated on a sparsity pattern built from
-the mesh connectivity (§15.11) with its columns colored (§15.7). There is one
+the mesh connectivity (§15.11) with its columns colored. There is one
 Jacobian and no option that selects another: every solve uses it, and the dense
 forward-mode Jacobian of §15.13 is the reference it is tested against.
 

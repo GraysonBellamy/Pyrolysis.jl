@@ -3,9 +3,10 @@
 # ============================================================================
 
 """
-Diffusivity factor of the two-stream rows: the ratio of a hemispherical flux's
-mean path to the slab's thickness. With 3/2 the flux of the continuous
-two-stream equations in an optically thick medium is the Rosseland flux.
+Diffusivity factor of the two-stream rows: a hemispherical flux is attenuated
+at `D α` per unit length. With `D = 3/2` the flux of the continuous two-stream
+equations in an optically thick medium is the Rosseland flux; the mean path of
+an isotropic hemispherical field over a thin slab's thickness is 2.
 """
 const DIFFUSIVITY = 3 / 2
 
@@ -243,7 +244,7 @@ _families(kernel::RadiativeTransferKernel) = 2 + _beam_count(kernel.beams)
 The radiation rows each radiation row reads, for the Jacobian's pattern. A
 row of family `k` at face `f` reads its own family at `f` and at
 `f + along[k]`, the face upstream of it in its direction of travel (toward
-the back for `q⁻` and the beams, toward the exposed face for `q⁺`), and the
+the exposed face for `q⁻` and the beams, toward the back for `q⁺`), and the
 rows `same_node[k]` at `f`: `q⁻` and `q⁺` read each other there, since any
 face can become the exposed face and the back face reflects `q⁻` into `q⁺`.
 At the face `back_face` each pair `(k, j)` of `back` is a row `k` that also

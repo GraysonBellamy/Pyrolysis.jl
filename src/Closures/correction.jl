@@ -64,11 +64,10 @@ correction's second switch ([`EquidistributionCorrection`](@ref)), so neither
 estimate changes the right-hand side where it is taken. The first estimate
 needs a cell to fall below `r_hi`, so the activation's `r_hi` must be below 1.
 A layer not thinning at its first estimate has no correction until its
-second; one not thinning at its second keeps its first. The rate scales with the physical rates and `λ` is
-a pure number, so a deck whose rates are all multiplied by `s` gets `τ/s`; no
-estimate reads the solve's horizon. Before the first estimate the layer has no
-time and no gain, and a cell that re-activates after the second changes
-nothing.
+second; one not thinning at its second keeps its first. The rate scales with
+the physical rates and `λ` is a pure number, so a deck whose rates are all
+multiplied by `s` gets `τ/s`. Before the first estimate the layer has no time
+and no gain, and a cell that re-activates after the second changes nothing.
 """
 struct ActivationTime
     λ::Float64

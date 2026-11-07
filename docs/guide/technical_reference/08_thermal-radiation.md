@@ -412,7 +412,7 @@ Under `RADIATIVE_TRANSFER`, `setup` and the kernel's constructor refuse, with an
 - a diffuse `RadiativeFluxBC` with its own `absorptivity`, and any diffuse
   `RadiativeFluxBC` on a material where a component sets `absorptivity`.
 
-No check compares the material with the model: `SURFACE_ABSORPTION` with non-zero
+No check compares the absorption coefficients with the model: `SURFACE_ABSORPTION` with non-zero
 $\alpha_j$ (not read) and `RADIATIVE_TRANSFER` with every $\alpha_j = 0$ (a transparent
 column: the radiation crossing the exposed face reaches the back, where a mirror
 returns it) both run without a warning.
@@ -648,7 +648,8 @@ area under a variable cross section. Among the radiation rows the reach is
 directional (`radiation_reach`): $I^-$ and each beam read their own family at $f$ and
 at the face upstream of $f$, $I^+$ its own at $f$ and at the face toward the back;
 $I^-$ and $I^+$ at the same face read each other, since any face can become the
-exposed face; and at the back face $I^+$ reads every beam arriving there. Each cell row
+exposed face and the back reflects $I^-$ into $I^+$; and at the back face $I^+$ reads
+every beam arriving there. Each cell row
 reads every family at its two faces. The pattern is built from these reaches
 (§15.11). Each family adds exactly two colors to the coloring, which a test asserts
 against its color model (`test/jacobian/test_pattern.jl`). The derivatives are those of the colored
@@ -672,7 +673,7 @@ face rules and their refusals. The verification suite adds:
 
 | case | checks |
 |---|---|
-| V-RAD-01 | a slab in an enclosure at its own temperature: every face flux $\sigma T_\infty^4$ and every source zero to $10^{-12}\sigma T_\infty^4$ for $\alpha L = 10^{-3}$–$10^3$, $\varepsilon = 0.3$–1, three meshes, both backs; through time integration $\lvert T - T_h\rvert \le 10^{-8}$ K |
+| V-RAD-01 | a slab in an enclosure at its own temperature: every face flux $\sigma T_\infty^4$ and every source zero to $10^{-12}\sigma T_\infty^4$ for $\alpha L = 10^{-3}$–$10^3$, $\varepsilon = 0.3$–1, three meshes, both backs; through time integration $\lvert T - T_\infty\rvert \le 10^{-8}$ K |
 | V-RAD-02 | a heater through a slab, collimated, diffuse and cone, both backs, against closed forms to $10^{-12}$ of $\varepsilon q$; three cone beams against the exact cone integral |
 | V-RAD-03 | an isothermal slab emitting to 0 K, against closed forms independent of the mesh, to $10^{-12}$ of $\sigma T^4$ |
 | V-RAD-04 | a linear emissive power: the net flux $\Delta\mathcal B\coth\big(\tau_i/(2\bar\mu)\big)$ at every face to $10^{-12}$; the approach to Rosseland reported |
@@ -741,11 +742,12 @@ MW·m⁻³ in the exposed cell to 3.039 MW·m⁻³ in the last.
 With `RadiativeFluxBC(50e3; distribution = Collimated())` the heater enters as a beam at
 $a_{\text{eff}} = 0.9$: 45000.0 W·m⁻² at the exposed face, $45\,000\,e^{-1} = 16\,554.6$
 W·m⁻² at the mirror, which turns it into $I^+$. The slab then absorbs 41658.9 W·m⁻²,
-`radiation_emitted` is 3754.5 W·m⁻², and the cell sources run from 4.935 MW·m⁻³ at the
+`radiation_emitted` is 3754.4 W·m⁻², and the cell sources run from 4.935 MW·m⁻³ at the
 top through a minimum of 3.849 MW·m⁻³ in the fourth cell from the back to 4.072
 MW·m⁻³ in the last, which the reflected flux heats from below. With
 `radiation_model = SURFACE_ABSORPTION` the same deck absorbs 45000 W·m⁻² at the face,
-conducted into the slab, and nothing in depth.
+of which 43972 W·m⁻² is conducted in at the start, the rest re-radiated, and nothing in
+depth.
 
 ---
 
@@ -776,8 +778,8 @@ Pyrolysis.jl. Its deposition is different: the absorbed radiation of a step is
 assigned to one element, the one with the largest share (`MAX`) or one sampled from
 the absorption distribution (`RAND`), whose shares come from the linear part of each
 element's optical thickness (TK §3). The emission $\varepsilon\sigma T^4$ is that of the
-same element and is scaled by the fraction absorbed when more than 0.1 % is
-transmitted, so emission and absorption share one kernel (TK Eqs. 12 and 23). The
+same element, scaled by the fraction of the external radiation absorbed (TK Eq. 12), so
+emission and absorption share one kernel (TK Eqs. 12 and 23). The
 model has no radiative transport between elements and no diffuse field; Pyrolysis.jl
 absorbs and emits in every cell and carries what each emits to the others.
 
@@ -837,9 +839,8 @@ establish a gray-band solid model.
 
 ### 8.9.4 Sources and numerical evidence
 
-TK Eqs. 11–12, 23 and §3 describe its attenuation, emission and deposition, and its
-`Boundary.cpp` implements them. GP Eqs. 7, 66–67 and V2 user guide §§4.2, 8 are checked
-against the linked V2 routines. FDS's
+TK Eqs. 11–12, 23 and §3 describe its attenuation, emission and deposition. GP Eqs. 7,
+66–67 and V2 user guide §§4.2, 8 are checked against the linked V2 routines. FDS's
 [radiation equations](https://github.com/firemodels/fds/blob/FDS-6.11.0/Manuals/FDS_Technical_Reference_Guide/Solid_Chapter.tex#L52-L90),
 [two-flux implementation](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2255-L2295)
 and [insulated back](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2152-L2160)
@@ -851,11 +852,13 @@ solver's own burning PMMA runs (10 and 25 kW·m⁻² collimated, 50 % and 10 % o
 PMMA left): the thermal field's flux leaving the exposed face moves by at most 0.0044
 of the absorbed heater flux, and with the heater's beam converted at the mirror by at
 most 0.016; the cell sources of the top half millimetre move by 0.039–0.068 in the $L_1$ norm
-(0.046–0.081 over the sample with the heater's beam converted at the mirror); and
-the exposed cell, which the closure underweights in the thin limit, absorbs 0.755–0.791
-of its exact share. V-RAD-02 reports the conversion at the back against a specular mirror
-on its slab. No case compares the in-depth radiation of Pyrolysis.jl with another
-code's: each of the three differs in a way §8.9.1–§8.9.3 name, and a matched
+(0.046–0.081 over the sample with the heater's beam converted at the mirror); with
+the same heater diffuse, attenuated as $e^{-D\tau}$ where exact transfer gives
+$2E_3(\tau)$, the flux leaving moves by at most 0.0024 and the sources over the sample
+by 0.012–0.051; and the exposed cell, which the closure underweights in the thin
+limit, absorbs 0.755–0.791 of its exact share. V-RAD-02 reports the conversion at the
+back against a specular mirror on its slab. No case compares the in-depth radiation of
+Pyrolysis.jl with another code's: each of the three differs in a way §8.9.1–§8.9.3 name, and a matched
 comparison would test those choices rather than the discretization. User Guide §5.6
 explains the heater and surroundings choices for comparisons.
 
