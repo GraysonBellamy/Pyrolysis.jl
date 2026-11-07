@@ -1,6 +1,6 @@
 # V-BO-06 — PMMA-on-Kaowool burnout on a mesh graded toward the exposed surface
 
-**Tags:** `ale`, `burnout`, `depletion`, `beer_lambert`, `coupled`
+**Tags:** `ale`, `burnout`, `depletion`, `radiative_transfer`, `coupled`
 
 **References:**
 
@@ -22,11 +22,11 @@ the invocations that deactivate the layer are reported.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| complete burnout: live thickness at t_end is the substrate | 0.01198 | 0.01198 | 4.026e-10 | 1e-05 | yes | every PMMA cell deactivated; 11.98 ± 0.01 mm |
-| mass loss of the gasified PMMA layer | 69.95 | 69.95 | 4.889e-06 | 0.3 | yes | percent of the initial mass; exact = the layer's initial mass / m₀ |
-| mass ledger closure | 1.175e-07 | 0 | 1.175e-07 | 3e-05 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented |
+| complete burnout: live thickness at t_end is the substrate | 0.01198 | 0.01198 | 8.059e-10 | 1e-05 | yes | every PMMA cell deactivated; 11.98 ± 0.01 mm |
+| mass loss of the gasified PMMA layer | 69.95 | 69.95 | 9.7e-06 | 0.3 | yes | percent of the initial mass; exact = the layer's initial mass / m₀ |
+| mass ledger closure | 1.857e-08 | 0 | 1.857e-08 | 3e-05 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented |
 | clamped surface balances on accepted states | 0 | 0 | 0 | 0.5 | yes | boundary temperature solve converged inside the property bracket at every accepted step |
-| deactivation invocations for the PMMA layer (reported) | 1 | 1 | 0 | Inf | yes | 60 cells; largest merged fraction 0.0159 (1.59 ε_m); reported, not asserted |
+| deactivation invocations for the PMMA layer (reported) | 2 | 1 | 1 | Inf | yes | 60 cells; largest merged fraction 0.0919 (9.19 ε_m); reported, not asserted |
 
 ![V-BO-06 mlr_history](assets/V-BO-06/V-BO-06_mlr_history.png)
 
@@ -40,6 +40,6 @@ the invocations that deactivate the layer are reported.
 | use_ale | true |
 | deactivation | true |
 | min_thickness | 0.001 |
-| radiation_model | BEER_LAMBERT |
+| radiation_model | RADIATIVE_TRANSFER |
 | abstol | 1.0e-8 |
 | reltol | 1.0e-6 |

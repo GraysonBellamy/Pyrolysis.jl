@@ -1,13 +1,13 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
 30,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
-30,"transmitted flux reported (series peak above 1 % of the entering flux)",0.7770806878503436,1.0,0.0,0.5,true
-30,"peak transmitted fraction of the incident flux",0.7770806878503437,1.0,0.22291931214965632,0.3,true
-30,"mass loss (informational)",68.87915751967624,69.9147977671139,1.0356402474376551,10.0,true
+30,"radiation leaving through the back reported (series peak above 1 % of the radiation entering)",0.8894400746670269,1.0,0.0,0.5,true
+30,"peak share of the radiation entering that leaves through the back",0.8894400746670269,1.0,0.1105599253329731,0.3,true
+30,"mass loss (informational)",69.54455718697464,69.9147977671139,0.370240580139253,10.0,true
 60,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
-60,"transmitted flux reported (series peak above 1 % of the entering flux)",0.7769951734503089,1.0,0.0,0.5,true
-60,"peak transmitted fraction of the incident flux",0.776995173450309,1.0,0.223004826549691,0.3,true
-60,"mass loss (informational)",68.87870274176673,69.9147977671139,1.0360950253471657,10.0,true
+60,"radiation leaving through the back reported (series peak above 1 % of the radiation entering)",0.8893285037166964,1.0,0.0,0.5,true
+60,"peak share of the radiation entering that leaves through the back",0.8893285037166964,1.0,0.11067149628330364,0.3,true
+60,"mass loss (informational)",69.54411327901484,69.9147977671139,0.37068448809905874,10.0,true
 120,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
-120,"transmitted flux reported (series peak above 1 % of the entering flux)",0.7769736664527814,1.0,0.0,0.5,true
-120,"peak transmitted fraction of the incident flux",0.7769736664527815,1.0,0.22302633354721846,0.3,true
-120,"mass loss (informational)",68.87858838631887,69.9147977671139,1.0362093807950288,10.0,true
+120,"radiation leaving through the back reported (series peak above 1 % of the radiation entering)",0.8892991329189012,1.0,0.0,0.5,true
+120,"peak share of the radiation entering that leaves through the back",0.8892991329189012,1.0,0.11070086708109883,0.3,true
+120,"mass loss (informational)",69.5439958572881,69.9147977671139,0.37080190982580064,10.0,true

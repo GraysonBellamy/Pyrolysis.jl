@@ -5,6 +5,6 @@
 "n_cells_ladder","30 60 120"
 "use_ale","false"
 "deactivation","true"
-"radiation_model","BEER_LAMBERT"
+"radiation_model","RADIATIVE_TRANSFER"
 "abstol","1.0e-8"
 "reltol","1.0e-6"

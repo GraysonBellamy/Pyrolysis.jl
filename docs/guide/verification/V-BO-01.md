@@ -1,6 +1,6 @@
 # V-BO-01 — PMMA-on-Kaowool burnout under ALE (layer deactivation)
 
-**Tags:** `ale`, `burnout`, `depletion`, `beer_lambert`, `coupled`, `performance`
+**Tags:** `ale`, `burnout`, `depletion`, `radiative_transfer`, `coupled`, `performance`
 
 **References:**
 
@@ -13,8 +13,11 @@ A 5.9 mm PMMA slab on 12 mm Kaowool under 50 kW/m² burns out completely:
 the PMMA cells thin to the deactivation threshold, the layer is deactivated
 and the run ends on the bare substrate. The deck is the MaCFP PMMA
 gasification case with the Gpyro V2 property fits (power-law k(T), c(T)
-above 394 K — positive on the whole property bracket) and in-depth
-(Beer–Lambert) absorption.
+above 394 K — positive on the whole property bracket) under radiative
+transfer through the solid: the heater's diffuse flux and the surroundings'
+radiation cross the exposed face at the surface cell's emissivity, every
+cell absorbs and emits, and the back of the Kaowool radiates to the
+surroundings.
 
 The run must burn out completely, lose exactly the mass of the PMMA layer,
 close the mass ledger, and converge the surface temperature at every
@@ -23,7 +26,8 @@ Peak mass loss rate and timing are reported through the history curves.
 
 The mesh moves by the equidistribution correction, the PMMA–Kaowool
 interface a Lagrangian node, so the PMMA cells thin together and the layer
-deactivates in one invocation into the Kaowool cell beneath. The surface
+deactivates in two invocations into the Kaowool cell beneath: the cells
+next to the Kaowool lag the rest by about 40 s. The surface
 QoI counts accepted states whose surface balance did not converge or sits
 on the trial clamp, since that Newton never warns.
 
@@ -32,10 +36,10 @@ on the trial clamp, since that Newton never warns.
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
 | complete burnout: live thickness at t_end is the substrate | 0.012 | 0.012 | 3.333e-06 | 1e-05 | yes | every PMMA cell deactivated; 12.0 ± 0.01 mm |
-| mass loss of the gasified PMMA layer | 69.92 | 69.91 | 0.005841 | 0.3 | yes | percent of the initial mass; exact = the layer's initial mass / m₀ |
-| mass ledger closure | 8.36e-08 | 0 | 8.36e-08 | 3e-05 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented |
+| mass loss of the gasified PMMA layer | 69.92 | 69.91 | 0.00584 | 0.3 | yes | percent of the initial mass; exact = the layer's initial mass / m₀ |
+| mass ledger closure | 2.271e-07 | 0 | 2.271e-07 | 3e-05 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented |
 | clamped surface balances on accepted states | 0 | 0 | 0 | 0.5 | yes | boundary temperature solve converged inside the property bracket at every accepted step |
-| deactivation invocations for the PMMA layer (reported) | 1 | 1 | 0 | Inf | yes | 120 cells; largest merged fraction 0.0435 (4.35 ε_m); reported, not asserted |
+| deactivation invocations for the PMMA layer (reported) | 2 | 1 | 1 | Inf | yes | 120 cells; largest merged fraction 0.0965 (9.65 ε_m); reported, not asserted |
 
 ![V-BO-01 mlr_history](assets/V-BO-01/V-BO-01_mlr_history.png)
 
@@ -49,6 +53,6 @@ on the trial clamp, since that Newton never warns.
 | use_ale | true |
 | deactivation | true |
 | min_thickness | 0.001 |
-| radiation_model | BEER_LAMBERT |
+| radiation_model | RADIATIVE_TRANSFER |
 | abstol | 1.0e-8 |
 | reltol | 1.0e-6 |

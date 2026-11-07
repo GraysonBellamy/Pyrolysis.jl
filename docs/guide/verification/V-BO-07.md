@@ -1,6 +1,6 @@
 # V-BO-07 — Burnout of a heterogeneous PMMA layer of mixed composition
 
-**Tags:** `ale`, `burnout`, `depletion`, `beer_lambert`, `coupled`
+**Tags:** `ale`, `burnout`, `depletion`, `radiative_transfer`, `coupled`
 
 **References:**
 
@@ -19,29 +19,31 @@ layer's initial mass and ends on the bare Kaowool. Peak mass loss rate and
 timing are reported through the history curves.
 
 Nominal pore fraction 0.1 supplies resolved gas storage during heterogeneous
-ALE redistribution. The maximum matrix occupancy decreases from 1.091 to
-1.016 over 15/30/60 PMMA cells. The joint pore/mesh/pressure gate verifies
-the 0.1–0.15 range, both energy forms, thermal independence of the passive
+ALE redistribution. The correction's remap of the mixed layer raises the
+matrix occupancy above one in the layer's bottom cell, next to the Kaowool,
+just before the invocation: 1.066 and 1.033 at 30 and 60 PMMA cells, falling
+at first order; at 15 cells it closes that cell's pores and the solve stops
+on pore closure. The joint pore/mesh/pressure gate verifies the 0.1–0.15
+range from 30 cells, both energy forms, thermal independence of the passive
 gas, and the independent species ledger.
 
 The layer deactivates in one invocation. The burn
 runs down from the surface: the upper cells lose their PMMA first and keep
 the slow solid, and the PMMA beneath burns last and fast. When the first cell
-crosses ε_m the others still hold up to about 6 % of their initial mass,
-with or without the monitor's mass term; the case reports the invocations
-and that fraction. Under refinement at ε_m = 1e-2 the largest per-step excess
-of N cells over 2N stops falling between 120 and 240 cells, where at 3e-3 it
-falls by two per doubling (test/gates/burnout_envelope.jl measures it).
+crosses ε_m the others still hold up to about 2.5 % of their initial mass; the
+case reports the invocations and that fraction. Under refinement at
+ε_m = 1e-2 the largest per-step excess of N cells over 2N falls by about two
+per doubling (test/gates/burnout_envelope.jl measures it).
 
 ### Quantities of interest (n = 60)
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| complete burnout: live thickness at t_end is the substrate | 0.012 | 0.012 | 1.902e-09 | 1e-05 | yes | every PMMA cell deactivated; 12.0 ± 0.01 mm |
-| mass loss of the gasified PMMA layer | 65.34 | 65.34 | 1.489e-05 | 0.3 | yes | percent of the initial mass; exact = the layer's initial mass / m₀ |
-| mass ledger closure | 2.655e-09 | 0 | 2.655e-09 | 3e-05 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented |
+| complete burnout: live thickness at t_end is the substrate | 0.012 | 0.012 | 2.93e-09 | 1e-05 | yes | every PMMA cell deactivated; 12.0 ± 0.01 mm |
+| mass loss of the gasified PMMA layer | 65.34 | 65.34 | 2.287e-05 | 0.3 | yes | percent of the initial mass; exact = the layer's initial mass / m₀ |
+| mass ledger closure | 1.943e-07 | 0 | 1.943e-07 | 3e-05 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented |
 | clamped surface balances on accepted states | 0 | 0 | 0 | 0.5 | yes | boundary temperature solve converged inside the property bracket at every accepted step |
-| deactivation invocations for the PMMA layer (reported) | 1 | 1 | 0 | Inf | yes | 60 cells; largest merged fraction 0.0614 (6.14 ε_m); reported, not asserted |
+| deactivation invocations for the PMMA layer (reported) | 1 | 1 | 0 | Inf | yes | 60 cells; largest merged fraction 0.0251 (2.51 ε_m); reported, not asserted |
 
 ![V-BO-07 mlr_history](assets/V-BO-07/V-BO-07_mlr_history.png)
 
@@ -55,6 +57,6 @@ falls by two per doubling (test/gates/burnout_envelope.jl measures it).
 | use_ale | true |
 | deactivation | true |
 | min_thickness | 0.001 |
-| radiation_model | BEER_LAMBERT |
+| radiation_model | RADIATIVE_TRANSFER |
 | abstol | 1.0e-8 |
 | reltol | 1.0e-6 |

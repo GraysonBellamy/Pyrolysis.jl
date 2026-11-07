@@ -41,13 +41,13 @@ over the burn [J/m²].
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
 | the sample burns out, every cell deactivated | 40 | 40 | 0 | 0.5 | yes | outcome burned_out, 40 events |
-| radiation crossing the faces against the cells' sources, every accepted step | 6.063e-16 | — | 6.063e-16 | 1e-12 | yes | absorbed − emitted − back against Σ S_rad / A over 1745 states, over εq |
+| radiation crossing the faces against the cells' sources, every accepted step | 6.063e-16 | — | 6.063e-16 | 1e-12 | yes | absorbed − emitted − back against Σ S_rad / A over 1757 states, over εq |
 | radiation entering, every accepted step | 0 | — | 0 | 1e-12 | yes | ε(q + σT∞⁴) through whichever cell is exposed, over εq |
-| energy closure of the live region | 7.563e-08 | — | 7.563e-08 | 2.3e-07 | yes | change − inflow + lost over the largest of them; inflow 30700.0 J |
-| mass closure of the live region | 1.521e-09 | — | 1.521e-09 | 4.6e-09 | yes | lost 0.00121 kg of 4.84 kg |
+| energy closure of the live region | 7.607e-08 | — | 7.607e-08 | 2.3e-07 | yes | change − inflow + lost over the largest of them; inflow 30700.0 J |
+| mass closure of the live region | 1.376e-09 | — | 1.376e-09 | 4.6e-09 | yes | lost 0.00121 kg of 4.84 kg |
 | radiation absorbed over the burn [J/m²] | 1.185e+07 | — | 0 | Inf | yes | reported |
 | radiation emitted through the exposed face over the burn [J/m²] | 1.451e+06 | — | 0 | Inf | yes | reported |
-| radiation leaving through the back over the burn [J/m²] | 2.941e+06 | — | 0 | Inf | yes | reported |
+| radiation leaving through the back over the burn [J/m²] | 2.94e+06 | — | 0 | Inf | yes | reported |
 
 ![V-RAD-06 radiation_crossing](assets/V-RAD-06/V-RAD-06_radiation_crossing.png)
 
