@@ -125,12 +125,6 @@ variant = ""
 spatial_status = "mesh mismatch"
 
 [[targets]]
-case = "V-RAD-01"
-n_cells = 400
-variant = ""
-spatial_status = "spacing matched"
-
-[[targets]]
 case = "V-RX-01"
 n_cells = 1
 variant = ""

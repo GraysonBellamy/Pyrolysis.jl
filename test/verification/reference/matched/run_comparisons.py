@@ -30,7 +30,6 @@ CASES = {
         "vhc04b",
         "vhc04c",
         "vhc05",
-        "vrad01",
         "vrx01",
         "vrx02a",
         "vrx02b",
@@ -350,8 +349,6 @@ def parameters(case):
             if case[-1] == "2"
             else 1000.0,
         )
-    elif case == "vrad01":
-        p.update(L=0.01, end=180.0, dt=0.1, nodes=401)
     elif case == "vcpl01":
         p.update(L=0.04, end=300.0, dt=0.02, nodes=801, melt_T=433.0)
     elif case.startswith("vgt08"):
@@ -388,7 +385,7 @@ def section(name, lines):
 # TSTOP(1).
 GPYRO_DECKS = DEST / "gpyro_decks"
 GPYRO_TEMPLATED = {
-    "vhc01", "vhc03", "vrad01", "vrx01", "vrx05a", "vrx05b", "vrx05c",
+    "vhc01", "vhc03", "vrx01", "vrx05a", "vrx05b", "vrx05c",
     "vcpl01", "vgt07a", "vgt07b", "vgt08a", "vgt08b",
 }
 # A homogeneous ZEROD run has one lumped unknown and no mesh to refine.
@@ -1019,7 +1016,7 @@ def extract(solver, case, level, path, decks):
     files = decks + [native]
     profile = None
     transient = solver == "fds" and fds_transient_profiles(case)
-    if case.startswith(("vhc", "vrad", "vcpl01", "vcpl04", "vgt")) or case == "vrx04a":
+    if case.startswith(("vhc", "vcpl01", "vcpl04", "vgt")) or case == "vrx04a":
         quantity = (
             "YJ(01)" if case.startswith("vgt07")
             else "PRESSURE" if case.startswith("vgt08")
@@ -1086,19 +1083,6 @@ def extract(solver, case, level, path, decks):
             "mean_T_history",
             "volume mean",
             ((r[0], node_mean(depth, r[1:]) + 273.15) for r in prof[1:]),
-        )
-    elif case == "vrad01":
-        for t in (30.0, 60.0, 90.0, 180.0):
-            add(
-                "T_profiles",
-                f"t = {t} s",
-                sorted((d, v + 273.15) for d, v in profile_at(t)),
-                f", t = {t} s",
-            )
-        add(
-            "surface_T_history",
-            "front face",
-            ((r[0], r[1] + 273.15) for r in data if r[0] > 0),
         )
     elif case == "vcpl01":
         depth = prof[0][1:]

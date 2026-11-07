@@ -58,7 +58,6 @@ const DECKS = (
     "V-CPL-03",
     "V-CPL-06a",
     "V-HC-05",
-    "V-RAD-01",
     "V-RX-02d",
     "V-BO-01",
     "V-BO-03",

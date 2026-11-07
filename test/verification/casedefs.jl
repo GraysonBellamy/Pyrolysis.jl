@@ -12,7 +12,6 @@ exact solutions use depth x = L − z.
 
 using Pyrolysis
 using Pyrolysis.Materials: DepletionLimiter, STEFAN_BOLTZMANN
-using Pyrolysis.Materials: BEER_LAMBERT
 using Pyrolysis.Kernels: RadiativeTransferKernel, find_kernel, radiation_crossing
 using Pyrolysis.States: derive!
 using Pyrolysis.Problem: step_profile

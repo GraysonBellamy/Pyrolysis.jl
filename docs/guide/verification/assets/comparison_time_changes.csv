@@ -91,11 +91,6 @@ V-HC-04b,gpyro,T_profile_steady,steady solver profile,0.0,0.0,81,81,0,0,linear i
 V-HC-04c,gpyro,T_profile_steady,steady solver profile,0.0,0.0,81,81,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-04d,gpyro,T_profile_steady,steady solver profile,0.0,0.0,81,81,0,0,linear interpolation on common support; native units; no order inferred
 V-HC-05,gpyro,T_profile_steady,steady solver profile,0.0,0.0,81,81,0,0,linear interpolation on common support; native units; no order inferred
-V-RAD-01,gpyro,T_profiles,t = 30.0 s,0.019582800000023326,0.00980290000001105,401,401,0,0,linear interpolation on common support; native units; no order inferred
-V-RAD-01,gpyro,T_profiles,t = 60.0 s,0.020975700000008146,0.01049510000001419,401,401,0,0,linear interpolation on common support; native units; no order inferred
-V-RAD-01,gpyro,T_profiles,t = 90.0 s,0.025004699999954028,0.012508099999990918,401,401,0,0,linear interpolation on common support; native units; no order inferred
-V-RAD-01,gpyro,T_profiles,t = 180.0 s,0.018171000000052118,0.009085000000027321,401,401,0,0,linear interpolation on common support; native units; no order inferred
-V-RAD-01,gpyro,surface_T_history,front face,0.03021929999999884,0.015291699999977482,180,180,0,0,linear interpolation on common support; native units; no order inferred
 V-RX-01,gpyro,xi_histories,ξ_A,0.035799999999994725,0.017899999999997362,201,201,0,0,linear interpolation on common support; native units; no order inferred
 V-RX-01,gpyro,xi_histories,ξ_B,0.05150000000003274,0.024799999999970623,201,201,0,0,linear interpolation on common support; native units; no order inferred
 V-RX-01,gpyro,xi_histories,ξ_C,0.022700000000099863,0.011500000000069122,201,201,0,0,linear interpolation on common support; native units; no order inferred

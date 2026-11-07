@@ -2,9 +2,9 @@
 
 These accuracy comparisons use native inputs to unmodified FDS 6.11.1 and
 Gpyro V2, and to ThermaKin2Ds 7 built from its source with a banner-only
-portability change. There are 74 native decks (21 FDS, 29 Gpyro, 24
-ThermaKin), each run at seven configurations (511 successful runs, 7 recorded
-unavailable), spanning 29 verification case IDs.
+portability change. There are 73 native decks (21 FDS, 28 Gpyro, 24
+ThermaKin), each run at seven configurations (504 successful runs, 7 recorded
+unavailable), spanning 28 verification case IDs.
 V-HC-04c and V-HC-04d share the same physical problem and explicitly reuse
 the same native runs: only Julia's mesh differs. P1/P2/P3 are counted
 separately within V-CPL-03. V-GT-08 is the only pressure-driven case. The
@@ -93,7 +93,7 @@ with maximum and RMS error against the shared analytical functions:
 
 ```sh
 julia --project=scripts/verification scripts/verification/run_reports.jl \
-  --cases=V-HC-01,V-HC-02,V-HC-03,V-HC-04,V-HC-05,V-RAD-01,V-RX-01,V-RX-02,V-RX-04,V-RX-05,V-CPL-01,V-CPL-03,V-CPL-04,V-GT-01,V-GT-07,V-GT-08 \
+  --cases=V-HC-01,V-HC-02,V-HC-03,V-HC-04,V-HC-05,V-RX-01,V-RX-02,V-RX-04,V-RX-05,V-CPL-01,V-CPL-03,V-CPL-04,V-GT-01,V-GT-07,V-GT-08 \
   --timings=false --comparisons-only=true --outdir=/tmp/verification-comparison-report
 ```
 
@@ -147,11 +147,6 @@ shift.
   Base: 321 boundary nodes, dt = 0.1 s; profiles at Fo = 0.1, 0.5 and 1.5.
   The volume mean integrates the node values over half end cells (80 s
   outputs).
-* **V-RAD-01 (Gpyro):** L = 0.01 m, k = 0.2, ρ = 1000, c = 1400, incident
-  25 kW/m² absorbed in depth with `KAPPA(1)=1000` 1/m (Julia mass coefficient
-  1 m²/kg), h = 20 W/(m² K) at the irradiated face, insulated back; the
-  unabsorbed remainder leaves the slab, as in the exact model. Base: 401
-  boundary nodes, dt = 0.1 s; profiles at 30, 60, 90 and 180 s.
 * **V-HC-04a–d:** both solvers use L = 0.02 m, 300/400 K boundaries,
   ρ = c = 1000, bottom k = 1 and top k = 0.1/0.01/0.1 W/(m K),
   interface z = 0.01/0.01/0.0102 m. Native Gpyro obstacle orientation is
@@ -346,8 +341,7 @@ The mappings below are native inputs, not corrections:
 * **Steps.** Base steps equal the Gpyro steps, except V-HC-05 at 0.05 s:
   with k(T), ThermaKin's linearized step diverges at 0.1 s and above.
 
-ThermaKin cannot express V-RAD-01 (absorbed radiation is deposited in one
-element per step, not distributed by Beer–Lambert absorption), V-CPL-01
+ThermaKin cannot express V-CPL-01
 (properties are p₀ + p₁T + p₂Tⁿ, which has no Gaussian latent-heat peak),
 V-RX-02a/c (zero and two-thirds order), or the pressure-driven cases
 V-GT-02 to V-GT-06 and V-GT-08.

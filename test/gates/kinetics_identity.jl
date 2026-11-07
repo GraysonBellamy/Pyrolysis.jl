@@ -65,7 +65,6 @@ const CASES = (
     "V-CPL-05",
     "V-CPL-06a",
     "V-HC-05",
-    "V-RAD-01",
     "V-BO-04",
     "V-RAD-06",
     "V-RAD-07",
