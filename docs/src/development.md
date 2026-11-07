@@ -97,7 +97,7 @@ or caption; do not repeat them as text panels inside an image.
 | 4 | Equidistribution and thickness activation | §10.5 | §11.7 |
 | 5 | Burnout, transfers and retained state slots | §10.2 | §14.3 |
 | 6 | Surface energy balance | §5.4 | §12.2 |
-| 7 | Surface versus in-depth absorption | §7.4 | §8.1 |
+| 7 | Surface absorption and radiative transfer | §7.4 | §8.1 |
 | 8 | Actual quick-start results | §2.9; compact copy on Home | — |
 | 9 | Constructor coordinates | §6.2 | — |
 | 10 | One-dimensional coordinate geometry | §6.4 | — |

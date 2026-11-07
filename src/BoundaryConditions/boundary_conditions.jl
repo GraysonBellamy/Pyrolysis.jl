@@ -122,16 +122,25 @@ end
 """
 	RadiativeBC{Fε,FT,FF} <: AbstractThermalBC
 
-Radiative exchange with gray surroundings: q" = ε σ (F T∞⁴ − T_surface⁴).
+Radiative exchange with gray surroundings at `T∞` over the fraction `F` of the
+face's hemisphere. What it does depends on the `radiation_model` passed to
+`solve()`:
 
-The surface emits ε σ T_surface⁴ into its whole hemisphere whatever it faces,
-and receives ε σ T∞⁴ from the fraction F of that hemisphere occupied by the
-surroundings at T∞. The flux is positive into the material when the
-irradiation exceeds the emission and negative (a re-radiation loss) once the
-surface is hot.
+- `SURFACE_ABSORPTION`: a flux in the surface energy balance,
+  q" = ε σ (F T∞⁴ − T_surface⁴). The surface emits ε σ T_surface⁴ into its
+  whole hemisphere whatever it faces, and receives ε σ T∞⁴ from the fraction F
+  of it occupied by the surroundings. The flux is positive into the material
+  when the irradiation exceeds the emission and negative (a re-radiation
+  loss) once the surface is hot.
+- `RADIATIVE_TRANSFER`: nothing in the surface energy balance. The
+  surroundings' F σ T∞⁴ is diffuse radiation arriving at the face, which
+  crosses into the solid at the emissivity of the cell beside it, and the
+  solid's own emission leaves through the same face from the radiation rows.
+  `ε` must be `nothing`: the face transmits its cell's emissivity in both
+  directions. On `:bottom` the condition makes the back an open gray face.
 
 # Fields
-- `ε::Fε`: Surface emissivity [-], range 0-1. Can be:
+- `ε::Fε`: Surface emissivity [-], range 0-1 (`SURFACE_ABSORPTION` only). Can be:
   - `nothing` (default): Use effective emissivity from material properties (ε_eff = Σⱼ vⱼ εⱼ),
 	which tracks composition changes.
   - A constant value (e.g., 0.9)

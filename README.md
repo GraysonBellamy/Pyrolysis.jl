@@ -5,7 +5,7 @@
 A Julia package for simulating thermal decomposition (pyrolysis) of
 materials under high heat flux. Uses a finite-volume discretisation on a mesh
 that moves with the solid (Arbitrary Lagrangian–Eulerian), with cell
-deactivation at burnout, Arrhenius kinetics, in-depth radiation absorption,
+deactivation at burnout, Arrhenius kinetics, radiative transfer through the solid,
 and conservative lumped or dusty-gas transport.
 
 ## Features
