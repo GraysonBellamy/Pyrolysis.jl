@@ -11,16 +11,21 @@
 The V-BO-01 deck, radiative transfer included, on a fixed mesh. The cells
 absorb and emit through the depth while the exposed face also loses heat by
 convection, so the temperature maximum of the PMMA lies below the surface
-and the surface cell reacts slowest: it persists as a low-density skin while
-the cells beneath it empty, and the layer gasifies from within.
+and the PMMA beneath the surface empties nearly uniformly, the exposed cell
+slowest.
 
 A cell deactivates when its condensed mass falls below ε_m of its initial
 value. A fixed mesh removes only its outermost live cell, and a void beneath
 a live skin is a gap the model does not represent, so a crossing cell
 beneath a live cell ends the solve with outcome `:interior` and retcode
-Terminated. The run must stop
-before any deactivation, with the maximum live-cell temperature below
-1000 K. The histories report the time reached at each resolution.
+Terminated. At the CI resolution, 60 PMMA cells, the cell beneath the
+exposed one crosses first, at 157.5 s, while the exposed cell holds 1.2
+thresholds: the run must stop there before any deactivation, with the
+maximum live-cell temperature below 1000 K. The skin is thin at every
+resolution: at 30 cells the exposed cell reaches the threshold first and
+goes before the stop, and at 120 and 240 the cells over the first crossing
+hold 1.0 to 1.4 thresholds. The histories report the time reached at each
+resolution.
 
 ### Quantities of interest (n = 120)
 
