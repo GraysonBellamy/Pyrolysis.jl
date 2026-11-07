@@ -180,7 +180,7 @@ Conventions:
 | $T_{\text{cell}}$ | Temperature at the cell center adjacent to a boundary | K |
 | $T_{\infty}$ | Ambient / surroundings temperature | K |
 | $T_{\text{ref}}$ | Reference temperature for enthalpy datum (= 298.15) | K |
-| $T_{\text{rad}}$ | The largest of the initial cell temperatures and the surroundings' $T_\infty$, for the radiation rows' tolerance scale (§8.7.3) | K |
+| $T_{\text{rad}}$ | The largest initial cell temperature, for the radiation rows' tolerance scale (§8.7.3) | K |
 | $T_f$ | Face temperature of the enthalpy the gas fluxes carry: the distance-weighted interpolation $(d_n T_o + d_o T_n)/(d_o + d_n)$ at an interior face, the surface temperature for boundary outflow and specified incoming temperature for inflow (§13.6.2) | K |
 | $\bar T_f$, $T_{\text{face}}$ | Face temperature; gas transport uses the distance-weighted interface state $T^*=(d_RT_L+d_LT_R)/(d_L+d_R)$, reducing to the arithmetic mean for equal half-cell distances (§9.6) | K |
 | $\tilde T_f$ | Face temperature of the relative fluxes: the upwind van Albada reconstruction on the stencil of the mass flux it carries (§11.6.4, §13.6.2) | K |

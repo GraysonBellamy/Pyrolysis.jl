@@ -218,13 +218,6 @@ _arriving_sum(::Tuple{}, t) = 0.0
 _arriving_sum(b::Tuple, t) =
     arriving_radiation(first(b), t) + _arriving_sum(Base.tail(b), t)
 
-# The largest surroundings temperature of a condition's `RadiativeBC` members
-# at time `t`, zero without one.
-_surroundings_temperature(::AbstractThermalBC, t) = 0.0
-_surroundings_temperature(bc::RadiativeBC, t) = Float64(evaluate_param(bc.T_inf, t))
-_surroundings_temperature(bc::CombinedThermalBC, t) =
-    maximum(b -> _surroundings_temperature(b, t), bc.bcs; init = 0.0)
-
 """
 	radiative_transfer_rows(bc_set) -> Int
 

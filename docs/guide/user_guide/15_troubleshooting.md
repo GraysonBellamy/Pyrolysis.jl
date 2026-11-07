@@ -589,7 +589,7 @@ integrator must step to, so a flux feature shorter than the steps the error
 test would take across it (a short pulse) can be stepped over: bound the step
 with `dtmax` (§15.12.1). Under `RADIATIVE_TRANSFER` the radiation rows' tolerances
 scale with the largest radiation arriving over the time span, sampled at 101 times,
-or with `σT⁴` of the hottest initial cell or surroundings if that is larger.
+or with `σT⁴` of the hottest initial cell if that is larger.
 
 ---
 

@@ -556,10 +556,9 @@ end
 end
 
 # Under radiative transfer every radiation row's tolerance is the relative
-# tolerance of one scale: the largest radiation, diffuse and beams, arriving
-# at either face over the window, or the emissive power at the largest of the
-# initial cell temperatures and the surroundings' temperatures, whichever is
-# larger.
+# tolerance of one scale: the largest radiation arriving at either face over
+# the window (diffuse members, the surroundings' F σ T∞⁴ and the beams), or the
+# emissive power of the hottest initial cell, whichever is larger.
 @testset "radiative transfer rows: tolerance at the scale of the arriving and emitted radiation" begin
     material = _thinning_slab(law = nothing).material
     σ = STEFAN_BOLTZMANN
@@ -582,13 +581,18 @@ end
             maximum(t -> flux(t) + 5e3 + σ * 300.0^4, times),
             3,
         ),
-        # The surroundings are hotter than every cell; the back is open.
+        # The surroundings are hotter than every cell and seen at half view
+        # factor: what arrives from them, F σ T∞⁴ at its largest, sets the
+        # scale; the back is open.
         (
             RadiativeBC(T_inf = t -> 900.0 + 20t, F = 0.5),
             RadiativeBC(T_inf = 350.0) + RadiativeFluxBC(2e3),
-            σ * 1100.0^4,
+            maximum(t -> 0.5 * σ * (900.0 + 20t)^4, times),
             2,
         ),
+        # Hot surroundings out of view arrive with nothing: the cells' own
+        # emission sets the scale.
+        (RadiativeBC(T_inf = 1e4, F = 0.0), AdiabaticBC(), 0.0, 2),
         # Cold surroundings: the cells' own emission is the larger.
         (RadiativeBC(T_inf = 300.0), AdiabaticBC(), σ * 300.0^4, 2),
     )

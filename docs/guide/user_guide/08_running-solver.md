@@ -178,7 +178,7 @@ alone; the absolute tolerances are set **per row** by `setup` from `abstol`, `re
 | Component mass of cell `i` | `reltol · threshold · m_s,i(0)` [kg] (every component of the cell, a product included) |
 | Node position (moving mesh) | `reltol · threshold · h_n`, `h_n` the smallest initial size of the cells around node `n`; no relative share |
 | Node velocity (moving mesh) | the position tolerance over the time scale `dt` |
-| Radiation row (`RADIATIVE_TRANSFER`) | `reltol` times `q_scale`: the largest radiation arriving from outside over the time span (heaters and the surroundings' `F·σ·T_∞⁴`) or `σT⁴` of the hottest initial cell or surroundings, whichever is larger, and at least 1 W/m² |
+| Radiation row (`RADIATIVE_TRANSFER`) | `reltol` times `q_scale`: the largest radiation arriving from outside over the time span (heaters and the surroundings' `F·σ·T_∞⁴`) or `σT⁴` of the hottest initial cell, whichever is larger, and at least 1 W/m²; the whole time span is read, so a run extended to a later end can take a larger scale and differs from the shorter run within that tolerance |
 | Cross-section area and its lateral rate (lateral shrinkage) | `reltol · A₀`; the velocity tolerance over the initial thickness |
 
 A cell that starts with no condensed mass takes its total initial mass for

@@ -964,7 +964,7 @@ it starts empty):
 | gas component mass | initial `pressure_tolerance · M_j · φ_i · V_i/(N_g R T_i)` [kg], supplemented by the proposed-state pressure norm |
 | node position (moving mesh) | `reltol · threshold · h_n`, `h_n` the smallest initial size of the cells around node `n`; no relative share |
 | node velocity (moving mesh) | the position tolerance over `dt` |
-| radiation row (`RADIATIVE_TRANSFER`) | `reltol` times the largest radiation arriving from outside over the time span or `σT⁴` of the hottest initial cell or surroundings, whichever is larger (at least 1 W/m²) |
+| radiation row (`RADIATIVE_TRANSFER`) | `reltol` times the largest radiation arriving from outside over the time span or `σT⁴` of the hottest initial cell, whichever is larger (at least 1 W/m²) |
 | conversion-history pair (lateral shrinkage) | the cell's mass tolerance |
 | cross-section area and lateral rate (lateral shrinkage) | `reltol · A₀`; the smallest node-velocity tolerance over the initial thickness |
 

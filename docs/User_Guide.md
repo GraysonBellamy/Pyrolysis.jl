@@ -5482,7 +5482,7 @@ alone; the absolute tolerances are set **per row** by `setup` from `abstol`, `re
 | Component mass of cell `i` | `reltol · threshold · m_s,i(0)` [kg] (every component of the cell, a product included) |
 | Node position (moving mesh) | `reltol · threshold · h_n`, `h_n` the smallest initial size of the cells around node `n`; no relative share |
 | Node velocity (moving mesh) | the position tolerance over the time scale `dt` |
-| Radiation row (`RADIATIVE_TRANSFER`) | `reltol` times `q_scale`: the largest radiation arriving from outside over the time span (heaters and the surroundings' `F·σ·T_∞⁴`) or `σT⁴` of the hottest initial cell or surroundings, whichever is larger, and at least 1 W/m² |
+| Radiation row (`RADIATIVE_TRANSFER`) | `reltol` times `q_scale`: the largest radiation arriving from outside over the time span (heaters and the surroundings' `F·σ·T_∞⁴`) or `σT⁴` of the hottest initial cell, whichever is larger, and at least 1 W/m²; the whole time span is read, so a run extended to a later end can take a larger scale and differs from the shorter run within that tolerance |
 | Cross-section area and its lateral rate (lateral shrinkage) | `reltol · A₀`; the velocity tolerance over the initial thickness |
 
 A cell that starts with no condensed mass takes its total initial mass for
@@ -7997,7 +7997,7 @@ row (`energy_state = :enthalpy`) `threshold` times the cell's initial
 condensed mass, a reference heat capacity and `abstol`, so a cell at the
 threshold resolves its temperature as the temperature form does; a
 radiation row `reltol` times the largest radiation arriving from outside or
-`σT⁴` of the hottest initial cell or surroundings, whichever is larger; a node
+`σT⁴` of the hottest initial cell, whichever is larger; a node
 position `reltol · threshold` times the smallest initial size of the cells
 around it, and its velocity that over `dt`. `setup` builds the vector
 (`cp.abstol`); Chapter 8 discusses the choice.
@@ -10985,7 +10985,7 @@ integrator must step to, so a flux feature shorter than the steps the error
 test would take across it (a short pulse) can be stepped over: bound the step
 with `dtmax` (§15.12.1). Under `RADIATIVE_TRANSFER` the radiation rows' tolerances
 scale with the largest radiation arriving over the time span, sampled at 101 times,
-or with `σT⁴` of the hottest initial cell or surroundings if that is larger.
+or with `σT⁴` of the hottest initial cell if that is larger.
 
 ---
 
@@ -12108,7 +12108,7 @@ it starts empty):
 | gas component mass | initial `pressure_tolerance · M_j · φ_i · V_i/(N_g R T_i)` [kg], supplemented by the proposed-state pressure norm |
 | node position (moving mesh) | `reltol · threshold · h_n`, `h_n` the smallest initial size of the cells around node `n`; no relative share |
 | node velocity (moving mesh) | the position tolerance over `dt` |
-| radiation row (`RADIATIVE_TRANSFER`) | `reltol` times the largest radiation arriving from outside over the time span or `σT⁴` of the hottest initial cell or surroundings, whichever is larger (at least 1 W/m²) |
+| radiation row (`RADIATIVE_TRANSFER`) | `reltol` times the largest radiation arriving from outside over the time span or `σT⁴` of the hottest initial cell, whichever is larger (at least 1 W/m²) |
 | conversion-history pair (lateral shrinkage) | the cell's mass tolerance |
 | cross-section area and lateral rate (lateral shrinkage) | `reltol · A₀`; the smallest node-velocity tolerance over the initial thickness |
 

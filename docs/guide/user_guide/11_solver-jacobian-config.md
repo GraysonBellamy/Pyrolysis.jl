@@ -311,7 +311,7 @@ row (`energy_state = :enthalpy`) `threshold` times the cell's initial
 condensed mass, a reference heat capacity and `abstol`, so a cell at the
 threshold resolves its temperature as the temperature form does; a
 radiation row `reltol` times the largest radiation arriving from outside or
-`σT⁴` of the hottest initial cell or surroundings, whichever is larger; a node
+`σT⁴` of the hottest initial cell, whichever is larger; a node
 position `reltol · threshold` times the smallest initial size of the cells
 around it, and its velocity that over `dt`. `setup` builds the vector
 (`cp.abstol`); Chapter 8 discusses the choice.

@@ -627,8 +627,11 @@ $$
 
 with $q^{\text{arr}}$ the radiation arriving from outside at the exposed face and at an
 open back (diffuse members, $F\sigma T_\infty^4$ and the full flux of every beam
-member), sampled at 101 times over the time span, and $T_{\text{rad}}$ the largest of
-the initial cell temperatures and the $T_\infty$ of every `RadiativeBC` member there. A
+member), sampled at 101 times over the time span, and $T_{\text{rad}}$ the largest
+initial cell temperature. The surroundings enter at their view factor, through
+$q^{\text{arr}}$ only, so surroundings out of view add nothing. The scale reads the whole
+time span: a run extended to a later end can take a larger $q_{\text{scale}}$, and its
+trajectory then differs from the shorter run's within the radiation rows' tolerance. A
 radiation row's absolute tolerance is $\mathrm{reltol}\cdot q_{\text{scale}}$. The
 domain test reads each live radiation row against its own flux,
 $\lvert r\rvert/(\mathrm{reltol}\,\lvert I\rvert + \mathrm{atol}_r)$, the form of the

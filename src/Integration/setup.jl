@@ -431,22 +431,21 @@ _radiation_rows(model::RadiationModel, bc_set) =
     model === RADIATIVE_TRANSFER ? radiative_transfer_rows(bc_set) : 0
 
 # The scale of the radiation rows' tolerances [W/m²], at least 1: under
-# radiative transfer the largest radiation, diffuse and beams, arriving at
-# either face over the solve window, and the emissive power at the largest of
-# the initial cell temperatures and the surroundings' temperatures of the
-# `RadiativeBC` members over the window.
+# radiative transfer the larger of the largest radiation arriving at either
+# face over the solve window (diffuse members, the surroundings' F σ T∞⁴ and
+# the beams), sampled at 101 times, and the emissive power of the hottest
+# initial cell. The window is read whole, so a later end can raise the scale.
 function _transfer_scale(kernels::Tuple, ds, tspan)
     kernel = find_kernel(RadiativeTransferKernel, kernels)
     kernel === nothing && return 1.0
     times = range(Float64(tspan[1]), Float64(tspan[2]); length = 101)
     conditions =
         kernel.back isa OpenBack ? (kernel.top, kernel.back.condition) : (kernel.top,)
-    incoming, T_ref = 0.0, maximum(ds.T)
+    arriving = 0.0
     for t in times, bc in conditions
-        incoming = max(incoming, abs(arriving_radiation(bc, t)))
-        T_ref = max(T_ref, Kernels._surroundings_temperature(bc, t))
+        arriving = max(arriving, abs(arriving_radiation(bc, t)))
     end
-    return max(1.0, incoming, STEFAN_BOLTZMANN * T_ref^4)
+    return max(1.0, arriving, STEFAN_BOLTZMANN * maximum(ds.T)^4)
 end
 
 # The area and its lateral rate under a variable cross section: one kernel

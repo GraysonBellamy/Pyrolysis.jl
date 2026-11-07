@@ -695,7 +695,7 @@ Conventions:
 | $T_{\text{cell}}$ | Temperature at the cell center adjacent to a boundary | K |
 | $T_{\infty}$ | Ambient / surroundings temperature | K |
 | $T_{\text{ref}}$ | Reference temperature for enthalpy datum (= 298.15) | K |
-| $T_{\text{rad}}$ | The largest of the initial cell temperatures and the surroundings' $T_\infty$, for the radiation rows' tolerance scale (§8.7.3) | K |
+| $T_{\text{rad}}$ | The largest initial cell temperature, for the radiation rows' tolerance scale (§8.7.3) | K |
 | $T_f$ | Face temperature of the enthalpy the gas fluxes carry: the distance-weighted interpolation $(d_n T_o + d_o T_n)/(d_o + d_n)$ at an interior face, the surface temperature for boundary outflow and specified incoming temperature for inflow (§13.6.2) | K |
 | $\bar T_f$, $T_{\text{face}}$ | Face temperature; gas transport uses the distance-weighted interface state $T^*=(d_RT_L+d_LT_R)/(d_L+d_R)$, reducing to the arithmetic mean for equal half-cell distances (§9.6) | K |
 | $\tilde T_f$ | Face temperature of the relative fluxes: the upwind van Albada reconstruction on the stencil of the mass flux it carries (§11.6.4, §13.6.2) | K |
@@ -7087,8 +7087,11 @@ $$
 
 with $q^{\text{arr}}$ the radiation arriving from outside at the exposed face and at an
 open back (diffuse members, $F\sigma T_\infty^4$ and the full flux of every beam
-member), sampled at 101 times over the time span, and $T_{\text{rad}}$ the largest of
-the initial cell temperatures and the $T_\infty$ of every `RadiativeBC` member there. A
+member), sampled at 101 times over the time span, and $T_{\text{rad}}$ the largest
+initial cell temperature. The surroundings enter at their view factor, through
+$q^{\text{arr}}$ only, so surroundings out of view add nothing. The scale reads the whole
+time span: a run extended to a later end can take a larger $q_{\text{scale}}$, and its
+trajectory then differs from the shorter run's within the radiation rows' tolerance. A
 radiation row's absolute tolerance is $\mathrm{reltol}\cdot q_{\text{scale}}$. The
 domain test reads each live radiation row against its own flux,
 $\lvert r\rvert/(\mathrm{reltol}\,\lvert I\rvert + \mathrm{atol}_r)$, the form of the
