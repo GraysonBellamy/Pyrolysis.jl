@@ -20,7 +20,7 @@
 # The mesh moves by the equidistribution correction, the PMMA–Kaowool
 # interface a Lagrangian node, so the PMMA cells thin together and the layer
 # deactivates in two invocations into the Kaowool cell beneath: the cells
-# next to the Kaowool lag the rest by about 25 s. The surface
+# next to the Kaowool lag the rest by about 40 s. The surface
 # QoI counts accepted states whose surface balance did not converge or sits
 # on the trial clamp, since that Newton never warns.
 

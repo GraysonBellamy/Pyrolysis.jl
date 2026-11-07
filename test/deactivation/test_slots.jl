@@ -11,7 +11,8 @@ using Pyrolysis.Kernels:
     RadiativeTransferKernel,
     RelativeFluxKernel,
     find_kernel
-using Pyrolysis.Closures: NoCorrection, EquidistributionCorrection
+using Pyrolysis.Closures:
+    NoCorrection, EquidistributionCorrection, EQUIDISTRIBUTION_TIME, slot_gains!
 using Pyrolysis.Deactivation
 using Pyrolysis.Integration
 using Pyrolysis.Integration: setup, integrate
@@ -315,13 +316,17 @@ end
         _column(h, T, layer, ρ);
         use_ale = true,
         deactivation = true,
-        correction = EquidistributionCorrection(layers = :all),
+        correction = EquidistributionCorrection(layers = :all, τ = EQUIDISTRIBUTION_TIME),
     )
     layout, cells = cp.def.layout, cp.deactivation
     corr = cp.def.closure.correction
     @test corr.origin === cells.tables.origin
-    gain = copy(corr.gain)
+    # A shift by initial node, as a second estimate leaves one.
+    corr.initial_shift .= 0.5 .* corr.initial_gain
+    slot_gains!(corr)
+    gain, shift = copy(corr.gain), copy(corr.shift)
     @test iszero(gain[5]) && all(!iszero, gain[[2, 3, 4, 6, 7, 8, 9, 10]])
+    @test shift == 0.5 .* gain
     kernel = find_kernel(RelativeFluxKernel, cp.def.kernels)
     η = copy(kernel.η)
     floors = copy(kernel.d_floor)
@@ -331,15 +336,17 @@ end
     _kill!(cells, layout, 9)
     origin = [1, 2, 3, 6, 7, 8, 9, 10, 4, 5]
     arrange_slots!(cells.tables, layout, origin, Tuple{Int,Int,Float64}[])
-    @test corr.gain[4] == 0
-    @test corr.gain[[2, 3]] == gain[[2, 3]]
-    @test corr.gain[5:8] == gain[7:10]
+    for (now, before) in ((corr.gain, gain), (corr.shift, shift))
+        @test now[4] == 0
+        @test now[[2, 3]] == before[[2, 3]]
+        @test now[5:8] == before[7:10]
+    end
     @test kernel.η[4] == η[6]
     @test kernel.d_floor[1, 5] == floors[1, 7] && kernel.d_floor[2, 4] == floors[2, 6]
     # Two layers of live cells, each in its own contiguous slots.
     @test Pyrolysis.Closures._live_cells(corr, layout, 1) == 1:3
     @test Pyrolysis.Closures._live_cells(corr, layout, 2) == 4:8
     reset_cells!(cells, layout)
-    @test corr.gain == gain
+    @test corr.gain == gain && corr.shift == shift
     @test kernel.d_floor == floors
 end

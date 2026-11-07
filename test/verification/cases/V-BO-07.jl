@@ -15,7 +15,7 @@
 # Nominal pore fraction 0.1 supplies resolved gas storage during heterogeneous
 # ALE redistribution. The correction's remap of the mixed layer raises the
 # matrix occupancy above one in the layer's bottom cell, next to the Kaowool,
-# just before the invocation: 1.107 and 1.048 at 30 and 60 PMMA cells, falling
+# just before the invocation: 1.066 and 1.033 at 30 and 60 PMMA cells, falling
 # at first order; at 15 cells it closes that cell's pores and the solve stops
 # on pore closure. The joint pore/mesh/pressure gate verifies the 0.1–0.15
 # range from 30 cells, both energy forms, thermal independence of the passive
@@ -24,7 +24,7 @@
 # The layer deactivates in one invocation. The burn
 # runs down from the surface: the upper cells lose their PMMA first and keep
 # the slow solid, and the PMMA beneath burns last and fast. When the first cell
-# crosses ε_m the others still hold up to about 3 % of their initial mass; the
+# crosses ε_m the others still hold up to about 2.5 % of their initial mass; the
 # case reports the invocations and that fraction. Under refinement at
 # ε_m = 1e-2 the largest per-step excess of N cells over 2N falls by about two
 # per doubling (test/gates/burnout_envelope.jl measures it).

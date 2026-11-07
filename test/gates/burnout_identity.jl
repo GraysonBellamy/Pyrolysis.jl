@@ -278,7 +278,11 @@ function activation_extent(sol, corr, h0)
         active = 0
         for nd = 2:(size(z, 1)-1)
             h_in, h_out = z[nd, j] - z[nd-1, j], z[nd+1, j] - z[nd, j]
-            (iszero(corr.gain[nd]) || !isfinite(h_in) || !isfinite(h_out)) && continue
+            (
+                (iszero(corr.gain[nd]) && iszero(corr.shift[nd])) ||
+                !isfinite(h_in) ||
+                !isfinite(h_out)
+            ) && continue
             a_in = Pyrolysis.Closures.activation(corr, h_in, h0[nd-1])
             a_out = Pyrolysis.Closures.activation(corr, h_out, h0[nd])
             a = 1 - (1 - a_in) * (1 - a_out)

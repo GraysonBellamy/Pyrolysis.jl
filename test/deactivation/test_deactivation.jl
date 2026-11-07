@@ -13,6 +13,7 @@ using Pyrolysis.Closures:
     EquidistributionCorrection,
     EQUIDISTRIBUTION_TIME,
     LayerCorrection,
+    estimates_layer_times,
     residues,
     retained_volumes
 using Pyrolysis.ColoredJacobian
@@ -531,7 +532,7 @@ end
     def, layout, cells = cp.def, cp.def.layout, cp.deactivation
     @test cells.band == cells.threshold == ε_m
     @test def.closure.correction isa LayerCorrection
-    @test any(!iszero, def.closure.correction.gain)
+    @test estimates_layer_times(def.closure.correction)
     fractions = (8 => 0.5ε_m, 7 => 0.9ε_m, 6 => 1.5ε_m, 5 => 0.05, 4 => 0.5ε_m)
     u = copy(cp.u0)
     for (i, f) in fractions
@@ -1176,11 +1177,15 @@ end
     # Pores resolved at the start fall below the mass error margin as cells
     # shrink: a cell's mass tolerance keeps its initial reference while its
     # condensed mass shrinks. The local error test alone cannot admit them.
+    # One fixed layer time, long against the solve: the cells shrink and go one
+    # at a time.
+    correction = EquidistributionCorrection(τ = EQUIDISTRIBUTION_TIME)
     cp = setup(
         problem;
         use_ale = true,
         radiation_model = RADIATIVE_TRANSFER,
         deactivation = true,
+        correction,
         reltol = 1e-3,
         abstol = 1e-5,
         pressure_tolerance = 1e-3,
@@ -1198,6 +1203,7 @@ end
         use_ale = true,
         radiation_model = RADIATIVE_TRANSFER,
         deactivation = true,
+        correction,
         reltol = 1e-4,
         abstol = 1e-6,
         pressure_tolerance = 1e-3,
@@ -1210,7 +1216,8 @@ end
 
 # A node position carries no relative tolerance, so the pore margin of a thin
 # cell does not grow with its distance from the coordinate origin: wide pores
-# stay resolved at a loose tolerance through every deactivation.
+# stay resolved at a loose tolerance through every deactivation (one fixed
+# layer time, long against the solve, so that the cells go one at a time).
 @testset "wide pores stay resolved as cells shrink at a loose tolerance" begin
     policy = rodas5p_policy(KLUFactorization(); restart = :solver_chosen)
     sol = Integration.solve(
@@ -1218,6 +1225,7 @@ end
         use_ale = true,
         radiation_model = RADIATIVE_TRANSFER,
         deactivation = true,
+        correction = EquidistributionCorrection(τ = EQUIDISTRIBUTION_TIME),
         reltol = 1e-3,
         abstol = 1e-5,
         pressure_tolerance = 1e-3,
@@ -1360,9 +1368,13 @@ end
     true,
     false,
 )
+    # On the moving mesh one fixed layer time, long against the solve: the
+    # cells go one at a time.
     options = (
         use_ale = moving,
         deactivation = true,
+        correction = moving ? EquidistributionCorrection(τ = EQUIDISTRIBUTION_TIME) :
+                     nothing,
         abstol = 1e-8,
         reltol = 1e-6,
         pressure_tolerance = 1e-3,
@@ -1428,12 +1440,14 @@ end
 
 @testset "a located event leaves an admissible state with the velocity and radiation rows at round-off" begin
     q = 2.8e6
-    # Absorbed near the surface, so that the cells go one at a time.
+    # Absorbed near the surface, under one fixed layer time long against the
+    # solve, so that the cells go one at a time.
     cp = setup(
         _ablator(8; _radiating_ablator(q; absorption = 50.0)...);
         use_ale = true,
         radiation_model = RADIATIVE_TRANSFER,
         deactivation = true,
+        correction = EquidistributionCorrection(τ = EQUIDISTRIBUTION_TIME),
         abstol = 1e-8,
         reltol = 1e-6,
         pressure_tolerance = 1e-3,

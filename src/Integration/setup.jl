@@ -359,11 +359,12 @@ leaves in one invocation.
 """
 const CORRECTION_BAND = 0.1
 
-# Whether the bound correction of `closure` moves some layer.
+# Whether the bound correction of `closure` moves some layer: a gain already
+# set, or layers whose times the solve estimates.
 _moves(closure) =
     closure isa BalanceRowClosure &&
     closure.correction isa LayerCorrection &&
-    any(!iszero, closure.correction.gain)
+    (any(!iszero, closure.correction.gain) || estimates_layer_times(closure.correction))
 
 # Pore state exists for every gas-bearing material, independently of mobility.
 _gas_transport(problem::PyrolysisProblem) =

@@ -5,8 +5,9 @@
 #   fixed — one time for every layer, EQUIDISTRIBUTION_TIME;
 #   A     — that time scaled by the layer's initial thickness against
 #           V-BO-01's 5.9 mm, where it was calibrated;
-#   B     — `ActivationTime()`: the time set at the layer's first activation
-#           from its thickness and thinning rate there;
+#   B     — `ActivationTime()`: the time estimated from the layer's thickness
+#           and thinning rate at its first activation and again when its
+#           first cell falls below r_lo;
 #
 # and, reported beside them, B with λ = 0.5 (`B(0.5)`), the factor under
 # which the decks heated hardest keep one invocation.
@@ -31,7 +32,7 @@
 # solve's own error, against which the rescaled pairs are read); V-BO-01, 06,
 # 07 and 08 in the enthalpy form at their CI resolutions.
 #
-# Per run: the layer's time and, under B, when it was set; the first
+# Per run: the layer's time and, under B, when it was last estimated; the first
 # activation t_a (the first accepted step on which a layer cell is below
 # r_hi of its thickness, interpolated linearly) and the activated life from
 # it to the layer's first invocation, with T_sync = τ/π² over that life; the
@@ -741,7 +742,7 @@ function write_ladder(runs, families, pairs, load_start, load_end, elapsed)
         println(io, "\n## The runs\n")
         println(
             io,
-            "τ: the layer's time [s] (B: set at t [s]); t_a: the first activation [s]; life: from t_a ",
+            "τ: the layer's time [s] (B: last estimated at t [s]); t_a: the first activation [s]; life: from t_a ",
             "to the layer's first invocation [s]; T_sync/life: τ/π² over that life. Invocations: each ",
             "one's cells (largest merged fraction). QoIs: passing of counted, the failing named. Wall: ",
             "the instrumented solve's, on a loaded machine.\n",

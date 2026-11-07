@@ -28,8 +28,8 @@
 # before the solve's last event (the peak QoI's, on the saved times); the
 # integrated tail, the gas generated from the main peak's time to the end;
 # the mass ledger over the accepted steps; the invocations, the cells each
-# took and the largest merged fraction; the layer time τ and when it was set;
-# the outcome, the steps and the wall time.
+# took and the largest merged fraction; the layer time τ and when it was last
+# estimated; the outcome, the steps and the wall time.
 #
 # Per family (a deck, pair, tolerance, activation and comparator at its four
 # resolutions), the hard criterion: every run's QoIs (the invocation QoI
@@ -529,7 +529,7 @@ function write_envelope(runs, families, load_start, load_end, elapsed)
         println(io, "\n## The runs\n")
         println(
             io,
-            "τ: the layer's time [s] (set at t [s]). Invocations: each one's cells (largest merged ",
+            "τ: the layer's time [s] (last estimated at t [s]). Invocations: each one's cells (largest merged ",
             "fraction). Peak: the accepted-step peak (t); main: the largest before the last event (t) ",
             "[g m⁻² s⁻¹]; tail [g/m²]; ledger: the mass ledger's closure. Wall: on a loaded machine.\n",
         )

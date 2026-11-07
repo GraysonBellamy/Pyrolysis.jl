@@ -7,7 +7,7 @@ using Pyrolysis.States
 using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!
 using Pyrolysis.ColoredJacobian
-using Pyrolysis.Closures: EquidistributionCorrection
+using Pyrolysis.Closures: EquidistributionCorrection, EQUIDISTRIBUTION_TIME
 using Pyrolysis.Deactivation
 using Pyrolysis.Integration: setup, DomainCheck, consistent_state!
 
@@ -105,7 +105,10 @@ const _configurations = (
         problem = n -> _column(_pmma(), n; stretch = 1.05),
         options = (
             use_ale = true,
-            correction = EquidistributionCorrection(activation = (2.0, 0.5)),
+            correction = EquidistributionCorrection(
+                τ = EQUIDISTRIBUTION_TIME,
+                activation = (2.0, 0.5),
+            ),
         ),
         wood = false,
     ),
@@ -125,7 +128,10 @@ const _configurations = (
         problem = n -> _column(_pmma(), n; top = _collimated, stretch = 1.05),
         options = (
             use_ale = true,
-            correction = EquidistributionCorrection(activation = (2.0, 0.5)),
+            correction = EquidistributionCorrection(
+                τ = EQUIDISTRIBUTION_TIME,
+                activation = (2.0, 0.5),
+            ),
         ),
         wood = false,
         rows = 3,

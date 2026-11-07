@@ -648,15 +648,17 @@ function _layer_correction(def::ResidualDefinition)
 end
 
 # The layer times' event, on every moving mesh: at the first root of the
-# smallest activation margin of the layers still waiting for their
-# equidistribution time, each such layer that has crossed takes its time
+# smallest margin of the layers still waiting for an estimate of their
+# equidistribution time (to `r_hi` before the first, to `r_lo` before the
+# second), each such layer that has crossed takes its estimate
 # ([`estimate_layer_times!`](@ref), the margin widened by the relative
-# tolerance as the deactivation's threshold is). Without such a layer
-# the margin is infinite and the event never fires; the callback's types are
-# the same either way, so the integrator's type does not depend on the
-# correction. The state is not modified and the layer's correction is zero up
-# to its activation, so the event changes the right-hand side only where the
-# activation has just begun; the integrator re-evaluates its derivative there
+# tolerance as the deactivation's threshold is). Without such a layer the
+# margin is infinite and the event never fires; the callback's types are the
+# same either way, so the integrator's type does not depend on the correction.
+# The state is not modified, and each estimate enters through a switch that is
+# zero with zero slope where it is taken (the activation at `r_hi`, the second
+# switch at `r_lo`), so the right-hand side does not jump and the node
+# velocities stay consistent; the integrator re-evaluates its derivative there
 # and the policy's flag rule applies as for an observer.
 function _layer_time_callback(cp::PreparedProblem, check::DomainCheck, policy)
     layout = cp.def.layout
@@ -669,8 +671,6 @@ function _layer_time_callback(cp::PreparedProblem, check::DomainCheck, policy)
         )
     else
         reference = cp.def.setup.reference
-        t0, t1 = cp.problem.tspan
-        horizon = Float64(t1 - t0)
         reltol = cp.reltol
         (
             FunctionWrapper{Float64,Tuple{_StateVector}}(
@@ -678,15 +678,7 @@ function _layer_time_callback(cp::PreparedProblem, check::DomainCheck, policy)
             ),
             FunctionWrapper{Nothing,Tuple{_StateVector,Float64}}(
                 (u, t) -> begin
-                    estimate_layer_times!(
-                        corr,
-                        layout,
-                        reference,
-                        u,
-                        t,
-                        horizon;
-                        slack = reltol,
-                    )
+                    estimate_layer_times!(corr, layout, reference, u, t; slack = reltol)
                     forget!(check)
                     return nothing
                 end,

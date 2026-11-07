@@ -14,7 +14,7 @@
 # 1 % of the radiation entering (solution.extras.radiation_absorbed).
 
 # The end the burnout measurements run V-BO-03's deck to, past its layer's
-# last invocation (about 577 s at 60 cells).
+# last invocation (898, 817 and 856 s at 30, 60 and 120 cells).
 const VBO03_T_EXTENDED = 1000.0
 
 # The share of the radiation entering the exposed face that leaves through the
