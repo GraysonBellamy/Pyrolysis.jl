@@ -445,7 +445,7 @@ end
 end
 
 # ----------------------------------------------------------------------------
-# RadiativeFluxBC: q = α × incident_flux at the surface, or zero where the
+# RadiativeFluxBC: q = a × incident_flux at the surface, or zero where the
 # incident radiation is absorbed in depth. With `absorptivity = nothing` the BC
 # absorbs at the material's mixture surface absorptivity `a_eff` (= ε_eff
 # unless a component overrides it).
@@ -465,12 +465,12 @@ end
         # Radiation absorbed at boundary - include in boundary balance
         # This ensures T_surface is physically correct (hotter than T_cell when net heating)
         flux = evaluate_param(bc.flux, t)
-        α = if bc.absorptivity === nothing
+        a = if bc.absorptivity === nothing
             a_eff
         else
             evaluate_param(bc.absorptivity, t)
         end
-        return flux * α, 0.0
+        return flux * a, 0.0
     end
 
     # In-depth absorption handles the incident radiation volumetrically, so

@@ -480,26 +480,3 @@ reads_time(bc::MassFluxBC) =
     _any_function(bc.fluxes...) || _any_function(bc.inflow_temperature...)
 reads_time(set::BoundaryConditionSet) =
     any(reads_time, values(set.thermal)) || any(reads_time, values(set.mass))
-
-# ============================================================================
-# RadiativeFluxBC Evaluation Helpers
-# ============================================================================
-
-"""
-	get_radiative_flux_bc(bc::AbstractThermalBC) -> Union{RadiativeFluxBC, Nothing}
-
-Extract RadiativeFluxBC from a (possibly combined) thermal BC.
-Returns nothing if no RadiativeFluxBC is present.
-"""
-get_radiative_flux_bc(bc::RadiativeFluxBC) = bc
-get_radiative_flux_bc(bc::AbstractThermalBC) = nothing
-
-function get_radiative_flux_bc(bc::CombinedThermalBC)
-    for inner_bc in bc.bcs
-        result = get_radiative_flux_bc(inner_bc)
-        if result !== nothing
-            return result
-        end
-    end
-    return nothing
-end

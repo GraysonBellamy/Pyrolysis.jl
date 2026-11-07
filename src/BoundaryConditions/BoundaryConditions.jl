@@ -42,9 +42,6 @@ export validate_gas_boundary, mass_film_flux
 # Pressure boundary conditions (Darcy flow)
 export NeumannPressureBC, ConvectivePressureBC
 
-# Radiative-flux helpers
-export get_radiative_flux_bc
-
 # Type-stable boundary-condition container
 export BoundaryConditionSet, reads_time
 
