@@ -35,9 +35,7 @@ end
 	EQUIDISTRIBUTION_TIME
 
 The fallback equidistribution time `τ` [s] of [`ActivationTime`](@ref), for
-a layer whose thinning gives no estimate: with it the 5.9 mm PMMA layer of
-V-BO-01 at 50 kW/m² ends in one deactivation at 30, 60 and 120 cells across
-it.
+a layer whose thinning gives no estimate.
 """
 const EQUIDISTRIBUTION_TIME = 720.0
 
@@ -45,10 +43,9 @@ const EQUIDISTRIBUTION_TIME = 720.0
 	ACTIVATION_TIME_FACTOR
 
 The factor `λ` of [`ActivationTime`](@ref): a layer's equidistribution time
-is `λ` times the time its thickness would take to vanish at the thinning rate
-of its first activation. With it the 5.9 mm PMMA layer of V-BO-01 at 50 kW/m²
-gets about [`EQUIDISTRIBUTION_TIME`](@ref), and a layer synchronizes in about
-a fifth of that estimated life.
+is `λ` times the time its thickness would take to vanish at its thinning rate
+when the time is set. A layer synchronizes in about a fifth of that
+estimated life.
 """
 const ACTIVATION_TIME_FACTOR = 1.8
 
@@ -63,7 +60,10 @@ A layer's equidistribution time set once, when its first cell activates
 	τ = λ h / |ḣ|.
 
 The rate scales with the physical rates and `λ` is a pure number, so a deck
-whose rates are all multiplied by `s` gets `τ/s`. Before the estimate the
+whose rates are all multiplied by `s`, run over a horizon divided by `s`, gets
+`τ/s` when its layer's time is set at the first activation; a layer that
+waits for the second threshold runs on `fallback`, which does not scale, and
+takes it for good if it is still that slow there. Before the estimate the
 layer's correction is zero, since no cell of it is active. A layer thinning
 no faster than `floor` times its initial thickness over the solve's horizon
 keeps `fallback` [s] until a cell crosses `r_lo` of its initial thickness,

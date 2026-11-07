@@ -3,45 +3,50 @@
 # =============================================================================
 #
 # The V-BO-01 deck under ALE with the Kaowool absorption coefficient set to
-# zero. Radiation that passes the PMMA layer crosses the substrate and leaves
-# through the back face without heating it, so the share of the incident flux
-# that leaves the slab rises toward one as the PMMA thins. The mesh moves by
-# the equidistribution correction as in V-BO-01. The run must complete with
-# the surface temperature converged at every accepted step, and the flux that
-# leaves through the back face (solution.extras.radiation_transmitted) must
-# reach more than 1 % of the entering flux.
+# zero, so the substrate neither absorbs nor emits. Radiation that passes the
+# PMMA layer, the heater's and the PMMA's own, crosses the substrate and
+# leaves through the back face without heating it, so the share of the
+# radiation entering the exposed face that leaves through the back rises
+# toward one as the PMMA thins. The mesh moves by the equidistribution
+# correction as in V-BO-01. The run must complete with the surface
+# temperature converged at every accepted step, and the radiation leaving
+# through the back face (solution.extras.radiation_back) must reach more than
+# 1 % of the radiation entering (solution.extras.radiation_absorbed).
 
 # The end the burnout measurements run V-BO-03's deck to, past its layer's
-# invocation (about 3,023 s, where the film decays slowly).
-const VBO03_T_EXTENDED = 3100.0
+# last invocation (about 577 s at 60 cells).
+const VBO03_T_EXTENDED = 1000.0
+
+# The share of the radiation entering the exposed face that leaves through the
+# back face, at every saved time.
+_vbo03_back_share(sol) = sol.extras.radiation_back ./ sol.extras.radiation_absorbed
 
 function _verification_case_vbo03()
     id = "V-BO-03"
     function qois(sol)
         m = _vbo_measures(sol)
         out = QoIResult[_vbo_surface_qoi(id)]
-        tr = sol.extras.radiation_transmitted
-        leaving = maximum(tr) / maximum(tr .+ sol.extras.volumetric_absorption)
+        leaving = maximum(_vbo03_back_share(sol))
         push!(
             out,
             QoIResult(
-                name = "transmitted flux reported (series peak above 1 % of the entering flux)",
+                name = "radiation leaving through the back reported (series peak above 1 % of the radiation entering)",
                 value = leaving,
                 exact = 1.0,
                 error = leaving > 0.01 ? 0.0 : 1.0,
                 tol = 0.5,
-                comment = "largest share of the entering flux that leaves through the transparent back face",
+                comment = "largest share of the radiation entering the exposed face that leaves through the transparent back face",
             ),
         )
         push!(
             out,
             QoIResult(
-                name = "peak transmitted fraction of the incident flux",
-                value = maximum(tr) / (0.96 * 50e3),
+                name = "peak share of the radiation entering that leaves through the back",
+                value = leaving,
                 exact = 1.0,
-                error = 1.0 - maximum(tr) / (0.96 * 50e3),
+                error = 1.0 - leaving,
                 tol = 0.3,
-                comment = "asymptote 1 once the PMMA is gone; the transmitted flux does not heat the substrate, so a residual PMMA layer remains at t_end and absorbs about 20 %",
+                comment = "asymptote 1 once the PMMA is gone, since the substrate neither absorbs nor emits; at t_end the PMMA cells next to the substrate still hold about 1 % of their mass and absorb 8 % of it, and 3 % leaves through the exposed face (observed 0.889)",
             ),
         )
         push!(
@@ -52,7 +57,7 @@ function _verification_case_vbo03()
                 exact = VBO_MASS_LOSS_EXACT,
                 error = abs(m.mass_loss - VBO_MASS_LOSS_EXACT),
                 tol = 10.0,
-                comment = "percent; the transmitted flux does not heat the substrate",
+                comment = "percent; the radiation crossing the substrate does not heat it",
             ),
         )
         return out
@@ -60,7 +65,7 @@ function _verification_case_vbo03()
     return VerificationCase(
         id = id,
         title = "PMMA burnout on a transparent substrate (transmitted-flux guard)",
-        tags = [:ale, :burnout, :depletion, :beer_lambert],
+        tags = [:ale, :burnout, :depletion, :radiative_transfer],
         references = ["MaCFP-2 PMMA gasification case (NIST), 50 kW/m²"],
         build = n -> _vbo_problem(n; substrate_alpha = 0.0),
         solve_fn = _vbo_solve_fn(id),
@@ -68,7 +73,7 @@ function _verification_case_vbo03()
             use_ale = true,
             deactivation = true,
             min_thickness = 1e-3,
-            radiation_model = BEER_LAMBERT,
+            radiation_model = RADIATIVE_TRANSFER,
             abstol = 1e-8,
             reltol = 1e-6,
         ),
@@ -79,12 +84,12 @@ function _verification_case_vbo03()
             curves = sol -> [
                 _vbo_history_curve(
                     id,
-                    :transmitted_history,
-                    "flux leaving through the back face",
-                    "transmitted / absorbed incident flux",
-                    "transmitted fraction",
+                    :back_history,
+                    "radiation leaving through the back face",
+                    "share of the radiation entering the exposed face",
+                    "leaving through the back",
                     sol.t,
-                    sol.extras.radiation_transmitted ./ (0.96 * 50e3),
+                    _vbo03_back_share(sol),
                 ),
                 _vbo_history_curve(
                     id,

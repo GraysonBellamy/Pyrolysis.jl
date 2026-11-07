@@ -1,18 +1,18 @@
 # =============================================================================
-# V-BO-05 — fixed-mesh burnout under in-depth absorption stops at the first interior void
+# V-BO-05 — fixed-mesh burnout under radiative transfer stops at the first interior void
 # =============================================================================
 #
-# The V-BO-01 deck, in-depth absorption included, on a fixed mesh. The
-# temperature maximum of the PMMA lies below the surface, so the surface cell
-# reacts slowest: it persists as a low-density skin while the cells beneath it
-# empty, and the layer gasifies from within. A void cell conducts with the gas
-# conductivity and absorbs nothing, and nothing in the model carries heat
-# across a void, so the flux transmitted through the void column would heat
-# the substrate beneath it far outside the property bracket.
+# The V-BO-01 deck, radiative transfer included, on a fixed mesh. The cells
+# absorb and emit through the depth while the exposed face also loses heat by
+# convection, so the temperature maximum of the PMMA lies below the surface
+# and the surface cell reacts slowest: it persists as a low-density skin while
+# the cells beneath it empty, and the layer gasifies from within.
 #
 # A cell deactivates when its condensed mass falls below ε_m of its initial
-# value, and on a fixed mesh a crossing cell beneath a live cell ends the
-# solve with outcome `:interior` and retcode Terminated. The run must stop
+# value. A fixed mesh removes only its outermost live cell, and a void beneath
+# a live skin is a gap the model does not represent, so a crossing cell
+# beneath a live cell ends the solve with outcome `:interior` and retcode
+# Terminated. The run must stop
 # before any deactivation, with the maximum live-cell temperature below
 # 1000 K. The histories report the time reached at each resolution.
 
@@ -92,7 +92,7 @@ function _vbo05_qois(sol, rec)
             value = rec.T_max,
             error = rec.T_max,
             tol = 1000.0,
-            comment = "K over every accepted step (observed 693)",
+            comment = "K over every accepted step (observed 691)",
         ),
     ]
 end
@@ -102,8 +102,8 @@ function _verification_case_vbo05()
     qois(sol) = _vbo05_qois(sol, VBO_STEP_STATS[id])
     return VerificationCase(
         id = id,
-        title = "PMMA-on-Kaowool burnout on a fixed mesh under in-depth absorption stops at the first interior void",
-        tags = [:eulerian, :burnout, :depletion, :beer_lambert, :coupled],
+        title = "PMMA-on-Kaowool burnout on a fixed mesh under radiative transfer stops at the first interior void",
+        tags = [:eulerian, :burnout, :depletion, :radiative_transfer, :coupled],
         references = ["MaCFP-2 PMMA gasification case (NIST), 50 kW/m²"],
         build = n -> _vbo_problem(n),
         solve_fn = _vbo_solve_fn(id),
@@ -111,7 +111,7 @@ function _verification_case_vbo05()
         solve_kwargs = (
             use_ale = false,
             deactivation = true,
-            radiation_model = BEER_LAMBERT,
+            radiation_model = RADIATIVE_TRANSFER,
             abstol = 1e-8,
             reltol = 1e-6,
         ),

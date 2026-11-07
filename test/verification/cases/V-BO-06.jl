@@ -35,7 +35,7 @@ function _verification_case_vbo06()
     return VerificationCase(
         id = id,
         title = "PMMA-on-Kaowool burnout on a mesh graded toward the exposed surface",
-        tags = [:ale, :burnout, :depletion, :beer_lambert, :coupled],
+        tags = [:ale, :burnout, :depletion, :radiative_transfer, :coupled],
         references = [
             "MaCFP-2 PMMA gasification case (NIST), 50 kW/m²",
             "Gpyro V2 PMMA deck property fits",
