@@ -1235,7 +1235,7 @@ println("mass lost      = ",
         round((1 - total_m[end] / total_m[1]) * 100, digits = 1), " %")
 ```
 
-For this deck the peak surface temperature is 672.3 K, the peak MLR
+For this deck the peak surface temperature is 672.4 K, the peak MLR
 5.49 g/(m²·s), and the mass lost 92.7 % (values from a run of this script).
 The surface series read `NaN` once no live cell borders the surface, so take
 `maximum(filter(isfinite, T_surface))` on a run that burns out completely.
