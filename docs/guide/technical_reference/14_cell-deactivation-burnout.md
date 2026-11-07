@@ -160,32 +160,35 @@ velocity exactly zero (V-BO-08).
 ### 14.2.2 The layer time
 
 The correction relaxes a layer over its equidistribution time $\tau_{\rm eq}$.
-By default each layer sets it once, at its first activation
-(`ActivationTime()`): when a cell of the layer first falls below the activation
-threshold $r_{\rm hi}$ of its initial thickness, the layer's thickness $L_{\rm layer}$
-and thinning rate $\dot L_{\rm layer}$ give
+By default each layer estimates it twice (`ActivationTime()`): when a cell of
+the layer first falls below the activation threshold $r_{\rm hi}$ of its initial
+thickness, and again when a cell first falls below $r_{\rm lo}$, each time from the
+layer's thickness $L_{\rm layer}$ and thinning rate $\dot L_{\rm layer}$,
 
 $$
-\tau_{\rm eq}=\lambda_\tau\,\frac{L_{\rm layer}}{|\dot L_{\rm layer}|},\qquad \lambda_\tau=1.8
+\tau_{{\rm eq},k}=\lambda_\tau\,\frac{L_{\rm layer}}{|\dot L_{\rm layer}|},\qquad \lambda_\tau=1.8
 \ (\texttt{ACTIVATION\_TIME\_FACTOR}),
 $$
 
-where $\lambda_\tau$ is the $\lambda$ keyword of `ActivationTime`. Since $\dot L_{\rm layer}$
-scales with the physical rates and $\lambda_\tau$ is a pure number, a deck
-whose rates are all multiplied by $s$ gets $\tau_{\rm eq}/s$. Before the
-estimate the layer's correction is zero. A layer thinning no faster than its
-initial thickness over the solve's horizon keeps the fallback time
-(`EQUIDISTRIBUTION_TIME` $=720$ s) until a cell crosses $r_{\rm lo}$, where the
-estimate is taken once more; a thickening layer keeps the fallback. The
-activation thresholds default to $(r_{\rm hi},r_{\rm lo})=(0.3,0.1)$.
+where $\lambda_\tau$ is the $\lambda$ keyword of `ActivationTime`. The first
+estimate sets the layer's gain; the second enters through each cell's second
+switch, which rises from zero at $r_{\rm lo}$ to one at $r_{\rm lo}^2/r_{\rm hi}$ of its
+initial thickness, so the correction runs at $\tau_{{\rm eq},1}$ until the layer's
+cells pass $r_{\rm lo}$ and at $\tau_{{\rm eq},2}$ below $r_{\rm lo}^2/r_{\rm hi}$ (§11.7.5).
+Since $\dot L_{\rm layer}$ scales with the physical rates and $\lambda_\tau$ is a pure
+number, a deck whose rates are all multiplied by $s$ gets both times divided by $s$.
+Before its first estimate a layer has no gain; a layer not thinning at its first
+estimate has no correction until its second, and one not thinning at its second keeps
+its first. The activation thresholds default to
+$(r_{\rm hi},r_{\rm lo})=(0.3,0.1)$.
 
-The estimate is taken by an event of its own: a continuous callback on the
+The estimates are taken by an event of their own: a continuous callback on the
 smallest margin $\Delta z_i/(r\,\Delta z_i(0))-1$ over the live cells of the layers still
-waiting ($r=r_{\rm hi}$ before the first activation, $r_{\rm lo}$ while a slow
-layer waits for the second), located inside the step and widened by the
-relative tolerance as the deactivation event is (§14.3.5). It does not modify
-the state; the layer's correction is zero up to its activation, so the event
-changes the right-hand side only where the activation has just begun. The
+waiting ($r=r_{\rm hi}$ before a layer's first estimate, $r_{\rm lo}$ before its
+second), located inside the step and widened by the relative tolerance as the
+deactivation event is (§14.3.5). It does not modify the state, and each estimate
+enters where its switch leaves zero with zero slope, so the event changes the
+right-hand side only where a switch has just begun to rise. The
 callback is present on every moving mesh, with an infinite margin when no
 layer waits, so the integrator's type does not depend on the correction
 (§15.5.7). The correction's node formula and its smooth activation switch are
@@ -973,8 +976,10 @@ $\varepsilon_m\le\varepsilon_{\rm band}<1$.
 **Installation of the correction**: `use_ale`, `deactivation` and some cell with
 $\sum_j\mathrm{res}_j m_{j,i}(0)<\varepsilon_m m^s_i(0)$.
 
-**Layer time**: $\tau_{\rm eq}=\lambda_\tau L_{\rm layer}/|\dot L_{\rm layer}|$, $\lambda_\tau=1.8$, at the
-layer's first activation ($\Delta z_i<0.3\,\Delta z_i(0)$), fallback 720 s.
+**Layer time**: $\tau_{{\rm eq},k}=\lambda_\tau L_{\rm layer}/|\dot L_{\rm layer}|$, $\lambda_\tau=1.8$, at the
+layer's first activation ($\Delta z_i<0.3\,\Delta z_i(0)$, $k=1$) and again at
+$\Delta z_i<0.1\,\Delta z_i(0)$ ($k=2$), the second blended in over the second switch
+(11.24).
 
 **Transfer** (`_merge!`):
 

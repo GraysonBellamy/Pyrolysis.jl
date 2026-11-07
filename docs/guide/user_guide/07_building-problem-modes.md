@@ -233,8 +233,8 @@ exposed side only. Chapter 10 describes the burnout path, its parameters and the
 envelope in which it is verified.
 
 On a moving mesh with deactivation on, `setup` installs the **equidistribution correction**
-(`EquidistributionCorrection()`, its layer time set at each layer's first activation,
-`ActivationTime()`) when some layer can vanish: its components, converted completely, leave
+(`EquidistributionCorrection()`, its layer time estimated at each layer's first activation
+and again near its end, `ActivationTime()`) when some layer can vanish: its components, converted completely, leave
 less condensed mass than `threshold` of what it started with (`Pyrolysis.Closures.residues`
 gives the fraction each component leaves). The correction moves the mesh relative to the
 solid, thinning a vanishing layer's cells together so that the layer leaves in one event;

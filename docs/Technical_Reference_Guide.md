@@ -579,6 +579,7 @@ Conventions:
 | $a_{\text{eff}}$ | Effective (composition-weighted) surface absorptivity, $\sum_j v_j a_j$ | – |
 | $a$, $a_s$ | Absorptivity applied to the incident flux of a `RadiativeFluxBC`: the condition's own `absorptivity` when it has one, otherwise $a_{\text{eff}}$ of the outermost live cell (§8.3.2, §12.3.5) | – |
 | $a_i$, $a_n$ | Activation switch of cell *i* / node *n* of the equidistribution correction (§11; overload A9) | – |
+| $a^{\text{lo}}_i$, $a^{\text{lo}}_n$ | Second switch of cell *i* / node *n*, through which a layer's second estimate enters the correction (§11.7.5; overload A9) | – |
 | $B$ | Spalding blowing number $\dot m''c_{p,g}/h$ of the convective blowing models (§12.3.3) | – |
 | $B_{\lambda}$, $B_{\Gamma}$ | Film parameters of the blowing models: $B_{\lambda} = 2\lambda \sum_j N_j c_{p,j}(T_s)/h$ (`CouetteFilm`, $\lambda$ its film constant, overload A6); $B_{\Gamma} = (\dot m'' c_{p,\infty}/h)(\Gamma_{\infty}/\Gamma_g)^{n_{\Gamma}}$ (`PropertyRatioFilm`, `PoolingFilm`) (§12.3.3; overload B1) | – |
 | $C_i$ | Heat-capacity sum of cell *i*, $\sum_j m_{j,i} c_{p,j}(\tilde T_i)$ at the trial temperature, smoothly floored at $C_{\text{floor},i}$ | J·K⁻¹ |
@@ -763,7 +764,7 @@ Conventions:
 | $\Lambda$ | Face buoyancy of the pooling film relative to the hot free stream, $[1 - (M_{\text{face}}/T_s)(T_{\infty}/M_{\infty})]/(1 - T_{\infty}/T_s)$ (§12.3.3; overload B1) | – |
 | $\Lambda_c$, $\Lambda_w$ | Centre and width of the pooling factor's logistic switch in $\Lambda$ (`PoolingFilm` keywords `Λc`, `Λw`, defaults 0.35, 0.10; §12.3.3) | – |
 | $\lambda$ ($\lambda_j$, $\lambda_{\text{face}}$, $\lambda_{\text{eff}}$) | Gas transfer (diffusion) coefficient | m²·s⁻¹ |
-| $\lambda_{\tau}$ | Factor of the layer equidistribution time, $\tau_{\text{eq}} = \lambda_{\tau} L_{\text{layer}}/\vert \dot L_{\text{layer}}\vert $ (`ActivationTime`, default 1.8; overload A6) | – |
+| $\lambda_{\tau}$ | Factor of the layer equidistribution time, $\tau_{\text{eq},k} = \lambda_{\tau} L_{\text{layer}}/\vert \dot L_{\text{layer}}\vert $ at each estimate (`ActivationTime`, default 1.8; overload A6) | – |
 | $\ell$ | Characteristic particle/pore diameter (Carman–Kozeny); in §17 the scalar loss | m |
 | $\mu$, $\mu_i$ | Gas dynamic (Sutherland) viscosity (of cell *i*) | Pa·s |
 | $\mu_{\text{ref}}$ | Reference viscosity (= 1.716×10⁻⁵ at 273.15 K, air) | Pa·s |
@@ -785,6 +786,7 @@ Conventions:
 | $\sigma_s$ | Scattering coefficient (not modeled) | m⁻¹ |
 | $\sigma_{AB}$ | Lennard-Jones collision diameter | Å |
 | $\tau_{\text{eq}}$ | Equidistribution time of a layer in the correction (keyword `τ`; overload T1) | s |
+| $\tau_{\text{eq},1}$, $\tau_{\text{eq},2}$ | A layer's first and second estimate of its equidistribution time under `ActivationTime` (§11.7.5; overload T1) | s |
 | $\tau_i$ | Optical thickness of cell *i*, $\alpha_i \Delta z_i$ (always subscripted or called optical; overload T1) | – |
 | $\varphi$ | Porosity (gas void fraction), $1 - \sum_{S,L} \xi_j/\rho_{i,j}$ (U+03C6, LaTeX `\varphi`; overload A8) | – |
 | $\phi_i$ | Multiplier of cell *i* in the potential closure (multi-dimensional meshes only; U+03D5, LaTeX `\phi`; overload A8) | m²·s⁻¹ |
@@ -917,7 +919,7 @@ Conventions:
 | Near-threshold band under a moving correction | $\varepsilon_{\text{band}}$ | 0.1 | – | `CORRECTION_BAND` |
 | Activation bounds | $(r_{\text{hi}}, r_{\text{lo}})$ | (0.3, 0.1) | – | `EquidistributionCorrection` |
 | Layer-time factor | $\lambda_{\tau}$ | 1.8 | – | `ACTIVATION_TIME_FACTOR` |
-| Fallback equidistribution time | $\tau_{\text{eq}}$ | 720 | s | `EQUIDISTRIBUTION_TIME` |
+| A fixed equidistribution time, for `EquidistributionCorrection(τ = …)` | $\tau_{\text{eq}}$ | 720 | s | `EQUIDISTRIBUTION_TIME` |
 | Depletion-limiter scale | $\xi_{\text{th}}$ | 1.0 | kg·m⁻³ | `DepletionLimiter()` |
 | Join of the depletion onset | $x_J$ | 1.0 | – (units of $\xi_{\text{th}}$) | `DepletionLimiter()` |
 | Scale of the finite power base | $\delta_b$ | 10⁻⁸ | kg·m⁻³ | `DepletionLimiter()` |
@@ -1050,7 +1052,8 @@ below is authoritative; writers must use the disambiguating subscript/context.
 - **τ — T1 [optical thickness vs. equidistribution time].** $\tau_i$ with a cell
   subscript, or "optical thickness" in words, is $\alpha_i \Delta z_i$; $\tau_{\text{eq}}$ in the
   mesh-correction and burnout chapters (§11, §14) is a layer's equidistribution
-  time [s]. A time variable of integration is written $t$, never $\tau$.
+  time [s], and $\tau_{\text{eq},1}$, $\tau_{\text{eq},2}$ its two estimates (a numeric
+  subscript after "eq", never a cell index). A time variable of integration is written $t$, never $\tau$.
 
 - **M — M1 [molar mass vs. mass matrix vs. history].** $M$, $M_j$
   (and $M_{\text{face}}$, $M_{\infty}$) is molar mass; $M$ in the linear-algebra context of §15
@@ -1066,7 +1069,7 @@ below is authoritative; writers must use the disambiguating subscript/context.
 - **a — A9 [absorptivity vs. activation].** $a_j$, $a_{\text{eff}}$, $a_s$ (component,
   effective or surface subscript) are surface absorptivities; $a_i$, $a_n$ (cell
   or node subscript, correction context only) are the correction's activation
-  switches. A row's absolute tolerance is written $\text{atol}_r$ (§15.5.4), never
+  switches, and $a^{\text{lo}}_i$, $a^{\text{lo}}_n$ its second switches. A row's absolute tolerance is written $\text{atol}_r$ (§15.5.4), never
   $a_r$.
 
 - **N — N1 [species fluxes vs. counts].** $N_j$ is species mass flux and
@@ -9726,7 +9729,7 @@ c_i = a_i\,\frac{n_{\text{layer}}^2}{\tau_{\text{eq}}}\,
 $$
 (`_correction!`), with $\Delta z_i = z_{i+1} - z_i$ the current cell thickness,
 $a_i$ the activation of §11.7.3 and $\tau_{\text{eq}}$ [s] the layer's equidistribution
-time (the keyword $\tau$, §11.7.5). A positive $c_i$ moves the node in $+z$ relative to the
+time (the keyword $\tau$; by default estimated twice, which (11.24) of §11.7.5 writes out). A positive $c_i$ moves the node in $+z$ relative to the
 solid, into the outer cell: the correction moves each node into the thicker of its two
 cells, so $\Delta z$ itself relaxes toward a common value over the layer.
 
@@ -9788,42 +9791,65 @@ correction on layers that cannot vanish.
 
 ### 11.7.5 The layer time
 
-The equidistribution time is one value for every layer when $\tau$ is a number. By
-default it is `ActivationTime()`: each layer's time is set once, when its first cell
-activates (falls below $r_{\text{hi}}$ of its initial thickness), from the layer's
-thickness $L_{\text{layer}}$ (from its inner bounding node to its outermost live node)
-and its thinning rate $\dot L_{\text{layer}}$ (their velocity difference) at that time,
+The equidistribution time is one value for every layer when $\tau$ is a number, and
+(11.21) holds with it. By default it is `ActivationTime()`, which estimates each layer's
+time twice from the layer's thickness $L_{\text{layer}}$ (from its inner bounding node
+to its outermost live node) and its thinning rate $\dot L_{\text{layer}}$ (their
+velocity difference) at the moment of the estimate,
 $$
 \boxed{\;
-\tau_{\text{eq}} = \lambda_\tau\,\frac{L_{\text{layer}}}{|\dot L_{\text{layer}}|}
+\tau_{\text{eq},k} = \lambda_\tau\,\frac{L_{\text{layer}}}{|\dot L_{\text{layer}}|}
 \;}
 \tag{11.23}
 $$
-with $\lambda_\tau$ the keyword `λ` of `ActivationTime`, by default
-`ACTIVATION_TIME_FACTOR` = 1.8. The rate scales with the physical rates and
-$\lambda_\tau$ is a pure number, so a deck whose rates are all multiplied by $s$ gets
-$\tau_{\text{eq}}/s$, which a test asserts in dimensionless time. With it the 5.9 mm
-PMMA layer of V-BO-01 at 50 kW/m² gets about 720 s, and a layer equalizes in about
-$\tau_{\text{eq}}/\pi^2 \approx 0.18$ of the life $L_{\text{layer}}/|\dot L_{\text{layer}}|$
-the estimate implies, about a fifth of it. Before the estimate the layer's correction is zero,
-since no cell of it is active. A layer thinning no faster than `floor` (default 1)
-times its initial thickness over the solve's horizon keeps the `fallback` time
-(`EQUIDISTRIBUTION_TIME` = 720 s, with which V-BO-01 ends in one deactivation at 30,
-60 and 120 cells across the layer) until a cell crosses $r_{\text{lo}}$, where the
-estimate is taken once more; a layer that thickens keeps the fallback. A layer is
-estimated once: a cell that re-activates later changes nothing.
+the first ($k = 1$) when a cell of the layer first falls below $r_{\text{hi}}$ of its
+initial thickness, the second ($k = 2$) when a cell first falls below $r_{\text{lo}}$.
+$\lambda_\tau$ is the keyword `λ` of `ActivationTime`, by default
+`ACTIVATION_TIME_FACTOR` = 1.8, so a layer equalizes in about
+$\tau_{\text{eq},k}/\pi^2 \approx 0.18$ of the life $L_{\text{layer}}/|\dot L_{\text{layer}}|$
+each estimate implies, about a fifth of it.
+
+The first estimate sets the layer's gain. The second, taken nearer the layer's end
+where its rate has grown, enters through a second switch of each cell,
+$$
+a^{\text{lo}}_i = \mathcal S(x_i - 1),
+$$
+with $x_i$ the argument of $\mathcal S$ in (11.22): zero while the cell keeps at least
+$r_{\text{lo}}$ of its initial thickness, one at and below $r_{\text{lo}}^2/r_{\text{hi}}$
+of it ($1/30$ by default), and $C^1$ in $\ln\Delta z$ between. A node's
+$a^{\text{lo}}_i$ is the smooth "or" of its two cells', as for $a_i$, and the node
+correction is
+$$
+c_i = \left(\frac{a_i}{\tau_{\text{eq},1}}
++ a^{\text{lo}}_i\Big(\frac{1}{\tau_{\text{eq},2}} - \frac{1}{\tau_{\text{eq},1}}\Big)\right)
+n_{\text{layer}}^2\,\big(\Delta z_i - \Delta z_{i-1}\big)
+\tag{11.24}
+$$
+(`_correction!`, `switches`): (11.21) at $\tau_{\text{eq},1}$ where both of the node's
+cells keep more than $r_{\text{lo}}$ of their thickness, and at $\tau_{\text{eq},2}$ once
+one of them is below $r_{\text{lo}}^2/r_{\text{hi}}$. Neither estimate changes the
+right-hand side where it is taken: the first is taken where $a_i$ leaves zero, the
+second where $a^{\text{lo}}_i$ does, both with zero slope. Before its first estimate a
+layer has no gain. A layer not thinning at its first estimate has no correction until
+its second ($\tau_{\text{eq},1}=\infty$); one not thinning at its second keeps its first
+($\tau_{\text{eq},2}=\tau_{\text{eq},1}$). Each estimate is taken once: a cell that
+re-activates later changes nothing.
+
+The rate scales with the physical rates and $\lambda_\tau$ is a pure number, so a deck
+whose rates are all multiplied by $s$ gets both times divided by $s$, which a test
+asserts in dimensionless time; no estimate reads the solve's horizon. The 5.9 mm PMMA
+layer of V-BO-01 at 50 kW/m² (60 cells) gets about 868 s at its first estimate, at
+$t \approx$ 74 s, and 509 s at its second, at 160 s.
 
 The estimate is an event of the integrator. A continuous callback watches the smallest
 margin $\Delta z_i/(r\,\Delta z_i(0)) - 1$ over the live cells of the layers still
-waiting ($r = r_{\text{hi}}$ before the first estimate, $r_{\text{lo}}$ while a floored
-rate waits for the second), locates its first root inside the step, and sets the time
-of every waiting layer whose margin is within `reltol` of zero
-(`estimate_layer_times!`). The state is not modified, and the layer's correction is
-zero up to its activation, so the event changes the right-hand side only where the
-activation has just begun; the integrator re-evaluates its derivative there under the
-policy's flag rule (Chapter 15). Every `integrate` call starts with every layer back
-before its first activation, so repeated integrations of one problem are
-bit-identical.
+waiting ($r = r_{\text{hi}}$ before a layer's first estimate, $r_{\text{lo}}$ before its
+second), locates its first root inside the step, and estimates every waiting layer
+whose margin is within `reltol` of zero (`estimate_layer_times!`). The state is not
+modified, and the event changes the right-hand side only where a switch has just begun
+to rise; the integrator re-evaluates its derivative there under the policy's flag rule
+(Chapter 15). Every `integrate` call starts with every layer back before its first
+estimate, so repeated integrations of one problem are bit-identical.
 
 ### 11.7.6 Installation, keywords and outputs
 
@@ -9873,7 +9899,7 @@ sol = solve(problem; use_ale = true, deactivation = true)
 
 # The same correction, every parameter spelled out.
 corr = EquidistributionCorrection(
-    τ = ActivationTime(λ = 1.8, fallback = 720.0),
+    τ = ActivationTime(λ = 1.8),
     activation = (0.3, 0.1),
     layers = :vanishing,
 )
@@ -9882,20 +9908,22 @@ sol = solve(problem; use_ale = true, deactivation = true, correction = corr)
 sol.statistics.invocations    # deactivation invocations
 sol.correction_velocity       # c at every node and saved time [m/s]
 sol.extras.min_cell_thickness # the thinnest live cell at every saved time [m]
-sol.definition.closure.correction.time    # each moving layer's τ_eq [s]
-sol.definition.closure.correction.set_at  # the time it was set [s]
+c = sol.definition.closure.correction
+c.first_estimate              # each moving layer's first estimate τ_eq,1 [s]
+c.time                        # its latest estimate [s]
+c.set_at                      # the time of the latest estimate [s]
 ```
 
 Measured with this script: the default call installs the correction with one moving
 layer, the PMMA, bounded by the board–PMMA interface (node 31), which `setup` takes
-as a Lagrangian node from the initial composition; the layer's equidistribution time
-is set to about 172 s at $t \approx 35$ s, and the 30 PMMA cells leave in two
-invocations, at $t \approx 91.9$ s and $96.6$ s, the solve then continuing on the
-board to the end of its time span (return code `:Success`). The explicit correction
-reproduces the default bit for bit. At `threshold = 3e-3` the layer leaves in one
-invocation. With `correction = NoCorrection()` the 30 cells leave in 30 invocations,
-from $t \approx 58.7$ s to $96.8$ s, some from under live cells (Chapter 14), at 887
-accepted steps against the correction's 530.
+as a Lagrangian node from the initial composition. The layer's first estimate is about
+172 s, at $t \approx 34.8$ s, and its second about 65 s, at $t \approx 61.2$ s; the 30
+PMMA cells leave in one invocation at $t \approx 94.3$ s, and the solve continues on the
+board to the end of its time span (return code `:Success`) in 747 accepted steps. The
+explicit correction reproduces the default bit for bit. With
+`correction = NoCorrection()` the 30 cells leave in 30 invocations, from
+$t \approx 58.7$ s to $96.8$ s, some from under live cells (Chapter 14), in 984
+accepted steps.
 
 ### 11.7.7 The prescribed mesh velocity (`PrescribedCorrection`)
 
@@ -10025,7 +10053,7 @@ The principal limitations and open issues are:
    integrator's order (§11.5.2).
 
 5. **The correction is a numerical device with a verified envelope.** The
-   equidistribution time is set from one estimate per layer, the activation
+   equidistribution time is set from two estimates per layer, the activation
    thresholds are user parameters, and the relative fluxes it switches
    on add smooth numerical diffusion wherever $\mathbf c \ne 0$. The burnout path is
    verified on the decks listed in User Guide Chapter 10; other materials, thicker or
@@ -12305,32 +12333,35 @@ velocity exactly zero (V-BO-08).
 ### 14.2.2 The layer time
 
 The correction relaxes a layer over its equidistribution time $\tau_{\rm eq}$.
-By default each layer sets it once, at its first activation
-(`ActivationTime()`): when a cell of the layer first falls below the activation
-threshold $r_{\rm hi}$ of its initial thickness, the layer's thickness $L_{\rm layer}$
-and thinning rate $\dot L_{\rm layer}$ give
+By default each layer estimates it twice (`ActivationTime()`): when a cell of
+the layer first falls below the activation threshold $r_{\rm hi}$ of its initial
+thickness, and again when a cell first falls below $r_{\rm lo}$, each time from the
+layer's thickness $L_{\rm layer}$ and thinning rate $\dot L_{\rm layer}$,
 
 $$
-\tau_{\rm eq}=\lambda_\tau\,\frac{L_{\rm layer}}{|\dot L_{\rm layer}|},\qquad \lambda_\tau=1.8
+\tau_{{\rm eq},k}=\lambda_\tau\,\frac{L_{\rm layer}}{|\dot L_{\rm layer}|},\qquad \lambda_\tau=1.8
 \ (\texttt{ACTIVATION\_TIME\_FACTOR}),
 $$
 
-where $\lambda_\tau$ is the $\lambda$ keyword of `ActivationTime`. Since $\dot L_{\rm layer}$
-scales with the physical rates and $\lambda_\tau$ is a pure number, a deck
-whose rates are all multiplied by $s$ gets $\tau_{\rm eq}/s$. Before the
-estimate the layer's correction is zero. A layer thinning no faster than its
-initial thickness over the solve's horizon keeps the fallback time
-(`EQUIDISTRIBUTION_TIME` $=720$ s) until a cell crosses $r_{\rm lo}$, where the
-estimate is taken once more; a thickening layer keeps the fallback. The
-activation thresholds default to $(r_{\rm hi},r_{\rm lo})=(0.3,0.1)$.
+where $\lambda_\tau$ is the $\lambda$ keyword of `ActivationTime`. The first
+estimate sets the layer's gain; the second enters through each cell's second
+switch, which rises from zero at $r_{\rm lo}$ to one at $r_{\rm lo}^2/r_{\rm hi}$ of its
+initial thickness, so the correction runs at $\tau_{{\rm eq},1}$ until the layer's
+cells pass $r_{\rm lo}$ and at $\tau_{{\rm eq},2}$ below $r_{\rm lo}^2/r_{\rm hi}$ (§11.7.5).
+Since $\dot L_{\rm layer}$ scales with the physical rates and $\lambda_\tau$ is a pure
+number, a deck whose rates are all multiplied by $s$ gets both times divided by $s$.
+Before its first estimate a layer has no gain; a layer not thinning at its first
+estimate has no correction until its second, and one not thinning at its second keeps
+its first. The activation thresholds default to
+$(r_{\rm hi},r_{\rm lo})=(0.3,0.1)$.
 
-The estimate is taken by an event of its own: a continuous callback on the
+The estimates are taken by an event of their own: a continuous callback on the
 smallest margin $\Delta z_i/(r\,\Delta z_i(0))-1$ over the live cells of the layers still
-waiting ($r=r_{\rm hi}$ before the first activation, $r_{\rm lo}$ while a slow
-layer waits for the second), located inside the step and widened by the
-relative tolerance as the deactivation event is (§14.3.5). It does not modify
-the state; the layer's correction is zero up to its activation, so the event
-changes the right-hand side only where the activation has just begun. The
+waiting ($r=r_{\rm hi}$ before a layer's first estimate, $r_{\rm lo}$ before its
+second), located inside the step and widened by the relative tolerance as the
+deactivation event is (§14.3.5). It does not modify the state, and each estimate
+enters where its switch leaves zero with zero slope, so the event changes the
+right-hand side only where a switch has just begun to rise. The
 callback is present on every moving mesh, with an infinite margin when no
 layer waits, so the integrator's type does not depend on the correction
 (§15.5.7). The correction's node formula and its smooth activation switch are
@@ -13118,8 +13149,10 @@ $\varepsilon_m\le\varepsilon_{\rm band}<1$.
 **Installation of the correction**: `use_ale`, `deactivation` and some cell with
 $\sum_j\mathrm{res}_j m_{j,i}(0)<\varepsilon_m m^s_i(0)$.
 
-**Layer time**: $\tau_{\rm eq}=\lambda_\tau L_{\rm layer}/|\dot L_{\rm layer}|$, $\lambda_\tau=1.8$, at the
-layer's first activation ($\Delta z_i<0.3\,\Delta z_i(0)$), fallback 720 s.
+**Layer time**: $\tau_{{\rm eq},k}=\lambda_\tau L_{\rm layer}/|\dot L_{\rm layer}|$, $\lambda_\tau=1.8$, at the
+layer's first activation ($\Delta z_i<0.3\,\Delta z_i(0)$, $k=1$) and again at
+$\Delta z_i<0.1\,\Delta z_i(0)$ ($k=2$), the second blended in over the second switch
+(11.24).
 
 **Transfer** (`_merge!`):
 

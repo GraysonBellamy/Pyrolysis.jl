@@ -1033,8 +1033,8 @@ integrate(cp::PreparedProblem; kwargs...) -> PyrolysisSolution
 | `maxiters`, `dt`, `adaptive`, `dtmin`, `dtmax`, `saveat`, `callback`, `min_thickness`, `integrator_policy`, `progress` | as in §16.7, with `dt = cp.problem.dt_initial` and `saveat = cp.problem.output_times` | as in §16.7 |
 | `started` | `time()` | the wall-clock time the reported `solve_time` counts from |
 
-Every call of `integrate` starts with every cell live, the layer times unset and
-the caloric inversion from the set-up temperatures, so repeated integrations
+Every call of `integrate` starts with every cell live, the layer times not yet
+estimated and the caloric inversion from the set-up temperatures, so repeated integrations
 of one `PreparedProblem` are bit-identical (Chapter 11, §11.8).
 
 ```julia
@@ -1270,7 +1270,7 @@ NoCorrection()
 EquidistributionCorrection(; τ = ActivationTime(), activation = (0.3, 0.1),
                              layers = :vanishing)
 
-ActivationTime(; λ = 1.8, fallback = 720.0, floor = 1.0)
+ActivationTime(; λ = 1.8)
 
 PrescribedCorrection(w)
 ```
@@ -1281,9 +1281,7 @@ PrescribedCorrection(w)
 | `EquidistributionCorrection` `τ` | the layer's equidistribution time `τ_eq` [s]: an `ActivationTime` rule, or one positive number for every layer | `ActivationTime()` |
 | `activation` | `(r_hi, r_lo)`, `0 < r_lo < r_hi`: a cell's switch is zero while it keeps at least `r_hi` of its initial thickness and one at and below `r_lo` | `(0.3, 0.1)` |
 | `layers` | `:vanishing` moves only the layers deactivation can remove; `:all` every layer | `:vanishing` |
-| `ActivationTime` `λ` | `λ_τ`: the layer's `τ_eq` is `λ_τ` times its thickness `L_layer` over its thinning rate, both taken at its first activation | `1.8` |
-| `fallback` | the time [s] a layer keeps while it thins too slowly to estimate (or thickens) | `720.0` |
-| `floor` | the thinning below which the estimate waits: `floor` times the initial thickness over the solve's horizon | `1.0` |
+| `ActivationTime` `λ` | `λ_τ`: each estimate of the layer's `τ_eq` is `λ_τ` times its thickness `L_layer` over its thinning rate, both taken when a cell first falls below `r_hi` and again below `r_lo` (§10.5.3) | `1.8` |
 | `PrescribedCorrection` `w` | the mesh velocity `w(x, t)` [m/s] over a solid at rest (verification); needs a non-reacting material and no deactivation | required |
 
 The correction requires `use_ale = true`. Under an equidistribution correction
@@ -1308,7 +1306,7 @@ sol = solve(problem; use_ale = true, deactivation = true,
 |---|---|---|
 | `CORRECTION_BAND` | `0.1`, the default band under a moving correction | `Pyrolysis.Integration` |
 | `ACTIVATION_TIME_FACTOR` | `1.8`, the default `λ_τ` | `Pyrolysis.Closures` |
-| `EQUIDISTRIBUTION_TIME` | `720.0` s, the default `fallback` | `Pyrolysis.Closures` |
+| `EQUIDISTRIBUTION_TIME` | `720.0` s, a fixed time for `EquidistributionCorrection(τ = …)` | `Pyrolysis.Closures` |
 | `DT_AFTER_EVENT` | `1e-6` s, the `:forced_dt` restart step | `Pyrolysis.Integration` |
 | `residues(material)` | per component, the condensed mass fraction left after complete conversion | `Pyrolysis.Closures` |
 | `retained_volumes(material, T)` | per component, the volume left per unit of its mass after complete conversion, which decides whether a cell is tested at an order other than one (§10.4) | `Pyrolysis.Closures` |
@@ -1452,7 +1450,7 @@ Technical Reference chapter.
 | Quantity | Default |
 |---|---|
 | `EquidistributionCorrection` `τ`, `activation`, `layers` | `ActivationTime()`, `(0.3, 0.1)`, `:vanishing` |
-| `ActivationTime` `λ`, `fallback`, `floor` | `1.8`, `720.0` s, `1.0` |
+| `ActivationTime` `λ` | `1.8` |
 | `CORRECTION_BAND` | `0.1` |
 | `rodas5p_policy` `restart` | `:heuristic` |
 | `DT_AFTER_EVENT` (`:forced_dt` restart) | `1e-6` s |

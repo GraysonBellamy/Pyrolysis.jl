@@ -430,8 +430,8 @@ sol_fbdf  = integrate(cp; min_thickness = 1e-3,
                       integrator_policy = fbdf_policy(StructuredKLU()))
 ```
 
-Every call starts with every cell live, the layer times before their first
-activation and the caloric inversion from the set-up temperatures, so
+Every call starts with every cell live, every layer before its first
+estimate and the caloric inversion from the set-up temperatures, so
 repeated integrations of one `PreparedProblem` are bit-identical. `integrate(cp;
 u0 = u)` starts from another state; its algebraic rows must be consistent,
 which `consistent_state!(u, cp.def, cp.ws, t)` ensures, and an inadmissible

@@ -312,7 +312,7 @@ In particular, FDS V-RX-05a–b uses `ADJUST_H=F` to match the specified local
 reaction heat. No gas-transport comparison is attributed to FDS, and the
 V-CPL-04 comparison does not extend to the upper-temperature-gated runaway branch.
 
-The reports compare accuracy, and each case compares cost at matched accuracy: for each external run, that code's cheapest run at least as accurate against this code's cheapest resolution at least as accurate on every scored reference. The ratio is a cost at equal accuracy for that problem, not a pure solver speedup; on the smallest problems the external times are mostly input, setup and output. See the [comparison basis](../verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions and time refinement. ThermaKin2Ds cannot express V-RAD-01, V-CPL-01, V-RX-02a/c or the pressure-driven V-GT-02–06 and V-GT-08; the [coverage matrix](../verification/comparison_coverage.md) gives the reasons.
+The reports compare accuracy, and each case compares cost at matched accuracy: for each external run, that code's cheapest run at least as accurate against this code's cheapest mesh and solver tolerance at least as accurate on every scored reference. The ratio is a cost at equal accuracy for that problem, not a pure solver speedup; on the smallest problems the external times are mostly input, setup and output. See the [comparison basis](../verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions and time refinement. ThermaKin2Ds cannot express V-RAD-01, V-CPL-01, V-RX-02a/c or the pressure-driven V-GT-02–06 and V-GT-08; the [coverage matrix](../verification/comparison_coverage.md) gives the reasons.
 
 ---
 

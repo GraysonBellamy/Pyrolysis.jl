@@ -65,6 +65,7 @@ Conventions:
 | $a_{\text{eff}}$ | Effective (composition-weighted) surface absorptivity, $\sum_j v_j a_j$ | – |
 | $a$, $a_s$ | Absorptivity applied to the incident flux of a `RadiativeFluxBC`: the condition's own `absorptivity` when it has one, otherwise $a_{\text{eff}}$ of the outermost live cell (§8.3.2, §12.3.5) | – |
 | $a_i$, $a_n$ | Activation switch of cell *i* / node *n* of the equidistribution correction (§11; overload A9) | – |
+| $a^{\text{lo}}_i$, $a^{\text{lo}}_n$ | Second switch of cell *i* / node *n*, through which a layer's second estimate enters the correction (§11.7.5; overload A9) | – |
 | $B$ | Spalding blowing number $\dot m''c_{p,g}/h$ of the convective blowing models (§12.3.3) | – |
 | $B_{\lambda}$, $B_{\Gamma}$ | Film parameters of the blowing models: $B_{\lambda} = 2\lambda \sum_j N_j c_{p,j}(T_s)/h$ (`CouetteFilm`, $\lambda$ its film constant, overload A6); $B_{\Gamma} = (\dot m'' c_{p,\infty}/h)(\Gamma_{\infty}/\Gamma_g)^{n_{\Gamma}}$ (`PropertyRatioFilm`, `PoolingFilm`) (§12.3.3; overload B1) | – |
 | $C_i$ | Heat-capacity sum of cell *i*, $\sum_j m_{j,i} c_{p,j}(\tilde T_i)$ at the trial temperature, smoothly floored at $C_{\text{floor},i}$ | J·K⁻¹ |
@@ -249,7 +250,7 @@ Conventions:
 | $\Lambda$ | Face buoyancy of the pooling film relative to the hot free stream, $[1 - (M_{\text{face}}/T_s)(T_{\infty}/M_{\infty})]/(1 - T_{\infty}/T_s)$ (§12.3.3; overload B1) | – |
 | $\Lambda_c$, $\Lambda_w$ | Centre and width of the pooling factor's logistic switch in $\Lambda$ (`PoolingFilm` keywords `Λc`, `Λw`, defaults 0.35, 0.10; §12.3.3) | – |
 | $\lambda$ ($\lambda_j$, $\lambda_{\text{face}}$, $\lambda_{\text{eff}}$) | Gas transfer (diffusion) coefficient | m²·s⁻¹ |
-| $\lambda_{\tau}$ | Factor of the layer equidistribution time, $\tau_{\text{eq}} = \lambda_{\tau} L_{\text{layer}}/\vert \dot L_{\text{layer}}\vert $ (`ActivationTime`, default 1.8; overload A6) | – |
+| $\lambda_{\tau}$ | Factor of the layer equidistribution time, $\tau_{\text{eq},k} = \lambda_{\tau} L_{\text{layer}}/\vert \dot L_{\text{layer}}\vert $ at each estimate (`ActivationTime`, default 1.8; overload A6) | – |
 | $\ell$ | Characteristic particle/pore diameter (Carman–Kozeny); in §17 the scalar loss | m |
 | $\mu$, $\mu_i$ | Gas dynamic (Sutherland) viscosity (of cell *i*) | Pa·s |
 | $\mu_{\text{ref}}$ | Reference viscosity (= 1.716×10⁻⁵ at 273.15 K, air) | Pa·s |
@@ -271,6 +272,7 @@ Conventions:
 | $\sigma_s$ | Scattering coefficient (not modeled) | m⁻¹ |
 | $\sigma_{AB}$ | Lennard-Jones collision diameter | Å |
 | $\tau_{\text{eq}}$ | Equidistribution time of a layer in the correction (keyword `τ`; overload T1) | s |
+| $\tau_{\text{eq},1}$, $\tau_{\text{eq},2}$ | A layer's first and second estimate of its equidistribution time under `ActivationTime` (§11.7.5; overload T1) | s |
 | $\tau_i$ | Optical thickness of cell *i*, $\alpha_i \Delta z_i$ (always subscripted or called optical; overload T1) | – |
 | $\varphi$ | Porosity (gas void fraction), $1 - \sum_{S,L} \xi_j/\rho_{i,j}$ (U+03C6, LaTeX `\varphi`; overload A8) | – |
 | $\phi_i$ | Multiplier of cell *i* in the potential closure (multi-dimensional meshes only; U+03D5, LaTeX `\phi`; overload A8) | m²·s⁻¹ |
@@ -403,7 +405,7 @@ Conventions:
 | Near-threshold band under a moving correction | $\varepsilon_{\text{band}}$ | 0.1 | – | `CORRECTION_BAND` |
 | Activation bounds | $(r_{\text{hi}}, r_{\text{lo}})$ | (0.3, 0.1) | – | `EquidistributionCorrection` |
 | Layer-time factor | $\lambda_{\tau}$ | 1.8 | – | `ACTIVATION_TIME_FACTOR` |
-| Fallback equidistribution time | $\tau_{\text{eq}}$ | 720 | s | `EQUIDISTRIBUTION_TIME` |
+| A fixed equidistribution time, for `EquidistributionCorrection(τ = …)` | $\tau_{\text{eq}}$ | 720 | s | `EQUIDISTRIBUTION_TIME` |
 | Depletion-limiter scale | $\xi_{\text{th}}$ | 1.0 | kg·m⁻³ | `DepletionLimiter()` |
 | Join of the depletion onset | $x_J$ | 1.0 | – (units of $\xi_{\text{th}}$) | `DepletionLimiter()` |
 | Scale of the finite power base | $\delta_b$ | 10⁻⁸ | kg·m⁻³ | `DepletionLimiter()` |
@@ -536,7 +538,8 @@ below is authoritative; writers must use the disambiguating subscript/context.
 - **τ — T1 [optical thickness vs. equidistribution time].** $\tau_i$ with a cell
   subscript, or "optical thickness" in words, is $\alpha_i \Delta z_i$; $\tau_{\text{eq}}$ in the
   mesh-correction and burnout chapters (§11, §14) is a layer's equidistribution
-  time [s]. A time variable of integration is written $t$, never $\tau$.
+  time [s], and $\tau_{\text{eq},1}$, $\tau_{\text{eq},2}$ its two estimates (a numeric
+  subscript after "eq", never a cell index). A time variable of integration is written $t$, never $\tau$.
 
 - **M — M1 [molar mass vs. mass matrix vs. history].** $M$, $M_j$
   (and $M_{\text{face}}$, $M_{\infty}$) is molar mass; $M$ in the linear-algebra context of §15
@@ -552,7 +555,7 @@ below is authoritative; writers must use the disambiguating subscript/context.
 - **a — A9 [absorptivity vs. activation].** $a_j$, $a_{\text{eff}}$, $a_s$ (component,
   effective or surface subscript) are surface absorptivities; $a_i$, $a_n$ (cell
   or node subscript, correction context only) are the correction's activation
-  switches. A row's absolute tolerance is written $\text{atol}_r$ (§15.5.4), never
+  switches, and $a^{\text{lo}}_i$, $a^{\text{lo}}_n$ its second switches. A row's absolute tolerance is written $\text{atol}_r$ (§15.5.4), never
   $a_r$.
 
 - **N — N1 [species fluxes vs. counts].** $N_j$ is species mass flux and

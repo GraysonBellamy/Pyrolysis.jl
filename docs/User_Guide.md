@@ -4715,8 +4715,8 @@ exposed side only. Chapter 10 describes the burnout path, its parameters and the
 envelope in which it is verified.
 
 On a moving mesh with deactivation on, `setup` installs the **equidistribution correction**
-(`EquidistributionCorrection()`, its layer time set at each layer's first activation,
-`ActivationTime()`) when some layer can vanish: its components, converted completely, leave
+(`EquidistributionCorrection()`, its layer time estimated at each layer's first activation
+and again near its end, `ActivationTime()`) when some layer can vanish: its components, converted completely, leave
 less condensed mass than `threshold` of what it started with (`Pyrolysis.Closures.residues`
 gives the fraction each component leaves). The correction moves the mesh relative to the
 solid, thinning a vanishing layer's cells together so that the layer leaves in one event;
@@ -6991,8 +6991,8 @@ callbacks:
    at the end of an accepted step, the safety net for a crossing the location
    does not see;
 3. on a moving mesh under the equidistribution correction, the **layer-time
-   event**, which sets each layer's equidistribution time at its first
-   activation (§10.5.3);
+   event**, which estimates each layer's equidistribution time at its first
+   activation and again when a cell passes `r_lo` (§10.5.3);
 4. on a moving mesh, the **thickness stop** (§10.3).
 
 After each deactivation the algebraic rows are swept to consistency (the face
@@ -7284,40 +7284,60 @@ zero at every bounding node of a layer and beside a dead cell.
 
 ### 10.5.3 The layer time
 
-The equidistribution time `τ_eq` of a layer is set once, when its first cell
-activates (falls below `r_hi` of its initial thickness), from the layer's
-thickness `L_layer` and its thinning rate `L̇_layer` at that moment
-(`ActivationTime()`):
+The equidistribution time of a layer is estimated twice (`ActivationTime()`),
+each time from the layer's thickness `L_layer` and its thinning rate `L̇_layer`
+at that moment: when its first cell activates (falls below `r_hi` of its
+initial thickness), and again when a cell first falls below `r_lo`:
 
 ```
-τ_eq = λ_τ L_layer / |L̇_layer|,     λ_τ = 1.8 (the keyword λ)
+τ_eq,k = λ_τ L_layer / |L̇_layer|,     λ_τ = 1.8 (the keyword λ),     k = 1, 2
 ```
 
-so the layer synchronizes (in about `τ_eq/π²`) within about a fifth of its
-estimated life `L_layer/|L̇_layer|`.
+so the layer synchronizes (in about `τ_eq,k/π²`) within about a fifth of the
+life `L_layer/|L̇_layer|` each estimate implies. The first estimate sets the
+layer's gain. The second, taken near the layer's end where it thins faster,
+takes over through a second switch of each cell, `a_i^lo = 𝒮(x_i − 1)` with
+`x_i` the argument of the switch of §10.5.2: zero while the cell keeps at
+least `r_lo` of its initial thickness and one at and below `r_lo²/r_hi` of it
+(1/30 by default). With `ā_n^lo` the smooth "or" of a node's two cells'
+second switches,
+
+```
+c_n = (ā_n/τ_eq,1 + ā_n^lo (1/τ_eq,2 − 1/τ_eq,1)) n_layer² (Δz_n − Δz_{n−1})
+```
+
+which runs at `τ_eq,1` until the cells pass `r_lo` and at `τ_eq,2` below
+`r_lo²/r_hi`. Neither estimate changes the right-hand side where it is taken:
+each switch leaves zero with zero slope there. Before its first estimate a
+layer has no correction; a layer not thinning at its first estimate gets none
+until its second, and one not thinning at its second keeps its first. Each
+estimate is taken once; a cell that re-activates later changes nothing.
+
 The rate scales with the physical rates and `λ_τ` is a pure number, so a deck
-whose rates are all multiplied by `s` gets `τ_eq/s`, and the correction scales
-with it; one fixed `τ` for every deck does not. Before its activation a
-layer's correction is zero anyway, and its time reads the fallback, 720 s. A
-layer thinning more slowly than its initial thickness over the solve's
-horizon keeps the fallback until a cell crosses `r_lo`, where the estimate is
-taken once more; a layer that thickens keeps the fallback. Each layer is
-estimated once; a cell that re-activates later changes nothing.
+whose rates are all multiplied by `s` gets both times divided by `s`, and the
+correction scales with it; one fixed `τ` for every deck does not. No estimate
+reads the solve's time span.
 
-The activation is a located event of its own, so `τ_eq` is taken at the
+The estimates are located events of their own, so each is taken at the
 crossing, not at the end of a step. After the solve, the bound correction
-holds every layer's time and the time it was set at:
+holds every layer's estimates:
 
 ```julia
 c = sol.definition.closure.correction    # the correction bound to the mesh
-c.time, c.set_at                         # ([617.88…], [97.07…]) on the deck of §10.2.1
+c.first_estimate                         # [τ_eq,1] of each moving layer [s]
+c.time, c.set_at                         # its latest estimate and the time it was taken [s]
 ```
+
+On the deck of §10.2.1 the PMMA layer's first estimate is about 745 s, taken at
+t ≈ 81 s, and its second 353 s, at t ≈ 167 s.
 
 | `ActivationTime` keyword | Default | Meaning |
 |---|---|---|
-| `λ` | `1.8` (`ACTIVATION_TIME_FACTOR`) | `λ_τ` in `τ_eq = λ_τ L_layer/\|L̇_layer\|` at the first activation |
-| `fallback` | `720.0` s (`EQUIDISTRIBUTION_TIME`) | the time before the estimate, and of a layer that thins too slowly or thickens |
-| `floor` | `1.0` | the slowest thinning that gives an estimate, in initial thicknesses over the horizon |
+| `λ` | `1.8` (`ACTIVATION_TIME_FACTOR`) | `λ_τ` in `τ_eq,k = λ_τ L_layer/\|L̇_layer\|` at each estimate |
+
+A number for `τ` gives every layer that one fixed time from the start, and the
+second switch then changes nothing; `Pyrolysis.Closures.EQUIDISTRIBUTION_TIME`
+(720 s) is such a value.
 
 ### 10.5.4 The layers
 
@@ -7461,8 +7481,8 @@ void (the V-BO-02 case). Under in-depth absorption it does not (§10.7).
 
 ## 10.9 The supported envelope
 
-The burnout path (the equidistribution correction with its layer time set at
-activation, the near-threshold band, located deactivation events) is
+The burnout path (the equidistribution correction with its layer time estimated
+twice, the near-threshold band, located deactivation events) is
 verified under joint refinement of the mesh and the tolerance on five decks:
 a 5.9 mm PMMA layer on Kaowool under 50 kW/m² on a uniform mesh (V-BO-01) and
 on a mesh graded threefold toward the surface (V-BO-06); the same layer with
@@ -7544,7 +7564,7 @@ fraction against the band.
 | `lagrangian` | `solve`, `setup` | the layer interfaces | 10.5.1 |
 | `min_thickness` | `solve`, `integrate` | `1e-6` m | 10.3 |
 | `EquidistributionCorrection(; τ, activation, layers)` | exported | `ActivationTime()`, `(0.3, 0.1)`, `:vanishing` | 10.5 |
-| `ActivationTime(; λ, fallback, floor)` | exported | `1.8`, `720.0` s, `1.0` | 10.5.3 |
+| `ActivationTime(; λ)` | exported | `1.8` | 10.5.3 |
 | `NoCorrection()` | exported | — | 10.5.5 |
 | `PrescribedCorrection(w)` | exported | — | 10.5.5 |
 
@@ -7993,8 +8013,8 @@ sol_fbdf  = integrate(cp; min_thickness = 1e-3,
                       integrator_policy = fbdf_policy(StructuredKLU()))
 ```
 
-Every call starts with every cell live, the layer times before their first
-activation and the caloric inversion from the set-up temperatures, so
+Every call starts with every cell live, every layer before its first
+estimate and the caloric inversion from the set-up temperatures, so
 repeated integrations of one `PreparedProblem` are bit-identical. `integrate(cp;
 u0 = u)` starts from another state; its algebraic rows must be consistent,
 which `consistent_state!(u, cp.def, cp.ws, t)` ensures, and an inadmissible
@@ -12033,8 +12053,8 @@ integrate(cp::PreparedProblem; kwargs...) -> PyrolysisSolution
 | `maxiters`, `dt`, `adaptive`, `dtmin`, `dtmax`, `saveat`, `callback`, `min_thickness`, `integrator_policy`, `progress` | as in §16.7, with `dt = cp.problem.dt_initial` and `saveat = cp.problem.output_times` | as in §16.7 |
 | `started` | `time()` | the wall-clock time the reported `solve_time` counts from |
 
-Every call of `integrate` starts with every cell live, the layer times unset and
-the caloric inversion from the set-up temperatures, so repeated integrations
+Every call of `integrate` starts with every cell live, the layer times not yet
+estimated and the caloric inversion from the set-up temperatures, so repeated integrations
 of one `PreparedProblem` are bit-identical (Chapter 11, §11.8).
 
 ```julia
@@ -12270,7 +12290,7 @@ NoCorrection()
 EquidistributionCorrection(; τ = ActivationTime(), activation = (0.3, 0.1),
                              layers = :vanishing)
 
-ActivationTime(; λ = 1.8, fallback = 720.0, floor = 1.0)
+ActivationTime(; λ = 1.8)
 
 PrescribedCorrection(w)
 ```
@@ -12281,9 +12301,7 @@ PrescribedCorrection(w)
 | `EquidistributionCorrection` `τ` | the layer's equidistribution time `τ_eq` [s]: an `ActivationTime` rule, or one positive number for every layer | `ActivationTime()` |
 | `activation` | `(r_hi, r_lo)`, `0 < r_lo < r_hi`: a cell's switch is zero while it keeps at least `r_hi` of its initial thickness and one at and below `r_lo` | `(0.3, 0.1)` |
 | `layers` | `:vanishing` moves only the layers deactivation can remove; `:all` every layer | `:vanishing` |
-| `ActivationTime` `λ` | `λ_τ`: the layer's `τ_eq` is `λ_τ` times its thickness `L_layer` over its thinning rate, both taken at its first activation | `1.8` |
-| `fallback` | the time [s] a layer keeps while it thins too slowly to estimate (or thickens) | `720.0` |
-| `floor` | the thinning below which the estimate waits: `floor` times the initial thickness over the solve's horizon | `1.0` |
+| `ActivationTime` `λ` | `λ_τ`: each estimate of the layer's `τ_eq` is `λ_τ` times its thickness `L_layer` over its thinning rate, both taken when a cell first falls below `r_hi` and again below `r_lo` (§10.5.3) | `1.8` |
 | `PrescribedCorrection` `w` | the mesh velocity `w(x, t)` [m/s] over a solid at rest (verification); needs a non-reacting material and no deactivation | required |
 
 The correction requires `use_ale = true`. Under an equidistribution correction
@@ -12308,7 +12326,7 @@ sol = solve(problem; use_ale = true, deactivation = true,
 |---|---|---|
 | `CORRECTION_BAND` | `0.1`, the default band under a moving correction | `Pyrolysis.Integration` |
 | `ACTIVATION_TIME_FACTOR` | `1.8`, the default `λ_τ` | `Pyrolysis.Closures` |
-| `EQUIDISTRIBUTION_TIME` | `720.0` s, the default `fallback` | `Pyrolysis.Closures` |
+| `EQUIDISTRIBUTION_TIME` | `720.0` s, a fixed time for `EquidistributionCorrection(τ = …)` | `Pyrolysis.Closures` |
 | `DT_AFTER_EVENT` | `1e-6` s, the `:forced_dt` restart step | `Pyrolysis.Integration` |
 | `residues(material)` | per component, the condensed mass fraction left after complete conversion | `Pyrolysis.Closures` |
 | `retained_volumes(material, T)` | per component, the volume left per unit of its mass after complete conversion, which decides whether a cell is tested at an order other than one (§10.4) | `Pyrolysis.Closures` |
@@ -12452,7 +12470,7 @@ Technical Reference chapter.
 | Quantity | Default |
 |---|---|
 | `EquidistributionCorrection` `τ`, `activation`, `layers` | `ActivationTime()`, `(0.3, 0.1)`, `:vanishing` |
-| `ActivationTime` `λ`, `fallback`, `floor` | `1.8`, `720.0` s, `1.0` |
+| `ActivationTime` `λ` | `1.8` |
 | `CORRECTION_BAND` | `0.1` |
 | `rodas5p_policy` `restart` | `:heuristic` |
 | `DT_AFTER_EVENT` (`:forced_dt` restart) | `1e-6` s |
