@@ -25,7 +25,11 @@
 # - the whole field with the heater: the flux leaving and the L1 difference
 #   of the sources over the whole sample. The beams themselves are exact; the
 #   difference adds the conversion at the mirror (the beam reaching the back
-#   travels on as diffuse).
+#   travels on as diffuse);
+# - the whole field with the same heater diffuse, the default distribution:
+#   the same two measures. The two-stream attenuates diffuse incidence as
+#   e^{−Dτ} where exact transfer gives 2E₃(τ): it transmits 3 % more through
+#   an optical depth of 0.1 and 38 % less through one of 3.
 #
 # The values are the model's error, not a discretization error: they are
 # pinned at 3× the observed as a regression. The exposed cell's two-stream
@@ -65,26 +69,26 @@ function _vrad_gidaze_material()
 end
 
 """
-    _vrad_gidaze_problem(nodes, T, ξ; q, bottom = AdiabaticBC(), tspan, output_times)
+    _vrad_gidaze_problem(nodes, T, ξ; q, distribution = Collimated(),
+                         bottom = AdiabaticBC(), tspan, output_times)
 
 The GIDAZE+ PMMA on the line `nodes` (back to exposed face) at the cell
-temperatures `T(z)` and PMMA concentrations `ξ(z)`, under a collimated heater
-`q` [W/m²] (none when zero) beside surroundings at 293 K, the gas leaving
-through the exposed face to the ambient and not through the back.
+temperatures `T(z)` and PMMA concentrations `ξ(z)`, under a heater `q` [W/m²]
+arriving as `distribution` (none when zero) beside surroundings at 293 K, the
+gas leaving through the exposed face to the ambient and not through the back.
 """
 function _vrad_gidaze_problem(
     nodes,
     T,
     ξ;
     q,
+    distribution = Collimated(),
     bottom = AdiabaticBC(),
     tspan = (0.0, 1.0),
     output_times = Float64[],
 )
     surroundings = RadiativeBC(T_inf = _VRAD_GIDAZE_T0)
-    top =
-        q > 0 ? RadiativeFluxBC(q; distribution = Collimated()) + surroundings :
-        surroundings
+    top = q > 0 ? RadiativeFluxBC(q; distribution) + surroundings : surroundings
     return PyrolysisProblem(
         mesh = line_mesh(nodes),
         material = _vrad_gidaze_material(),
@@ -125,6 +129,8 @@ function _verification_case_vrad05()
             exposed = 0.0105,
             heated_leaving = 3.98e-4,
             heated = 0.0732,
+            diffuse_leaving = 3.98e-4,
+            diffuse = 0.0237,
         ),
         (10, 10) => (
             leaving = 4.43e-3,
@@ -132,6 +138,8 @@ function _verification_case_vrad05()
             exposed = 4.89e-3,
             heated_leaving = 0.0135,
             heated = 0.0811,
+            diffuse_leaving = 2.75e-4,
+            diffuse = 0.0124,
         ),
         (25, 50) => (
             leaving = 3.94e-4,
@@ -139,6 +147,8 @@ function _verification_case_vrad05()
             exposed = 2.24e-3,
             heated_leaving = 3.94e-4,
             heated = 0.0457,
+            diffuse_leaving = 3.94e-4,
+            diffuse = 0.0512,
         ),
         (25, 10) => (
             leaving = 2.30e-3,
@@ -146,13 +156,21 @@ function _verification_case_vrad05()
             exposed = 6.73e-4,
             heated_leaving = 0.0158,
             heated = 0.0582,
+            diffuse_leaving = 2.44e-3,
+            diffuse = 0.0422,
         ),
     )
 
-    function deck(frame, q)
+    function deck(frame, q; distribution = Collimated())
         nodes = frame.nodes
         cell(z) = clamp(searchsortedlast(nodes, z), 1, length(frame.T))
-        return _vrad_gidaze_problem(nodes, z -> frame.T[cell(z)], z -> frame.ξ[cell(z)]; q)
+        return _vrad_gidaze_problem(
+            nodes,
+            z -> frame.T[cell(z)],
+            z -> frame.ξ[cell(z)];
+            q,
+            distribution,
+        )
     end
 
     build(n_cells) = deck(_vrad05_frame(25, 10), 25e3)
@@ -240,6 +258,38 @@ function _verification_case_vrad05()
                         error = value / scale,
                         tol = 3 * seen,
                         comment = "two-stream with conversion at the mirror against exact transfer, over εq",
+                    ),
+                )
+            end
+
+            diffuse = radiation_fields(deck(frame, q; distribution = Diffuse()))
+            g = gray_slab_exact(τ, B; ε, B_amb, ε_b = 0.0, q, heater = :diffuse)
+            S = two_stream_sources(
+                diffuse.qm,
+                diffuse.qp,
+                diffuse.I,
+                zeros(size(diffuse.I)),
+            )
+            for (name, value, seen) in (
+                (
+                    "with a diffuse heater: flux leaving",
+                    abs(diffuse.emitted - g.q_out),
+                    pinned.diffuse_leaving,
+                ),
+                (
+                    "with a diffuse heater: L1 of the sources",
+                    sum(abs, S .- g.S),
+                    pinned.diffuse,
+                ),
+            )
+                push!(
+                    out,
+                    QoIResult(
+                        name = "$(label), $(name)",
+                        value = value / scale,
+                        error = value / scale,
+                        tol = 3 * seen,
+                        comment = "two-stream, the heater attenuated as e^{−Dτ}, against exact transfer, over εq",
                     ),
                 )
             end
