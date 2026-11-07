@@ -80,10 +80,10 @@ const _CONFIGURATIONS = (
         darcy = false,
         options = (radiation_model = SURFACE_ABSORPTION,),
     ),
-    wood_moving_beer_lambert_darcy = (
+    wood_moving_radiative_transfer_darcy = (
         material = _wood,
         darcy = true,
-        options = (use_ale = true, radiation_model = BEER_LAMBERT),
+        options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
     ),
     polymer_moving_lumped = (material = _pmma, darcy = false, options = (use_ale = true,)),
 )

@@ -282,7 +282,7 @@ function jacobian_figure()
         setup(
             small_problem(; law);
             use_ale = true,
-            radiation_model = BEER_LAMBERT,
+            radiation_model = RADIATIVE_TRANSFER,
             correction = corr,
         ) for (_, corr, law) in cases
     ]

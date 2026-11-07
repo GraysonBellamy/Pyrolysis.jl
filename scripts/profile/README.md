@@ -5,7 +5,7 @@ Answers "*where* is the time/allocation going?" — the complement to
 
 Runs five canonical configurations (a PMMA column on a fixed and a moving
 mesh, with surface absorption, and a permeable charring solid with
-lumped wall and Darcy transport, with Beer–Lambert absorption on a moving mesh) on the
+lumped wall and Darcy transport, under radiative transfer on a moving mesh) on the
 problem `setup` builds, under:
 
 - **`summary`** — wall clock, bytes allocated, and GC share per residual
@@ -26,7 +26,7 @@ julia --project=scripts/profile -e 'using Pkg; Pkg.instantiate()'
 julia --project=scripts/profile scripts/profile/profile.jl
 ```
 
-Defaults profile the heaviest configuration (`moving_beer_lambert_darcy`) in
+Defaults profile the heaviest configuration (`moving_radiative_transfer_darcy`) in
 all modes and targets. Narrow it down with:
 
 ```sh

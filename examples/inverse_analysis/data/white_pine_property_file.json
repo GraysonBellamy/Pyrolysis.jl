@@ -340,7 +340,7 @@
                 "Gas5": 0.0,
                 "H2O_vapor": 0.0
             },
-            "Note": "In-depth (Beer-Lambert) absorption disabled; incident radiation is deposited at the boundary via emissivity. The model field is populated and zeroed by design."
+            "Note": "In-depth absorption disabled; incident radiation is deposited at the boundary via emissivity. The model field is populated and zeroed by design."
         },
         "Permeability": {
             "Form": "Per-Component, single value (m^2)",

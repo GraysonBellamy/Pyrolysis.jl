@@ -171,14 +171,15 @@ println("  - Cell size: $(sample_thickness/n_cells*1000) mm")
 # ============================================================================
 
 # Top surface (:top): exposed surface
-# - External radiant heat flux (25 kW/m²) with in-depth absorption controlled by radiation_model
+# - External radiant heat flux (25 kW/m²), absorbed where radiation_model puts it
 # - Re-radiation losses (surface radiates to surroundings)
 # - Convective losses (natural + forced convection)
 #
 # - RadiativeFluxBC: External radiative source (cone heater)
-#   → Subject to absorptivity (fraction absorbed = α × incident)
-#   → radiation_model=BEER_LAMBERT: absorbed radiation distributed via Beer-Lambert
-#   → radiation_model=SURFACE_ABSORPTION, the default: all absorbed at the exposed face
+#   → radiation_model=SURFACE_ABSORPTION, the default: absorbed at the exposed
+#     face, subject to absorptivity (fraction absorbed = α × incident)
+#   → radiation_model=RADIATIVE_TRANSFER: crosses the exposed face at the
+#     surface cell's emissivity and is absorbed and re-emitted through the depth
 # - HeatFluxBC: Direct contact heating or fully opaque surface absorption
 #   → NOT subject to absorptivity - full flux applied at surface
 # - RadiativeBC: Re-radiation losses to surroundings (σεT⁴)
