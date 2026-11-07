@@ -1,6 +1,6 @@
 using Test
 using Pyrolysis
-using Pyrolysis.Materials: DepletionLimiter, BEER_LAMBERT, SURFACE_ABSORPTION
+using Pyrolysis.Materials: DepletionLimiter, SURFACE_ABSORPTION
 using Pyrolysis.Materials: RADIATIVE_TRANSFER, STEFAN_BOLTZMANN
 using Pyrolysis.States
 using Pyrolysis.Integration
@@ -110,7 +110,7 @@ end
     cp = setup(
         _slab(6; κ = 1e-12, radiating = true);
         use_ale = true,
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
     )
     layout = cp.def.layout
     check = DomainCheck(cp; max_consecutive = 3)
@@ -127,7 +127,7 @@ end
     V = cp.def.setup.reference.volume[2]
     u[mass_index(layout, 2, 1)] = 1.2 * 1400.0 * V
     @test check(u, nothing, 0.0)
-    # A velocity off its balance row, and an intensity off its attenuation row.
+    # A velocity off its balance row, and a radiation flux off its row.
     for row in (velocity_index(layout, 4), radiation_index(layout, 2, 1))
         u = copy(cp.u0)
         u[row] += 1e3 * cp.abstol[row] / cp.reltol
@@ -223,7 +223,11 @@ end
 end
 
 @testset "domain check: a proposal the error test rejects is left to it" begin
-    cp = setup(_slab(6; radiating = true); use_ale = true, radiation_model = BEER_LAMBERT)
+    cp = setup(
+        _slab(6; radiating = true);
+        use_ale = true,
+        radiation_model = RADIATIVE_TRANSFER,
+    )
     layout = cp.def.layout
     check = DomainCheck(cp)
     u = copy(cp.u0)
@@ -475,7 +479,7 @@ function _plain_deck()
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = HeatFluxBC(40e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
+                top = HeatFluxBC(40e3) + RadiativeBC(T_inf = 300.0),
                 bottom = AdiabaticBC(),
             ),
             mass = (
@@ -490,7 +494,7 @@ end
 
 # Under radiative transfer (`transfer`) its back is open to surroundings at the
 # back cell's emissivity and its heater has the given `distribution`.
-function _rich_deck(; transfer = false, distribution = Diffuse())
+function _rich_deck(; distribution = Diffuse())
     virgin = SolidComponent(
         :virgin,
         ρ = 500.0,
@@ -536,8 +540,7 @@ function _rich_deck(; transfer = false, distribution = Diffuse())
                 top = RadiativeFluxBC(50e3; distribution) +
                       RadiativeBC(T_inf = 300.0) +
                       ConvectiveBC(h = 10.0, T_inf = 300.0),
-                bottom = transfer ? RadiativeBC(T_inf = 300.0) :
-                         RadiativeBC(ε = 0.9, T_inf = 300.0),
+                bottom = RadiativeBC(T_inf = 300.0),
             ),
             mass = (
                 top = AmbientGasBC(
@@ -565,7 +568,7 @@ function _solve_types(problem; kw...)
     return only(seen), typeof(sol.raw_solution)
 end
 
-# On a fixed mesh in-depth radiation adds algebraic rows, and so a mass
+# On a fixed mesh radiative transfer adds algebraic rows, and so a mass
 # matrix: a different solver configuration, compared with itself.
 @testset "the integrator's type does not depend on the problem: $name" for (
     name,
@@ -574,15 +577,19 @@ end
 ) in (
     ("fixed mesh", (;), (radiation_model = SURFACE_ABSORPTION,)),
     (
-        "fixed mesh with in-depth radiation",
-        (radiation_model = BEER_LAMBERT,),
-        (radiation_model = BEER_LAMBERT,),
+        "fixed mesh with radiative transfer",
+        (radiation_model = RADIATIVE_TRANSFER,),
+        (radiation_model = RADIATIVE_TRANSFER,),
     ),
-    ("moving mesh", (use_ale = true,), (use_ale = true, radiation_model = BEER_LAMBERT)),
+    (
+        "moving mesh",
+        (use_ale = true,),
+        (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
+    ),
     (
         "moving mesh with deactivation",
         (use_ale = true, deactivation = true),
-        (use_ale = true, radiation_model = BEER_LAMBERT, deactivation = true),
+        (use_ale = true, radiation_model = RADIATIVE_TRANSFER, deactivation = true),
     ),
 )
     integrator_plain, solution_plain = _solve_types(_plain_deck(); plain...)
@@ -591,8 +598,9 @@ end
     @test solution_plain === solution_rich
 end
 
-# Radiative transfer's rows, a beam's among them, take the integrator and the
-# solution of in-depth radiation's configuration on each mesh.
+# The number of radiation rows per face (two for a diffuse heater, one more
+# per beam) leaves the integrator and the solution of each mesh's
+# configuration unchanged.
 @testset "the integrator's type does not depend on the radiation rows: $name" for (
     name,
     options,
@@ -601,10 +609,10 @@ end
     ("moving mesh", (use_ale = true,)),
     ("moving mesh with deactivation", (use_ale = true, deactivation = true)),
 )
-    reference = _solve_types(_rich_deck(); options..., radiation_model = BEER_LAMBERT)
-    for distribution in (Diffuse(), Collimated())
+    reference = _solve_types(_rich_deck(); options..., radiation_model = RADIATIVE_TRANSFER)
+    for distribution in (Collimated(), Cone(0.35, 1.27))
         @test _solve_types(
-            _rich_deck(; transfer = true, distribution);
+            _rich_deck(; distribution);
             options...,
             radiation_model = RADIATIVE_TRANSFER,
         ) === reference
@@ -662,14 +670,13 @@ end
     end
 end
 
-# In-depth radiation adds the radiation rows, and on a fixed mesh a mass
+# Radiative transfer adds the radiation rows, and on a fixed mesh a mass
 # matrix: a solver configuration of its own on each mesh.
-@testset "repeated solves with in-depth radiation are bit-identical under each linear solver: use_ale = $ale, $model" for ale in
-                                                                                                                          (
-        false,
-        true,
-    ),
-    model in (BEER_LAMBERT, RADIATIVE_TRANSFER)
+@testset "repeated solves with radiative transfer are bit-identical under each linear solver: use_ale = $ale" for ale in
+                                                                                                                  (
+    false,
+    true,
+)
 
     problem = _slab(12; radiating = true)
     for linear_solver in (StructuredKLU(), KLUFactorization(), UMFPACKFactorization())
@@ -677,7 +684,7 @@ end
             Integration.solve(
                 problem;
                 use_ale = ale,
-                radiation_model = model,
+                radiation_model = RADIATIVE_TRANSFER,
                 integrator_policy = default_policy(linear_solver),
                 saveat = Float64[],
                 abstol = 1e-8,
@@ -1167,8 +1174,7 @@ end
         ),
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(q, absorptivity = 1.0) +
-                      ConvectiveBC(h = 20.0, T_inf = 300.0),
+                top = RadiativeFluxBC(q; absorptivity = 1.0, distribution = Collimated()) + ConvectiveBC(h = 20.0, T_inf = 300.0),
                 bottom = AdiabaticBC(),
             ),
         ),
@@ -1178,7 +1184,7 @@ end
     )
     tight = (
         energy_state = :enthalpy,
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
         abstol = 1e-12,
         reltol = 1e-10,
     )

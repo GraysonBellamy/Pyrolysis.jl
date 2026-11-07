@@ -1,8 +1,7 @@
 using Test
 using SparseArrays
 using Pyrolysis
-using Pyrolysis.Materials:
-    DepletionLimiter, BEER_LAMBERT, SURFACE_ABSORPTION, RADIATIVE_TRANSFER
+using Pyrolysis.Materials: DepletionLimiter, SURFACE_ABSORPTION, RADIATIVE_TRANSFER
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.States: StateLayout, state_length
@@ -130,11 +129,6 @@ _expected(NC, moving, R, χ, reconstruction, prescribed) =
 
 const _color_cases = (
     fixed = (options = (;), law = nothing, reacting = true),
-    fixed_beer_lambert = (
-        options = (radiation_model = BEER_LAMBERT,),
-        law = nothing,
-        reacting = true,
-    ),
     fixed_radiative_transfer = (
         options = (radiation_model = RADIATIVE_TRANSFER,),
         law = nothing,
@@ -146,17 +140,7 @@ const _color_cases = (
         law = nothing,
         reacting = true,
     ),
-    moving_beer_lambert = (
-        options = (use_ale = true, radiation_model = BEER_LAMBERT),
-        law = nothing,
-        reacting = true,
-    ),
     cross_section = (options = (use_ale = true,), law = χ -> 1 - 0.3χ, reacting = true),
-    cross_section_beer_lambert = (
-        options = (use_ale = true, radiation_model = BEER_LAMBERT),
-        law = χ -> 1 - 0.3χ,
-        reacting = true,
-    ),
     cross_section_radiative_transfer = (
         options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
         law = χ -> 1 - 0.3χ,
@@ -177,15 +161,6 @@ const _color_cases = (
         law = nothing,
         reacting = true,
     ),
-    equidistribution_beer_lambert = (
-        options = (
-            use_ale = true,
-            radiation_model = BEER_LAMBERT,
-            correction = EquidistributionCorrection(),
-        ),
-        law = nothing,
-        reacting = true,
-    ),
     equidistribution_radiative_transfer = (
         options = (
             use_ale = true,
@@ -198,7 +173,7 @@ const _color_cases = (
     equidistribution_cross_section = (
         options = (
             use_ale = true,
-            radiation_model = BEER_LAMBERT,
+            radiation_model = RADIATIVE_TRANSFER,
             correction = EquidistributionCorrection(),
         ),
         law = χ -> 1 - 0.3χ,
@@ -369,7 +344,7 @@ function _bandwidth(pattern, layout)
     return w
 end
 
-# In-depth radiation is planar only: setup refuses it on a cylinder or a sphere.
+# Radiative transfer is planar only: setup refuses it on a cylinder or a sphere.
 @testset "radial meshes: the planar pattern, bandwidth and colors" begin
     for options in ((;), (use_ale = true,))
         widths = Int[]

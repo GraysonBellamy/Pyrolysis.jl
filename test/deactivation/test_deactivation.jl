@@ -1,7 +1,7 @@
 using Test
 using SparseArrays
 using Pyrolysis
-using Pyrolysis.Materials: BEER_LAMBERT, RADIATIVE_TRANSFER, T_REF
+using Pyrolysis.Materials: RADIATIVE_TRANSFER, T_REF
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.States: StateLayout, state_length
@@ -851,11 +851,11 @@ _sensible(laws, s) = sum(s.m[j] * sensible_enthalpy(laws.h[j], s.T) for j in eac
 end
 
 # The masked-rows configurations: the ablator's options and the setup's. The
-# Darcy columns vent through a pressure condition, one under the full surface
-# balance with the beam absorbed in depth; the lateral columns carry the
-# history pair and the cross-section rows, which follow the last node. Under
-# radiative transfer the exposed face's rows, beams and diffuse fluxes alike,
-# move down to the outermost live node.
+# Darcy columns vent through a pressure condition, one under radiative
+# transfer with a diffuse heater beside its convection and surroundings; the
+# lateral columns carry the history pair and the cross-section rows, which
+# follow the last node. Under radiative transfer the exposed face's rows,
+# beams and diffuse fluxes alike, move down to the outermost live node.
 const _surface_balance_top =
     RadiativeFluxBC(2.8e6) +
     ConvectiveBC(h = 10.0, T_inf = 300.0) +
@@ -870,10 +870,6 @@ const _transfer_ablator = (radiating = true, absorption = 2.0)
 const _masked_configurations = (
     fixed = (ablator = (;), options = (;)),
     moving = (ablator = (;), options = (use_ale = true,)),
-    beer_lambert = (
-        ablator = (radiating = true,),
-        options = (use_ale = true, radiation_model = BEER_LAMBERT),
-    ),
     darcy = (
         ablator = (
             porous = true,
@@ -892,7 +888,7 @@ const _masked_configurations = (
                 GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (gas = 1.0,)),
             ),
         ),
-        options = (use_ale = true, radiation_model = BEER_LAMBERT),
+        options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
     ),
     lateral = (
         ablator = (
@@ -1137,22 +1133,17 @@ end
     @test abs(audit.mass.relative) <= 1e-6
 end
 
-# The ablator's options for an in-depth model, heated by `q`; under radiative
-# transfer at the absorption coefficient `absorption`.
-_radiating_ablator(model, q; absorption = _transfer_ablator.absorption) =
-    model === BEER_LAMBERT ? (; q, radiating = true) :
+# The ablator's options under radiative transfer, heated by a beam `q` at the
+# absorption coefficient `absorption`.
+_radiating_ablator(q; absorption = _transfer_ablator.absorption) =
     (; q, radiating = true, absorption, top = _beam_top(q))
 
-@testset "the consistent sweep after a transfer leaves the velocity and radiation rows at round-off: $(model)" for model in
-                                                                                                                   (
-    BEER_LAMBERT,
-    RADIATIVE_TRANSFER,
-)
+@testset "the consistent sweep after a transfer leaves the velocity and radiation rows at round-off" begin
     q = 2.8e6
     cp = setup(
-        _ablator(6; _radiating_ablator(model, q)...);
+        _ablator(6; _radiating_ablator(q)...);
         use_ale = true,
-        radiation_model = model,
+        radiation_model = RADIATIVE_TRANSFER,
         deactivation = true,
     )
     def, layout, cells = cp.def, cp.def.layout, cp.deactivation
@@ -1188,7 +1179,7 @@ end
     cp = setup(
         problem;
         use_ale = true,
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
         deactivation = true,
         reltol = 1e-3,
         abstol = 1e-5,
@@ -1205,7 +1196,7 @@ end
     refined = Integration.solve(
         problem;
         use_ale = true,
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
         deactivation = true,
         reltol = 1e-4,
         abstol = 1e-6,
@@ -1225,7 +1216,7 @@ end
     sol = Integration.solve(
         _ablator(8; radiating = true, porosity = 0.3);
         use_ale = true,
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
         deactivation = true,
         reltol = 1e-3,
         abstol = 1e-5,
@@ -1435,17 +1426,13 @@ end
     @test all(e -> isapprox(e.fraction, 1e-2; rtol = 1e-12), located.events)
 end
 
-@testset "a located event leaves an admissible state with the velocity and radiation rows at round-off: $(model)" for model in
-                                                                                                                      (
-    BEER_LAMBERT,
-    RADIATIVE_TRANSFER,
-)
+@testset "a located event leaves an admissible state with the velocity and radiation rows at round-off" begin
     q = 2.8e6
     # Absorbed near the surface, so that the cells go one at a time.
     cp = setup(
-        _ablator(8; _radiating_ablator(model, q; absorption = 50.0)...);
+        _ablator(8; _radiating_ablator(q; absorption = 50.0)...);
         use_ale = true,
-        radiation_model = model,
+        radiation_model = RADIATIVE_TRANSFER,
         deactivation = true,
         abstol = 1e-8,
         reltol = 1e-6,
@@ -1573,7 +1560,7 @@ end
         use_ale = moving,
         deactivation = true,
         correction = NoCorrection(),
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
         energy_state = energy,
     )
     layout, d = cp.def.layout, cp.deactivation
@@ -1839,7 +1826,6 @@ end
 end
 
 @testset "one interior event through the solve: $(name), $(energy) form" for name in (
-        :beam,
         :transfer,
         :lateral,
         :layers,
@@ -1847,7 +1833,7 @@ end
     energy in (:temperature, :enthalpy)
 
     problem =
-        name in (:beam, :transfer) ? _burning(5; k = 0.02, radiating = true, t_end = 0.2) :
+        name === :transfer ? _burning(5; k = 0.02, radiating = true, t_end = 0.2) :
         name === :lateral ? _burning(5; k = 0.02, law = χ -> 1 - 0.2χ, t_end = 0.2) :
         _burning(5; k = 0.02, substrate = 0.004, t_end = 0.2)
     cp = setup(
@@ -1856,8 +1842,7 @@ end
         deactivation = true,
         correction = NoCorrection(),
         energy_state = energy,
-        radiation_model = name === :beam ? BEER_LAMBERT :
-                          name === :transfer ? RADIATIVE_TRANSFER : SURFACE_ABSORPTION,
+        radiation_model = name === :transfer ? RADIATIVE_TRANSFER : SURFACE_ABSORPTION,
         reltol = 1e-6,
         abstol = 1e-8,
     )
@@ -2262,14 +2247,14 @@ _on_mesh(p, mesh) = PyrolysisProblem(
 end
 
 @testset "a void beneath a skin ends a moving column's solve" begin
-    # Cell 3 empties under in-depth absorption beneath cells that hold their mass.
+    # Cell 3 empties under radiative transfer beneath cells that hold their mass.
     problem = _burning(5; k = 2.0, radiating = true, t_end = 1.0)
     cp = setup(
         problem;
         use_ale = true,
         deactivation = true,
         correction = NoCorrection(),
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
     )
     u = _prepared(cp, [0.8, 0.8, 0.015, 0.7, 0.6])
     consistent_state!(u, cp.def, cp.ws, 0.0)

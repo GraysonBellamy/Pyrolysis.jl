@@ -5,7 +5,6 @@ using StaticArrays
 using OrdinaryDiffEq: ODEFunction, ODEProblem
 import OrdinaryDiffEq
 using Pyrolysis
-using Pyrolysis.Materials: BEER_LAMBERT
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.States: state_length
@@ -181,7 +180,6 @@ end
 
 @testset "the 2D example's refusals" begin
     p = _example()
-    @test_throws ArgumentError setup(p; radiation_model = BEER_LAMBERT)
     @test_throws r"in-depth radiation is a line's" setup(
         p;
         radiation_model = RADIATIVE_TRANSFER,

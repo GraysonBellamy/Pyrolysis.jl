@@ -462,10 +462,9 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
     # RadiativeFluxBC with Radiation Models
     # ========================================================================
     @testset "RadiativeFluxBC with Radiation Models" begin
-        # RadiativeFluxBC applies its absorbed flux at the face under the
-        # surface models (SURFACE_ABSORPTION) and none under
-        # BEER_LAMBERT, whose in-depth radiation kernel absorbs it in the
-        # cells.
+        # RadiativeFluxBC applies its absorbed flux at the face under
+        # SURFACE_ABSORPTION and none under RADIATIVE_TRANSFER, whose
+        # radiation rows carry it into the cells.
 
         T_s = 500.0
         t = 0.0
@@ -481,15 +480,6 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
 
             @test q ≈ I_incident * ε_eff  # Absorbed flux = incident × absorptivity
             @test dq ≈ 0.0                # Flux doesn't depend on T_s
-        end
-
-        @testset "BEER_LAMBERT: flux handled volumetrically" begin
-            # With BEER_LAMBERT, radiation penetrates in-depth and is absorbed
-            # according to Beer-Lambert law by the in-depth radiation kernel
-            q, dq = evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff, BEER_LAMBERT)
-
-            @test q ≈ 0.0   # No boundary flux contribution
-            @test dq ≈ 0.0  # No temperature dependence
         end
 
         @testset "RadiativeFluxBC with explicit absorptivity" begin
@@ -509,11 +499,16 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
             @test q ≈ I_incident * α_explicit  # Uses explicit α, not ε_eff
             @test dq ≈ 0.0
 
-            # The volumetric model returns zero
-            q_bl, _ =
-                evaluate_bc_flux_and_derivative(bc_with_α, T_s, t, ε_eff, BEER_LAMBERT)
-
-            @test q_bl ≈ 0.0
+            # Under radiative transfer the face takes none of it
+            q_rt, dq_rt = evaluate_bc_flux_and_derivative(
+                bc_with_α,
+                T_s,
+                t,
+                ε_eff,
+                RADIATIVE_TRANSFER,
+            )
+            @test q_rt == 0.0
+            @test dq_rt == 0.0
         end
 
         @testset "Combined BC with RadiativeFluxBC" begin
@@ -539,17 +534,17 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
             @test q_surf ≈ q_rad_expected + q_conv_expected
             @test dq_surf ≈ -h_conv  # Only convective contributes to derivative
 
-            # For BEER_LAMBERT: only convective contributes (radiation handled volumetrically)
-            q_bl, dq_bl = evaluate_bc_flux_and_derivative(
+            # For RADIATIVE_TRANSFER: only the convection (the rows carry the radiation)
+            q_rt, dq_rt = evaluate_bc_flux_and_derivative(
                 bc_combined,
                 T_s,
                 t,
                 ε_eff,
-                BEER_LAMBERT,
+                RADIATIVE_TRANSFER,
                 face,
             )
-            @test q_bl ≈ q_conv_expected
-            @test dq_bl ≈ -h_conv
+            @test q_rt ≈ q_conv_expected
+            @test dq_rt ≈ -h_conv
         end
 
         @testset "RADIATIVE_TRANSFER: radiation leaves the face balance" begin
@@ -676,16 +671,16 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
             @test q_c ≈ q + q_emit
             @test dq_c ≈ dq_emit
 
-            # Volumetric models still contribute zero at the face.
-            q_vol, _ = evaluate_bc_flux_and_derivative(
+            # Radiative transfer still contributes zero at the face.
+            q_rt, _ = evaluate_bc_flux_and_derivative(
                 bc,
                 T_s,
                 t,
                 ε_eff,
-                BEER_LAMBERT;
+                RADIATIVE_TRANSFER;
                 a_eff = a_eff,
             )
-            @test q_vol == 0.0
+            @test q_rt == 0.0
         end
 
     end
@@ -999,8 +994,7 @@ end
     t = 0.0
     face = _bc_face(T_s)
 
-    for bc in (combined, standalone),
-        model in (SURFACE_ABSORPTION, BEER_LAMBERT, RADIATIVE_TRANSFER)
+    for bc in (combined, standalone), model in (SURFACE_ABSORPTION, RADIATIVE_TRANSFER)
 
         hf = compute_boundary_heat_fluxes(bc, T_s, t, ε_eff, model, face)
         q_applied, _ = evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff, model, face)
@@ -1014,28 +1008,21 @@ end
     @test hf.net ≈ ε_eff * 50e3
     @test hf.absorbed ≈ ε_eff * 50e3
 
-    # (b) combined under BEER_LAMBERT: net carries only the rerad +
-    #     convection the face actually applies, not α·q_ext, and the face
-    #     absorbs nothing (the deposit is volumetric).
-    hf_bl = compute_boundary_heat_fluxes(combined, T_s, t, ε_eff, BEER_LAMBERT, face)
+    # (b) combined under SURFACE_ABSORPTION includes the absorbed flux.
     q_rerad = ε_eff * STEFAN_BOLTZMANN * (300.0^4 - T_s^4)
     q_conv = 10.0 * (300.0 - T_s)
-    @test hf_bl.absorbed == 0.0
-    @test hf_bl.net ≈ q_rerad + q_conv rtol = 1e-12
-    @test abs(
-        hf_bl.net -
-        (hf_bl.absorbed - hf_bl.reradiation - hf_bl.convection + hf_bl.prescribed),
-    ) < 1e-9  # components stay consistent with net
-
-    # (c) combined under SURFACE_ABSORPTION includes the absorbed flux.
     hf_sa = compute_boundary_heat_fluxes(combined, T_s, t, ε_eff, SURFACE_ABSORPTION, face)
     @test hf_sa.net ≈ ε_eff * 50e3 + q_rerad + q_conv rtol = 1e-12
 
-    # (d) combined under RADIATIVE_TRANSFER: the face carries the convection
+    # (c) combined under RADIATIVE_TRANSFER: the face carries the convection
     #     alone; neither the incident flux nor the exchange with the
     #     surroundings is absorbed or radiated at the face.
     hf_rt = compute_boundary_heat_fluxes(combined, T_s, t, ε_eff, RADIATIVE_TRANSFER, face)
     @test hf_rt.absorbed == 0.0 && hf_rt.reradiation == 0.0
     @test hf_rt.net ≈ q_conv rtol = 1e-12
     @test hf_rt.convection ≈ -q_conv rtol = 1e-12
+    @test abs(
+        hf_rt.net -
+        (hf_rt.absorbed - hf_rt.reradiation - hf_rt.convection + hf_rt.prescribed),
+    ) < 1e-9  # components stay consistent with net
 end

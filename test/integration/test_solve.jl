@@ -209,7 +209,6 @@ end
     )
     for (radiation_model, distribution) in (
         (SURFACE_ABSORPTION, Diffuse()),
-        (BEER_LAMBERT, Diffuse()),
         (RADIATIVE_TRANSFER, Diffuse()),
         (RADIATIVE_TRANSFER, Collimated()),
     )
@@ -243,7 +242,6 @@ end
             @test all(>(0), x.radiation_emitted)
             @test all(x.radiation_emitted .< x.radiation_absorbed)
             @test maximum(abs, x.radiation_back) <= 1e-10 * 4e4
-            @test all(iszero, x.volumetric_absorption)
         else
             @test all(>(0), x.surface_heat_flux_reradiation[2:end])
             for name in (:radiation_absorbed, :radiation_emitted, :radiation_back)
@@ -252,13 +250,6 @@ end
         end
         if radiation_model === SURFACE_ABSORPTION
             @test x.surface_heat_flux_absorbed ≈ 4e4 .* x.surface_emissivity rtol = 1e-12
-            @test all(iszero, x.volumetric_absorption)
-        elseif radiation_model === BEER_LAMBERT
-            # The incident flux enters in depth, not through the face, at most
-            # its absorbed share.
-            @test all(iszero, x.surface_heat_flux_absorbed)
-            @test all(>(0), x.volumetric_absorption)
-            @test all(x.volumetric_absorption .<= x.surface_emissivity .* 4e4 .+ 1e-9)
         end
         @test x.back_temperature == sol.boundary_T[:bottom]
         @test x.back_heat_flux ≈ h_back .* (T_back_inf .- x.back_temperature) rtol = 1e-12
@@ -275,12 +266,13 @@ end
     end
 end
 
-# A solid that absorbs less than it emits (a = 0.6, ε = 0.95), absorbing in
-# depth and thin enough to pass about a fifth of the beam; its gas takes no
+# A solid that absorbs less than it emits (a = 0.6, ε = 0.95), heated by a
+# collimated beam that crosses about a third of the column; its gas takes no
 # volume, so the cells' absorptivity is the solid's at every state, while on a
-# moving mesh its decomposition thins the column.
-@testset "outputs: the in-depth deposit and the transmitted beam sum to the absorbed share: use_ale = $use_ale" for use_ale in
-                                                                                                                    (
+# moving mesh its decomposition thins the column. The beam enters at a, the
+# surroundings at ε, and the adiabatic back is a mirror.
+@testset "outputs: a beam enters at the absorptivity, the surroundings at the emissivity: use_ale = $use_ale" for use_ale in
+                                                                                                                  (
     false,
     true,
 )
@@ -314,7 +306,7 @@ end
         ),
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(q) +
+                top = RadiativeFluxBC(q; distribution = Collimated()) +
                       RadiativeBC(T_inf = 300.0) +
                       ConvectiveBC(h = 10.0, T_inf = 300.0),
                 bottom = AdiabaticBC(),
@@ -328,16 +320,19 @@ end
         tspan = (0.0, 10.0),
         output_times = collect(0.0:2.0:10.0),
     )
-    sol = Integration.solve(problem; radiation_model = BEER_LAMBERT, use_ale)
+    sol = Integration.solve(problem; radiation_model = RADIATIVE_TRANSFER, use_ale)
     @test sol.retcode === :Success
     x = sol.extras
     @test all(≈(0.95), x.surface_emissivity)
     @test all(iszero, x.surface_heat_flux_absorbed)
-    @test all(>(0), x.volumetric_absorption)
-    @test all(x.volumetric_absorption .<= a * q + 1e-9)
-    @test all(>(0.1 * a * q), x.radiation_transmitted)
-    @test x.volumetric_absorption .+ x.radiation_transmitted ≈ fill(a * q, length(sol.t)) rtol =
-        1e-12
+    # The beam's entering row and the mirror's are linear in the fluxes with
+    # constant coefficients, so the interpolated saved states hold them to
+    # round-off.
+    @test x.radiation_absorbed ≈
+          fill(a * q + 0.95 * STEFAN_BOLTZMANN * 300.0^4, length(sol.t)) rtol = 1e-12
+    @test all(>(0), x.radiation_emitted)
+    @test all(x.radiation_emitted .< x.radiation_absorbed)
+    @test maximum(abs, x.radiation_back) <= 1e-10 * q
     use_ale && @test x.thickness_history[end] < 0.995 * x.thickness_history[1]
     @test x.surface_heat_flux_net ≈ x.surface_heat_flux_conduction rtol = 1e-8
 end

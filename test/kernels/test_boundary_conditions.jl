@@ -2,7 +2,7 @@ using Test
 using Logging
 using ForwardDiff
 using Pyrolysis
-using Pyrolysis.Materials: BEER_LAMBERT, SURFACE_ABSORPTION, RADIATIVE_TRANSFER
+using Pyrolysis.Materials: SURFACE_ABSORPTION, RADIATIVE_TRANSFER
 using Pyrolysis.Materials: STEFAN_BOLTZMANN, T_PROPERTY_MAX, R_GAS
 using Pyrolysis.Physics: TransportFailure
 using Pyrolysis.BoundaryConditions: BoundaryState, solve_boundary_temperature!
@@ -225,16 +225,6 @@ end
     @test sol.extras.surface_heat_flux_net[2] > 0
 end
 
-@testset "in-depth radiation enters through the top faces only" begin
-    bc = BoundaryConditionSet(
-        thermal = (top = HeatFluxBC(0.0), bottom = RadiativeFluxBC(10e3)),
-    )
-    problem = _bc_problem(bc; α = 200.0)
-    @test_throws ArgumentError setup(problem; radiation_model = BEER_LAMBERT)
-    sol = Integration.solve(problem; radiation_model = SURFACE_ABSORPTION)
-    @test sol.retcode === :Success
-end
-
 # An isothermal slab of emissive power B and optical thickness τ_L behind a
 # gray exposed face of emissivity ε, a mirror at its back, facing diffuse
 # radiation Q: the rows are exact across each cell, so the net intake is the
@@ -452,36 +442,6 @@ end
     end
 end
 
-@testset "surface absorption is the surface balance of the incident flux" begin
-    bc = BoundaryConditionSet(
-        thermal = (
-            top = RadiativeFluxBC(30e3) + ConvectiveBC(h = 10.0, T_inf = 300.0),
-            bottom = AdiabaticBC(),
-        ),
-    )
-    a = setup(_bc_problem(bc); radiation_model = SURFACE_ABSORPTION)
-    b = setup(_bc_problem(bc); radiation_model = SURFACE_ABSORPTION)
-    du_a, du_b = zeros(length(a.u0)), zeros(length(b.u0))
-    residual!(du_a, a.u0, a.def, 0.0, a.ws)
-    residual!(du_b, b.u0, b.def, 0.0, b.ws)
-    @test du_a == du_b
-    # Under BEER_LAMBERT the incident flux leaves the surface balance and is
-    # absorbed in depth instead: the same total energy rate when nothing is
-    # transmitted and nothing else depends on the surface temperature.
-    alone = BoundaryConditionSet(
-        thermal = (top = RadiativeFluxBC(30e3), bottom = AdiabaticBC()),
-    )
-    c = setup(_bc_problem(alone; α = 1e3); radiation_model = BEER_LAMBERT)
-    s = setup(_bc_problem(alone; α = 1e3); radiation_model = SURFACE_ABSORPTION)
-    rate(cp) = begin
-        du = zeros(length(cp.u0))
-        residual!(du, cp.u0, cp.def, 0.0, cp.ws)
-        ds, _ = buffers(cp.ws, cp.def, Float64)
-        sum(ds.cp_sum[i] * du[energy_index(cp.def.layout, i)] for i = 1:6)
-    end
-    @test rate(c) ≈ rate(s) rtol = 1e-10
-end
-
 @testset "a time-varying incident flux is sampled at every evaluation" begin
     bc_of(flux) = BoundaryConditionSet(
         thermal = (
@@ -498,17 +458,23 @@ end
         output_times = [0.0, 0.25, 0.5, 1.0],
     )
     # sin(2π·0) = sin(2π·1) = 0: sampling only the window's ends would freeze
-    # the deposit at q₀ and make the two runs identical.
-    var =
-        Integration.solve(prob(t -> q0 * (1 + sin(2π * t))); radiation_model = BEER_LAMBERT)
-    con = Integration.solve(prob(q0); radiation_model = BEER_LAMBERT)
+    # the radiation entering at q₀ and make the two runs identical.
+    var = Integration.solve(
+        prob(t -> q0 * (1 + sin(2π * t)));
+        radiation_model = RADIATIVE_TRANSFER,
+    )
+    con = Integration.solve(prob(q0); radiation_model = RADIATIVE_TRANSFER)
     @test var.retcode === :Success && con.retcode === :Success
     @test var.surface_T[3] > con.surface_T[3] + 1.0
-    @test all(isfinite, var.extras.volumetric_absorption)
-    # At 0.25 s the incident flux is 2q₀; the column absorbs nearly the same
-    # share of it (a frozen flux would give a ratio of one).
-    @test var.extras.volumetric_absorption[2] ≈ 2 * con.extras.volumetric_absorption[2] rtol =
-        1e-4
+    x, y = var.extras, con.extras
+    @test all(isfinite, x.radiation_absorbed) && all(isfinite, x.radiation_emitted)
+    # At 0.25 s the incident flux is 2q₀ and twice as much enters; the face
+    # rows carry it into the column.
+    @test x.radiation_absorbed[2] ≈ 2 * y.radiation_absorbed[2] rtol = 1e-12
+    intake(e) = e.radiation_absorbed[2] - e.radiation_emitted[2]
+    # The net intake, read from the rows' unknowns, doubles with it, less the
+    # little more the hotter face emits (observed 2.008).
+    @test intake(x) ≈ 2 * intake(y) rtol = 0.02
 end
 
 @testset "blowing lowers the convective loss of an outgassing surface" begin

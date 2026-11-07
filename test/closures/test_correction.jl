@@ -3,7 +3,7 @@ using LinearAlgebra
 using ForwardDiff
 using SparseArrays
 using Pyrolysis
-using Pyrolysis.Materials: DepletionLimiter, BEER_LAMBERT, RADIATIVE_TRANSFER
+using Pyrolysis.Materials: DepletionLimiter, RADIATIVE_TRANSFER
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.Kernels: RelativeFluxKernel, find_kernel
@@ -84,7 +84,7 @@ end
 
 # A gasifying layer of `n_top` cells absorbing in depth on an inert substrate
 # of `n_bottom` cells, the interface at node `n_bottom + 1` (V-BO-01's
-# configuration: three components, in-depth radiation, a moving mesh).
+# configuration: three components, radiative transfer, a moving mesh).
 function _two_layer(n_top, n_bottom; t_end = 100.0)
     L_top, L_bottom = 2e-3, 3e-3
     top = SolidComponent(
@@ -655,7 +655,6 @@ end
 const _active = EquidistributionCorrection(τ = 50.0, activation = (1.5, 0.5), layers = :all)
 const _correction_configurations = (
     two_layer = (problem = n -> _two_layer(n - 3, 3), lagrangian = [4]),
-    two_layer_transfer = (problem = n -> _two_layer(n - 3, 3), lagrangian = [4]),
     uniform_burn = (problem = _uniform_burn, lagrangian = Int[]),
     mixed = (problem = _mixed, lagrangian = Int[]),
 )
@@ -687,8 +686,7 @@ end
         energy_state = energy,
         use_ale = true,
         deactivation = true,
-        radiation_model = name === :two_layer ? BEER_LAMBERT :
-                          name === :two_layer_transfer ? RADIATIVE_TRANSFER :
+        radiation_model = name === :two_layer ? RADIATIVE_TRANSFER :
                           Pyrolysis.SURFACE_ABSORPTION,
         correction = _active,
         config.lagrangian,
@@ -727,7 +725,7 @@ end
                 # The correction is active: a balance row reads the positions
                 # of the nodes beyond its cell (cell 4's row node is interior
                 # to the two-layer deck's upper layer).
-                k = name in (:two_layer, :two_layer_transfer) ? 4 : 3
+                k = name === :two_layer ? 4 : 3
                 r = velocity_index(layout, cp.def.closure.row_node[k])
                 @test Jd[r, position_index(layout, k + 2)] != 0
             end

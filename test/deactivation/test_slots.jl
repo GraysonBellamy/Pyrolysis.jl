@@ -1,6 +1,6 @@
 using Test
 using Pyrolysis
-using Pyrolysis.Materials: BEER_LAMBERT, RADIATIVE_TRANSFER
+using Pyrolysis.Materials: RADIATIVE_TRANSFER
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.Kernels:
@@ -8,7 +8,6 @@ using Pyrolysis.Kernels:
     ConductionKernel,
     GasTransportKernel,
     ThermalBoundaryKernel,
-    BeerLambertKernel,
     RadiativeTransferKernel,
     RelativeFluxKernel,
     find_kernel
@@ -90,8 +89,6 @@ function _named_tables(cp)
     )
     gas = find_kernel(GasTransportKernel, k)
     gas === nothing || (out["gas floor"] = (:face, gas.d_floor))
-    beam = find_kernel(BeerLambertKernel, k)
-    beam === nothing || (out["beam floor"] = (:matrix, beam.d_floor))
     transfer = find_kernel(RadiativeTransferKernel, k)
     transfer === nothing || (out["transfer floor"] = (:matrix, transfer.d_floor))
     return out
@@ -266,7 +263,7 @@ end
         7,
     ),
     energy in (:temperature, :enthalpy),
-    model in (SURFACE_ABSORPTION, BEER_LAMBERT, RADIATIVE_TRANSFER)
+    model in (SURFACE_ABSORPTION, RADIATIVE_TRANSFER)
 
     radiating = model !== SURFACE_ABSORPTION
     cp = _set_up(_column(_H, _T, _L, _R; radiating), energy; model)
@@ -287,7 +284,7 @@ end
         7,
     ),
     energy in (:temperature, :enthalpy),
-    model in (SURFACE_ABSORPTION, BEER_LAMBERT, RADIATIVE_TRANSFER)
+    model in (SURFACE_ABSORPTION, RADIATIVE_TRANSFER)
 
     radiating = model !== SURFACE_ABSORPTION
     cp = _set_up(_column(_H, _T, _L, _R; radiating), energy; model)

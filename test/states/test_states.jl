@@ -2,7 +2,7 @@ using Test
 using ForwardDiff
 using LinearAlgebra
 using Pyrolysis
-using Pyrolysis.Materials: T_REF, T_PROPERTY_MIN, T_PROPERTY_MAX, BEER_LAMBERT
+using Pyrolysis.Materials: T_REF, T_PROPERTY_MIN, T_PROPERTY_MAX
 using Pyrolysis.Materials: RADIATIVE_TRANSFER, STEFAN_BOLTZMANN
 using Pyrolysis.Meshes
 using Pyrolysis.States
@@ -471,7 +471,11 @@ function _thinning_slab(; law = χ -> 1 - 0.3χ, coordinates = Planar())
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(t -> 3e4 * (1 + 0.5 * sin(t)), absorptivity = 0.9),
+                top = RadiativeFluxBC(
+                    t -> 3e4 * (1 + 0.5 * sin(t));
+                    absorptivity = 0.9,
+                    distribution = Collimated(),
+                ),
                 bottom = AdiabaticBC(),
             ),
         ),
@@ -490,14 +494,14 @@ end
         _thinning_slab();
         energy_state = energy,
         use_ale = true,
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
         reltol,
         abstol,
         threshold,
         time_scale = dt,
     )
     layout, ref = cp.def.layout, cp.def.setup.reference
-    @test is_moving(layout) && has_chi(layout) && radiation_rows(layout) == 1
+    @test is_moving(layout) && has_chi(layout) && radiation_rows(layout) == 3
     tol = cp.abstol
     n = n_cells(layout)
     x = ref.positions
@@ -527,14 +531,19 @@ end
     end
     # Node rows: positions at the mass tolerance's share of the thinner
     # neighbouring cell, velocities that over the first step, the face
-    # radiation rows at the relative tolerance of the largest incident intensity.
-    I_scale = maximum(t -> 0.9 * 3e4 * (1 + 0.5 * sin(t)), range(0.0, 10.0; length = 101))
+    # radiation rows (the two diffuse fluxes and the beam) at the relative
+    # tolerance of the largest flux arriving over the window, which exceeds the
+    # emissive power of the hottest initial cell.
+    q_scale = maximum(t -> 3e4 * (1 + 0.5 * sin(t)), range(0.0, 10.0; length = 101))
+    @test q_scale > STEFAN_BOLTZMANN * maximum(cp.T0)^4
     w_tol = Float64[]
     for nd = 1:(n+1)
         h = min(nd > 1 ? x[nd] - x[nd-1] : Inf, nd <= n ? x[nd+1] - x[nd] : Inf)
         @test tol[position_index(layout, nd)] ≈ reltol * threshold * h rtol = 1e-14
         @test tol[velocity_index(layout, nd)] ≈ reltol * threshold * h / dt rtol = 1e-14
-        @test tol[radiation_index(layout, nd, 1)] ≈ reltol * I_scale rtol = 1e-14
+        for k = 1:3
+            @test tol[radiation_index(layout, nd, k)] ≈ reltol * q_scale rtol = 1e-14
+        end
         push!(w_tol, reltol * threshold * h / dt)
     end
     # On the stretched mesh a node's two cells differ, so the rule picks one.

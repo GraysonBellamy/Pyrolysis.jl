@@ -2,7 +2,7 @@ using Test
 using ForwardDiff
 using SparseArrays
 using Pyrolysis
-using Pyrolysis.Materials: DepletionLimiter, BEER_LAMBERT, RADIATIVE_TRANSFER
+using Pyrolysis.Materials: DepletionLimiter, RADIATIVE_TRANSFER
 using Pyrolysis.Meshes
 using Pyrolysis.Meshes: MeshGeometry
 using Pyrolysis.States
@@ -90,15 +90,6 @@ const _configurations = (
     cylinder = (problem = n -> _slab(n; coordinates = Cylindrical()), options = (;)),
     sphere = (problem = n -> _slab(n; coordinates = Spherical()), options = (;)),
     chi = (problem = n -> _slab(n; law = χ -> 1 - 0.4χ), options = (;)),
-    beer_lambert = (
-        problem = n -> _slab(
-            n;
-            radiating = true,
-            top = RadiativeFluxBC(t -> 3e4 * (1 + 0.5 * sin(t))) +
-                  RadiativeBC(T_inf = 300.0),
-        ),
-        options = (radiation_model = BEER_LAMBERT,),
-    ),
     # The heater as a beam, which enters at the virgin solid's own
     # absorptivity; with a lateral law the radiation rows read the area.
     radiative_transfer = (

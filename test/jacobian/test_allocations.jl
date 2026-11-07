@@ -1,6 +1,6 @@
 using Test
 using Pyrolysis
-using Pyrolysis.Materials: BEER_LAMBERT, SURFACE_ABSORPTION
+using Pyrolysis.Materials: SURFACE_ABSORPTION
 using Pyrolysis.States
 using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!
@@ -130,10 +130,6 @@ const _configurations = (
     ale_surface_absorption = (
         problem = () -> _column(_pmma(); top = HeatFluxBC(50e3)),
         options = (use_ale = true,),
-    ),
-    ale_beer_lambert_darcy = (
-        problem = () -> _column(_wood(α = 0.5); top = _incident),
-        options = (use_ale = true, radiation_model = BEER_LAMBERT),
     ),
     ale_cross_section = (
         problem = () -> _column(_wood(law = χ -> 1 - 0.2χ); top = HeatFluxBC(50e3)),

@@ -486,17 +486,13 @@ end
 # every algebraic row, the radiation rows among them, whose optical depths
 # read the concentrations at the cross section the state's history gives, so
 # that row takes its value before them.
-@testset "the saved states hold their algebraic rows on a shrinking, absorbing column, $(model)" for model in
-                                                                                                     (
-    BEER_LAMBERT,
-    RADIATIVE_TRANSFER,
-)
+@testset "the saved states hold their algebraic rows on a shrinking, absorbing column" begin
     problem =
         _charring_column(; lateral_shrinkage_law = χ -> 1 - 0.3χ, absorption = (1.0, 2.0))
     sol = Integration.solve(
         problem;
         use_ale = true,
-        radiation_model = model,
+        radiation_model = RADIATIVE_TRANSFER,
         integrator_policy = kencarp4_policy(),
         _TOL...,
     )
@@ -510,13 +506,13 @@ end
     # Every saved state but the last is the step's interpolant with its
     # algebraic rows from their constraints; the last is the integrator's own,
     # its rows as converged as the method's Newton iteration left them.
-    intensity, area, rate, velocity = 0.0, 0.0, 0.0, 0.0
+    radiation, area, rate, velocity = 0.0, 0.0, 0.0, 0.0
     for (t, u) in zip(sol.t[1:(end-1)], sol.raw_solution.u[1:(end-1)])
         residual!(du, u, def, t, ws)
         ds, c = buffers(ws, def, Float64)
         nodes = 1:n_nodes(topo)
-        intensity = max(
-            intensity,
+        radiation = max(
+            radiation,
             maximum(
                 abs(du[radiation_index(layout, f, k)]) for f in nodes for
                 k = 1:radiation_rows(layout)
@@ -528,9 +524,9 @@ end
         velocity =
             max(velocity, maximum(nd -> abs(du[velocity_index(layout, nd)]), nodes) / sweep)
     end
-    @info "absorbing shrinking column: algebraic rows of the saved states" model intensity area rate velocity
+    @info "absorbing shrinking column: algebraic rows of the saved states" radiation area rate velocity
     # The incident flux is 5e4 W/m²; the rows hold to round-off.
-    @test intensity <= 1e-10 * 5e4
+    @test radiation <= 1e-10 * 5e4
     @test area <= 1e-12
     @test rate <= 1e-10
     @test velocity <= 1e-10
@@ -542,14 +538,10 @@ end
 # A state whose cross section is off its law: `consistent_state!`, the setup's
 # and the deactivation event's path, sets the area before the radiation rows
 # whose optical depths read it, so every algebraic row holds.
-@testset "a consistent state holds its algebraic rows on a shrinking, absorbing column, $(model)" for model in
-                                                                                                      (
-    BEER_LAMBERT,
-    RADIATIVE_TRANSFER,
-)
+@testset "a consistent state holds its algebraic rows on a shrinking, absorbing column" begin
     problem =
         _charring_column(; lateral_shrinkage_law = χ -> 1 - 0.3χ, absorption = (1.0, 2.0))
-    cp = setup(problem; use_ale = true, radiation_model = model, _TOL...)
+    cp = setup(problem; use_ale = true, radiation_model = RADIATIVE_TRANSFER, _TOL...)
     def = cp.def
     layout = def.layout
     nodes = 1:n_nodes(def.setup.topology)
