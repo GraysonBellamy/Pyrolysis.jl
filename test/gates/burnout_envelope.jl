@@ -74,7 +74,7 @@ function deck(name)
         name,
         build = n -> restricted_problem(n, 1.0),
         ci = 60,
-        keywords = VBO_SOLVE_KWARGS,
+        keywords = RESTRICTED_KWARGS,
         solve_fn = _vbo_solve_fn(name),
         qois = variant_qois(name; surface = false),
     )

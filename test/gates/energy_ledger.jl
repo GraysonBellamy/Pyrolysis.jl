@@ -407,8 +407,7 @@ function interior_closure(config, energy_state)
         deactivation = true,
         threshold = 1e-2,
         energy_state,
-        radiation_model = config === :beam ? BEER_LAMBERT :
-                          config in (:transfer, :transfer_lateral) ?
+        radiation_model = config in (:transfer, :transfer_lateral) ?
                           RADIATIVE_TRANSFER : SURFACE_ABSORPTION,
         reltol = 1e-7,
         abstol = 1e-9,
@@ -492,7 +491,7 @@ function crossing_report(sol)
 end
 
 interior_event = []
-for config in (:beam, :transfer, :transfer_lateral, :lateral, :layers),
+for config in (:transfer, :transfer_lateral, :lateral, :layers),
     energy_state in (:temperature, :enthalpy)
 
     push!(interior_event, interior_closure(config, energy_state))

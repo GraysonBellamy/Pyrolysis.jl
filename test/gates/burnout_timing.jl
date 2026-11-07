@@ -189,7 +189,7 @@ function problem_for(kind, n; t_end = 80.0, outputs = 3, solid_λ = nothing, flu
         output_times = collect(range(0.0, t_end, length = outputs)),
     )
     return problem,
-    (; use_ale = true, radiation_model = wood ? BEER_LAMBERT : SURFACE_ABSORPTION)
+    (; use_ale = true, radiation_model = wood ? RADIATIVE_TRANSFER : SURFACE_ABSORPTION)
 end
 
 # A deck of the tables: its name and cells, the problem, `setup`'s keywords,
