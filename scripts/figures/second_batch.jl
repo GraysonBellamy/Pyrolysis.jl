@@ -308,7 +308,14 @@ function jacobian_figure()
         for (x, w, title, body, color, fill) in (
             (35, 205, "Node 1", ["z₁ [D], w₁ [A]", "I^{−}_{1}, I^{+}_{1} [A]"], BLUE, PALE),
             (260, 290, "Cell 1", ["m₁, m₂, T, G, M [D]"], TEAL, GREEN),
-            (570, 205, "Node 2", ["z₂ [D], w₂ [A]", "I^{−}_{2}, I^{+}_{2} [A]"], BLUE, PALE),
+            (
+                570,
+                205,
+                "Node 2",
+                ["z₂ [D], w₂ [A]", "I^{−}_{2}, I^{+}_{2} [A]"],
+                BLUE,
+                PALE,
+            ),
             (900, 265, "Global", ["A, θ_{A} [A]"], PURPLE, "#f2f2f2"),
         )
             box(io, x, 80, w, 105, title, body; color, fill)

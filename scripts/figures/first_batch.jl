@@ -302,14 +302,49 @@ function first_batch(activation_curve, slab)
         label(io, 290, 215, "Surface balance at the face"; anchor = "middle", size = 18)
         label(io, 65, 270, "Radiative Transfer"; weight = "bold")
         y0, h = 300, 90
-        meshstrip(io, nodes, y0; h, ids = false, fills = ["#ebebeb", "#ebebeb", "#ebebeb", "#ebebeb"])
+        meshstrip(
+            io,
+            nodes,
+            y0;
+            h,
+            ids = false,
+            fills = ["#ebebeb", "#ebebeb", "#ebebeb", "#ebebeb"],
+        )
         for x in nodes[2:end]
-            line(io, x - 6, y0 + 22, x - 46, y0 + 22; arrow = "orange", color = ORANGE, width = 2)
+            line(
+                io,
+                x - 6,
+                y0 + 22,
+                x - 46,
+                y0 + 22;
+                arrow = "orange",
+                color = ORANGE,
+                width = 2,
+            )
         end
         for x in nodes[1:(end-1)]
-            line(io, x + 6, y0 + 48, x + 46, y0 + 48; arrow = "blue", color = BLUE, width = 2)
+            line(
+                io,
+                x + 6,
+                y0 + 48,
+                x + 46,
+                y0 + 48;
+                arrow = "blue",
+                color = BLUE,
+                width = 2,
+            )
         end
-        line(io, 600, y0 + 72, 98, y0 + 72; arrow = "orange", color = ORANGE, width = 1.6, dash = "7 5")
+        line(
+            io,
+            600,
+            y0 + 72,
+            98,
+            y0 + 72;
+            arrow = "orange",
+            color = ORANGE,
+            width = 1.6,
+            dash = "7 5",
+        )
         line(io, 602, y0 + 22, 498, y0 + 22; arrow = "orange", color = ORANGE, width = 2.5)
         line(io, 498, y0 + 48, 602, y0 + 48; arrow = "blue", color = BLUE, width = 2.5)
         label(io, 452, y0 - 8, "I^{−}"; anchor = "middle", color = ORANGE, size = 20)
@@ -318,7 +353,14 @@ function first_batch(activation_curve, slab)
         label(io, 612, y0 + 80, "beam"; color = ORANGE, size = 17)
         line(io, 90, y0 - 10, 90, y0 + h + 10; color = INK, width = 5)
         label(io, 80, y0 + h + 30, "Mirror"; anchor = "middle", size = 17)
-        label(io, 290, y0 + h + 54, "Every cell absorbs and emits"; anchor = "middle", size = 18)
+        label(
+            io,
+            290,
+            y0 + h + 54,
+            "Every cell absorbs and emits";
+            anchor = "middle",
+            size = 18,
+        )
         line(io, 200, 478, 470, 478; arrow = "ink")
         label(io, 185, 485, "z = 0"; anchor = "end", size = 18)
         label(io, 490, 485, "z = L"; size = 18)
