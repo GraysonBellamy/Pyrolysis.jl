@@ -3,8 +3,9 @@
 Runs the MaCFP condensed-phase PMMA property sets in Pyrolysis.jl, FDS,
 Gpyro and ThermaKin2Ds, and compares each run with the institution's own
 submission, with the other codes' runs of the same deck, and with the NIST
-gasification apparatus experiments. `report.jl` writes the validation page,
-`docs/guide/validation/macfp_pmma.md`.
+gasification apparatus experiments. `report.jl` writes the validation pages: the
+overview `docs/guide/validation/macfp_pmma.md` and its detail pages in
+`docs/guide/validation/macfp_pmma/`.
 
 - **MaCFP-2 targets**: TGA at 10 and 100 K/min; 1D anaerobic gasification
   at 10, 25 and 65 kW/m² on 6 and 12 mm slabs, no convection, perfectly
@@ -28,7 +29,7 @@ Data come from a checkout of [MaCFP/matl-db](https://github.com/MaCFP/matl-db)
 | `run_apparatus.jl` | Pyrolysis.jl on every deck × apparatus test, and the inert tests |
 | `external/` | deck writers, runners and extractors for FDS, Gpyro and ThermaKin2Ds |
 | `compare.jl` | figures and metrics of the runs against the submissions and the apparatus experiments (`results/figures/`, `results/metrics.csv`, `results/apparatus_scores.csv`) |
-| `report.jl` | the validation page and its figures |
+| `report.jl` | the validation overview, its detail pages and their figures |
 | `time_pyrolysis.jl`, `run_timing.py`, `timing_report.jl` | cost at matched accuracy on a quiet machine |
 | `results/` | generated (ignored): `results/<code>/<set>/<variant>/*.csv`, `results/timing/` |
 

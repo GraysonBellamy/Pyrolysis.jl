@@ -22,10 +22,12 @@ guide_pages(name) =
 # planning marker in what the site publishes (the guides, the hand-written
 # pages, the verification and validation reports). The lists are the code
 # scan's, test/code_scan/removed_names.txt.
-# The Markdown pages of a generated report under docs/guide/.
+# The Markdown pages of a generated report under docs/guide/, its detail pages
+# included.
 function report_files(name)
     d = joinpath(@__DIR__, "guide", name)
-    return isdir(d) ? [joinpath(d, f) for f in readdir(d) if endswith(f, ".md")] : String[]
+    isdir(d) || return String[]
+    return [joinpath(r, f) for (r, _, fs) in walkdir(d) for f in fs if endswith(f, ".md")]
 end
 
 function documentation_scan()
@@ -144,13 +146,30 @@ function verification_pages()
     return ["guide/verification/$f" for f in vcat("index.md", chapters)]
 end
 
-# One page per validation suite (macfp_pmma.md, ...).
+# One entry per validation suite: its overview (macfp_pmma.md, ...) alone, or, when
+# the suite writes detail pages beside it (macfp_pmma/NN_slug.md), a section
+# titled by the overview's heading that holds the overview and then those pages.
 function validation_pages()
     dir = joinpath(@__DIR__, "src", "guide", "validation")
-    isdir(dir) || return String[]
-    return [
-        "guide/validation/$f" for f in sort(filter(f -> endswith(f, ".md"), readdir(dir)))
-    ]
+    isdir(dir) || return Any[]
+    entries = Any[]
+    for f in sort(filter(f -> endswith(f, ".md"), readdir(dir)))
+        name = f[1:(end-3)]
+        overview = "guide/validation/$f"
+        sub = joinpath(dir, name)
+        if isdir(sub)
+            heading = first(filter(l -> startswith(l, "# "), readlines(joinpath(dir, f))))
+            title = String(strip(heading[3:end]))
+            details = [
+                "guide/validation/$name/$g" for
+                g in sort(filter(g -> endswith(g, ".md"), readdir(sub)))
+            ]
+            push!(entries, title => Any["Overview" => overview; details])
+        else
+            push!(entries, overview)
+        end
+    end
+    return entries
 end
 
 pages = Any[

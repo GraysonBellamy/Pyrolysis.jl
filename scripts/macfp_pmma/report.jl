@@ -1,4 +1,4 @@
-# The MaCFP PMMA validation page: every code's runs of the MaCFP property sets
+# The MaCFP PMMA validation pages: every code's runs of the MaCFP property sets
 # against the institutions' submissions, against each other, and against the
 # NIST gasification apparatus experiments.
 #
@@ -6,9 +6,10 @@
 #
 # Reads results/ (run_pyrolysis.jl, run_apparatus.jl, the external runners and,
 # when present, a run_timing.py campaign in results/timing/) and the pinned
-# matl-db checkout. Writes docs/guide/validation/macfp_pmma.md and its figures
-# in docs/guide/validation/assets/macfp_pmma/. The same results give the same
-# page, byte for byte.
+# matl-db checkout. Writes the overview docs/guide/validation/macfp_pmma.md, its
+# detail pages in docs/guide/validation/macfp_pmma/ and the figures in
+# docs/guide/validation/assets/macfp_pmma/. The same results give the same
+# pages, byte for byte.
 include(joinpath(@__DIR__, "MacfpPMMA.jl"))
 using .MacfpPMMA, CairoMakie, Printf, Statistics
 
@@ -169,7 +170,9 @@ function table(io, header, rows)
     println(io)
 end
 
-figure(io, file, alt) = println(io, "![$alt]($ASSETS/$file)\n")
+# A figure on the overview, or (`up`) on a detail page one directory down.
+figure(io, file, alt; up = false) =
+    println(io, "![$alt]($(up ? "../" : "")$ASSETS/$file)\n")
 
 # ---------------------------------------------------------------------------
 # Figures
@@ -565,13 +568,42 @@ function cost_figure(rows)
     return save_figure("cost.png", fig)
 end
 
+
 # ---------------------------------------------------------------------------
-# The page
+# The pages
 # ---------------------------------------------------------------------------
+
+# The overview's detail pages, in navigation order.
+const DETAIL = joinpath(dirname(PAGE), "macfp_pmma")
+const DECKS_PAGE = "01_decks.md"
+const GAS_PAGE = "02_gasification.md"
+const HIST_PAGE = "03_histories.md"
+const TGA_PAGE = "04_tga.md"
+const APP_PAGE = "05_apparatus.md"
+const COST_PAGE = "06_cost.md"
+const OVERVIEW = "[MaCFP PMMA validation](../macfp_pmma.md)"
+
+# A link from the overview to a detail page, or to one of its sections
+# (Documenter's anchor: the heading with hyphens for spaces).
+function link(file, text, section = "")
+    anchor = isempty(section) ? "" : "#" * replace(section, " " => "-")
+    return "[$text](macfp_pmma/$file$anchor)"
+end
+
+function write_page(path, io)
+    mkpath(dirname(path))
+    text = replace(String(take!(io)), r"\n{3,}" => "\n\n")
+    write(path, rstrip(text) * "\n")
+    return path
+end
+
+# A percentage as the pages print it, so that comparisons agree with the tables.
+shown(x) = round(100x; digits = 1)
 
 function main()
     check_matl_db()
     rm(FIG; force = true, recursive = true)
+    rm(DETAIL; force = true, recursive = true)
     decks = load_decks()
     byid = Dict(d["id"] => d for d in decks)
     gas = filter(d -> !get(d, "kinetics_only", false), decks)
@@ -579,36 +611,24 @@ function main()
     indepth = filter(d -> d["absorption"] == "in-depth", gas)
     M = all_metrics(gas)
     headline = filter(d -> d["id"] != "BUW-FZJ_A", withsub)
-    io = IOBuffer()
 
+    # =========================================================================
+    # Decks and scenario
+    # =========================================================================
+    io = IOBuffer()
     println(
         io,
         """
-# MaCFP PMMA validation
+# Decks and scenario
 
-The MaCFP condensed-phase working group's database holds property sets for one black
-PMMA, each calibrated by an institution in its own code, with that institution's
-predictions of a common set of targets (the MaCFP-2 targets) and of experiments in
-the NIST gasification apparatus (the MaCFP-3 validation data). Pyrolysis.jl runs every
-set as written; FDS 6.11.1, Gpyro V2 and ThermaKin2Ds 7 run the same decks. Each run is
-compared with the institution's own submission, with the other codes' runs of the
-same deck, and with the apparatus experiments. The submissions are each group's
-calibrated model, not measurements, so agreement with them measures how faithfully a
-code reproduces another code's model; the apparatus measurements are the experimental
-test.
+The property sets, the scenario and the variants behind the $OVERVIEW.
 
 Data come from [MaCFP/matl-db](https://github.com/MaCFP/matl-db) at commit
-`$(MacfpPMMA.MATL_DB_COMMIT[1:8])`. The decks, the runners and this page's generator are in
-`scripts/macfp_pmma/` (its `README.md` describes each choice); the translation of each
+`$(MacfpPMMA.MATL_DB_COMMIT[1:8])`. The decks, the runners and the generator of these pages are
+in `scripts/macfp_pmma/` (its `README.md` describes each choice); the translation of each
 deck for FDS, Gpyro and ThermaKin2Ds is described beside their runners in
 `scripts/macfp_pmma/external/`.
-""",
-    )
 
-    # --- Scenario --------------------------------------------------------------
-    println(
-        io,
-        """
 ## Scenario
 
 The MaCFP-2 gasification targets expose a 6 or 12 mm slab at 293 K to 10, 25 or
@@ -619,6 +639,8 @@ that absorbs at its surface runs under `SURFACE_ABSORPTION`. A deck with an abso
 coefficient κ runs under `RADIATIVE_TRANSFER`: every cell absorbs and emits, the
 heater is `Diffuse()`, and the insulated back is a mirror. The TGA targets heat one
 50 µm cell from 300 K at 10 and 100 K/min.
+
+## Property sets
 """,
     )
     rows = []
@@ -658,24 +680,6 @@ heater is `Diffuse()`, and the insulated back is a mirror. The TGA targets heat 
         join([d["id"] for d in kin], ", "),
         " give kinetics only and run the TGA targets alone.\n",
     )
-
-    println(
-        io,
-        """
-Each in-depth deck also runs variants that move one choice, and three variants run
-what a group evidently ran:
-
-| variant | what it changes |
-|---|---|
-| `collimated` | the heater as one beam along the normal, attenuated at κ rather than the diffuse field's $(@sprintf("%.1f", 1.5))κ |
-| `fds_closure` | every component's κ × ln(1 + 2κΔz)/(1.5κΔz) at Δz = 50 µm: FDS's two-flux attenuation on its own cells (below) |
-| `fds_matched` | `fds_closure` with the one item FDS cannot express aligned with FDS: no pyrolyzate enthalpy in the solid (UMD, UMET_TK); UMET_GP's second reaction first order, as FDS runs it on a shrinking cell |
-| `surface` | `SURFACE_ABSORPTION`: no radiation in depth |
-| `h5.33` | BUW-FZJ_A/B: convection h = 5.33 W/(m²·K) to 293 K, which their submissions include |
-| `tablesC` | DBI_1, DBI_calibrated: the kelvin-valued c and k tables read as °C, as DBI_1's FDS runs read them (DBI_calibrated's are not published) |
-| `T303` | Aalto_I: start and surroundings at 303.15 K, where their runs start |
-""",
-    )
     ran(code) = [d["id"] for d in gas if isdir(joinpath(RESULTS, code, d["id"], "base"))]
     println(
         io,
@@ -685,19 +689,44 @@ Gpyro V2 runs $(join(ran("gpyro"), ", ")), and ThermaKin2Ds 7 runs $(join(ran("t
 `MAX` mode (the absorbed radiation deposited in the element that absorbs most) and
 $(join([d["id"] for d in gas if isdir(joinpath(RESULTS, "thermakin", d["id"], "rand"))], ", ")) also in its
 `RAND` mode (in an element drawn from the absorption distribution).
+
+## Variants
+
+Each in-depth deck also runs variants that move one choice, and three variants run
+what a group evidently ran:
+
+| variant | what it changes |
+|---|---|
+| `collimated` | the heater as one beam along the normal, attenuated at κ rather than the diffuse field's 1.5κ |
+| `fds_closure` | every component's κ × ln(1 + 2κΔz)/(1.5κΔz) at Δz = 50 µm: FDS's two-flux attenuation on its own cells |
+| `fds_matched` | `fds_closure` with the one item FDS cannot express aligned with FDS: no pyrolyzate enthalpy in the solid (UMD, UMET_TK); UMET_GP's second reaction first order, as FDS runs it on a shrinking cell |
+| `surface` | `SURFACE_ABSORPTION`: no radiation in depth |
+| `h5.33` | BUW-FZJ_A/B: convection h = 5.33 W/(m²·K) to 293 K, which their submissions include |
+| `tablesC` | DBI_1, DBI_calibrated: the kelvin-valued c and k tables read as °C, as DBI_1's FDS runs read them (DBI_calibrated's are not published) |
+| `T303` | Aalto_I: start and surroundings at 303.15 K, where their runs start |
 """,
     )
+    write_page(joinpath(DETAIL, DECKS_PAGE), io)
 
-    # --- Against the submissions ----------------------------------------------
+    # =========================================================================
+    # Gasification
+    # =========================================================================
+    io = IOBuffer()
     println(
         io,
         """
-## Gasification against the submissions
+# Gasification
 
-Median over the six cases of the relative difference in the time to 50 % mass loss,
-|Δt₅₀|, and in brackets in the peak mass-loss rate, |Δpeak|, against the institution's
-submission (%). t₅₀ is the first saved time at or below half the initial mass; the
-peak is the largest finite mass-loss rate. BUW-FZJ_A is reported on its own below.
+The MaCFP-2 gasification targets of the $OVERVIEW: each code's run of every deck
+against the institution's submission, against the other codes' runs, and against FDS
+with the attenuation matched. t₅₀ is the first saved time at or below half the initial
+mass; the peak is the largest finite mass-loss rate. Unless a table says otherwise, a
+cell is the median over the six cases of the relative difference in t₅₀, |Δt₅₀|, and in
+brackets in the peak, |Δpeak| (%).
+
+## Against the submissions
+
+BUW-FZJ_A is reported on its own below.
 """,
     )
     rows = []
@@ -724,25 +753,24 @@ ThermaKin2Ds does not reproduce UMET_TK ($(pct(medabs(d50(M, "UMET_TK", "thermak
 $(pct(medabs(d50(M, "UMET_TK", "thermakin/rand", "submission")))) % in `RAND`, $(pct(medabs(d50(M, "UMET_TK", "thermakin/rhoT", "submission")))) % in `MAX` with UMET's ρ(T)).
 """,
     )
+    # The calibration code's own run: UMD's in ThermaKin2Ds is MAX at 10 kW/m² and
+    # RAND at 25 and 65 kW/m², the reading that reproduces its submission; UMET_TK's
+    # mode is not known.
+    function own(id)
+        id == "UMD" && return vcat(
+            d50(M, id, "thermakin/base", "submission")[1:2],
+            d50(M, id, "thermakin/rand", "submission")[3:6],
+        )
+        code = byid[id]["calibration_code"]
+        code == "FDS" && return d50(M, id, "fds/base", "submission")
+        code == "Gpyro" && return d50(M, id, "gpyro/base", "submission")
+        return nothing
+    end
     ind_sub = filter(d -> d["absorption"] == "in-depth", headline)
     ours = [
         (d["id"], medabs(d50(M, d["id"], "pyrolysis/base", "submission"))) for d in ind_sub
     ]
-    # The calibration code's own run: UMD's in ThermaKin2Ds is MAX at 10 kW/m² and
-    # RAND at 25 and 65 kW/m², the reading that reproduces its submission.
-    own(id) =
-        id == "UMD" ?
-        vcat(
-            d50(M, id, "thermakin/base", "submission")[1:2],
-            d50(M, id, "thermakin/rand", "submission")[3:6],
-        ) :
-        d50(
-            M,
-            id,
-            Dict("FDS" => "fds/base", "Gpyro" => "gpyro/base")[byid[id]["calibration_code"]],
-            "submission",
-        )
-    known = filter(d -> d["id"] != "UMET_TK", ind_sub)
+    known = filter(d -> own(d["id"]) !== nothing, ind_sub)
     closer = [
         d["id"] for d in known if
         medabs(d50(M, d["id"], "pyrolysis/base", "submission")) < medabs(own(d["id"]))
@@ -761,21 +789,17 @@ not known; Pyrolysis.jl ($(pct(ptk)) %) is $(minimum(tk) <= ptk <= maximum(tk) ?
 ($(pct(tk[2])) %) there.
 """,
     )
-    figure(
-        io,
-        parity_figure(M, [d["id"] for d in headline]),
-        "Parity of t50 and peak MLR against the submissions",
-    )
+    parity = parity_figure(M, [d["id"] for d in headline])
+    figure(io, parity, "Parity of t50 and peak MLR against the submissions"; up = true)
 
-    # --- Code to code ---------------------------------------------------------
     println(
         io,
         """
 ## Code to code
 
-Median |Δt₅₀| (median |Δpeak|) of Pyrolysis.jl's run of each deck against each other
-code's run of the same deck (%). The 2023 sets NIST-StMU, DBI_calibrated and BUW-FZJ_C
-have no MaCFP-2 submission; FDS runs them.
+Pyrolysis.jl's run of each deck against each other code's run of the same deck. The
+2023 sets NIST-StMU, DBI_calibrated and BUW-FZJ_C have no MaCFP-2 submission; FDS runs
+them.
 """,
     )
     rows = []
@@ -801,13 +825,7 @@ have no MaCFP-2 submission; FDS runs them.
 On the decks that absorb at the surface, Pyrolysis.jl and FDS solve the same problem and
 agree to $(pct(minimum(sfds)))–$(pct(maximum(sfds))) % in t₅₀. On the in-depth decks the codes differ in how
 the solid absorbs and emits the radiation (Technical Reference §8.9).
-""",
-    )
 
-    # --- Matched to FDS ------------------------------------------------------
-    println(
-        io,
-        """
 ## Matched to FDS
 
 FDS's in-depth model is a two-flux model with emission, like Pyrolysis.jl's, but its
@@ -819,6 +837,7 @@ express, `fds_matched` also aligns it. FDS 6.11.1's runs of the same decks:
 """,
     )
     rows = []
+    matched = Dict{String,Any}()               # set => match_stats against FDS
     within = Dict{String,Tuple{Bool,Bool}}()   # t50, peak within FDS's own 50 → 25 µm change
     for d in indepth
         id = d["id"]
@@ -827,6 +846,7 @@ express, `fds_matched` also aligns it. FDS 6.11.1's runs of the same decks:
             "pyrolysis/fds_closure"
         st = match_stats(id, src, "fds/base")
         st === nothing && continue
+        matched[id] = st
         fdsref = match_stats(id, "fds/base_c2.5e-5", "fds/base")
         fdsref === nothing ||
             (within[id] = (st.t50_max <= fdsref.t50_max, st.peak_max <= fdsref.peak_max))
@@ -866,33 +886,28 @@ express, `fds_matched` also aligns it. FDS 6.11.1's runs of the same decks:
         ],
         rows,
     )
-    base_fds = [match_stats(d["id"], "pyrolysis/base", "fds/base") for d in indepth]
-    base_fds = filter(!isnothing, base_fds)
+    base_fds =
+        Dict(d["id"] => match_stats(d["id"], "pyrolysis/base", "fds/base") for d in indepth)
+    filter!(p -> p[2] !== nothing, base_fds)
+    bf = collect(values(base_fds))
     println(
         io,
         """
 Temperatures are compared at FDS's saved times while both runs hold more than 10 % of
 their mass; masses are for the 10 cm × 10 cm sample. With the deck's κ as written and
-the diffuse heater the same runs differ from FDS by $(pct(minimum(s.t50_med for s in base_fds)))–$(pct(maximum(s.t50_med for s in base_fds))) % in median t₅₀ and
-up to $(pct(maximum(s.peak_max for s in base_fds))) % in peak. FDS also runs $(join(sort(collect(keys(within))), ", ")) on
+the diffuse heater the same runs differ from FDS by $(pct(minimum(s.t50_med for s in bf)))–$(pct(maximum(s.t50_med for s in bf))) % in median t₅₀ and
+up to $(pct(maximum(s.peak_max for s in bf))) % in peak. FDS also runs $(join(sort(collect(keys(within))), ", ")) on
 25 µm cells. Matched, the largest |Δt₅₀| is within FDS's own change between its 50 and
 25 µm runs on $(howmany(count(first, values(within)), length(within))) of these sets$(let w = sort([k for (k, v) in within if !v[1]]); isempty(w) ? "" : " (not on $(join(w, ", ")))" end),
 and the largest |Δpeak| on $(howmany(count(last, values(within)), length(within)))$(let w = sort([k for (k, v) in within if !v[2]]); isempty(w) ? "" : " (not on $(join(w, ", ")))" end). The factor
 belongs to FDS's cell size, so it changes with the cell FDS runs. BUW-FZJ_C is the
 exception to a single factor: its residue's κ = 50 000 1/m takes a factor of $(@sprintf("%.2f", fds_factor(5e4))),
 and a factor applied per component is not FDS's attenuation of the cell's mixture.
-""",
-    )
 
-    # --- Variants ------------------------------------------------------------
-    println(
-        io,
-        """
-## In-depth radiation: the variants
+## Radiation in depth
 
-Median |Δt₅₀| (median |Δpeak|) of each Pyrolysis.jl variant of the in-depth decks
-against the submission and each code (%). Bold: the variant closest to that column's
-run in t₅₀.
+Each Pyrolysis.jl variant of the in-depth decks against the submission and each code.
+Bold: the variant closest to that column's run in t₅₀.
 """,
     )
     refs = [("submission", "submission"); [(s[1], s[2]) for s in SOURCES[2:end]]]
@@ -948,9 +963,9 @@ run in t₅₀.
         id in gp if closest(id, "gpyro/base", ["base", "collimated", "fds_closure"]) ==
         "fds_closure"
     ]
-    tk = ids_with("thermakin/base")
+    tkr = ids_with("thermakin/base")
     tk_surf = [
-        id for id in tk if closest(
+        id for id in tkr if closest(
             id,
             "thermakin/base",
             filter(v -> has(M, id, "pyrolysis/$v"), VARIANTS),
@@ -961,6 +976,7 @@ run in t₅₀.
         gv(id, v, "thermakin/rand") for id in rnd for
         v in ("base", "collimated", "fds_closure")
     ]
+    surface_move = [gv(d["id"], "surface", "pyrolysis/base") for d in indepth]
     println(
         io,
         """
@@ -975,20 +991,14 @@ run in t₅₀.
   variant shares its net-flux deposition.
 - **ThermaKin2Ds** deposits each step's absorbed radiation in one element. In `MAX` mode
   that is the surface element for a uniform κ, and `surface` is the closest variant on
-  $(length(tk_surf)) of the $(length(tk)) in-depth sets it runs ($(join(["$id $(g(id, "surface", "thermakin/base")) %" for id in tk], ", "))). `RAND` draws the
+  $(length(tk_surf)) of the $(length(tkr)) in-depth sets it runs ($(join(["$id $(g(id, "surface", "thermakin/base")) %" for id in tkr], ", "))). `RAND` draws the
   element from the absorption distribution and sits within $(pct(minimum(filter(isfinite, rv))))–$(pct(maximum(filter(isfinite, rv)))) % of
   the variants that absorb in depth.
 - **UMET's runs** use a temperature-dependent density, which the decks hold at its
   293 K value; Gpyro with UMET's ρ(T) reproduces UMET_GP's submission (above).
 - **No radiation in depth** (`surface`) moves t₅₀ by
-  $(pct(minimum(gv(d["id"], "surface", "pyrolysis/base") for d in indepth)))–$(pct(maximum(gv(d["id"], "surface", "pyrolysis/base") for d in indepth))) % (median per set) from the diffuse base.
-""",
-    )
+  $(pct(minimum(surface_move)))–$(pct(maximum(surface_move))) % (median per set) from the diffuse base.
 
-    # --- As the group ran ---------------------------------------------------
-    println(
-        io,
-        """
 ## Runs as the groups ran them
 
 Three submissions depart from the MaCFP-2 scenario in a way their files show, and a
@@ -1032,7 +1042,6 @@ FDS, the two codes solve the same problem. |Δt₅₀| over the six cases (%):
         rows,
     )
 
-    # --- BUW-FZJ_A -----------------------------------------------------------
     da = byid["BUW-FZJ_A"]
     res = only(
         filter(
@@ -1092,78 +1101,98 @@ it is kept out of the medians above. Median / max |Δt₅₀| over the six cases
         ["run", "against", "median \\|Δt₅₀\\|", "max \\|Δt₅₀\\|", "median \\|Δpeak\\|"],
         rows,
     )
+    println(
+        io,
+        "The mass, mass-loss rate and temperature histories of every set are on ",
+        "[Gasification histories]($HIST_PAGE).\n",
+    )
+    write_page(joinpath(DETAIL, GAS_PAGE), io)
 
-    println(io, "## Gasification histories\n")
+    # =========================================================================
+    # Gasification histories
+    # =========================================================================
+    io = IOBuffer()
     println(
         io,
         """
-Mass, mass-loss rate, the submission's top temperature (the surface, or the mean over
-the top millimetre where the group reported that) and the back temperature, per set.
-The interval holding a deactivation event is blanked in Pyrolysis.jl's MLR: the event
-vents the last 1 % of a layer's mass in one step. ThermaKin2Ds' UMD runs end where its
-integration diverges, once the deck's conductivity turns negative above 809.5 K; their
-last temperatures, outside $(Int(T_DRAWN[1]))–$(Int(T_DRAWN[2])) K, are not drawn.
+# Gasification histories
+
+The MaCFP-2 gasification histories of the $OVERVIEW, per set: mass, mass-loss rate, the
+submission's top temperature (the surface, or the mean over the top millimetre where the
+group reported that) and the back temperature. The interval holding a deactivation event
+is blanked in Pyrolysis.jl's MLR: the event vents the last 1 % of a layer's mass in one
+step. ThermaKin2Ds' UMD runs end where its integration diverges, once the deck's
+conductivity turns negative above 809.5 K; their last temperatures, outside
+$(Int(T_DRAWN[1]))–$(Int(T_DRAWN[2])) K, are not drawn.
 """,
     )
-    for d in withsub
-        figure(io, gasification_figure(d), "Gasification histories, $(d["id"])")
+    for d in vcat(withsub, filter(d -> !haskey(d, "predictions"), gas))
+        println(io, "## $(d["id"])\n")
+        figure(io, gasification_figure(d), "Gasification histories, $(d["id"])"; up = true)
     end
-    for d in filter(d -> !haskey(d, "predictions"), gas)
-        figure(io, gasification_figure(d), "Gasification histories, $(d["id"])")
-    end
+    write_page(joinpath(DETAIL, HIST_PAGE), io)
 
-    # --- TGA ---------------------------------------------------------------
+    # =========================================================================
+    # TGA
+    # =========================================================================
     tgadecks = filter(d -> haskey(d, "tga_predictions"), decks)
+    io = IOBuffer()
     println(
         io,
         """
-## TGA
+# TGA
 
-Temperature at which 10, 50 and 90 % of the mass is lost, Pyrolysis.jl minus the
-submission (K).
+The MaCFP-2 TGA targets of the $OVERVIEW: the temperature at which 10, 50 and 90 % of
+the mass is lost, Pyrolysis.jl minus the submission (K).
 """,
     )
     rows = []
+    tga_dev = Dict{String,Tuple{Float64,Int}}()    # set => largest |ΔT| (K) and its rate
     for d in tgadecks, β in TGA_RATES
         s = load_run("pyrolysis", d["id"], "base", "tga_$(β)K")
         sub = tga_submission(d, β)
         (s === nothing || sub === nothing) && continue
-        push!(
-            rows,
-            vcat(
-                [d["id"], string(β)],
-                [
-                    fmt(tga_T(s.T_K, s.mass_rel, f) - tga_T(sub.T, sub.m, f), "%.1f") for
-                    f in (0.1, 0.5, 0.9)
-                ],
-            ),
-        )
+        dT = [tga_T(s.T_K, s.mass_rel, f) - tga_T(sub.T, sub.m, f) for f in (0.1, 0.5, 0.9)]
+        m = maximum(abs, filter(isfinite, dT))
+        m > get(tga_dev, d["id"], (-Inf, 0))[1] && (tga_dev[d["id"]] = (m, β))
+        push!(rows, vcat([d["id"], string(β)], [fmt(x, "%.1f") for x in dT]))
     end
     table(io, ["set", "β (K/min)", "ΔT₁₀", "ΔT₅₀", "ΔT₉₀"], rows)
-    figure(io, tga_figure(tgadecks), "TGA, every set")
+    tga_png = tga_figure(tgadecks)
+    figure(io, tga_png, "TGA, every set"; up = true)
+    write_page(joinpath(DETAIL, TGA_PAGE), io)
 
-    # --- Apparatus ------------------------------------------------------------
+    # =========================================================================
+    # Apparatus
+    # =========================================================================
     θ = rad2deg(APPARATUS_HEATER.θ₂)
+    io = IOBuffer()
     println(
         io,
         """
-## MaCFP-3: the NIST gasification apparatus
+# Gasification apparatus
 
-Every deck with complete properties runs the eleven PMMA tests of the apparatus on one
-shared deck: the sample at the thickness that holds its measured mass at the deck's
-density on the 6.99 cm disc, bonded to 28.52 mm of Kaowool PM; convection with
-h = $(MacfpPMMA.APPARATUS.h) W/(m²·K) to gas at $(MacfpPMMA.APPARATUS.T_gas) K and re-radiation to walls at $(MacfpPMMA.APPARATUS.T_wall) K;
-adiabatic beneath the board. The heater is a cone of uniform intensity from the normal to
-$(@sprintf("%.0f", θ))°: a coaxial disc fitted to the apparatus's radial flux profile at 50 kW/m² is seen
-out to 33–62° within the profile's error bars, and no disc fits the 25 kW/m² profile
-within its bars. The Kaowool cell under the sample is opaque and absorbs what the
-sample transmits; the board beneath it is transparent, because its measured
+The MaCFP-3 experiments of the $OVERVIEW: every deck with complete properties runs the
+eleven PMMA tests of the NIST gasification apparatus, scored against the measurements.
+
+## Apparatus deck
+
+The tests run on one shared deck: the sample at the thickness that holds its measured
+mass at the deck's density on the 6.99 cm disc, bonded to 28.52 mm of Kaowool PM;
+convection with h = $(MacfpPMMA.APPARATUS.h) W/(m²·K) to gas at $(MacfpPMMA.APPARATUS.T_gas) K and re-radiation to walls at
+$(MacfpPMMA.APPARATUS.T_wall) K; adiabatic beneath the board. The heater is a cone of uniform intensity
+from the normal to $(@sprintf("%.0f", θ))°: a coaxial disc fitted to the apparatus's radial flux profile
+at 50 kW/m² is seen out to 33–62° within the profile's error bars, and no disc fits the
+25 kW/m² profile within its bars. The Kaowool cell under the sample is opaque and absorbs
+what the sample transmits; the board beneath it is transparent, because its measured
 conductivity already carries its own radiation.
+
+## Scores
 
 The score is MaCFP's: the mean of the runs of the repeats, against the mean of the
 measured repeats over the shortest repeat, as NRMS = RMS/(max − min) of the measured
-mean. For an in-depth deck, the range is that of the diffuse and collimated heaters,
-which bound the cone.
+mean; lower is better. For an in-depth deck, the range is that of the diffuse and
+collimated heaters, which bound the cone.
 """,
     )
     appdecks = filter(
@@ -1212,6 +1241,8 @@ which bound the cone.
         ),
         rows,
     )
+    # Per quantity: the sets with a group prediction, and those where Pyrolysis.jl's
+    # score is as good or better.
     cmp = [
         (
             p[1],
@@ -1240,18 +1271,25 @@ Pyrolysis.jl's score is as good or better on $(join(["$(length(c[3])) of $(lengt
 The heater's distribution moves an in-depth deck's score by at most $(fmt(spread, "%.3f")). The
 back temperatures are those of the sample's interface with the board, which the shared
 deck's convection coefficient and the board's conductivity set as much as the
-property set: on the inert Kaowool stack below, the shared deck is
+property set: on the inert Kaowool stack (below), the shared deck is
 $(fmt(deep, "%.0f")) K above the measurement at 17.16 mm after 1200 s.
+
+## Runs against the experiments
 """,
     )
     for d in appdecks
-        figure(io, apparatus_figure(d), "NIST gasification apparatus, $(d["id"])")
+        println(io, "### $(d["id"])\n")
+        figure(
+            io,
+            apparatus_figure(d),
+            "NIST gasification apparatus, $(d["id"])";
+            up = true,
+        )
     end
-
     println(
         io,
         """
-### Inert tests
+## Inert tests
 
 The apparatus's inert tests check the shared deck without a pyrolysing sample: five
 Kaowool discs painted black (ε 0.95), and a copper disc painted black (ε 0.92) on
@@ -1293,26 +1331,33 @@ Kaowool's conductivity.
         ],
         rows,
     )
-    figure(io, inert_figure(), "Inert tests")
+    figure(io, inert_figure(), "Inert tests"; up = true)
+    write_page(joinpath(DETAIL, APP_PAGE), io)
 
-    # --- Cost --------------------------------------------------------------
-    if isfile(joinpath(TIMING, "pyrolysis_timing.csv"))
+    # =========================================================================
+    # Cost
+    # =========================================================================
+    timed = isfile(joinpath(TIMING, "pyrolysis_timing.csv"))
+    cost_png, reached, pkeys, coarse, versus = "", [], [], [], String[]
+    vs = Dict{String,NTuple{3,Int}}()     # code => (faster, shared cases, faster scaled)
+    if timed
         crow = cost_rows(TIMING)
+        io = IOBuffer()
         println(
             io,
             """
-## Cost
+# Cost
 
-Each code is scored against its own finest run of each case: Pyrolysis.jl against
-80 cells/mm at reltol 1e-8, FDS against its 25 µm run, Gpyro and ThermaKin2Ds
-against their half-cell, half-step runs. A run is within tolerance when its peak MLR
-and t₅₀ are within 1 % and its surface and back temperature histories within 2 K up
-to 90 % mass loss; the error is the largest of those four ratios. Pyrolysis.jl runs
-a ladder of 10, 20 and 40 cells/mm at the default tolerances and ten times them. Every
-time is the median of repeated solves on one pinned core of a quiet machine
-(`scripts/timing/README.md`). FDS and ThermaKin2Ds step at a fixed step to the case's
-end time; their times scaled to their own burnout are given beside them, since
-Pyrolysis.jl and Gpyro stop at burnout.
+The cost at matched accuracy of the $OVERVIEW. Each code is scored against its own finest
+run of each case: Pyrolysis.jl against 80 cells/mm at reltol 1e-8, FDS against its 25 µm
+run, Gpyro and ThermaKin2Ds against their half-cell, half-step runs. A run is within
+tolerance when its peak MLR and t₅₀ are within 1 % and its surface and back temperature
+histories within 2 K up to 90 % mass loss; the error is the largest of those four
+ratios. Pyrolysis.jl runs a ladder of 10, 20 and 40 cells/mm at the default tolerances
+and ten times them. Every time is the median of repeated solves on one pinned core of a
+quiet machine (`scripts/timing/README.md`). FDS and ThermaKin2Ds step at a fixed step to
+the case's end time; their times scaled to their own burnout are given beside them,
+since Pyrolysis.jl and Gpyro stop at burnout.
 """,
         )
         rows = []
@@ -1351,16 +1396,15 @@ Pyrolysis.jl and Gpyro stop at burnout.
             ],
             rows,
         )
-        ours(k) = filter(r -> (r[2], r[3]) == k && r[1] == "Pyrolysis.jl", crow)
+        ourrows(k) = filter(r -> (r[2], r[3]) == k && r[1] == "Pyrolysis.jl", crow)
         cheapest(k) = (
-            ok = filter(r -> r[6] <= 1, ours(k));
+            ok = filter(r -> r[6] <= 1, ourrows(k));
             isempty(ok) ? NaN : minimum(r[5] for r in ok)
         )
         pkeys = sort(unique((r[2], r[3]) for r in crow if r[1] == "Pyrolysis.jl"))
         reached = filter(k -> isfinite(cheapest(k)), pkeys)
         coarse =
-            filter(k -> any(r -> r[6] <= 1 && startswith(r[4], "10/"), ours(k)), reached)
-        versus = String[]
+            filter(k -> any(r -> r[6] <= 1 && startswith(r[4], "10/"), ourrows(k)), reached)
         for code in ("fds", "gpyro", "thermakin")
             n, faster, scaled = 0, 0, 0
             for k in sort(unique((r[2], r[3]) for r in crow if r[1] == code))
@@ -1372,6 +1416,7 @@ Pyrolysis.jl and Gpyro stop at burnout.
                 scaled += cheapest(k) < span_scaled(code, k[1], k[2], "base", base[1][5])
             end
             n == 0 && continue
+            vs[code] = (faster, n, scaled)
             push!(
                 versus,
                 "$(COST_NAME[code])'s base run on $faster of $n" * (
@@ -1388,14 +1433,271 @@ $(length(coarse)) of them at 10 cells/mm. On the cases where an external code is
 its cheapest run within tolerance takes less time than $(join(versus, "; ")).
 """,
         )
-        figure(io, cost_figure(crow), "Solve time against error")
+        cost_png = cost_figure(crow)
+        figure(io, cost_png, "Solve time against error"; up = true)
+        write_page(joinpath(DETAIL, COST_PAGE), io)
     end
 
-    mkpath(dirname(PAGE))
-    text = replace(String(take!(io)), r"\n{3,}" => "\n\n")
-    write(PAGE, rstrip(text) * "\n")
+    # =========================================================================
+    # Overview
+    # =========================================================================
+    # Against the submissions: each headline set's deck as written, the
+    # calibration code's own run of it, and the run as the group ran it.
+    sub_rows = []
+    as_written, own_runs = Dict{String,Float64}(), Dict{String,Float64}()
+    for d in headline
+        id = d["id"]
+        p = medabs(d50(M, id, "pyrolysis/base", "submission"))
+        as_written[id] = p
+        o = own(id)
+        o === nothing || (own_runs[id] = medabs(o))
+        owncell =
+            o !== nothing ? pct(medabs(o)) :
+            "$(pct(tk[1])) / $(pct(tk[2])) (`MAX` / `RAND`)"
+        asran =
+            haskey(AS_RAN, id) ?
+            pct(medabs(d50(M, id, "pyrolysis/$(AS_RAN[id])", "submission")); d = 2) : "–"
+        push!(sub_rows, [id, d["calibration_code"], pct(p), owncell, asran])
+    end
+    nclose = count(id -> shown(as_written[id]) <= shown(own_runs[id]), keys(own_runs))
+    nfar = count(id -> shown(as_written[id]) > shown(own_runs[id]), keys(own_runs))
+    departed = [id for id in ("BUW-FZJ_B", "DBI_1") if haskey(as_written, id)]
+    departed_to = [
+        pct(medabs(d50(M, id, "pyrolysis/$(AS_RAN[id])", "submission")); d = 2) for
+        id in departed
+    ]
+    # The two largest gaps are the scenario departures the bullet names.
+    largest = sort(collect(keys(as_written)); by = id -> -as_written[id])[1:2]
+    Set(largest) == Set(departed) ||
+        error("the largest gaps to the submissions are $largest, not $departed")
+    # Matched to FDS: every case of every in-depth set.
+    ncases = sum(st.n for st in values(matched))
+    worst_match = maximum(max(st.t50_max, st.peak_max) for st in values(matched))
+    match_rows = [
+        [
+            d["id"],
+            pct(base_fds[d["id"]].t50_med),
+            pct(matched[d["id"]].t50_max; d = 2),
+            pct(matched[d["id"]].peak_max; d = 2),
+            "$(fmt(max(matched[d["id"]].Ttop, matched[d["id"]].Tback), "%.1f"))",
+        ] for d in indepth if haskey(matched, d["id"]) && haskey(base_fds, d["id"])
+    ]
+    # TGA: the sets within 2 K, and the largest difference.
+    tga_tol = 2.0
+    tga_ok = count(v -> v[1] <= tga_tol, values(tga_dev))
+    tga_worst = argmax(id -> tga_dev[id][1], collect(keys(tga_dev)))
+    # Apparatus: per quantity, the medians over the sets the group also predicted.
+    app_rows = [
+        [
+            "$(qname[c[1]]) kW/m²",
+            "$(length(c[3])) of $(length(c[2]))",
+            fmt(median([S[(id, c[1], "base")] for id in c[2]]), "%.3f"),
+            fmt(median([S[(id, c[1], nothing)] for id in c[2]]), "%.3f"),
+        ] for c in cmp
+    ]
+    # As good or better / sets with a group prediction, per kind of quantity.
+    app_count(qs) = (
+        sum(length(c[3]) for c in cmp if c[1] in qs),
+        sum(length(c[2]) for c in cmp if c[1] in qs),
+    )
+    app_mass = app_count(("q50_Mass",))
+    app_mlr = app_count(("q50_MLR",))
+    app_T = app_count(("q50_Temp", "q25_Temp"))
+    cost_bullet =
+        timed && haskey(vs, "fds") ?
+        "- **Cost.** Pyrolysis.jl reaches a 1 %, 2 K accuracy tolerance on $(length(reached)) of " *
+        "$(length(pkeys)) timed\n  cases, and its cheapest such run takes less time than FDS's on " *
+        "$(vs["fds"][1]) of $(vs["fds"][2]) shared cases." : ""
+
+    io = IOBuffer()
+    println(
+        io,
+        """
+# MaCFP PMMA validation
+
+The MaCFP condensed-phase working group's database holds property sets for one black
+PMMA. Each set was calibrated by an institution in its own code (FDS, Gpyro or
+ThermaKin2Ds) and comes with that institution's predictions: of the MaCFP-2 targets (TGA,
+and gasification of 6 and 12 mm slabs at 10, 25 and 65 kW/m²) and, for most sets, of the
+MaCFP-3 experiments in the NIST gasification apparatus. Pyrolysis.jl runs every set as
+written, and FDS 6.11.1, Gpyro V2 and ThermaKin2Ds 7 run the same decks
+($(link(DECKS_PAGE, "decks and scenario"))).
+
+The submissions are calibrated models, not measurements: agreement with them shows how
+faithfully a code reproduces another code's model. The apparatus experiments are the
+measurements.
+
+## Findings
+
+- **Same deck, same answer.** On the decks that absorb at the surface, Pyrolysis.jl and
+  FDS agree to $(pct(minimum(sfds)))–$(pct(maximum(sfds))) % in t₅₀. On the in-depth decks, with FDS's attenuation
+  matched, all $ncases cases agree within $(pct(worst_match; d = 2)) % in t₅₀ and peak mass-loss rate.
+- **The groups' predictions.** Pyrolysis.jl reproduces each submission about as well as
+  the code the set was calibrated in: as close or closer on $nclose of $(length(own_runs)) sets. The two
+  largest gaps are submissions that ran a different scenario; reproducing it brings
+  $(join(["$id to $v %" for (id, v) in zip(departed, departed_to)], " and ")).
+- **Where the codes differ**, the difference follows how each code deposits the
+  radiation the solid absorbs.
+- **TGA.** The kinetics reproduce the submitted curves within $(Int(tga_tol)) K on $tga_ok of
+  $(length(tga_dev)) sets.
+- **The apparatus experiments.** Scored against the measurements, Pyrolysis.jl is as
+  good as or better than the groups' own predictions on mass-loss rate in $(app_mlr[1]) of $(app_mlr[2]) sets
+  and on back temperature in $(app_T[1]) of $(app_T[2]), but on mass in $(app_mass[1]) of $(app_mass[2]). The shared
+  apparatus deck limits the back-temperature scores.
+$cost_bullet
+
+## Against FDS on the same decks
+
+On the decks that absorb at the surface, Pyrolysis.jl and FDS solve the same problem and
+agree to $(pct(minimum(sfds)))–$(pct(maximum(sfds))) % in median t₅₀. On the in-depth decks both codes absorb
+and emit in every cell, but FDS's two-flux sweep crosses a cell of width Δz with
+transmission 1/(1 + 2κΔz) where Pyrolysis.jl's two-stream model transmits e^(−1.5κΔz).
+Scaling κ so the two agree on FDS's 50 µm cells, and aligning the one item FDS cannot
+express on UMD, UMET_GP and UMET_TK, leaves differences within $(pct(worst_match; d = 2)) % in every case.
+In t₅₀ they are within FDS's own change between its 50 and 25 µm cells on
+$(howmany(count(first, values(within)), length(within))) of the sets FDS also ran at 25 µm.
+""",
+    )
+    table(
+        io,
+        [
+            "set",
+            "deck as written: median \\|Δt₅₀\\| (%)",
+            "matched: max \\|Δt₅₀\\| (%)",
+            "matched: max \\|Δpeak\\| (%)",
+            "matched: worst RMS ΔT (K)",
+        ],
+        match_rows,
+    )
+    println(
+        io,
+        """
+Per-code tables: $(link(GAS_PAGE, "code to code", "Code to code")) and
+$(link(GAS_PAGE, "matched to FDS", "Matched to FDS")).
+
+## Against the groups' predictions
+
+The code a set was calibrated in, running the published deck, is the yardstick: it
+reproduces the submission only as far as the deck and the scenario are what the group
+ran. Median |Δt₅₀| over the six cases (%):
+""",
+    )
+    table(
+        io,
+        [
+            "set",
+            "calibrated in",
+            "Pyrolysis.jl",
+            "calibration code",
+            "Pyrolysis.jl, as the group ran",
+        ],
+        sub_rows,
+    )
+    println(
+        io,
+        """
+UMD's ThermaKin2Ds run is read in `MAX` mode at 10 kW/m² and `RAND` above, which
+reproduces its submission; UMET_TK's mode is not known. The last column reproduces what
+three groups ran instead of the specified scenario: convection at h = 5.33 W/(m²·K)
+(BUW-FZJ_B), c and k tables read as °C (DBI_1), and a 303.15 K start (Aalto_I).
+
+BUW-FZJ_A is left out. Its low-emissivity residue collects as a film at the surface, and
+how much of that film the surface cell holds, and so how much of the heater's flux the
+sample absorbs, depends on the cell size in every code. Its results measure the
+discretization as much as the property set ($(link(GAS_PAGE, "BUW-FZJ_A", "BUW-FZJ_A"))).
+""",
+    )
+    figure(io, parity, "Parity of t50 and peak MLR against the submissions")
+    println(
+        io,
+        """
+Every code against every submission: $(link(GAS_PAGE, "gasification", "Against the submissions"));
+the mass, mass-loss rate and temperature histories of each set:
+$(link(HIST_PAGE, "gasification histories")).
+
+## Where the codes differ
+
+The differences to Gpyro and ThermaKin2Ds follow how each code deposits the radiation it
+absorbs. Variants of each in-depth deck that move one choice at a time show it:
+
+- Gpyro deposits the net surface flux along a Beer–Lambert march and emits nothing from
+  the depth; the shallowest-depositing variant is closest to it on $(length(gp_close)) of $(length(gp)) sets.
+- ThermaKin2Ds in `MAX` mode deposits the absorbed radiation in the surface element;
+  surface absorption is the closest variant on $(length(tk_surf)) of $(length(tkr)) sets.
+- A diffuse heater is closer than a collimated one to the submission on $(length(heater_sub)) of $(length(calib_sub))
+  sets calibrated in Gpyro or ThermaKin2Ds, and to FDS on $(length(heater_fds)) of $(length(ids_with("fds/base"))).
+- Absorbing at the surface instead of in depth moves t₅₀ by
+  $(pct(minimum(surface_move)))–$(pct(maximum(surface_move))) % per set.
+
+Every variant against every code: $(link(GAS_PAGE, "radiation in depth", "Radiation in depth")).
+
+## TGA
+
+The TGA targets test the kinetics alone. Pyrolysis.jl's temperatures at 10, 50 and
+90 % mass loss are within $(Int(tga_tol)) K of the submission on $tga_ok of the $(length(tga_dev)) sets at both
+heating rates; the largest difference is $(fmt(tga_dev[tga_worst][1], "%.1f")) K ($tga_worst, $(tga_dev[tga_worst][2]) K/min).
+""",
+    )
+    figure(io, tga_png, "TGA, every set")
+    println(
+        io,
+        """
+Per set and rate: $(link(TGA_PAGE, "TGA")).
+
+## Against the apparatus experiments
+
+Every deck with complete properties runs the eleven PMMA tests of the NIST gasification
+apparatus on one shared apparatus deck, scored against the measured repeats with MaCFP's
+normalized RMS (lower is better). Against the groups' own predictions of the same tests,
+over the sets with a group prediction:
+""",
+    )
+    table(
+        io,
+        [
+            "quantity",
+            "Pyrolysis.jl as good or better",
+            "median NRMS, Pyrolysis.jl",
+            "median NRMS, groups",
+        ],
+        app_rows,
+    )
+    println(
+        io,
+        """
+The back temperatures measure the shared deck as much as the property sets: on the
+apparatus's inert Kaowool stack, with no sample, it runs $(fmt(deep, "%.0f")) K above the measurement at
+17.16 mm after 1200 s.
+
+Scores, histories and the inert tests: $(link(APP_PAGE, "gasification apparatus")).
+""",
+    )
+    if timed
+        println(
+            io,
+            """
+## Cost
+
+Each code is scored against its own finest run of each case, and a run is within
+tolerance when its peak mass-loss rate and t₅₀ are within 1 % and its temperature
+histories within 2 K. Pyrolysis.jl reaches the tolerance on $(length(reached)) of its $(length(pkeys)) timed
+cases, $(length(coarse)) of them at 10 cells/mm. Its cheapest run within tolerance takes less time than
+$(join(versus, "; ")).
+""",
+        )
+        figure(io, cost_png, "Solve time against error")
+        println(io, "Every case and code: $(link(COST_PAGE, "cost")).\n")
+    end
+    write_page(PAGE, io)
+
     total = sum(filesize(joinpath(FIG, f)) for f in readdir(FIG))
-    @printf("wrote %s and %d figures (%.2f MB)\n", PAGE, length(readdir(FIG)), total / 2^20)
+    @printf(
+        "wrote %s, %d detail pages and %d figures (%.2f MB)\n",
+        PAGE,
+        length(readdir(DETAIL)),
+        length(readdir(FIG)),
+        total / 2^20
+    )
 end
 
 main()
