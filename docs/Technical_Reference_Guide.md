@@ -7289,7 +7289,16 @@ absorption coefficient does not give the same deposition. The implementation int
 each cell by an implicit step,
 $I_d = (I_u + 2\kappa_s\Delta z\,\sigma T^4)/(1 + 2\kappa_s\Delta z)$, first order in the
 cell's optical thickness, so its effective attenuation is
-$\ln(1+2\kappa_s\Delta z)/\Delta z$, below $2\kappa_s$ on any finite cell. Its exposed face
+$\ln(1+2\kappa_s\Delta z)/\Delta z$, below $2\kappa_s$ on any finite cell. Our diffuse row
+transmits $t=e^{-1.5\alpha\Delta z}$ across a cell and gains $\sigma T^4(1-t)$, so at
+$\alpha=\ln(1+2\kappa_s\Delta z)/(1.5\,\Delta z)$ on cells of FDS's width the transmission
+and the emission of the two rows agree cell by cell. With that coefficient at FDS's 50 µm
+cells, and on UMD, UMET_GP and UMET_TK the one item FDS cannot express aligned, seven of
+the eight MaCFP PMMA property sets that absorb in depth agree with FDS 6.11.1 to at most
+0.32 % in the time to half mass loss and 0.58 % in peak mass-loss rate, with RMS surface
+and back temperature differences of at most 1.9 K; the eighth, BUW-FZJ_C, whose residue's
+coefficient makes a factor applied per component approximate, agrees to 0.68 % and 0.71 %
+(§18.6.5). FDS's exposed face
 transmits $\varepsilon$ both ways, with the reflected upward flux taken from the
 previous sub-step, and the face balance holds no radiation; an insulated back is a
 mirror. Match the angular factor, the optical depth and the cell size as well as
@@ -7317,10 +7326,16 @@ the same heater diffuse, attenuated as $e^{-D\tau}$ where exact transfer gives
 $2E_3(\tau)$, the flux leaving moves by at most 0.0024 and the sources over the sample
 by 0.012–0.051; and the exposed cell, which the closure underweights in the thin
 limit, absorbs 0.755–0.791 of its exact share. V-RAD-02 reports the conversion at the
-back against a specular mirror on its slab. No case compares the in-depth radiation of
-Pyrolysis.jl with another code's: each of the three differs in a way §8.9.1–§8.9.3 name, and a matched
-comparison would test those choices rather than the discretization. User Guide §5.6
-explains the heater and surroundings choices for comparisons.
+back against a specular mirror on its slab. No verification case compares the in-depth
+radiation of Pyrolysis.jl with another code's. The MaCFP PMMA validation (§18.6.5) does: against
+FDS it is matched, with the attenuation of §8.9.3 at FDS's cell size and the items FDS cannot
+express aligned, and agrees within 0.71 % in the time to half mass loss and in peak
+mass-loss rate on eight property sets; against Gpyro V2 and ThermaKin2Ds it is unmatched,
+because their deposition has no exact counterpart here (Gpyro marches the net surface
+flux and emits nothing from the depth, §8.9.2; ThermaKin2Ds deposits each step in one
+element, §8.9.1), so their differences measure those kernels rather than the
+discretization. User Guide §5.6 explains the heater
+and surroundings choices for comparisons.
 
 ---
 
@@ -16211,11 +16226,13 @@ validation:
 4. **Convergence studies** (§18.5): spatial, temporal and tolerance refinement,
    confirming that the discretization error shrinks at the designed rate.
 5. **Code- and experiment-level validation** (§18.6): cone calorimeter, Douglas fir,
-   pressure-treated wood, moisture transport, against measurements and other codes.
+   pressure-treated wood, moisture transport and the MaCFP PMMA property sets, against
+   measurements and other codes.
 
 The first three run in the test suite, and the verification suite asserts
 convergence orders as well (§18.1.3); the convergence studies of §18.5 and the
-validation cases are scripted examples in `examples/`.
+validation cases are scripted examples in `examples/`, and the MaCFP PMMA suite is
+in `scripts/macfp_pmma/`.
 
 ### 18.1.3 The verification suite: test mode and report mode
 
@@ -17225,13 +17242,54 @@ can arise from either, from input transcription, or from output definitions.
   radiation are not general equivalents of our transport and radiative transfer
   models: its two-flux closure attenuates a diffuse field at $2\kappa_s$ where our
   two-stream rows attenuate at $1.5\,\alpha$, and integrates each cell implicitly to
-  first order (§8.9.3).
+  first order (§8.9.3). At that attenuation on FDS's cells, with the item FDS cannot
+  express aligned on UMD, UMET_GP and UMET_TK, the eight MaCFP PMMA property sets that
+  absorb in depth agree with FDS 6.11.1 within 0.71 % in the time to half mass loss and
+  in peak mass-loss rate (§18.6.5).
 
 The benchmark definitions, actual input decks and exact-solution errors
 provide the evidence for each comparison (§18.1.3). The MaCFP community
 predictions use differing calibrated models; their spread is not a
 solver-only verification result. Cost is compared only at matched accuracy
 (§18.1.3).
+
+### 18.6.5 MaCFP PMMA property sets
+
+The MaCFP condensed-phase working group's database (matl-db, read at a pinned commit)
+holds property sets for one black PMMA, each calibrated by an institution in its own
+code; for the 2021 sets it also holds that institution's predictions of the MaCFP-2
+targets (TGA at 10 and 100 K/min; anaerobic gasification of 6 and 12 mm slabs at 10, 25
+and 65 kW/m² with an insulated back), and for most sets their predictions of the MaCFP-3
+experiments in the NIST gasification apparatus. `scripts/macfp_pmma/` runs every set in
+Pyrolysis.jl, FDS 6.11.1, Gpyro V2 and ThermaKin2Ds 7 from one solver-neutral deck per
+set, and its `report.jl` writes the [MaCFP PMMA validation](guide/validation/macfp_pmma.md)
+page from those runs. The submissions are calibrated models, not measurements: agreement
+with them tests how faithfully a deck and a code reproduce another code's model, and the
+apparatus experiments are the measurements.
+
+Sets that absorb at the surface run under `SURFACE_ABSORPTION`. On them, BUW-FZJ_A aside,
+Pyrolysis.jl and FDS solve the same problem and agree to 0.0–0.3 % in the median time to
+half mass loss, $t_{50}$, and the runs that reproduce what a group evidently ran
+(BUW-FZJ_B's convection, DBI_1's temperature tables read as °C, Aalto's 303 K start) agree
+with those submissions to 0.04, 2.2 and 0.2 % in median $t_{50}$. Sets with an absorption
+coefficient run under `RADIATIVE_TRANSFER` with a diffuse heater and a mirror back. Per
+set, their median $|\Delta t_{50}|$ is 0.8–5.5 % to the submissions and 0.6–3.4 % to FDS;
+matched to FDS's attenuation (§8.9.3), with the item FDS cannot express aligned on UMD,
+UMET_GP and UMET_TK, every case of the eight agrees within 0.71 % in $t_{50}$ and peak
+mass-loss rate. The differences to Gpyro V2 and ThermaKin2Ds follow their deposition: of
+the variants that absorb in depth, the shallowest-depositing one is closest to Gpyro's
+net-flux march on three of the four in-depth sets Gpyro runs, and surface absorption is
+closest to ThermaKin2Ds' `MAX` mode on all four in-depth sets it runs. BUW-FZJ_A, whose
+low-emissivity residue collects in the surface cell, depends on the cell size in every
+code and, in Pyrolysis.jl, on how long the moving mesh keeps a burnt-out layer in the
+surface cell; it is reported apart.
+
+In the apparatus one shared deck (convection, walls, the Kaowool board, a cone heater
+inferred from the measured flux profile) runs every set, and MaCFP's normalized RMS
+scores the runs against the measured repeats beside the groups' own predictions. On the
+apparatus's inert Kaowool stack the shared deck runs above the measurements, by 6–27 K at
+5.72 mm and by up to 93 K at 17.16 mm after 1200 s, so the back-temperature scores
+measure the shared deck as much as the property sets.
 
 ---
 

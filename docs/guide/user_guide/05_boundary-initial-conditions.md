@@ -507,6 +507,18 @@ flux and absorption coefficient does not reproduce all three treatments.
 Match the deposition and loss model using Technical Reference §§8.9 and
 12.11 before comparing temperature histories.
 
+A heater under `RADIATIVE_TRANSFER` needs a distribution. A target that states only
+that the flux is absorbed at the surface emissivity is met by `Diffuse()` and by
+`Collimated()`. A cone from the normal, `Cone(0, θ₂)`, deposits between the two for θ₂
+up to about 70° and slightly nearer the face than `Diffuse()` beyond. The choice
+matters: on the MaCFP PMMA property sets that absorb in depth, a collimated heater
+differs from the diffuse default by a median of 0.9–1.7 % per set in the time to half
+mass loss (4.6 % in one case) and 0.7–4.4 % in peak mass-loss rate
+([MaCFP PMMA validation](../validation/macfp_pmma.md)). To compare with another
+code, match its heater and its closure as well as its absorption coefficient: FDS's
+two-flux sweep agrees with a diffuse heater at the attenuation of Technical Reference
+§8.9.3.
+
 ---
 
 ## 5.7 Mesh motion in ALE simulations (no boundary conditions needed)

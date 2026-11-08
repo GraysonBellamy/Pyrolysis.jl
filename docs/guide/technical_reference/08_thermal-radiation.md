@@ -829,7 +829,16 @@ absorption coefficient does not give the same deposition. The implementation int
 each cell by an implicit step,
 $I_d = (I_u + 2\kappa_s\Delta z\,\sigma T^4)/(1 + 2\kappa_s\Delta z)$, first order in the
 cell's optical thickness, so its effective attenuation is
-$\ln(1+2\kappa_s\Delta z)/\Delta z$, below $2\kappa_s$ on any finite cell. Its exposed face
+$\ln(1+2\kappa_s\Delta z)/\Delta z$, below $2\kappa_s$ on any finite cell. Our diffuse row
+transmits $t=e^{-1.5\alpha\Delta z}$ across a cell and gains $\sigma T^4(1-t)$, so at
+$\alpha=\ln(1+2\kappa_s\Delta z)/(1.5\,\Delta z)$ on cells of FDS's width the transmission
+and the emission of the two rows agree cell by cell. With that coefficient at FDS's 50 µm
+cells, and on UMD, UMET_GP and UMET_TK the one item FDS cannot express aligned, seven of
+the eight MaCFP PMMA property sets that absorb in depth agree with FDS 6.11.1 to at most
+0.32 % in the time to half mass loss and 0.58 % in peak mass-loss rate, with RMS surface
+and back temperature differences of at most 1.9 K; the eighth, BUW-FZJ_C, whose residue's
+coefficient makes a factor applied per component approximate, agrees to 0.68 % and 0.71 %
+(§18.6.5). FDS's exposed face
 transmits $\varepsilon$ both ways, with the reflected upward flux taken from the
 previous sub-step, and the face balance holds no radiation; an insulated back is a
 mirror. Match the angular factor, the optical depth and the cell size as well as
@@ -857,10 +866,16 @@ the same heater diffuse, attenuated as $e^{-D\tau}$ where exact transfer gives
 $2E_3(\tau)$, the flux leaving moves by at most 0.0024 and the sources over the sample
 by 0.012–0.051; and the exposed cell, which the closure underweights in the thin
 limit, absorbs 0.755–0.791 of its exact share. V-RAD-02 reports the conversion at the
-back against a specular mirror on its slab. No case compares the in-depth radiation of
-Pyrolysis.jl with another code's: each of the three differs in a way §8.9.1–§8.9.3 name, and a matched
-comparison would test those choices rather than the discretization. User Guide §5.6
-explains the heater and surroundings choices for comparisons.
+back against a specular mirror on its slab. No verification case compares the in-depth
+radiation of Pyrolysis.jl with another code's. The MaCFP PMMA validation (§18.6.5) does: against
+FDS it is matched, with the attenuation of §8.9.3 at FDS's cell size and the items FDS cannot
+express aligned, and agrees within 0.71 % in the time to half mass loss and in peak
+mass-loss rate on eight property sets; against Gpyro V2 and ThermaKin2Ds it is unmatched,
+because their deposition has no exact counterpart here (Gpyro marches the net surface
+flux and emits nothing from the depth, §8.9.2; ThermaKin2Ds deposits each step in one
+element, §8.9.1), so their differences measure those kernels rather than the
+discretization. User Guide §5.6 explains the heater
+and surroundings choices for comparisons.
 
 ---
 
