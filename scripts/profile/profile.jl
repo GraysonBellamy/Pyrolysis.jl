@@ -10,8 +10,8 @@
 # Options (all --key=value):
 #   --config=NAME    fixed_no_radiation | moving_no_radiation |
 #                    fixed_surface_absorption | fixed_darcy |
-#                    moving_beer_lambert_darcy | all
-#                    (default: moving_beer_lambert_darcy — the heaviest physics)
+#                    moving_radiative_transfer_darcy | all
+#                    (default: moving_radiative_transfer_darcy — the heaviest physics)
 #   --mode=MODE      summary | cpu | allocs | all   (default: all)
 #   --target=T       residual | jacobian | solve | all   (default: all)
 #   --t-final=SEC    end-to-end solve horizon [s]   (default: 5.0)
@@ -142,13 +142,13 @@ const CONFIGS = Dict(
         ),
         options = (;),
     ),
-    "moving_beer_lambert_darcy" => (
+    "moving_radiative_transfer_darcy" => (
         material = _wood,
         bc = () -> BoundaryConditionSet(
             thermal = (top = _radiative_top(), bottom = AdiabaticBC()),
             mass = _venting(),
         ),
-        options = (use_ale = true, radiation_model = BEER_LAMBERT),
+        options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
     ),
 )
 
@@ -171,7 +171,7 @@ end
 # ---------------------------------------------------------------------------
 function parse_cli(args)
     opts = Dict{String,String}(
-        "config" => "ale_beer_lambert_darcy",
+        "config" => "moving_radiative_transfer_darcy",
         "mode" => "all",
         "target" => "all",
         "t-final" => "5.0",

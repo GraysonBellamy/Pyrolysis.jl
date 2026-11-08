@@ -1,6 +1,6 @@
 # V-BO-08 — Localized burnout of a thin PMMA layer on a deep substrate
 
-**Tags:** `ale`, `burnout`, `depletion`, `beer_lambert`, `coupled`
+**Tags:** `ale`, `burnout`, `depletion`, `radiative_transfer`, `coupled`
 
 **References:**
 
@@ -21,11 +21,11 @@ time.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| complete burnout: live thickness at t_end is the substrate | 0.012 | 0.012 | 4.476e-10 | 1e-05 | yes | every PMMA cell deactivated; 12.0 ± 0.01 mm |
-| mass loss of the gasified PMMA layer | 27.92 | 27.92 | 1.306e-05 | 0.3 | yes | percent of the initial mass; exact = the layer's initial mass / m₀ |
-| mass ledger closure | 1.789e-07 | 0 | 1.789e-07 | 3e-05 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented |
+| complete burnout: live thickness at t_end is the substrate | 0.012 | 0.012 | 6.658e-10 | 1e-05 | yes | every PMMA cell deactivated; 12.0 ± 0.01 mm |
+| mass loss of the gasified PMMA layer | 27.92 | 27.92 | 1.93e-05 | 0.3 | yes | percent of the initial mass; exact = the layer's initial mass / m₀ |
+| mass ledger closure | 7.505e-07 | 0 | 7.505e-07 | 3e-05 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented |
 | clamped surface balances on accepted states | 0 | 0 | 0 | 0.5 | yes | boundary temperature solve converged inside the property bracket at every accepted step |
-| deactivation invocations for the PMMA layer (reported) | 1 | 1 | 0 | Inf | yes | 10 cells; largest merged fraction 0.0135 (1.35 ε_m); reported, not asserted |
+| deactivation invocations for the PMMA layer (reported) | 1 | 1 | 0 | Inf | yes | 10 cells; largest merged fraction 0.0104 (1.04 ε_m); reported, not asserted |
 | the correction is zero at every Kaowool node | 0 | 0 | 0 | 2.22e-16 | yes | m/s over the 123 substrate nodes and every saved time |
 
 ![V-BO-08 mlr_history](assets/V-BO-08/V-BO-08_mlr_history.png)
@@ -40,6 +40,6 @@ time.
 | use_ale | true |
 | deactivation | true |
 | min_thickness | 0.001 |
-| radiation_model | BEER_LAMBERT |
+| radiation_model | RADIATIVE_TRANSFER |
 | abstol | 1.0e-8 |
 | reltol | 1.0e-6 |

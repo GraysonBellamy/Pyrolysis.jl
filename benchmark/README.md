@@ -39,7 +39,7 @@ should investigate the offending benchmark in isolation:
 ```julia
 using BenchmarkTools, Pyrolysis
 include("benchmark/benchmarks.jl")
-run(SUITE["wood_moving_beer_lambert_darcy"]["jacobian"])
+run(SUITE["wood_moving_radiative_transfer_darcy"]["jacobian"])
 ```
 
 ## CI

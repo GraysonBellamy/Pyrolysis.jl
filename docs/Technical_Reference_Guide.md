@@ -64,7 +64,7 @@ The state of the material is described, in every finite-volume cell $i$, by:
 - the **component masses** $m_{j,i}$ [kg] of every chemical component $j \in \{1,\dots,N_C\}$ — the integrated unknowns; the **mass concentrations** $\xi_{j,i} = m_{j,i}/V_i$ [kg·m⁻³] that every constitutive law reads are derived from them — and
 - one **energy state**: the cell temperature $T_i$ [K] (the default), or the cell's sensible-enthalpy inventory $H_i = \sum_j m_{j,i}\,h_j(T_i)$ [J] (`energy_state = :enthalpy`), from which the temperature is recovered (§1.4.2).
 
-The choice of mass concentration $\xi_j$ (rather than mass fraction $Y_j = \xi_j/\rho$) as the constitutive species variable is deliberate: it makes the species conservation law a plain transport equation with a reaction source, with no embedded density derivative, and it is the form first-order kinetics naturally produce; a reaction of any other order reads its reactant's conversion against a constant of the cell, its reference (§6.1, §6.4). Integrating the cell masses themselves makes the discrete mass balance exact: a cell's mass changes only by its reaction sources and its face fluxes, and a moving cell's change of volume needs no correction term (§3.2, §11.3.4). Further unknowns are introduced only when the corresponding physics is enabled — on a moving mesh (`use_ale = true`) the node positions $z_n$ (differential) and node velocities $w_n$ (algebraic, held by the cells' volume balances; §11.3); under `BEER_LAMBERT` the face intensities $I_f$ (algebraic; §8); under a lateral-shrinkage law the conversion-history pair $(G_i, m_{\mathrm{dry},i})$ of every cell and the cross-section area $A$ with its lateral strain rate $\theta_A$ (algebraic; §10).
+The choice of mass concentration $\xi_j$ (rather than mass fraction $Y_j = \xi_j/\rho$) as the constitutive species variable is deliberate: it makes the species conservation law a plain transport equation with a reaction source, with no embedded density derivative, and it is the form first-order kinetics naturally produce; a reaction of any other order reads its reactant's conversion against a constant of the cell, its reference (§6.1, §6.4). Integrating the cell masses themselves makes the discrete mass balance exact: a cell's mass changes only by its reaction sources and its face fluxes, and a moving cell's change of volume needs no correction term (§3.2, §11.3.4). Further unknowns are introduced only when the corresponding physics is enabled — on a moving mesh (`use_ale = true`) the node positions $z_n$ (differential) and node velocities $w_n$ (algebraic, held by the cells' volume balances; §11.3); under `RADIATIVE_TRANSFER` the hemispherical fluxes $I^\pm_f$ of every face and the beams of a collimated or cone heater (algebraic; §8); under a lateral-shrinkage law the conversion-history pair $(G_i, m_{\mathrm{dry},i})$ of every cell and the cross-section area $A$ with its lateral strain rate $\theta_A$ (algebraic; §10).
 
 ### 1.2.1 Intended applications
 
@@ -102,12 +102,12 @@ The organizing principle of Pyrolysis.jl is a **single generalized model with op
 | Energy state | `energy_state` (`:temperature`, the default, or `:enthalpy`) | the energy row of every cell carries $T_i$ or $H_i$ (§1.4.2, §3.3.5) |
 | Mesh motion | `use_ale` | node positions (differential) and node velocities (algebraic, the balance rows of `BalanceRowClosure`) join the state; without it every node is pinned |
 | Mesh correction | `correction`; by default a rule | `EquidistributionCorrection` where the mesh moves, cells are deactivated and some cell, converted completely, would fall below the deactivation threshold; the inventories then cross the faces at the relative velocity (`RelativeFluxKernel`, §11.7) |
-| Radiation | `radiation_model` | under `BEER_LAMBERT` the face intensities (algebraic) and `BeerLambertKernel`; otherwise the incident flux enters the surface energy balance (§8) |
+| Radiation | `radiation_model` | under `RADIATIVE_TRANSFER` the face fluxes of the radiation field (algebraic) and `RadiativeTransferKernel`; otherwise the incident flux enters the surface energy balance (§8) |
 | Gas transport | material model and mass conditions | `LumpedTransfer` or `DustyGas`; sealed gas retains its pore EOS |
 | Cross section | the material's `lateral_shrinkage_law` | the conversion-history pair per cell and the global rows of $A$ and $\theta_A$ (`LateralShrinkage`, §10); needs `use_ale = true` |
 | Burnout | `deactivation`, `threshold`, `band` | `CellDeactivation`: an event that removes cells whose condensed mass, or at an order other than one whose reactive inventory, falls below the threshold (§14) |
 
-The kernels run in a fixed order, each present only when its physics is: `ReactionKernel`, `GasTransportKernel`, `BeerLambertKernel`, `ConductionKernel`, `ThermalBoundaryKernel`, `RelativeFluxKernel` (`_kernels`, `src/Integration/setup.jl`). The order matters where one kernel reads another's output: the surface energy balance of the thermal boundary kernel reads the outward gas fluxes of the gas transport for its blowing models and for the enthalpy those fluxes carry (§7.6, §15.3).
+The kernels run in a fixed order, each present only when its physics is: `ReactionKernel`, `GasTransportKernel`, `RadiativeTransferKernel`, `ConductionKernel`, `ThermalBoundaryKernel`, `RelativeFluxKernel` (`_kernels`, `src/Integration/setup.jl`). The order matters where one kernel reads another's output: the surface energy balance of the thermal boundary kernel reads the outward gas fluxes of the gas transport for its blowing models and for the enthalpy those fluxes carry (§7.6, §15.3).
 
 The layout's type parameters are read by `@inline` accessors with zero runtime cost:
 
@@ -123,7 +123,7 @@ The entry point `residual!(du, u, def::ResidualDefinition, t, ws::ResidualWorksp
 
 The same opt-in philosophy governs the constitutive layers. Each of the following is off (or set to its cheapest closure) by default and is enabled only when the problem requires it:
 
-- **Radiation in depth.** `SURFACE_ABSORPTION`, the default, routes the incident flux of a `RadiativeFluxBC` through the surface energy balance, with no volumetric deposit, at $O(1)$ cost; `BEER_LAMBERT` resolves exponential in-depth absorption through face intensities that are algebraic unknowns of the state, which keeps the Jacobian banded. The two models are mutually exclusive (§8).
+- **Radiation in depth.** `SURFACE_ABSORPTION`, the default, routes the incident flux of a `RadiativeFluxBC` through the surface energy balance, with no volumetric deposit, at $O(1)$ cost; `RADIATIVE_TRANSFER` carries radiation through the solid, every cell absorbing and emitting, as a gray two-stream field of face fluxes that are algebraic unknowns of the state, which keeps the Jacobian banded. The two models are mutually exclusive (§8).
 - **Gas transport.** The material declares lumped superficial transfer or dusty-gas
   friction. Both include independent Darcy permeability and use the same pore
   EOS and conservative total-flux interface matching (Chapter 9).
@@ -382,8 +382,9 @@ Reaction and gas/solid enthalpy accounting still matter (§7.8.3).
 FDS permits concentration-order, oxygen and temperature factors in its reaction
 rates. Pyrolysis.jl supports the concentration-order factor but omits the explicit
 oxygen and temperature-power factors. FDS offers surface absorption by default
-and a two-flux model for in-depth absorption and emission; Pyrolysis.jl's
-in-depth option is an incident Beer–Lambert beam without internal emission.
+and a two-flux model for in-depth absorption and emission. Pyrolysis.jl's
+radiative transfer is also a two-stream model with emission; it differs in the angular
+factor, the exact cell integration and the implicit coupling (§8.9.3).
 The implemented FDS thickness rule is discussed in §10.11.3, including a
 discrepancy between the 6.11.0 manual and source.
 
@@ -454,7 +455,7 @@ The Technical Reference Guide proceeds from continuum theory to discretization t
 - **§4 Materials & Property Functions** and **§5 Effective Properties & Mixing Rules** — the constitutive layer: components, phases, property-function types and the derivatives automatic differentiation takes of them, skeletal porosity, and the conductivity/transfer/permeability mixing rules.
 - **§6 Reaction Kinetics** — the Arrhenius rate law, smooth temperature gates, the one-sided depletion limiter, stoichiometry, and the heat-of-reaction source.
 - **§7 Heat Conduction, Gas Convection & Energy Assembly** — Fourier conduction, the gas enthalpy flux, the energy rows, and the residual sequence.
-- **§8 Thermal Radiation** — the two radiation models and the Beer–Lambert face intensities.
+- **§8 Thermal Radiation** — surface absorption and radiative transfer in the solid: the two-stream rows, the boundaries, the source and the mesh criterion.
 - **§9 Gas-Phase Mass Transport & Pressure** and **§10 Volume Change & Lateral Shrinkage** — diffusive and Darcy fluxes, the ideal-gas pressure, the strain rate, the conversion-history pair and the cross-section rows.
 - **§11 The ALE Framework**, **§12 Boundary & Initial Conditions**, **§13 Finite-Volume Discretization**, **§14 Cell Deactivation and Burnout** — the discretization, the moving mesh and its correction, and burnout.
 - **§15 Temporal Integration, the DAE, and the Colored Jacobian**, **§16 Conservation Ledgers and the Audit**, **§17 Sensitivity Analysis**, **§18 Verification & Validation** — the numerical engine, the audits, and the V&V program.
@@ -504,7 +505,7 @@ The physics below is absent from the model. It is ordered by its expected effect
 
 **Niche or future**
 
-- Spectral (two-band) radiation and in-depth emission from glowing char or from a semi-transparent polymer (for black PMMA the radiative conductivity it would add is about 0.045 W·m⁻¹·K⁻¹ at 650 K, a fifth of the room-temperature conductivity and half of the value a cone-calibrated law assigns at that temperature, §5.5, §8.2.2); a model of that kind would add further algebraic intensity rows to the state, as the Beer–Lambert face intensities do (§8).
+- Spectral (banded) radiation and a refractive index in the radiative transfer rows: each band would repeat the rows of §8.3 with its own absorption coefficient and share of the emission, and a refractive index would change the interface's reflectivities (§8.10).
 - Substrate reflection; scattering ($\sigma_s$ is not modeled); view-factor edge fall-off.
 - Species-pair-dependent molecular diffusivities and thermal-transpiration effects beyond the declared common-diffusivity dusty-gas closure.
 - Liquid free-water capillarity (relevant only above the fiber-saturation point, about 30 % moisture content) and bound-water diffusion ($\sqrt{Dt} \approx 0.25$ mm over a cone test, negligible at fire heating rates).
@@ -577,10 +578,12 @@ Conventions:
 | $A_{\alpha\beta}$, $A_i$ | Arrhenius pre-exponential factor for reaction *i* (or *αβ*) | s⁻¹ |
 | $a_j$ | Surface absorptivity of component *j* for incident radiation (`surface_absorptivity`; $\varepsilon_j(T)$ when unset, Kirchhoff) | – |
 | $a_{\text{eff}}$ | Effective (composition-weighted) surface absorptivity, $\sum_j v_j a_j$ | – |
-| $a$, $a_s$ | Absorptivity applied to the incident flux of a `RadiativeFluxBC`: the condition's own `absorptivity` when it has one, otherwise $a_{\text{eff}}$ of the outermost live cell (§8.3.2, §12.3.5) | – |
+| $a$, $a_s$ | Absorptivity applied to the incident flux of a `RadiativeFluxBC`: the condition's own `absorptivity` when it has one, otherwise $a_{\text{eff}}$ of the outermost live cell; at the face under surface absorption, to the beams under radiative transfer (§8.2, §8.4.2, §12.3.5) | – |
 | $a_i$, $a_n$ | Activation switch of cell *i* / node *n* of the equidistribution correction (§11; overload A9) | – |
+| $a^{\text{lo}}_i$, $a^{\text{lo}}_n$ | Second switch of cell *i* / node *n*, through which a layer's second estimate enters the correction (§11.7.5; overload A9) | – |
 | $B$ | Spalding blowing number $\dot m''c_{p,g}/h$ of the convective blowing models (§12.3.3) | – |
 | $B_{\lambda}$, $B_{\Gamma}$ | Film parameters of the blowing models: $B_{\lambda} = 2\lambda \sum_j N_j c_{p,j}(T_s)/h$ (`CouetteFilm`, $\lambda$ its film constant, overload A6); $B_{\Gamma} = (\dot m'' c_{p,\infty}/h)(\Gamma_{\infty}/\Gamma_g)^{n_{\Gamma}}$ (`PropertyRatioFilm`, `PoolingFilm`) (§12.3.3; overload B1) | – |
+| $\mathcal B_i$ | Emissive power of cell *i*, $\sigma\tilde T_i^4$ at its trial temperature (§8.3.2) | W·m⁻² |
 | $C_i$ | Heat-capacity sum of cell *i*, $\sum_j m_{j,i} c_{p,j}(\tilde T_i)$ at the trial temperature, smoothly floored at $C_{\text{floor},i}$ | J·K⁻¹ |
 | $C_{\text{floor},i}$ | Capacity floor of cell *i*, $\rho c_{p,\text{floor}} V_i(0)$ (§5.4.3, §13.10.4) | J·K⁻¹ |
 | $C_{\text{reg},i}$ | Regularizing capacity of the extended caloric relation: zero while the cell's guaranteed heat capacity is at least $2C_{\text{floor},i}$, rising to $C_{\text{floor},i}$ as that capacity vanishes (§5.4.3, §13.10.4, §16.4) | J·K⁻¹ |
@@ -623,10 +626,8 @@ Conventions:
 | $h_m$ | External mass-transfer (film) coefficient | m·s⁻¹ |
 | $h_P$ | Pressure-transfer coefficient (convective pressure BC) | m·Pa⁻¹·s⁻¹ |
 | $\Delta h$, $\Delta h_g$ | Sensible enthalpy difference $\int c_p dT$ between two temperatures, e.g. $\Delta h_g(T_s, T_{\infty})$; $\Delta h_{c,\text{eff}}$ the effective heat of combustion (User Guide 2) | J·kg⁻¹ |
-| $I(z)$ | Radiation intensity along the beam (Beer–Lambert) | W·m⁻² |
-| $I_f$, $I_{\text{up}}$, $I_{\text{down}}$ | Intensity at face *f* (an algebraic unknown under Beer–Lambert) / at a cell's upstream and downstream face | W·m⁻² |
-| $I_{\text{inc}}$, $I_e$ | Intensity entering the medium through the exposed face *e*, $a q_{\text{inc}}$ (§8.3.2, §8.3.4) | W·m⁻² |
-| $I_b$ | Intensity reaching the last face of the beam, transmitted out through the back (`radiation_transmitted`, §8.3.2) | W·m⁻² |
+| $I^-$, $I^+$; $I^-_f$, $I^+_f$ | Hemispherical radiative flux toward the back / toward the exposed face; at face *f*, algebraic unknowns under radiative transfer (§8.3) | W·m⁻² |
+| $I_h$, $I_{h,f}$ | Flux of the heater's beam of direction *h* across a face normal to $z$, toward the back; at face *f*, an algebraic unknown (§8.3.1, §8.4.2) | W·m⁻² |
 | $J$ | Jacobian $\partial f/\partial u$ of the residual (linear-algebra context only) | mixed |
 | $J_j$, $J_{j,f}$ | Mass flux of (gas) component *j* relative to the solid (at face *f*: the gas-transport flux, §9, §13.7) | kg·m⁻²·s⁻¹ |
 | $J_j^{\text{diff}}$, $J_j^{\text{adv}}$ | Diffusive / advective part of the gas flux | kg·m⁻²·s⁻¹ |
@@ -654,15 +655,16 @@ Conventions:
 | $\dot m_g$, $\dot m''$, $\dot m''_k$ | Outward gas mass flux at the surface ($\dot m''$ in the blowing models, $\dot m''_k$ of species *k*; §12.3.3) | kg·m⁻²·s⁻¹ |
 | $\dot m_{\text{out}}$ | Outflow rate of the live region, positive leaving, $\sum_{f\in\mathcal{F}_{\text{live}}} \sum_j F_{j,f} A_f$ (§16.3.2) | kg·s⁻¹ |
 | $\dot M_{j,i}$ | Face-flux part of the mass rate of component *j* in cell *i*, $-\sum_f s_{if} A_f F_{j,f}$ | kg·s⁻¹ |
-| $\text{mob}_i$, $\text{mob}_f$ | Gas mobility $\kappa/\mu$ of cell *i*; interface fluxes use each half-cell mobility (§5.7.4, §9.6; overload M1) | m²·Pa⁻¹·s⁻¹ |
+| $\text{mob}_i$, $\text{mob}_f$ | Gas mobility $\kappa/\mu$ of cell *i*; interface fluxes use each half-cell mobility (§5.13.2, §9.6; overload M1) | m²·Pa⁻¹·s⁻¹ |
 | $N_j$, $n_j$ | Species mass flux and molar flux relative to the skeleton | kg·m⁻²·s⁻¹; mol·m⁻²·s⁻¹ |
 | $N_C$ (`NC`) | Number of chemical components (type parameter) | – |
 | $N_R$ (`NR`) | Number of reactions (type parameter) | – |
 | $N_{\text{state}}$ | Length of the state vector (§3.1.2, §15.1.1) | – |
 | $N_{\text{node}}$, $N_{\text{cell}}$, $N_{\text{blk}}$ | Rows of a node block / of a cell block of the interleaved state on a line, and their sum, the stride (§15.1.1) | – |
+| $N_{\text{rad}}$, $N_{\text{beam}}$ | Radiation rows per face under radiative transfer, $2 + N_{\text{beam}}$ / beam directions of the `:top` heaters (§8.1.2, §8.7.1) | – |
 | $\mathsf{N}_i$ | Normal matrix of the least-squares gradient of cell *i*, $\sum_k w_k \mathbf{d}_k \mathbf{d}_k^{T}$ (§13.6.4) | – |
 | $n$ | Number of finite-volume cells | – |
-| $n_c$ | Number of colors of the colored Jacobian (§15.7) | – |
+| $n_c$ | Number of colors of the colored Jacobian (§15.6) | – |
 | $n_{\text{layer}}$ | Number of cells across a layer of the equidistribution correction; its gain is $n_{\text{layer}}^{2}/\tau_{\text{eq}}$ (§11.7.2; overload N1) | – |
 | $n_{\text{nodes}}$, $n_{\text{faces}}$ | Number of mesh nodes / faces (= n+1 in 1D) | – |
 | $n_{i,j}$, $n_s$ | Reaction order of reaction *i* w.r.t. reactant *j*, an order on the conversion for $n \ne 1$ | – |
@@ -670,11 +672,12 @@ Conventions:
 | $P$ | Gas pressure in the porous medium | Pa |
 | $P_{\text{ref}}$ | Reference pressure (= 101325) | Pa |
 | $Q_{\text{rxn}}$ | Volumetric reaction heat source, $-\sum h_r r_r$ | W·m⁻³ |
-| $Q_{\text{rad}}$ | Volumetric radiation absorption source | W·m⁻³ |
+| $Q_{\text{rad}}$ | Volumetric radiative source, absorption less emission, (8.2) | W·m⁻³ |
 | $q$, $q_{\text{cond}}$, $q_f$ | (Conductive) heat flux; at face *f*, along its normal | W·m⁻² |
 | $q_{\text{BC}}$ | Boundary-condition heat flux (positive into domain) | W·m⁻² |
 | $q_{\text{inc}}$ | Incident radiative flux of a `RadiativeFluxBC` | W·m⁻² |
-| $q'''$, $q_{\text{rad}}'''$, $q^{\text{rad}}_i$ | Volumetric radiation source (Beer–Lambert; $q^{\text{rad}}_i$ its average over cell *i*, §8.3.2) | W·m⁻³ |
+| $q^{\text{in}}_e$, $q^{\text{in}}_b$ | Diffuse radiation arriving from outside at the exposed / back face: $F\sigma T_\infty^4$ per `RadiativeBC` and $q_{\text{inc}}$ per diffuse `RadiativeFluxBC` (§8.4) | W·m⁻² |
+| $q_{\text{scale}}$, $q^{\text{arr}}$ | Scale of the radiation rows' tolerance, and the radiation arriving from outside at the exposed face and an open back that sets it (§8.7.3) | W·m⁻² |
 | $R_b$ | Blowing ratio $h_{\text{eff}}/h$ of a convective condition's blowing model, 1 at zero species fluxes (§12.3.3; the code's $\chi$, overload B1) | – |
 | $R_g$ ($R$, $R_{\text{gas}}$) | Universal gas constant (= 8.31446261815324) | J·mol⁻¹·K⁻¹ |
 | $r$, $r_i$ | Reaction rate (per unit volume) of reaction *i* | kg·m⁻³·s⁻¹ |
@@ -682,9 +685,9 @@ Conventions:
 | $S$ | Sutherland constant (= 110.4 K, air) in the viscosity law | K |
 | $S_j$, $S_{j,i}$ | Species source term for component *j* (in cell *i*), $\sum_r \nu_{r,j} r_r$ (= $\omega_{j,i}$); the rows carry the cell's reaction source $\omega_{j,i} \tilde V_i$ [kg·s⁻¹] | kg·m⁻³·s⁻¹ |
 | $S_{\text{dry},i}$ | Dry-pyrolysis-gas source term in cell *i* (source of $G_i$) | kg·m⁻³·s⁻¹ |
-| $S_{E,i}$ | Energy source of cell *i*: its reaction heat $Q_{\text{rxn},i} \tilde V_i$ plus the in-depth radiation it absorbs (§7.3.3, §13.3.4, §16.5.1) | W |
+| $S_{E,i}$ | Energy source of cell *i*: its reaction heat $Q_{\text{rxn},i} \tilde V_i$ plus its radiative source $S^{\text{rad}}_i$ (§7.3.3, §13.3.4, §16.5.1) | W |
 | $S_T$, $S_{T,i}$ | External temperature-rate source (manufactured solutions): $S_T$ on the temperature row, $C_i S_T$ on the enthalpy row (§7.3.3, §13.5.3) | K·s⁻¹ |
-| $S^{\text{rad}}_i$ | In-depth radiation absorbed by cell *i*, $I_{\text{up}} A_{\text{up}} - I_{\text{down}} A_{\text{down}}$ (§8.3.3) | W |
+| $S^{\text{rad}}_i$ | Radiation absorbed by cell *i* less what it emits, under radiative transfer, (8.6) (§8.3.3) | W |
 | $s_{if}$ | Orientation of face *f* relative to cell *i* (written $s_{if}$ or $s_{i,f}$; $s_f$ in §6, where *i* is the reaction index and the cell carries no index): +1 when its normal points out of *i* (*i* its owner), −1 otherwise | – |
 | $s_k$ | Diffusivity ratio $D_{k,\infty}/\alpha_{\text{th},\infty}$ of species *k* in the pooling film (§12.3.3) | – |
 | $T$ | Absolute temperature | K |
@@ -692,6 +695,7 @@ Conventions:
 | $T_{\text{cell}}$ | Temperature at the cell center adjacent to a boundary | K |
 | $T_{\infty}$ | Ambient / surroundings temperature | K |
 | $T_{\text{ref}}$ | Reference temperature for enthalpy datum (= 298.15) | K |
+| $T_{\text{rad}}$ | The largest initial cell temperature, for the radiation rows' tolerance scale (§8.7.3) | K |
 | $T_f$ | Face temperature of the enthalpy the gas fluxes carry: the distance-weighted interpolation $(d_n T_o + d_o T_n)/(d_o + d_n)$ at an interior face, the surface temperature for boundary outflow and specified incoming temperature for inflow (§13.6.2) | K |
 | $\bar T_f$, $T_{\text{face}}$ | Face temperature; gas transport uses the distance-weighted interface state $T^*=(d_RT_L+d_LT_R)/(d_L+d_R)$, reducing to the arithmetic mean for equal half-cell distances (§9.6) | K |
 | $\tilde T_f$ | Face temperature of the relative fluxes: the upwind van Albada reconstruction on the stencil of the mass flux it carries (§11.6.4, §13.6.2) | K |
@@ -714,6 +718,7 @@ Conventions:
 | $W$ | The integrator's iteration matrix $J - M/(\gamma_{\text{RK}} \Delta t)$ | – |
 | $w$, $w_n$ | Mesh node velocity (at node *n*), $w = v_s + c$; an algebraic unknown on a moving mesh (overload W1) | m·s⁻¹ |
 | $w_k$ | Weight $\lvert\mathbf{d}_k\rvert^{-2}$ of neighbour *k* in the least-squares gradient (§13.6.4); a quadrature weight in §16.5.3 (overload W1) | m⁻²; – |
+| $w_h$ | Share of a collimated or cone heater's flux carried by beam *h*, $\sum_h w_h = 1$ (§8.4.2; overload W1) | – |
 | $X_{\alpha}$ | Volume fraction (FDS/Gpyro V2 comparison notation; internally $v_j$) | – |
 | $x$, $y$ | Transverse/lateral coordinates (multi-dimensional meshes and comparison text) | m |
 | $x_a$ | Conversion of reactant $a$ against its reference, $\xi_a/\xi_{\text{ref}}$ (§6.4) | – |
@@ -741,13 +746,13 @@ Conventions:
 | $\Gamma$ | Thermal property ratio $k/c_p$ of a gas (property-ratio and pooling films, §12.3.3; overload G1) | kg·m⁻¹·s⁻¹ |
 | $\Gamma_i$ | Volume rate the node corrections sweep through the faces of cell *i*, $A_{i+1} c_{i+1} - A_i c_i$ on a line (§11.5.2; overload G1) | m³·s⁻¹ |
 | $\Delta$ | Forward-difference / change operator (prefix) | varies |
-| $\Delta_i$ | Thickness of cell *i* along the Beer–Lambert beam, the sum of its two floored centre-to-face distances ($\Delta z_i$ away from the floors; §8.3.3, §13.5.2) | m |
 | $\delta_{ij}$ | Kronecker delta | – |
 | $\delta_i$ | Positive-part mass scale of cell *i*, $\text{reltol} \cdot \varepsilon_m \cdot m^s_i(0)$ (its mass tolerance) | kg |
 | $\delta_b$ | Scale of the softplus finite base of the depletion limiter (`base_scale`, default 10⁻⁸; §6.3.2) | kg·m⁻³ |
-| $\delta_{\text{mov}}$, $\delta_{\text{BL}}$, $\delta_{\chi}$ | Configuration flags of the state layout: one on a moving mesh / under Beer–Lambert radiation / under a lateral-shrinkage law, zero otherwise (§3.1.2, §15.1.1) | – |
+| $\delta_{\text{mov}}$, $\delta_{\chi}$ | Configuration flags of the state layout: one on a moving mesh / under a lateral-shrinkage law, zero otherwise (§3.1.2, §15.1.1) | – |
 | $\varepsilon$, $\varepsilon_j$ | Emissivity (of component *j*) | – |
 | $\varepsilon_{\text{eff}}$ | Effective (composition-weighted) emissivity | – |
+| $\varepsilon_e$, $\varepsilon_b$, $\varepsilon_l$ | Transmissivity of the exposed face, $\varepsilon_{\text{eff}}$ of the first live cell smoothly floored at $10^{-3}$ / of the back face, $\varepsilon_l$ or zero for a mirror / $\varepsilon_{\text{eff}}$ of the last cell (§8.4) | – |
 | $\varepsilon_m$ | Deactivation threshold: fraction of a cell's reference below which it deactivates (`threshold`, default 1e-2, at an order other than one a tenth of the limiter's `conversion_threshold`; overload E1) | – |
 | $\varepsilon_{\text{band}}$ | Near-threshold band of deactivation, $\varepsilon_m \le \varepsilon_{\text{band}} < 1$ (`band`) | – |
 | $\varepsilon_{AB}$ | Lennard-Jones well depth (collision integral) | J |
@@ -758,14 +763,17 @@ Conventions:
 | $\theta_A$ | Column-global **radial** volumetric strain rate, $(1/A) dA/dt$ (an algebraic unknown under a lateral-shrinkage law) | s⁻¹ |
 | $\theta_L$ | **Axial** volumetric strain rate ($\theta - \theta_A$) | s⁻¹ |
 | $\theta_i^j$ | Stoichiometric coefficient (ThermaKin comparison notation; internally $\nu_{i,j}$) | – |
+| $\theta_1$, $\theta_2$ | Polar angles from the face normal bounding a cone heater, `Cone(θ₁, θ₂)` (§8.4.2; overload A2) | rad |
 | $\kappa$ ($\kappa_j$, $\kappa_{\text{eff}}$) | Permeability (Darcy) of component *j* / of the cell's mixture | m² |
 | $\kappa_s$ | Solid absorption coefficient (FDS; compare effective $\alpha_{\text{eff}}$, not mass-specific $\alpha_j$) | m⁻¹ |
 | $\Lambda$ | Face buoyancy of the pooling film relative to the hot free stream, $[1 - (M_{\text{face}}/T_s)(T_{\infty}/M_{\infty})]/(1 - T_{\infty}/T_s)$ (§12.3.3; overload B1) | – |
 | $\Lambda_c$, $\Lambda_w$ | Centre and width of the pooling factor's logistic switch in $\Lambda$ (`PoolingFilm` keywords `Λc`, `Λw`, defaults 0.35, 0.10; §12.3.3) | – |
 | $\lambda$ ($\lambda_j$, $\lambda_{\text{face}}$, $\lambda_{\text{eff}}$) | Gas transfer (diffusion) coefficient | m²·s⁻¹ |
-| $\lambda_{\tau}$ | Factor of the layer equidistribution time, $\tau_{\text{eq}} = \lambda_{\tau} L_{\text{layer}}/\vert \dot L_{\text{layer}}\vert $ (`ActivationTime`, default 1.8; overload A6) | – |
+| $\lambda_{\tau}$ | Factor of the layer equidistribution time, $\tau_{\text{eq},k} = \lambda_{\tau} L_{\text{layer}}/\vert \dot L_{\text{layer}}\vert $ at each estimate (`ActivationTime`, default 1.8; overload A6) | – |
 | $\ell$ | Characteristic particle/pore diameter (Carman–Kozeny); in §17 the scalar loss | m |
-| $\mu$, $\mu_i$ | Gas dynamic (Sutherland) viscosity (of cell *i*) | Pa·s |
+| $\mu$, $\mu_i$ | Gas dynamic (Sutherland) viscosity (of cell *i*; overload M2) | Pa·s |
+| $\bar\mu$ | Mean direction cosine of the two-stream closure, 2/3: a hemispherical flux is attenuated at $\alpha/\bar\mu$ (`DIFFUSIVITY` $=1/\bar\mu$; §8.3.1; overload M2) | – |
+| $\mu_h$ | Direction cosine of the heater's beam *h* in the solid (§8.4.2; overload M2) | – |
 | $\mu_{\text{ref}}$ | Reference viscosity (= 1.716×10⁻⁵ at 273.15 K, air) | Pa·s |
 | $\nu$ | Kinematic viscosity (Gpyro V2 Darcy comparison) | m²·s⁻¹ |
 | $\nu_{i,j}$ | Stoichiometric coefficient (yield) of component *j* in reaction *i* (negative reactant, positive product) | – |
@@ -785,7 +793,9 @@ Conventions:
 | $\sigma_s$ | Scattering coefficient (not modeled) | m⁻¹ |
 | $\sigma_{AB}$ | Lennard-Jones collision diameter | Å |
 | $\tau_{\text{eq}}$ | Equidistribution time of a layer in the correction (keyword `τ`; overload T1) | s |
+| $\tau_{\text{eq},1}$, $\tau_{\text{eq},2}$ | A layer's first and second estimate of its equidistribution time under `ActivationTime` (§11.7.5; overload T1) | s |
 | $\tau_i$ | Optical thickness of cell *i*, $\alpha_i \Delta z_i$ (always subscripted or called optical; overload T1) | – |
+| $\tau_L$ | Optical thickness of a whole layer or slab, $\int\alpha\,\mathrm dz$ over it (§8; overload T1) | – |
 | $\varphi$ | Porosity (gas void fraction), $1 - \sum_{S,L} \xi_j/\rho_{i,j}$ (U+03C6, LaTeX `\varphi`; overload A8) | – |
 | $\phi_i$ | Multiplier of cell *i* in the potential closure (multi-dimensional meshes only; U+03D5, LaTeX `\phi`; overload A8) | m²·s⁻¹ |
 | $\chi$, $\chi_i$ | **Pyrolysis progress** in cell *i*, $G_i/m_{\text{dry},i}$ (cumulative dry-gas mass released per unit initial dry-solid mass) | – |
@@ -811,8 +821,12 @@ Conventions:
 | $r$, $\alpha\beta$ | Reaction index; in §15, where stated, a row of the state vector ($f_r$, $s_r$, $J_{rc}$) |
 | $k$ | Layer or cell index inside a sweep (closure and correction context); the receiver of a merge (§14, §16.7); a neighbour in the least-squares gradient (§13.6.4); a species of the pooling film (§12.3.3); a quadrature node (§16.5.3) |
 | $q$ | Parameter index (§17); a node of a face in the multi-dimensional sweep vectors $s_{q,f}$ (§11.6.5) |
-| $e$ | Exposed face of the Beer–Lambert beam ($I_e$, $A_e$, §8); a deactivation event in the ledger ($m^{\text{lost}}_e$, §16) |
-| $b$ | Last face of the beam, at the back ($I_b$, $A_b$, §8) |
+| $e$ | The exposed face, the upstream face of the first live cell ($I^\pm_e$, $A_e$, $\varepsilon_e$, §8); a deactivation event in the ledger ($m^{\text{lost}}_e$, §16) |
+| $b$ | The back face ($I^\pm_b$, $A_b$, $\varepsilon_b$, §8) |
+| $l$ | The last cell of the column, at the back ($\varepsilon_l$, §8.4.3) |
+| $i_1$ | The first live cell, beside the exposed face (§8.3.3) |
+| $u$, $d$ (radiation) | A cell's upstream face, toward the exposed face, and downstream face, toward the back (§8.3) |
+| $h$ (radiation) | A beam direction of a collimated or cone heater ($\mu_h$, $w_h$, $I_{h,f}$, §8.4.2) |
 | $g$ | Gas phase / gaseous component |
 | $s$ | Solid / condensed phase |
 | $\ell$, $\text{liq}$ | Liquid phase |
@@ -823,11 +837,10 @@ Conventions:
 | $\text{eff}$ | Effective (mixture) property |
 | $\text{cell}$ | Cell-centered quantity |
 | $s$ (boundary) | Surface (boundary face) — e.g. $T_s$, $\xi_{j,s}$ |
-| $\text{up}$, $\text{down}$ | Upstream / downstream face of a cell along the Beer–Lambert beam |
-| $\text{inc}$ | Incident (radiation entering the exposed face) |
+| $\text{inc}$ | Incident (a heater's radiation arriving at a face) |
 | $\infty$ | Ambient / surroundings; the free stream of a blowing model |
 | $\text{ref}$ | Reference value |
-| $\text{in}$ | Cell-entrance (radiation); entering the live region ($\dot H_{\text{in}}$) |
+| $\text{in}$ | Arriving from outside ($q^{\text{in}}_e$, §8.4); entering the live region ($\dot H_{\text{in}}$) |
 | $\text{out}$ | Leaving ($\dot m_{\text{out}}$, $v_{\text{out}}$) |
 | $\text{live}$ | Restricted to the live cells or the live boundary faces (§16) |
 | $\text{layer}$ | A layer of the equidistribution correction ($n_{\text{layer}}$, $L_{\text{layer}}$) |
@@ -850,13 +863,13 @@ Conventions:
 |---|---|
 | $x^{\circ}$, $x^{o}$, $x_{\text{init}}$ | Value at previous time step / initial value |
 | $x(0)$ | Value at the initial (reference) state, e.g. $V_i(0)$, $\Delta z_i(0)$, $m^s_i(0)$ |
-| $x^{+}$, $x^{-}$ (radiation) | Forward / backward hemispheric intensity (two-flux, FDS comparison) |
+| $x^{+}$, $x^{-}$ (radiation) | Hemispherical flux toward the exposed face / toward the back ($I^+$, $I^-$, §8) |
 | $x^{+}$ | One-sided positive part, e.g. $\xi^{+}$, $(m)^{+}$ (zero at and below zero, the identity above the scale $\delta_i$); never a state after an event, which carries a hat |
 | $\hat x$ (hat) | The receiver's state after a deactivation merge ($\hat m_{j,k}$, $\hat V_k$, §14.3.3); $\hat n_f$ the unit normal of face *f* |
 | $x^{\text{solid}}$ | Restricted to the condensed (solid and liquid) components |
 | $x^{\text{diff}}$, $x^{\text{adv}}$ | Diffusive / advective flux component |
 | $x^{E}$ | Energy (the face energy flux $F^E_f$) |
-| $x^{\text{rad}}$ | In-depth radiation ($q^{\text{rad}}_i$, $S^{\text{rad}}_i$) |
+| $x^{\text{rad}}$ | Radiative transfer in the solid ($S^{\text{rad}}_i$) |
 | $x^{\text{lost}}$, $x^{\text{reg}}$ | What a deactivation event removes from the live region / the caloric regularization it writes to its record ($m^{\text{lost}}_e$, $H^{\text{lost}}_e$, $H^{\text{reg}}_e$) |
 | $x^{\text{rel}}$ (on a defect) | Relative defect ($d_m^{\text{rel}}$, $d_H^{\text{rel}}$) |
 | $x^{c}$ | Cell-center (e.g. $z_i^c$) |
@@ -917,10 +930,12 @@ Conventions:
 | Near-threshold band under a moving correction | $\varepsilon_{\text{band}}$ | 0.1 | – | `CORRECTION_BAND` |
 | Activation bounds | $(r_{\text{hi}}, r_{\text{lo}})$ | (0.3, 0.1) | – | `EquidistributionCorrection` |
 | Layer-time factor | $\lambda_{\tau}$ | 1.8 | – | `ACTIVATION_TIME_FACTOR` |
-| Fallback equidistribution time | $\tau_{\text{eq}}$ | 720 | s | `EQUIDISTRIBUTION_TIME` |
+| A fixed equidistribution time, for `EquidistributionCorrection(τ = …)` | $\tau_{\text{eq}}$ | 720 | s | `EQUIDISTRIBUTION_TIME` |
 | Depletion-limiter scale | $\xi_{\text{th}}$ | 1.0 | kg·m⁻³ | `DepletionLimiter()` |
 | Join of the depletion onset | $x_J$ | 1.0 | – (units of $\xi_{\text{th}}$) | `DepletionLimiter()` |
 | Scale of the finite power base | $\delta_b$ | 10⁻⁸ | kg·m⁻³ | `DepletionLimiter()` |
+| Diffusivity of the two-stream rows | $1/\bar\mu$ | 3/2 | – | `DIFFUSIVITY` |
+| Floor of the exposed face's transmissivity | — | 10⁻³ | – | `INTERFACE_FLOOR` |
 
 ---
 
@@ -945,7 +960,8 @@ below is authoritative; writers must use the disambiguating subscript/context.
   strain rate. $\theta_i^j$ appears only in the ThermaKin-comparison passage and is
   immediately mapped to $\nu_{i,j}$. The one exception is §17 (sensitivity), where
   the bold $\theta \in \mathbb{R}^p$ is the vector of parameters and $\theta_q$ its *q*-th entry;
-  the strain rate does not appear in that chapter.
+  the strain rate does not appear in that chapter. In Chapter 8 $\theta_1 < \theta_2$ are
+  the polar angles of a cone heater, never a cell's strain rate.
 
 - **A — A3 [area vs. pre-exponential factor].** $A$ is the **cross-sectional
   area** and $A_f$ the area of face $f$; the Arrhenius pre-exponential is $A_i$ /
@@ -961,7 +977,7 @@ below is authoritative; writers must use the disambiguating subscript/context.
 
 - **α — A5 [absorption vs. conversion vs. absorptivity].** $\alpha$ (or $\alpha_{\text{eff}}$) =
   **volumetric absorption coefficient** (m⁻¹); $\alpha_j$ = mass-basis absorption
-  coefficient (m²·kg⁻¹). Conversion (Gpyro V2) is $\alpha_{\text{conv}}$; FDS $\kappa_s$ has the units of $\alpha_{\text{eff}}$, not $\alpha_j$; matching attenuation also requires the angular closure (§8.7.3).
+  coefficient (m²·kg⁻¹). Conversion (Gpyro V2) is $\alpha_{\text{conv}}$; FDS $\kappa_s$ has the units of $\alpha_{\text{eff}}$, not $\alpha_j$; matching attenuation also requires the angular closure (§8.9.3).
   The absorptivity of a surface for incident radiation is **$a$** ($a_j$,
   $a_{\text{eff}}$, $a_s$), never $\alpha$; it equals $\varepsilon_{\text{eff}}$ under Kirchhoff's law unless a
   component sets its own `surface_absorptivity`. The free stream's thermal
@@ -1050,7 +1066,10 @@ below is authoritative; writers must use the disambiguating subscript/context.
 - **τ — T1 [optical thickness vs. equidistribution time].** $\tau_i$ with a cell
   subscript, or "optical thickness" in words, is $\alpha_i \Delta z_i$; $\tau_{\text{eq}}$ in the
   mesh-correction and burnout chapters (§11, §14) is a layer's equidistribution
-  time [s]. A time variable of integration is written $t$, never $\tau$.
+  time [s], and $\tau_{\text{eq},1}$, $\tau_{\text{eq},2}$ its two estimates
+  ($\tau_{\text{eq},k}$ for either; the subscript after "eq" counts the estimates,
+  never a cell). $\tau_L$ is the optical thickness of a whole layer or slab, $\int\alpha\,\mathrm dz$
+  over it (§8). A time variable of integration is written $t$, never $\tau$.
 
 - **M — M1 [molar mass vs. mass matrix vs. history].** $M$, $M_j$
   (and $M_{\text{face}}$, $M_{\infty}$) is molar mass; $M$ in the linear-algebra context of §15
@@ -1066,7 +1085,7 @@ below is authoritative; writers must use the disambiguating subscript/context.
 - **a — A9 [absorptivity vs. activation].** $a_j$, $a_{\text{eff}}$, $a_s$ (component,
   effective or surface subscript) are surface absorptivities; $a_i$, $a_n$ (cell
   or node subscript, correction context only) are the correction's activation
-  switches. A row's absolute tolerance is written $\text{atol}_r$ (§15.5.4), never
+  switches, and $a^{\text{lo}}_i$, $a^{\text{lo}}_n$ its second switches. A row's absolute tolerance is written $\text{atol}_r$ (§15.5.4), never
   $a_r$.
 
 - **N — N1 [species fluxes vs. counts].** $N_j$ is species mass flux and
@@ -1101,7 +1120,12 @@ below is authoritative; writers must use the disambiguating subscript/context.
 
 - **w — W1 [node velocity vs. weights].** $w$, $w_n$ is the mesh node velocity;
   $w_k$ (neighbour or quadrature-node subscript) is a weight of the
-  least-squares gradient (§13.6.4) or of a quadrature rule (§16.5.3).
+  least-squares gradient (§13.6.4) or of a quadrature rule (§16.5.3); $w_h$ (beam
+  subscript, Chapter 8 only) is the share of a heater's flux carried by beam $h$.
+
+- **μ — M2 [viscosity vs. direction cosine].** $\mu$, $\mu_i$ is the gas viscosity;
+  $\bar\mu$ (with the bar) and $\mu_h$ (beam subscript) are direction cosines of the
+  radiation rows, in Chapter 8 only.
 
 ---
 
@@ -1112,9 +1136,9 @@ Pyrolysis.jl solves *before* it is discretized, and the discrete unknowns that c
 it. We introduce the continuum state (temperature $T$ and component mass
 concentrations $\xi_j$), the integrated unknowns of every cell (the component masses
 $m_{j,i}$ and one energy state), and the further unknowns carried only when their
-physics is on (node positions and velocities on a moving mesh, face intensities under
-Beer–Lambert radiation, the conversion-history pair and the cross-section rows under a
-lateral-shrinkage law), then derive each conservation law: condensed-phase mass,
+physics is on (node positions and velocities on a moving mesh, the face fluxes of
+the radiation field under radiative transfer, the conversion-history pair and the
+cross-section rows under a lateral-shrinkage law), then derive each conservation law: condensed-phase mass,
 per-species transport, the energy balance and the temperature equation it implies, the
 ideal-gas pressure closure, and Darcy momentum. The chapter is deliberately a
 *statement and justification* of the continuum model; the discrete operators that
@@ -1216,8 +1240,10 @@ layout from the problem and the solve keywords; §15.1):
   $n=1,\dots,n+1$, on a moving mesh (`use_ale = true`). The positions are differential
   unknowns, $dz_n/dt = w_n$; the velocities are algebraic, each held by the volume
   balance of one cell (§3.6.3, §11.3).
-- **Face intensities** $I_f$ [W·m⁻²], one per face, under `BEER_LAMBERT`: algebraic
-  unknowns that satisfy the attenuation of the beam across each cell (§3.3.3, §8).
+- **Face fluxes of the radiation field** [W·m⁻²] under `RADIATIVE_TRANSFER`: the two
+  hemispherical fluxes $I^-_f$, $I^+_f$ of every face and one beam $I_{h,f}$ per
+  direction of a collimated or cone heater, algebraic unknowns that satisfy the exact
+  transfer across each cell (§3.3.3, §8).
 - The **conversion-history pair** $(G_i, m_{\mathrm{dry},i})$ [kg] of every cell and the
   global **cross-section area** $A$ [m²] with its **lateral strain rate** $\theta_A$
   [s⁻¹] under a lateral-shrinkage law: the pair differential, $A$ and $\theta_A$
@@ -1228,10 +1254,10 @@ near it and the Jacobian is banded:
 
 $$
 \boldsymbol u =
-\bigl[\,\underbrace{z_1, w_1, I_1}_{\text{node }1},\;
+\bigl[\,\underbrace{z_1, w_1, I^\pm_1}_{\text{node }1},\;
 \underbrace{m_{1,1},\dots,m_{N_C,1},\,T_1,\,G_1,\,m_{\mathrm{dry},1}}_{\text{cell }1},\;
-\underbrace{z_2, w_2, I_2}_{\text{node }2},\;\dots,\;
-\underbrace{z_{n+1}, w_{n+1}, I_{n+1}}_{\text{node }n+1},\;
+\underbrace{z_2, w_2, I^\pm_2}_{\text{node }2},\;\dots,\;
+\underbrace{z_{n+1}, w_{n+1}, I^\pm_{n+1}}_{\text{node }n+1},\;
 A,\;\theta_A \,\bigr],
 $$
 
@@ -1239,16 +1265,17 @@ with $T_i$ the energy state (the inventory $H_i$ under `energy_state = :enthalpy
 and each entry present only in its configuration. On a line its length is
 
 $$
-N_{\mathrm{state}} = (n+1)\,(2\delta_{\mathrm{mov}} + \delta_{\mathrm{BL}})
+N_{\mathrm{state}} = (n+1)\,(2\delta_{\mathrm{mov}} + N_{\mathrm{rad}})
 + n\,(N_C + 1 + 2\delta_{\chi}) + 2\delta_{\chi},
 $$
 
-where $\delta_{\mathrm{mov}}$, $\delta_{\mathrm{BL}}$, $\delta_\chi$ equal one on a
-moving mesh, under Beer–Lambert radiation and under a lateral-shrinkage law, and zero
-otherwise. For three components on four cells the state has 16 rows on a fixed mesh;
-36 on a moving mesh under a lateral-shrinkage law, of which 7 are algebraic (the five
-node velocities, $A$ and $\theta_A$); and 41 with Beer–Lambert radiation added, of
-which 12 are algebraic. The integrator's mass matrix is diagonal — one on the
+where $\delta_{\mathrm{mov}}$ and $\delta_\chi$ equal one on a moving mesh and under a
+lateral-shrinkage law, and zero otherwise, and $N_{\mathrm{rad}}$ is the number of
+radiation rows per face, zero without radiative transfer and $2 + N_{\mathrm{beam}}$
+with it (§8.1.2). For three components on four cells the state has 16 rows on a fixed
+mesh; 36 on a moving mesh under a lateral-shrinkage law, of which 7 are algebraic (the
+five node velocities, $A$ and $\theta_A$); and 46 with radiative transfer and a diffuse
+heater added, of which 17 are algebraic. The integrator's mass matrix is diagonal — one on the
 differential rows, zero on the algebraic ones — so the semi-discrete system is the
 semi-explicit DAE $\mathsf M\,d\boldsymbol u/dt = \boldsymbol f(\boldsymbol u, t)$
 (§15.4).
@@ -1260,7 +1287,7 @@ volume of a moving cell enters only through $\xi=m/V$, so a change of volume nee
 dilation term in any row (§11.3.4).
 
 > **Implementation notes.** The state layout and its index functions (`mass_index`,
-> `energy_index`, `position_index`, `velocity_index`, `intensity_index`,
+> `energy_index`, `position_index`, `velocity_index`, `radiation_index`,
 > `history_index`, `area_index`, `lateral_rate_index`) are
 > `StateLayout{NC,E,Mov,Rad,Chi,D,U,Car}` in `src/States/layout.jl`; the state mapping
 > `derive!` (`src/States/derived.jl`) is the only reader of $\boldsymbol u$ and fills
@@ -1587,18 +1614,17 @@ makes net conductive *outflow* cool the cell. At a face the flux is discretized 
 distance-weighted harmonic-mean conductivity (resistance-in-series), reducing to the
 ordinary harmonic mean on a uniform mesh; the full derivation is in §7.
 
-**Radiation.** $Q_{\mathrm{rad}}$ is the volumetric radiation absorption and is
-entirely model-dependent. For `SURFACE_ABSORPTION` it is zero —
+**Radiation.** $Q_{\mathrm{rad}}$ is the volumetric radiative source, absorption less
+emission, and is entirely model-dependent. For `SURFACE_ABSORPTION` it is zero —
 the absorbed flux $a\,q_{\mathrm{inc}}$ of a `RadiativeFluxBC` enters through the
 *surface energy balance* (boundary Newton solve, §12.3.5), not as a volumetric
-deposit. For `BEER_LAMBERT` it follows
-the in-depth attenuation $q''' = \alpha I(z)$ with
-$I(z) = I_{\mathrm{inc}}\exp(-\int\alpha\,dz')$: the face intensities are algebraic
-unknowns, each satisfying $0 = I_{\mathrm{down}} - I_{\mathrm{up}}\,e^{-\alpha_i\Delta z_i}$
-across its cell (and $0 = I_e - a\,q_{\mathrm{inc}}$ at the exposed face), and cell $i$
-absorbs $I_{\mathrm{up}}A_{\mathrm{up}} - I_{\mathrm{down}}A_{\mathrm{down}}$, the exact
-cell integral of $\alpha I$. The two models, their mutual exclusivity, and their
-numerics are the subject of §8.
+deposit. For `RADIATIVE_TRANSFER` it is the divergence of the two-stream field,
+$Q_{\mathrm{rad}} = (\alpha/\bar\mu)(I^+ + I^- - 2\sigma T^4)$ plus what the beams of a
+collimated or cone heater deposit: the face fluxes are algebraic unknowns, each
+satisfying the exact transfer across its cell, and cell $i$ absorbs what enters through
+its two faces less what leaves, $S^{\mathrm{rad}}_i$ of (8.6), the exact cell integral of
+$Q_{\mathrm{rad}}$ for its constant emission. The two models, their mutual exclusivity,
+and their numerics are the subject of §8.
 
 **Reaction heat.** With the internal sign convention $h_r>0$ endothermic,
 
@@ -1619,8 +1645,8 @@ the smoothly-gated Arrhenius form of §6, evaluated at the trial temperature.
 > sign documented in-source ("Note the negative sign!"). Reaction rates and heats are
 > evaluated together by `evaluate_reactions!` (same file), called per cell by
 > `ReactionKernel` (`src/Kernels/reactions.jl`), which adds $Q_{\mathrm{rxn},i}V_i$ to the
-> cell's energy source. The Beer–Lambert rows and cell sources are formed by
-> `BeerLambertKernel` (`src/Kernels/radiation.jl`).
+> cell's energy source. The radiative transfer rows and cell sources are formed by
+> `RadiativeTransferKernel` (`src/Kernels/radiative_transfer.jl`).
 
 ### 3.3.4 Gas enthalpy flux and surface energy
 
@@ -1836,7 +1862,7 @@ mesh frame introduces **no advection term** in any equation. The correction is z
 unless an equidistribution correction is installed: by default `setup` installs one
 where the mesh moves, cells are deactivated and some cell, converted completely, would
 fall below the deactivation threshold, so that the cells of a vanishing layer thin
-together and leave in one event (§11.7, §14.2.1). Under it every inventory — each
+together and leave in one or two events (§11.7, §14.2.1). Under it every inventory — each
 component's mass, the sensible enthalpy it carries and the conversion-history pair —
 crosses the faces at the relative velocity $-c$ (§11.6). The mesh kinematics, the
 geometric conservation law and the correction are derived in full in §11 (The ALE
@@ -1914,7 +1940,7 @@ first-principles-vs-empirical discussion are in §10.
 
 The PDE system of §3.1.3 is incomplete until every flux and source is expressed in terms
 of the state — the masses and the energy state, and the node positions and velocities,
-face intensities, history pair and cross-section unknowns where they are carried. The
+radiative face fluxes, history pair and cross-section unknowns where they are carried. The
 table below inventories the closures and points to the chapter where each is derived.
 This is the contract that makes the residual a *pure function* of the state.
 
@@ -1927,7 +1953,7 @@ This is the contract that makes the residual a *pure function* of the state.
 | Reaction rate $r_r$ | Arrhenius | $A_r e^{-E_r/R_gT}\prod_j\xi_j^{n_{r,j}}$, tanh gates, one-sided limiter, at the trial temperature | §6 |
 | Species source $\omega_j$ | stoichiometry | $\sum_r\nu_{r,j}r_r$ | §6 |
 | Reaction heat $Q_{\mathrm{rxn}}$ | enthalpy of reaction at the local temperature | $-\sum_r h_r(T,\xi)\,r_r$ | §6 |
-| Radiation source $Q_{\mathrm{rad}}$ | radiation model | surface balance / Beer–Lambert face intensities | §8 |
+| Radiation source $Q_{\mathrm{rad}}$ | radiation model | surface balance / gray two-stream face fluxes with exact cell integration | §8 |
 | Gas enthalpy flux | conservative face flux | interior face-temperature closure; outward surface enthalpy and specified incoming reservoir enthalpy | §7, §12 |
 | Wall and molecular gas flux | lumped transfer or dusty-gas friction | partial-pressure driving force, one consistent face pressure, total-flux interface matching | §9 |
 | Gas advective flux | donor pore density × Darcy velocity | $p_{j,up}M_jv/(RT_{up})$ in each half-cell | §9 |
@@ -2048,7 +2074,7 @@ regimes. The most important, with the section that quantifies or discusses each:
   gas storage is retained. A separate pressure-evolution equation, as in
   Gpyro V2, is an alternative choice of dependent variable; neither Darcy model
   resolves acoustic momentum waves (§9.2).
-- **First-order upwind advection** for the gas advective flux (§3.5.1); no TVD or
+- **First-order upwind advection** for the gas advective flux (§13.7.3); no TVD or
   MUSCL limiter on the gas advection. The scheme is monotone but numerically
   diffusive where the cell Péclet number exceeds one, and its upwind switch is a kink
   in the residual (§17.7.6).
@@ -2281,13 +2307,13 @@ consumed downstream:
 | `gas_transfer_coeff` | $\lambda_j(T)$ | m²·s⁻¹ | S, L | $\lambda_\mathrm{eff}$ (Ch. 5), gas diffusion (Ch. 9) |
 | `permeability` | $\kappa_j(T)$ | m² | S, L | $\kappa_\mathrm{eff}$ (Ch. 5), Darcy velocity (Ch. 9) |
 | `emissivity` | $\varepsilon_j(T)$ | – | all | $\varepsilon_\mathrm{eff}$ (Ch. 5), radiative BC (Ch. 12) |
-| `surface_absorptivity` | $a_j$ (or `nothing` ⇒ $\varepsilon_j(T)$) | – | S, L | $a_\mathrm{eff}$ (§5.8.2), incident-flux BC (Ch. 12), Beer–Lambert incident intensity (Ch. 8) |
+| `surface_absorptivity` | $a_j$ (or `nothing` ⇒ $\varepsilon_j(T)$) | – | S, L | $a_\mathrm{eff}$ (§5.8.2), incident-flux BC (Ch. 12), the beams of a collimated or cone heater under radiative transfer (Ch. 8) |
 | `absorption_coeff` | $\alpha_j$ | m²·kg⁻¹ | all | $\alpha_\mathrm{eff}=\sum_j\xi_j\alpha_j$ (Ch. 5, 8) |
 | `molar_mass` | $M_j$ | kg·mol⁻¹ | G | $\rho_g$ (§4.3), $P$ (Ch. 9), Chapman–Enskog estimate (§5.10) |
 
 Note that $\alpha_j$ is a **mass-basis** absorption coefficient [m²·kg⁻¹]; it is
 multiplied by concentration to give the volumetric (extinction) absorption
-coefficient $\alpha_\mathrm{eff}=\sum_j\xi_j\alpha_j$ [m⁻¹] used by Beer–Lambert
+coefficient $\alpha_\mathrm{eff}=\sum_j\xi_j\alpha_j$ [m⁻¹] used by the radiative transfer rows
 radiation (Chapter 8), at the positive-part concentrations. Condensed
 superficial transfer is explicit under the lumped model and uses condensed
 matrix weights. Its value is constitutive data, independent of gas loading.
@@ -2848,8 +2874,8 @@ residual evaluation $t$ is a plain number: a dual-number time is not supported,
 and the time derivative of the right-hand side is zero or a finite difference
 (§15.5.1). Where a
 time-dependent parameter meets the state, the kernel promotes it explicitly
-(the Beer–Lambert kernel adds `zero` of the state's element type to the incident
-flux it evaluates), and parameter sensitivities are finite differences of whole
+(the thermal boundary kernel adds `zero` of the state's element type to a
+prescribed flux it evaluates), and parameter sensitivities are finite differences of whole
 solves (Chapter 17).
 
 **Temperature-dependent parameters** (`evaluate_param_T(param, T)`):
@@ -3287,15 +3313,20 @@ where the heated layer is optically thick, $\beta\,\delta_T \gtrsim 3$ with $\be
 the extinction coefficient and $\delta_T$ the thermal thickness, the radiation that
 crosses the pores or passes through a semi-transparent component is a diffusive
 transport with the Rosseland conductivity $16n^{2}\sigma T^{3}/(3\beta)$, $n$ the
-refractive index of the component ($n = 1$ in pores). That term belongs inside
-$k_j(T)$, as $k_j = k_{0,j}(T) + 16n^{2}\sigma T^{3}/(3\beta_j)$. Measured wood char
+refractive index of the component ($n = 1$ in pores). Under `SURFACE_ABSORPTION`
+that term belongs inside $k_j(T)$, as $k_j = k_{0,j}(T) + 16n^{2}\sigma T^{3}/(3\beta_j)$. Measured wood char
 follows that form with $\beta \approx 800$–1000 m⁻¹. For PMMA, with
 $\beta_R \approx 3900$ m⁻¹ and $n^{2} \approx 2.1$ from its own emission spectrum,
 the term is 0.045 W·m⁻¹·K⁻¹ at 650 K, half of the value a cone-calibrated law
 assigns there, and a law that falls with temperature above the glass transition
-is a calibration constant standing in for it (§8.2.2). Below the optically thick
-limit, in the first millimetre of a polymer before ignition, the radiative
-transport is not local and no conductivity represents it (§8).
+is a calibration constant standing in for it (§8.2.2). Under `RADIATIVE_TRANSFER`
+the rows carry the radiation absorbed and emitted at $\alpha_j$, so $k_j$ is the
+conductive part: a deck does not also put a Rosseland term for $\alpha_j$'s band into
+$k_j$, and nothing is subtracted automatically; radiation across pores smaller than a
+cell, as in a char, is not resolved by the rows and stays in $k_j$ (§8.6). Below the
+optically thick limit, in the first millimetre of a polymer before ignition, the
+radiative transport is not local and no conductivity represents it; radiative transfer
+resolves it (§8).
 
 The state mapping evaluates `k_i = effective_conductivity(ξ⁺_i, T_trial,i,
 material)` and keeps it twice: smoothly floored at
@@ -3536,7 +3567,8 @@ sum is evaluated generically over the scalar type, a dual-number temperature
 carries $\partial\varepsilon_{\text{eff}}/\partial T$ into the colored Jacobian
 (§15). The effective emissivity is the surface property of the re-radiation
 boundary condition (§12): the surface balance of a boundary face reads the
-emissivity of its cell.
+emissivity of its cell. Under radiative transfer it is the transmissivity of the
+exposed face, both ways, and of an open back (§8.4).
 
 ### 5.8.2 Effective surface absorptivity
 
@@ -3567,11 +3599,12 @@ absorbed heater flux from the temperature-dependent emission: an emissivity that
 falls with temperature (integrating-sphere data for virgin wood, for instance)
 does not drag the absorbed cone flux down with it. $a_{\text{eff}}$ is consumed
 by a `RadiativeFluxBC` with `absorptivity = nothing`: in the surface balance of
-its face under `SURFACE_ABSORPTION` (§5.8.2), and under
-`BEER_LAMBERT` as the fraction of the incident flux that enters the first live
-cell, the absorptivity of that cell (`incident_intensity`,
-`src/Kernels/radiation.jl`; §8.3). Surface emission always uses
-$\varepsilon_{\text{eff}}$.
+its face under `SURFACE_ABSORPTION` (§8.2), and under `RADIATIVE_TRANSFER` as the
+fraction of a collimated or cone heater's flux that enters the first live cell as
+beams (`src/Kernels/radiative_transfer.jl`, §8.4.2). Emission always uses
+$\varepsilon_{\text{eff}}$, and so does diffuse radiation crossing the exposed face under
+radiative transfer: a component that sets its own absorptivity refuses a diffuse
+`RadiativeFluxBC` there (§8.4.2).
 
 Kirchhoff's law equates $a_j$ and $\varepsilon_j$ only for a gray surface or
 for a source at the surface's own temperature; a cone heater at $850$–$1150$ K
@@ -3585,8 +3618,8 @@ measured value through the component `absorptivity` when that matters.
 
 ### 5.8.3 Effective absorption coefficient
 
-The volumetric (extinction) absorption coefficient of the in-depth radiation
-model (`BEER_LAMBERT`, §8) is a **concentration**-weighted sum of the component
+The volumetric absorption coefficient of the radiative transfer rows
+(`RADIATIVE_TRANSFER`, §8) is a **concentration**-weighted sum of the component
 *mass* absorption coefficients $\alpha_j$ [m²·kg⁻¹]:
 
 $$
@@ -3596,7 +3629,7 @@ $$
 
 `effective_absorption(ξ, material)` → `_sum_absorption`
 (`effective_properties.jl`), evaluated by the state mapping at the positive-part
-concentrations, and only under `BEER_LAMBERT`. The dimensional bookkeeping is
+concentrations, and only under `RADIATIVE_TRANSFER`. The dimensional bookkeeping is
 the key point: a *mass* absorption coefficient $\alpha_j$ [m²·kg⁻¹] times a mass
 concentration $\xi_j$ [kg·m⁻³] yields a *volumetric* absorption coefficient
 [m⁻¹], which is what the optical thickness of a cell, $\tau_i = \alpha_i \Delta z_i$,
@@ -3648,7 +3681,7 @@ pore-gas viscosity curve in the `gas_viscosity` field, and under gas
 transport the state mapping evaluates it at the cell's trial temperature and
 floors the result smoothly at `MU_FLOOR`,
 `μ_i = smooth_floor(material.gas_viscosity(T_trial,i), 10⁻¹² Pa·s)`, the
-denominator of the cell mobility (§5.7.4; `src/States/derived.jl`). A material
+denominator of the cell mobility (§5.13.2; `src/States/derived.jl`). A material
 that says nothing carries `SutherlandProperty()` — the air triple above — so
 this reduces to (5.24).
 
@@ -4013,7 +4046,7 @@ TK Eq. 11 and Pyrolysis.jl use mass-specific component absorption
 $\alpha_j$ [m²/kg], giving
 $\alpha_{\mathrm{eff}}=\sum_j\xi_j\alpha_j$ [m⁻¹]. This matches
 the attenuation coefficient at the same component concentrations; the
-radiation deposition and emission algorithms still differ (§8.7.1).
+radiation deposition and emission algorithms still differ (§8.9.1).
 
 ### 5.15.2 Gpyro V2
 
@@ -4056,8 +4089,8 @@ properties match; our pore-gas heat storage remains an additional term.
 FDS component absorption coefficients are per length. The
 [in-depth radiation assembly](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2255-L2295)
 volume-averages them unless a layer coefficient is specified. Matching
-optical depth is necessary, but the two-flux angular closure and internal
-emission remain different from our incident beam (§8.7.3).
+optical depth is necessary, but the two-flux angular factor and cell integration
+remain different from our two-stream rows (§8.9.3).
 
 ### 5.15.4 Sources and numerical evidence
 
@@ -6168,26 +6201,24 @@ reactions, so an exothermic reaction ($h_r<0$) produces $Q>0$.
 
 ### 7.5.2 Radiation source $Q_{\text{rad}}$ (dispatch only)
 
-The absorbed radiation depends on the radiation model of the solve (`radiation_model`):
+The radiative source depends on the radiation model of the solve (`radiation_model`):
 
 - **`SURFACE_ABSORPTION`**: no volumetric source. The absorbed flux
   $a\,q_{\text{inc}}$ of a `RadiativeFluxBC` is applied through the surface energy balance of
   its face (§12.3.5), not as a volumetric deposit (opaque surface: the absorbed power raises
   $T_s$ directly).
-- **`BEER_LAMBERT`**: in-depth absorption, $q'''(z)=\alpha(z)I(z)$ with
-  $I(z)=I_{\text{inc}}\exp(-\!\int\!\alpha\,dz')$. The face intensities are algebraic unknowns
-  of the state, with the rows $0 = I_{\text{down}} - I_{\text{up}}\,e^{-\alpha_i\Delta_i}$ for
-  every live cell along the beam and $0 = I_e - a\,q_{\text{inc}}$ at the face the beam enters
-  (the upstream face of the first live cell). The beam kernel (`BeerLambertKernel`,
-  `src/Kernels/radiation.jl`) adds to each live cell's energy source
-  $I_{\text{up}}A_{\text{up}} - I_{\text{down}}A_{\text{down}}$ [W], the exact cell average of
-  the attenuated beam, and the radiative member of the boundary condition contributes zero to
-  the surface balance.
+- **`RADIATIVE_TRANSFER`**: every cell absorbs and emits. The two hemispherical fluxes
+  $I^\pm_f$ of every face, and the beams of a collimated or cone heater, are algebraic
+  unknowns of the state whose rows are the exact transfer across each live cell (8.5). The
+  radiative transfer kernel (`RadiativeTransferKernel`,
+  `src/Kernels/radiative_transfer.jl`) adds to each live cell's energy source what enters
+  through its two faces less what leaves, $S^{\text{rad}}_i$ of (8.6) [W], and the radiative
+  members of the boundary conditions contribute zero to the surface balance.
 
-The full derivation of each model — the Beer–Lambert cell-averaged form, the intensity rows,
-the energy-equation coupling and the regime diagnostics — is the subject of **§8 (Thermal
-Radiation)**. For the purposes of the energy assembly here, the absorbed radiation is part of
-the cell's energy source $S_{E,i}$ in (7.8).
+The full derivation of each model — the two-stream equations, the exact cell integration,
+the rows and their boundaries, the energy-equation coupling and the mesh criterion — is the
+subject of **§8 (Thermal Radiation)**. For the purposes of the energy assembly here, the
+radiative source is part of the cell's energy source $S_{E,i}$ in (7.8).
 
 ---
 
@@ -6218,8 +6249,8 @@ rather than skipped (§15.2). The sequence is:
    2. the **gas transport** (if gas can move): the interior gas mass fluxes, the enthalpy
       they carry at the face temperature (7.14) and the face's added conduction, and the
       outward mass fluxes of the boundary faces (§9, §7.4.2);
-   3. the **in-depth radiation** (`BEER_LAMBERT`): the intensity residuals and the absorbed
-      power (§7.5.2);
+   3. the **radiative transfer** (`RADIATIVE_TRANSFER`): the residuals of the radiation
+      rows and every cell's radiative source (§7.5.2, §8);
    4. **conduction**: the interior conductive fluxes (7.1) (and, in more dimensions, the
       cells' least-squares gradients, §7.1.3);
    5. the **thermal boundary**: the surface energy balance of every live boundary face, its
@@ -6232,7 +6263,7 @@ rather than skipped (§15.2). The sequence is:
    (§10, §11.3).
 6. **The external sources** (`add_sources!`): a manufactured mass source, for verification.
 7. **The row assembly** (`assemble_rows!`): the scatter (7.4) of every face flux, the mass
-   rows (7.12), the energy row (7.9) or (7.10), the intensity, motion, history and
+   rows (7.12), the energy row (7.9) or (7.10), the radiation, motion, history and
    cross-section rows, and last the dead rows of deactivated cells, which become identity rows
    (zero derivative on a differential row, the unknown itself on an algebraic one, §14.3.1).
    It is the only writer of `du`.
@@ -6278,11 +6309,11 @@ The kernels write into a pre-allocated buffer of contributions (`Contributions{N
 | `F_mass` | $N_C\times n_{\text{faces}}$ | mass flux of every component per unit face area along the face normal | $\text{kg}\,\text{m}^{-2}\text{s}^{-1}$ |
 | `F_energy` | $n_{\text{faces}}$ | energy flux per unit face area along the normal: conduction and the enthalpy carried by the mass fluxes | $\text{W}\,\text{m}^{-2}$ |
 | `S_mass` | $N_C\times n_{\text{cells}}$ | reaction mass source of every component, $\omega_{j,i}V_i$ | $\text{kg}\,\text{s}^{-1}$ |
-| `S_energy` | $n_{\text{cells}}$ | cell energy source: reaction heat and absorbed radiation, without the formation term | W |
+| `S_energy` | $n_{\text{cells}}$ | cell energy source: reaction heat and the radiative source, without the formation term | W |
 | $\theta$ | $n_{\text{cells}}$ | cell strain rate (mesh closure) | $\text{s}^{-1}$ |
 | `M_flux` | $N_C\times n_{\text{cells}}$ | face-flux part of every mass rate, $\dot M_{j,i}$ (7.4), filled by the assembler | $\text{kg}\,\text{s}^{-1}$ |
 | `T_face` | $n_{\text{faces}}$ | face temperatures; on a boundary face the surface temperature of its energy balance | K |
-| `r_intensity` | $n_{\text{faces}}$ | residuals of the face-intensity rows (`BEER_LAMBERT`) | $\text{W}\,\text{m}^{-2}$ |
+| `r_radiation` | $N_{\text{rad}}\times n_{\text{faces}}$ | residuals of the radiation rows (`RADIATIVE_TRANSFER`) | $\text{W}\,\text{m}^{-2}$ |
 | `r_velocity` | $D\cdot n_{\text{nodes}}$ | residuals of the node-velocity rows (moving mesh) | those of the rows (§11.3) |
 | `r_multiplier` | $n_{\text{cells}}$ | residuals of the closure multipliers (potential closure, more dimensions) | those of the rows (§11.3.5) |
 | `F_carried`, `S_carried` | $2\times n_{\text{faces}}$, $2\times n_{\text{cells}}$ | flux and source of the conversion-history pair (variable cross section) | $\text{kg}\,\text{m}^{-2}\text{s}^{-1}$, $\text{kg}\,\text{s}^{-1}$ |
@@ -6340,7 +6371,7 @@ $-\sum_g c_g\mathbf J_g\cdot\nabla T$. These terms correspond to our
 1D temperature balance after the conservative face enthalpy flux and species
 balance are combined. The reaction-heat sign must be converted. TK also
 includes its own deformation and absorption-weighted re-radiation terms;
-these must be matched separately (§§8.7, 10.11). Its 2D equation contains
+these must be matched separately (§§8.9, 10.11). Its 2D equation contains
 transverse transport absent from a 1D Pyrolysis.jl solve.
 
 ### 7.8.2 Gpyro V2
@@ -6429,106 +6460,99 @@ conservation ledgers and the audit of §16.
 
 # 8. Thermal Radiation
 
-This chapter derives and documents the thermal-radiation models implemented in
-Pyrolysis.jl and the way each couples into the energy equation. The solver offers
-two mutually exclusive treatments of the incident radiation — `SURFACE_ABSORPTION`
-and `BEER_LAMBERT` — each with its own state, Jacobian structure and physical
-regime of validity. We give the continuous radiative
-transfer equation (RTE) and its reduction to the Beer–Lambert law, the exact
-cell-averaged discretization, the face intensities that carry the beam as
-algebraic unknowns of the state, and the banded Jacobian those unknowns give.
-Every governing form, discrete update, constant, sign, factor and guard below
-has been checked against the implementation; where a docstring or textbook form
-diverges from the code, **the code is authoritative** and the divergence is
-called out explicitly.
+This chapter derives and documents the two thermal-radiation models of Pyrolysis.jl
+and the way each couples into the energy equation. `SURFACE_ABSORPTION` absorbs the
+incident radiation at the exposed face, through the surface energy balance.
+`RADIATIVE_TRANSFER` carries radiation through the solid: every cell absorbs and
+emits, the radiation field is two hemispherical fluxes per face (a gray two-stream
+closure with diffusivity $1/\bar\mu = 3/2$), integrated exactly across each cell, and
+a heater may arrive diffuse or as beams. Where a docstring or textbook form diverges
+from the code, **the code is authoritative**.
 
 Throughout, the spatial coordinate is $z$ (axial, through-thickness), with $z=0$
 the back face (tag `:bottom`) and $z=L$ the exposed surface (tag `:top`). Heat
 enters from the top. A face flux is stored per unit face area along the face
 normal, which points from the face's owner cell to its neighbour and out of the
 domain on a boundary face: on a line the interior faces and the `:top` face have
-their normal along $+z$, the `:bottom` face along $-z$ (§2). The incident beam
-travels in $-z$; its intensity $I_f$ at face $f$ is stored as a non-negative
-magnitude, and the radiative source of a cell is **positive = heating**. The cell
-index is $i$ ($1\le i\le n$), the component index $j$ ($1\le j\le N_C$). The
-Stefan–Boltzmann constant is $\sigma = 5.670374419\times10^{-8}\ \mathrm{W\,m^{-2}\,K^{-4}}$
+their normal along $+z$, the `:bottom` face along $-z$ (§2). The radiative fluxes
+are stored as non-negative magnitudes instead: $I^-_f$ travels toward the back
+($-z$), $I^+_f$ toward the exposed face ($+z$), and a beam $I_{h,f}$ toward the
+back along its direction. A cell's upstream face $u$ is the one toward the exposed
+face, its downstream face $d$ the one toward the back. The radiative source of a
+cell is **positive = heating**. The cell index is $i$ ($1\le i\le n$), the component
+index $j$ ($1\le j\le N_C$). The Stefan–Boltzmann constant is
+$\sigma = 5.670374419\times10^{-8}\ \mathrm{W\,m^{-2}\,K^{-4}}$
 (`STEFAN_BOLTZMANN`, `src/Materials/constants.jl`).
 
 ---
 
 ## 8.1 The Radiation Model Family
 
-![Matching slabs with surface deposition and Beer–Lambert face intensities, absorbed cell power, transmitted radiation and intensity decreasing with inward depth.](assets/figures/07_radiation.svg)
+![Two matching slabs: surface absorption deposits the absorbed flux at the face; radiative transfer carries downward and upward fluxes at every face, a dashed beam into the depth, and a mirror at the back; a chart of the two fluxes against depth.](assets/figures/07_radiation.svg)
 
-**Figure 7. Where applied radiation is absorbed (schematic).** `SURFACE_ABSORPTION` applies `RadiativeFluxBC` at the surface. Beer–Lambert introduces face-intensity unknowns and deposits the entering-minus-leaving radiant power in each cell. The exponential inset illustrates uniform optical thickness $\alpha L=2$; its depth coordinate $L-z$ increases inward, opposite to the common $+z$ direction. Radiation remaining at the back face is transmitted rather than absorbed.
+**Figure 7. Where radiation is absorbed (schematic).** Under `SURFACE_ABSORPTION` the absorbed flux $a\,q_{\text{inc}}$ enters the surface energy balance and no cell absorbs radiation. Under `RADIATIVE_TRANSFER` each face carries the hemispherical fluxes $I^-$ (toward the back) and $I^+$ (toward the exposed face); the exposed face transmits the fraction $\varepsilon$ of the cell beside it in both directions, a collimated or cone heater travels as beams, every cell absorbs and emits, and a back without a radiative condition reflects everything. The chart gives $I^-$ and $I^+$ of the worked slab of §8.8 at its consistent start, over the absorbed heater flux $\varepsilon q$: they meet at the mirror.
 
 ### 8.1.1 The two models
 
 The radiation treatment is selected at `solve` (or `setup`) time by one
-enumeration value passed as `radiation_model`; the default is `SURFACE_ABSORPTION`. The
-enum is defined in `src/Materials/radiation_types.jl`:
+enumeration value passed as `radiation_model`; the default is `SURFACE_ABSORPTION`.
+The enum is defined in `src/Materials/radiation_types.jl`:
 
 ```julia
 @enum RadiationModel begin
     SURFACE_ABSORPTION = 1
-    BEER_LAMBERT = 2
+    RADIATIVE_TRANSFER = 2
 end
 ```
 
-The models are **mutually exclusive** — exactly one is active for the whole domain
-in a given run — and they differ in where the incident external radiation of a
-`RadiativeFluxBC` is deposited:
+The models are **mutually exclusive**: exactly one is active for the whole domain
+in a given run. They differ in where the radiation arriving at the solid is absorbed
+and whether the solid emits from its depth:
 
-1. **`SURFACE_ABSORPTION`.** The incident radiation is
+1. **`SURFACE_ABSORPTION`.** The incident radiation of a `RadiativeFluxBC` is
    absorbed at the exposed face. It is **not** a volumetric source: the absorbed
    flux $a\,q_{\text{inc}}(t)$ enters the energy balance as a boundary heat flux
    through the surface energy balance and its Newton solve for $T_s$ (§8.2, §12.2)
-   (`evaluate_bc_flux_and_derivative`, `src/BoundaryConditions/surface_balance.jl`).
-   Component absorption coefficients $\alpha_j$ are not read. It is the model of
-   an opaque solid whose first cell is optically thick, $\tau_n\gg 1$, and with no
-   `RadiativeFluxBC` it absorbs nothing. Surface re-radiation (`RadiativeBC`) acts
-   at the face under both models.
+   (`evaluate_bc_flux_and_derivative`, `src/BoundaryConditions/surface_balance.jl`),
+   and a `RadiativeBC` exchanges $\varepsilon\sigma(F\,T_\infty^4-T_s^4)$ in the same
+   balance. Component absorption coefficients $\alpha_j$ are not read. It is the
+   model of an opaque solid whose first cell is optically thick, $\tau_n\gg 1$.
 
-2. **`BEER_LAMBERT`.** In-depth exponential absorption following the Beer–Lambert
-   law, $I(z)=I_e\exp\!\big(-\int_z^L\alpha_{\text{eff}}\,\mathrm{d}z'\big)$, with
-   volumetric source $q'''=\alpha_{\text{eff}}I$. Radiation penetrates over the
-   absorption length $1/\alpha_{\text{eff}}$. The intensity of every face is an
-   **algebraic unknown** of the state (§8.3.3); each of its rows reads one cell and
-   that cell's two faces, so the Jacobian stays banded (§8.6). Appropriate for
-   semi-transparent polymers and foams ($\tau\lesssim 10$).
-
-There is no spherical-harmonics (diffusion) or two-flux model of the radiation
-in depth; §8.8 states what one would take.
+2. **`RADIATIVE_TRANSFER`.** Radiation crosses the exposed face and travels through
+   the solid. Every cell absorbs and emits at its absorption coefficient
+   $\alpha_{\text{eff}}$ (§5.8.3) and its temperature; the field is two
+   hemispherical fluxes per face, $I^-_f$ and $I^+_f$, **algebraic unknowns** of the
+   state, plus one beam per face for each direction of a collimated or cone heater
+   (§8.3, §8.4). The exposed face is a gray interface at the emissivity of the cell
+   beside it, and the back a mirror unless its condition radiates. The surface
+   energy balance keeps convection, prescribed fluxes, blowing and conduction and
+   holds no radiation (§8.5). Appropriate for semi-transparent polymers and foams
+   ($\tau\lesssim 10$).
 
 ### 8.1.2 What the model changes
 
 The model-dependent decisions are made where they arise, all of them by `setup`
 (`src/Integration/setup.jl`):
 
-- **The state.** Under `BEER_LAMBERT` the layout carries the intensity of every
-  face as an algebraic unknown (`StateLayout(...; intensities = true)`): on a line
-  of $n$ cells, $n+1$ rows, one in the node block of each face's node
-  (`intensity_index(layout, f)`, §15.1). `SURFACE_ABSORPTION` adds nothing.
-- **The kernels.** `BEER_LAMBERT` adds a `BeerLambertKernel`
-  (`src/Kernels/radiation.jl`) after the gas-transport kernel and before
-  conduction; `SURFACE_ABSORPTION` adds none. The thermal boundary kernel reads the model
-  for the `RadiativeFluxBC` dispatch (§8.4).
-- **The tolerances and the domain test.** The intensity rows take the absolute
-  tolerance $\mathrm{reltol}\cdot S_I$, with $S_I$ the largest incident intensity
-  over the time span (§8.3.3); the domain test checks their residuals (§15.5.4).
-- **The refusals.** `setup` refuses `BEER_LAMBERT` with an `ArgumentError` off
-  planar coordinates, on a mesh of more than one dimension, when the `:top` tag
-  has more than one face, and when a `RadiativeFluxBC` sits on any tag other than
-  `:top` (§8.3.4).
-
-No check compares the material with the model: `SURFACE_ABSORPTION` with non-zero
-$\alpha_j$ (not read) and `BEER_LAMBERT` with every $\alpha_j = 0$ (nothing
-absorbed in depth, everything transmitted, §8.3.3) both run without a warning.
+- **The state.** Under `RADIATIVE_TRANSFER` the layout carries $N_{\text{rad}}$
+  radiation rows per face, the last rows of the node block of the face's node
+  (`StateLayout(...; radiation_rows)`, `radiation_index(layout, f, k)`, §8.7.1,
+  §15.1): $N_{\text{rad}} = 2 + N_{\text{beam}}$, the two hemispherical fluxes and one
+  row per beam direction (`radiative_transfer_rows`). On a line of $n$ cells that is
+  $(n+1)N_{\text{rad}}$ rows. `SURFACE_ABSORPTION` adds nothing.
+- **The kernels.** `RADIATIVE_TRANSFER` adds a `RadiativeTransferKernel`
+  (`src/Kernels/radiative_transfer.jl`) after the gas-transport kernel and before
+  conduction; `SURFACE_ABSORPTION` adds none. The thermal boundary kernel reads the
+  model for the `RadiativeBC` and `RadiativeFluxBC` dispatch (§8.5).
+- **The tolerances and the domain test.** The radiation rows take the absolute
+  tolerance $\mathrm{reltol}\cdot q_{\text{scale}}$ and the domain test reads each of them
+  against its own flux (§8.7.3, §15.5.4).
+- **The refusals.** `setup` refuses a deck the rows cannot represent (§8.4.4).
 
 | Model | Extra state | Kernel | Jacobian pattern |
 |---|---|---|---|
 | `SURFACE_ABSORPTION` | — | — | banded (cell blocks and their neighbours) |
-| `BEER_LAMBERT` | $n+1$ face intensities (algebraic) | `BeerLambertKernel` | banded; each intensity row reads three intensities and the two cells beside its face (§8.6) |
+| `RADIATIVE_TRANSFER` | $(n+1)N_{\text{rad}}$ face fluxes (algebraic) | `RadiativeTransferKernel` | banded; each radiation row reads its family at its own face and the next one upstream along its direction and the two cells beside the face, a thermal row also the other thermal family at its face (§8.7.4) |
 
 ---
 
@@ -6559,7 +6583,7 @@ with $v_j$ the mixing volume fractions and $a_j$ the component's
 `absorptivity` when set and otherwise its emissivity $\varepsilon_j(T)$; with no
 component absorptivity set this is Kirchhoff's law, $a_{\text{eff}}=\varepsilon_{\text{eff}}$.
 The state mapping evaluates it once per cell and residual,
-`ds.a[i] = mixture_absorptivity(ξ⁺, T_trial, material)` (`src/States/derived.jl`),
+`ds.a[i]` from `surface_properties_of_fractions` (`src/States/derived.jl`), the sum `mixture_absorptivity` computes,
 at the positive-part concentrations and the cell's trial temperature. No clamp is
 applied: the weights are convex and every component value lies in $[0,1]$
 (validated on the property bracket when the component is built), so the sum stays
@@ -6567,7 +6591,8 @@ in $[0,1]$. An explicit `absorptivity` on the condition (a constant or a functio
 of $t$) overrides $a_{\text{eff}}$. The absorbed incident flux does not depend on
 $T_s$. Surface re-radiation is supplied separately by a `RadiativeBC` term,
 $q=\varepsilon_{\text{eff}}\sigma(F\,T_\infty^4-T_s^4)$, whose $T_s$-dependence
-enters the Newton derivative (§12.3.4).
+enters the Newton derivative (§12.3.4). The `distribution` of a `RadiativeFluxBC`
+has no effect under this model.
 
 The textbook alternative — depositing the absorbed flux as a volumetric source
 $a\,q_{\text{inc}}/\Delta z_n$ in the top cell — is deliberately **not**
@@ -6584,312 +6609,279 @@ penetrates beyond cell $n$. It adds no unknowns and no Jacobian entries beyond t
 boundary cell's own, and it is the recommended choice for charring solids and fast
 cone-calorimeter analysis.
 
-Both radiation models treat the material's own emission as a surface process at $T_s$
-(§8.4). That holds while the mean free path of that emission, $1/\kappa_R(T)$ with
-$\kappa_R$ the Rosseland mean of the absorption spectrum over the material's own emission
-band, is short against the thermal-gradient scale; the in-depth transport it carries is a
-radiative conductivity $16n^2\sigma T^3/3\kappa_R$ that the surface treatment omits. For wood
-and char the mean free path is below 0.1 mm. For black PMMA the spectral windows at 2–3 µm
-and 4–5 µm give $\kappa_R\approx4\times10^{3}$ m⁻¹ at 650 K, a mean free path of 0.25 mm and
-a radiative conductivity of 0.045 W·m⁻¹·K⁻¹, a fifth of the room-temperature conductivity and
-half of the value a cone-calibrated law assigns at 650 K (§5.5); in
-the 25 kW·m⁻² cone case it changes the surface temperature by 6 K and the mass loss rate by
-5 %, within the scatter of those measurements, and the back-face temperature by 15 K, above it.
+It also treats the material's own emission as a surface process at $T_s$. That holds
+while the mean free path of that emission, $1/\kappa_R(T)$ with $\kappa_R$ the
+Rosseland mean of the absorption spectrum over the material's own emission band, is
+short against the thermal-gradient scale; the in-depth transport it carries is a
+radiative conductivity $16n^2\sigma T^3/(3\kappa_R)$ that the surface treatment omits
+unless the deck puts it into $k$ (§5.5). For wood and char the mean free path is below
+0.1 mm. For black PMMA the spectral windows at 2–3 µm and 4–5 µm give
+$\kappa_R\approx4\times10^{3}$ m⁻¹ at 650 K, a mean free path of 0.25 mm and a radiative
+conductivity of 0.045 W·m⁻¹·K⁻¹, a fifth of the room-temperature conductivity and
+half of the value a cone-calibrated law assigns at 650 K (§5.5); in the 25 kW·m⁻² cone
+case it changes the surface temperature by 6 K and the mass loss rate by 5 %, within
+the scatter of those measurements, and the back-face temperature by 15 K, above it.
+`RADIATIVE_TRANSFER` carries that transport through its rows (§8.3).
 
 ---
 
-## 8.3 The Beer–Lambert In-Depth Model
+## 8.3 Radiative Transfer in the Solid
 
-### 8.3.1 Continuous form
+### 8.3.1 The two-stream equations
 
-Beer–Lambert follows from the 1D radiative transfer equation for a collimated beam
-with absorption coefficient $\alpha_{\text{eff}}(z)$ and negligible scattering and
-emission along the *incident* beam. With the beam entering at the exposed surface
-$z=L$ and travelling into the depth, the depth $s=L-z$ is the path length, and
-
-$$
-\frac{\mathrm{d}I}{\mathrm{d}s} = -\alpha_{\text{eff}}\, I
-\qquad\Longleftrightarrow\qquad
-\frac{\mathrm{d}I}{\mathrm{d}z} = +\alpha_{\text{eff}}\, I .
-$$
-
-Integration from the surface gives exponential attenuation,
+A non-scattering gray medium of absorption coefficient $\alpha$ [m⁻¹] at temperature
+$T$ carries radiation of every direction. The two-stream closure keeps two
+hemispherical fluxes, $I^-$ toward the back and $I^+$ toward the exposed face
+[W·m⁻²], each treated as if its intensity were isotropic over its hemisphere, so that
+it travels at the mean direction cosine $\bar\mu$:
 
 $$
-I(z) = I_e\,\exp\!\left(-\int_{z}^{L}\alpha_{\text{eff}}(z')\,\mathrm{d}z'\right),
+-\bar\mu\,\frac{\mathrm{d}I^-}{\mathrm{d}z} = \alpha\big(\sigma T^4 - I^-\big),\qquad
+\bar\mu\,\frac{\mathrm{d}I^+}{\mathrm{d}z} = \alpha\big(\sigma T^4 - I^+\big),
+\tag{8.1}
 $$
 
-with $I_e$ the intensity that enters through the exposed face (§8.3.2). The local
-energy deposited per unit volume is the absorbed power density,
+with $1/\bar\mu = 3/2$ (`DIFFUSIVITY`). The net radiative flux along $+z$ is
+$I^+ - I^-$, and the power it deposits per unit volume is
 
 $$
-q'''(z) = \alpha_{\text{eff}}(z)\,I(z)\qquad[\mathrm{W\,m^{-3}}].
+Q_{\text{rad}} = -\frac{\mathrm{d}}{\mathrm{d}z}\big(I^+ - I^-\big)
+= \frac{\alpha}{\bar\mu}\big(I^+ + I^- - 2\sigma T^4\big).
+\tag{8.2}
 $$
 
-The effective absorption coefficient is the composition-weighted volumetric
-extinction,
+**Why $1/\bar\mu = 3/2$.** Deep in an optically thick medium (8.1) gives
+$I^\pm = \sigma T^4 \mp (\bar\mu/\alpha)\,\mathrm{d}(\sigma T^4)/\mathrm{d}z$ to first
+order, a net flux $-(2\bar\mu/\alpha)\,\mathrm{d}(\sigma T^4)/\mathrm{d}z$. With
+$\bar\mu = 2/3$ that is the Rosseland flux $-\frac{4}{3\alpha}\,\mathrm{d}(\sigma T^4)/\mathrm{d}z$,
+the exact limit of the transfer equation, so the closure carries the in-depth
+radiative conduction of a thick medium correctly. At the thin end it is less accurate: a
+layer of optical thickness $\tau\ll1$ exchanges $\tau/\bar\mu = 1.5\,\tau$ with a diffuse
+field where exact transfer, averaging the path length over the hemisphere, gives
+$2\tau$: 25 % too little. An isothermal slab at $\sigma T^4$ with black faces, emitting
+into surroundings at 0 K, emits through each face
+$\sigma T^4(1 - e^{-\tau_L/\bar\mu})$ under the closure against
+$\sigma T^4\big(1 - 2E_3(\tau_L)\big)$ exactly, with $\tau_L = \int_0^L\alpha\,\mathrm dz$ the
+slab's optical thickness and $E_3$ the third exponential integral:
+
+| $\tau_L$ | $10^{-3}$ | $10^{-2}$ | 0.1 | 0.3 | 1 | 3 |
+|---|---|---|---|---|---|---|
+| two-stream over exact, less one | −24.8 % | −23.4 % | −16.8 % | −9.4 % | −0.5 % | +0.7 % |
+
+On the burning PMMA profiles of V-RAD-05, down to the last tenth of the layer, the
+closure moves the thermal flux leaving the exposed face by at most 0.0044 of the
+absorbed heater flux against exact gray transfer (§8.9.4).
+
+**Beams.** A collimated or cone heater does not need the closure: each of its
+directions $h$, of direction cosine $\mu_h$, is carried exactly,
 
 $$
-\alpha_{\text{eff}} = \sum_j \xi^+_j\,\alpha_j,
+-\mu_h\,\frac{\mathrm{d}I_h}{\mathrm{d}z} = -\alpha\,I_h ,
+\tag{8.3}
 $$
 
-where $\xi^+_j$ [kg·m⁻³] is the positive-part mass concentration and $\alpha_j$
-[m²·kg⁻¹] the component's constant mass absorption coefficient (keyword `α`;
-`effective_absorption`, `src/Properties/effective_properties.jl`). The product
-$\xi_j\alpha_j$ has units m⁻¹, so $\alpha_{\text{eff}}$ is a *volumetric*
-coefficient. The state mapping evaluates it once per cell and residual, and only
-under `BEER_LAMBERT` (`ds.α[i]`, `src/States/derived.jl`; §5.8, §5.13). The
-optical thickness of the whole layer is $\tau = \int_0^L \alpha_{\text{eff}}\,\mathrm{d}z$.
+where $I_h$ is the beam's flux across a face normal to $z$. The medium's own emission
+enters $I^\pm$ only.
 
-### 8.3.2 The exact cell-averaged discretization
+### 8.3.2 Exact integration across a cell
 
-A naive evaluation $q'''_i \approx \alpha_i I(z_i^c)$ at the cell center is only
-first-order accurate and can over- or under-deposit energy depending on $\tau_i$.
-Pyrolysis.jl instead uses the **exact cell-integrated** source: integrating
-$q'''=\alpha I$ over a cell of constant $\alpha_i$ and entrance intensity
-$I_{\text{up}}$ (the intensity at the cell's face nearer the exposed surface),
+Across a cell $i$ of uniform absorption coefficient $\alpha_i$ and temperature
+$\tilde T_i$ (its trial temperature, as every property, §5), with optical thickness
+$\tau_i = \alpha_i\,\Delta z_i$ and emissive power $\mathcal B_i = \sigma\tilde T_i^4$,
+(8.1) and (8.3) integrate exactly from the face each flux enters by to the face it
+leaves by:
 
 $$
-\int_{\text{cell }i} \alpha_i\,I\,\mathrm{d}s
-= \int_0^{\Delta z_i}\!\alpha_i\, I_{\text{up}}\, e^{-\alpha_i s}\,\mathrm{d}s
-= I_{\text{up}}\big(1 - e^{-\alpha_i \Delta z_i}\big),
+I^-_d = \mathcal B_i + \big(I^-_u - \mathcal B_i\big)\,e^{-\tau_i/\bar\mu},\qquad
+I^+_u = \mathcal B_i + \big(I^+_d - \mathcal B_i\big)\,e^{-\tau_i/\bar\mu},\qquad
+I_{h,d} = I_{h,u}\,e^{-\tau_i/\mu_h}.
+\tag{8.4}
 $$
 
-so the *cell-averaged* volumetric source is the absorbed power divided by the cell
-thickness:
+These hold at any $\tau_i$: a coarse or optically thick cell is integrated exactly for
+its constant emissive power, and the mesh enters only through the staircase that
+cell-constant emission makes of $\sigma T^4$ (§8.6). $\alpha_i$ is (5.23) at the
+positive-part concentrations, $\sum_j\xi^+_j\alpha_j$, so a depleting cell becomes
+optically thin as it empties. $\Delta z_i$ is the sum of the cell's two center-to-face
+distances, each smoothly floored at `DISTANCE_FLOOR_FRACTION` of its initial value
+(the floors of the conduction kernel), so a collapsing cell on a moving mesh keeps a
+positive, differentiable thickness.
 
-$$
-\boxed{\;q^{\text{rad}}_i = I_{\text{up}}\,\frac{1 - e^{-\tau_i}}{\Delta z_i},
-\qquad \tau_i \equiv \alpha_i\,\Delta z_i\;}
-$$
+### 8.3.3 The rows
 
-This is exact for piecewise-constant $\alpha$ and conserves energy by
-construction: the power absorbed in cell $i$ per unit area is
-$q^{\text{rad}}_i\,\Delta z_i = I_{\text{up}}(1-e^{-\tau_i}) = I_{\text{up}}-I_{\text{down}}$,
-exactly the drop in beam intensity across the cell, with
-$I_{\text{down}} = I_{\text{up}}e^{-\tau_i}$ the intensity at its far face. The
-implementation carries exactly these face intensities (§8.3.3).
-
-The intensity that crosses the exposed face is $I_e = a\,q_{\text{inc}}(t)$, with
-$a$ the surface absorptivity: on the default **Kirchhoff path** (the
-`RadiativeFluxBC` carries no explicit `absorptivity`) it is the effective surface
-absorptivity $a_{\text{eff}}$ of the first live cell from the exposed face
-(`ds.a`, §8.2.1, §5.8.2) — identical to its $\varepsilon_{\text{eff}}$ unless a
-component sets its own `absorptivity`, so by default absorption and surface
-emission use the same coefficient (Kirchhoff's law, detailed balance) — and the
-remaining $(1-a)\,q_{\text{inc}}$ is reflected and never enters the medium. With
-an **explicit absorptivity** on the condition, $a(t)$ is that value at the time of
-the evaluation. The entrance intensity of cell $i$ is then the cumulative
-attenuation from the surface down to its upstream face,
-
-$$
-I_{\text{up}}(i) = a\,q_{\text{inc}}\prod_{k>i} e^{-\tau_k}
-= a\,q_{\text{inc}}\,\exp\!\left(-\sum_{k>i}\alpha_k\Delta z_k\right),
-$$
-
-the product running over the live cells between cell $i$ and the exposed face.
-The transmitted (un-absorbed) intensity at the back face is
-$I_b = a\,q_{\text{inc}}\,e^{-\tau}$; it leaves through the back face (§8.3.3).
-
-### 8.3.3 The face intensities as algebraic rows
-
-Eliminating the recurrence $I_{\text{down}} = I_{\text{up}}e^{-\tau_i}$ would make
-the source of every cell depend on the state of every cell above it. The
-`BeerLambertKernel` (`src/Kernels/radiation.jl`) keeps the recurrence local
-instead: the intensity $I_f$ of every face is an algebraic unknown, and each face
-carries one row. With the cells ordered from the exposed face into the depth
-(`order`), and `up[i]`, `down[i]` the faces of cell $i$ nearer and farther from
-the exposed face,
+The face fluxes are algebraic unknowns. Each row is a flux minus the value (8.4) or
+a boundary gives it (`contribute!`, `src/Kernels/radiative_transfer.jl`), for the
+first live cell $i_1$, whose upstream face is the exposed face $e$, every live cell
+$i$ with faces $u$ and $d$, and the last cell $l$, whose downstream face is the back
+face $b$:
 
 $$
 \begin{aligned}
-0 &= I_e - a\,q_{\text{inc}}(t) &&\text{(the exposed face $e$)},\\
-0 &= I_{\text{down}(i)} - I_{\text{up}(i)}\,\exp(-\alpha_i\Delta_i) &&\text{(every other face, the far face of cell $i$)},
+r[I^-_e] &= I^-_e - \big[\varepsilon_e\,q^{\text{in}}_e + (1-\varepsilon_e)\,I^+_e\big] &&\text{exposed face (§8.4.1)}\\
+r[I_{h,e}] &= I_{h,e} - a\,w_h\,q_{\text{inc}}(t) &&\text{each beam (§8.4.2)}\\
+r[I^-_d] &= I^-_d - \big[\mathcal B_i + (I^-_u - \mathcal B_i)\,e^{-\tau_i/\bar\mu}\big] &&\text{each live cell}\\
+r[I^+_u] &= I^+_u - \big[\mathcal B_i + (I^+_d - \mathcal B_i)\,e^{-\tau_i/\bar\mu}\big] &&\text{each live cell}\\
+r[I_{h,d}] &= I_{h,d} - I_{h,u}\,e^{-\tau_i/\mu_h} &&\text{each live cell, each beam}\\
+r[I^+_b] &= I^+_b - \Big[\varepsilon_b\,q^{\text{in}}_b + (1-\varepsilon_b)\Big(I^-_b + \sum_h I_{h,b}\Big)\Big] &&\text{back face (§8.4.3)}
 \end{aligned}
+\tag{8.5}
 $$
 
-and cell $i$ absorbs the power
+Every face of the live region has exactly two thermal rows (the exposed face its
+boundary row and the $I^+$ row of cell $i_1$; an interior face one row from each of
+its cells; the back face the $I^-$ row of cell $l$ and its boundary row) and one row
+per beam. The faces upstream of the first live cell, beyond a deactivated column,
+carry no rows: they are dead and hold zero (§8.7.1).
+
+Each live cell absorbs what enters through its two faces minus what leaves,
 
 $$
-S^{\text{rad}}_i = I_{\text{up}(i)}\,A_{\text{up}(i)} - I_{\text{down}(i)}\,A_{\text{down}(i)}\qquad[\mathrm{W}],
+S^{\text{rad}}_i = A_u\big(I^-_u - I^+_u\big) - A_d\big(I^-_d - I^+_d\big)
++ \sum_h\big(A_u I_{h,u} - A_d I_{h,d}\big)\quad[\text{W}],
+\tag{8.6}
 $$
 
-added to its energy source (`S_energy`). At intensities that satisfy the rows,
-$S^{\text{rad}}_i/V_i$ is exactly the cell average $q^{\text{rad}}_i$ of §8.3.2. The
-kernel, verbatim:
+with $A_u$, $A_d$ the face areas (equal on a planar line). At fluxes that satisfy the
+rows, $S^{\text{rad}}_i/V_i$ is the exact cell average of (8.2) for the cell's constant
+emission.
 
-```julia
-function contribute!(c::Contributions, kernel::BeerLambertKernel, ds::DerivedState,
-                     topo::MeshTopology{1}, material, t)
-    g = ds.geometry
-    s = _first_live(kernel, ds)
-    s == 0 && return c
-    e = kernel.up[kernel.order[s]]
-    c.r_intensity[e] = ds.I[e] - incident_intensity(kernel, ds, t)
-    @inbounds for k = s:length(kernel.order)
-        i = kernel.order[k]
-        up, down = kernel.up[i], kernel.down[i]
-        I_up, I_down = ds.I[up], ds.I[down]
-        c.r_intensity[down] = I_down - I_up * exp(-_optical_thickness(kernel, ds, topo, i))
-        c.S_energy[i] += I_up * g.face_area[up] - I_down * g.face_area[down]
-    end
-    return c
-end
-```
-
-The assembler writes `r_intensity[f]` into the intensity row of face $f$
-(`assemble_rows!`, `src/Assembly/residual.jl`). Several details are load-bearing:
-
-- **Cell thickness is geometric.** $\Delta_i = d_{\text{up}} + d_{\text{down}}$, the
-  sum of the cell center's distances to its two faces in the current geometry
-  (the node positions on a moving mesh), each smoothly floored at $10^{-8}$ of its
-  reference value (`DISTANCE_FLOOR_FRACTION`, `_optical_thickness`). On a line
-  $\Delta_i = \Delta z_i$, so the attenuation follows the cell as the mesh moves
-  and shrinks (§10, §11). Under a variable cross section every face of a planar
-  column has the same area $A(t)$, so $A_{\text{up}} = A_{\text{down}}$.
-- **The beam's energy telescopes for any intensities.** Summed over the live
-  cells, $\sum_i S^{\text{rad}}_i = I_e A_e - I_b A_b$ identically, whether or not
-  the intensities satisfy their rows: the power deposited in the cells is the
-  power that entered less the power that left, also on a trial state off the
-  algebraic manifold.
-- **Transparent cells.** A cell with $\alpha_i = 0$ has $e^{-\tau_i}=1$: its row
-  passes the intensity unchanged and it absorbs exactly nothing. No threshold
-  guard is needed.
-- **Zero flux.** A zero incident flux, or no `RadiativeFluxBC` on `:top` (the
-  kernel then uses `RadiativeFluxBC(0.0)`), gives zero intensities through the
-  rows; nothing is short-circuited.
-- **Transmitted flux.** Whatever intensity reaches the last face, $I_b$, leaves
-  through the back face: no row deposits it, and the back-face condition
-  describes only the surface it models. That is the right answer for a slab whose
-  back face is open and a modelling error for one that rests on an opaque holder.
-  The solution reports it per saved time (`sol.extras.radiation_transmitted`,
-  §8.5); no warning is issued.
-- **Planar coordinates only.** The rows attenuate intensities while the cell
-  sources read face areas; on a cylinder or a sphere the two areas of a cell
-  differ, so a transparent cell would absorb $I\,(A_{\text{up}}-A_{\text{down}})$.
-  `setup` refuses `BEER_LAMBERT` off planar coordinates
-  (`"in-depth radiation needs planar coordinates"`).
-- **Deactivation.** After cells are deactivated (§14), the beam enters the first
-  live cell of `order` through its upstream face
-  (`exposed_face`), the exposed-face row moves there, and $a$ is that cell's
-  absorptivity. The intensity rows of the faces upstream of it are masked with
-  the dead cells (§14.3.1): they become identity rows, and their intensities are
-  zero.
-- **A consistent start.** `setup` writes intensities that satisfy every row into
-  the initial state (`consistent_state!`, which calls `sweep_intensities!`: the
-  incident intensity at the exposed face, attenuated cell by cell, zero upstream
-  of the first live cell), and the deactivation event does the same after every
-  transfer (§15.4). The integrator runs no initialization of its own.
-- **Tolerances and the domain test.** Each intensity row takes the absolute
-  tolerance $\mathrm{reltol}\cdot S_I$, where $S_I$ is the largest
-  $|I_{\text{inc}}(t)|=|a\,q_{\text{inc}}(t)|$ over 101 equally spaced times of the
-  time span, at least 1 W·m⁻² (`_intensity_scale`, `src/Integration/setup.jl`;
-  `abstol_vector`, `src/States/tolerances.jl`). The domain test rejects a proposed
-  step whose live intensity rows leave a residual above
-  $\mathrm{rtol}\cdot S_I + \mathrm{abstol}$ (§15.5.4).
-
-The source is **positive = heating**. The absorbed power over the live cells is
-$\sum_i S^{\text{rad}}_i = A\,a\,q_{\text{inc}}\,(1-e^{-\tau}) \le A\,a\,q_{\text{inc}}$,
-with equality only if the layer is fully opaque ($e^{-\tau}\to 0$) — consistent
-with `SURFACE_ABSORPTION`, which applies $a\,q_{\text{inc}}$ at the face with the
-same $a$ (the absorptivity of the same cell), so switching models does not change
-the absorbed power in the opaque limit.
-
-### 8.3.4 Where the incident intensity comes from
-
-The incident flux fed to Beer–Lambert is the flux of the `RadiativeFluxBC` on the
-`:top` tag: the condition itself, or the **first** `RadiativeFluxBC` member of a
-`CombinedThermalBC` (`get_radiative_flux_bc`,
-`src/BoundaryConditions/boundary_conditions.jl`). `incident_intensity(kernel, ds, t)`
-returns
-
-$$
-I_{\text{inc}}(t) = a\,q_{\text{inc}}(t),\qquad
-a = \begin{cases}
-\text{the condition's absorptivity at } t, & \text{when it has one},\\
-a_{\text{eff}} \text{ of the first live cell}, & \text{otherwise (Kirchhoff path)}.
-\end{cases}
-$$
-
-The choice between the two paths is a property of the condition and is made by
-the same code in every evaluation; there is no separate flag to keep in step
-between the residual and its Jacobian, which differentiates the same residual
-(§8.6).
-
-Beer–Lambert models **top-incident** radiation only. Under this model a
-`RadiativeFluxBC` contributes zero to the surface balance of *every* face (§8.4),
-so a `RadiativeFluxBC` on any other tag could not be honored: `setup` refuses it
-with an `ArgumentError` (`"in-depth radiation enters through the :top faces
-only; the condition on :bottom carries an incident radiative flux"`) rather than
-silently dropping the back-side heating. Use `SURFACE_ABSORPTION` (face deposit
-at either boundary) or a `HeatFluxBC` for back-side radiant heating. The `:top`
-tag must have exactly one face, and a mesh of more than one dimension is refused
-(`"in-depth radiation is a line's"`, §8.8).
-
-A second `RadiativeFluxBC` member of the `:top` condition is **dropped
-silently**: only the first feeds the beam, and every member contributes zero to
-the surface balance. With the slab of §8.3.5 and a top condition
-`RadiativeFluxBC(50e3) + RadiativeFluxBC(20e3) + RadiativeBC(T_inf = 300.0)`,
-the incident intensity is $0.9\times 50 = 45\ \mathrm{kW\,m^{-2}}$ under
-`BEER_LAMBERT`, while `SURFACE_ABSORPTION` absorbs $0.9\times 70 = 63\ \mathrm{kW\,m^{-2}}$
-at the face (run in the documentation scratch environment). Combine the sources
-into one `RadiativeFluxBC` (a function of $t$ can sum them).
-
-The incident flux is evaluated inside **every** residual evaluation, at that
-evaluation's own time $t$, through `incident_intensity`. The colored Jacobian
-differentiates the same residual at its own time, so it sees the flux at the time
-it is evaluated. There is no constant-flux detection and no snapshot: a ramped or
-modulated cone flux can never be frozen at its $t=0$ value. The kernel tests run
-a sinusoidally modulated flux and check the exposed-face intensity against
-$a\,q_{\text{inc}}(t)$ at the residual's time (`test/kernels/test_radiation.jl`).
-
-### 8.3.5 Worked numbers
-
-For a 10 mm semi-transparent slab with $\alpha_{\text{eff}}=100\ \mathrm{m^{-1}}$
-($\rho = 1000\ \mathrm{kg\,m^{-3}}$, $\alpha_j = 0.1\ \mathrm{m^2\,kg^{-1}}$),
-uniform $\Delta z=1\ \mathrm{mm}$, $q_{\text{inc}}=50\ \mathrm{kW\,m^{-2}}$ and
-$\varepsilon_{\text{eff}}=0.9$ (Kirchhoff path), the intensity entering the
-medium is $I_e = 0.9\times50 = 45\ \mathrm{kW\,m^{-2}}$. With $\tau_i=0.1$ the top
-cell ($i=n=10$) absorbs $q_{10}=45\,000\,(1-e^{-0.1})/0.001 \approx 4.28\ \mathrm{MW\,m^{-3}}$;
-the intensity at its far face is $45\,000\,e^{-0.1}=40.7\ \mathrm{kW\,m^{-2}}$,
-giving $q_9\approx 3.88\ \mathrm{MW\,m^{-3}}$, then $q_8\approx 3.51\ \mathrm{MW\,m^{-3}}$,
-and so on. The total optical thickness is $\tau=\alpha L=1$, so
-$e^{-1}\approx 0.37$ of the entering intensity, $16.55\ \mathrm{kW\,m^{-2}}$, is
-transmitted through the slab — Beer–Lambert is the right tool in this regime,
-whereas surface absorption would deposit everything at the surface.
-
-The run below reproduces these numbers:
-
-```julia
-using Pyrolysis
-
-slab = SolidComponent(:slab, ρ = 1000.0, c = 1500.0, k = 0.2, ε = 0.9, α = 0.1)
-material = Material(name = :slab, components = (slab,), reactions = ())
-problem = PyrolysisProblem(
-    mesh = uniform_mesh(0.01, 10),
-    material = material,
-    bc_set = BoundaryConditionSet(
-        thermal = (top = RadiativeFluxBC(50e3), bottom = AdiabaticBC()),
-    ),
-    ξ_initial = [z -> 1000.0],
-    tspan = (0.0, 1.0),
-    output_times = [0.0, 1.0],
-)
-sol = solve(problem; radiation_model = BEER_LAMBERT)
-sol.extras.volumetric_absorption        # 28445.4 W/m² absorbed in depth
-sol.extras.radiation_transmitted        # 16554.6 W/m² through the back face
-sol.extras.surface_heat_flux_absorbed   # 0.0: nothing is absorbed at the face
-```
-
-The initial face intensities of this problem, from the exposed face down, are
-45000.0, 40717.7, 36842.9, … , 16554.6 W·m⁻², and the cell sources of the top three
-cells 4.282, 3.875 and 3.506 MW·m⁻³. With `radiation_model = SURFACE_ABSORPTION` the
-same problem absorbs 45000 W·m⁻² at the face, all of it conducted into the slab, and
-nothing in depth.
+The rows are smooth and allocation-free: exponentials, products and the smooth
+floors, and continuously differentiable in the state. The thermal rows are linear in the fluxes
+for given temperatures and absorption coefficients; their determinant is
+$1 - (1-\varepsilon_e)(1-\varepsilon_b)\prod_i e^{-2\tau_i/\bar\mu}$ (§8.7.2), which is at
+least $\varepsilon_e$ and so at least $10^{-3}$ for every state (§8.4.1).
 
 ---
 
-## 8.4 Energy-Equation Coupling for Each Model
+## 8.4 Boundaries
+
+### 8.4.1 The exposed face
+
+The exposed face $e$ is the upstream face of the first live cell from the `:top`
+boundary (`exposed_face`): the `:top` face itself while no cell is dead, and the face
+of the next live cell once cells beyond it are deactivated (Chapter 14). It is a
+**gray interface** that transmits the fraction $\varepsilon_e$ in both directions,
+
+$$
+\varepsilon_e = \text{smooth\_floor}\big(\varepsilon_{\text{eff}}(i_1),\ 10^{-3}\big),
+\tag{8.7}
+$$
+
+with $\varepsilon_{\text{eff}}(i_1)$ the effective emissivity (5.22) of the first live
+cell at its trial temperature and composition and $10^{-3}$ `INTERFACE_FLOOR`.
+Radiation from outside crosses it inward at $\varepsilon_e$, and the solid's
+upward flux crosses it outward at $\varepsilon_e$, the rest reflecting into $I^-_e$:
+the first row of (8.5). The radiation leaving through the face is
+$\varepsilon_e I^+_e$. Using one $\varepsilon_e$ both ways is what makes the
+interface satisfy detailed balance (§8.5.2); a condition-level emissivity would break
+it, so `setup` refuses a `RadiativeBC` with its own `ε` under this model.
+
+The diffuse radiation arriving from outside is the sum over the `:top` condition's
+radiative members (`incoming_radiation`),
+
+$$
+q^{\text{in}}_e = \sum_{\texttt{RadiativeBC}} F\,\sigma T_\infty^4
+\;+\sum_{\text{diffuse }\texttt{RadiativeFluxBC}} q_{\text{inc}}(t),
+$$
+
+each `RadiativeBC` the surroundings at $T_\infty$ over the fraction $F$ of the
+hemisphere, each diffuse `RadiativeFluxBC` a heater's diffuse flux; several members
+add. A `:top` condition with neither member is refused: radiation enters and leaves
+the solid through the exposed face, and a reflecting exposed face over a transparent
+column and a mirror back would make the thermal rows singular. A beam-only `:top` faces
+surroundings at 0 K unless a `RadiativeBC` is added.
+
+The smooth floor bounds the thermal rows' determinant away from zero for every state:
+a gas-filled first cell (gases default to $\varepsilon = 0$, §5.8.1) or a depleting
+column still leaves an interface that transmits $10^{-3}$. The floor acts both ways,
+so the equilibrium of §8.5.2 holds through it.
+
+### 8.4.2 Heaters: diffuse, collimated, cone
+
+A `RadiativeFluxBC` arrives with the angular distribution given by its
+`distribution` keyword (an `AngularDistribution`):
+
+| `distribution` | how it enters | rows |
+|---|---|---|
+| `Diffuse()` (default) | into $q^{\text{in}}_e$, crossing at $\varepsilon_e$, then travelling as $I^-$ | none |
+| `Collimated()` | one beam along the normal, $\mu_h = 1$ | one per face |
+| `Cone(θ₁, θ₂; directions = 3)` | uniform intensity between the polar angles $\theta_1<\theta_2$: `directions` beams | `directions` per face |
+
+A beam enters with its share of the absorbed flux, $I_{h,e} = a\,w_h\,q_{\text{inc}}(t)$,
+at the condition's `absorptivity` $a$ when given and otherwise at the effective
+absorptivity $a_{\text{eff}}$ (5.22b) of the first live cell. Under a cone of uniform
+intensity the flux per unit direction cosine is proportional to the cosine, so the
+beams sit at the Gauss–Legendre nodes $\mu_h$ of $[\cos\theta_2,\cos\theta_1]$, and each
+carries a share $w_h$ of the flux proportional to its Gauss–Legendre weight times
+$\mu_h$, divided by the sum of these products, the quadrature's integral of the cosine
+over that interval, which is $(\cos^2\theta_1 - \cos^2\theta_2)/2$ to round-off; so
+$\sum_h w_h = 1$ however narrow the cone (`_beam_directions`). A cone whose
+$\cos\theta_1$ and $\cos\theta_2$ round to the same double, as below a width of
+about $10^{-8}$ rad at the normal, is a single direction and is refused, with
+`Collimated()` named.
+Three directions reproduce the downward field of a cone heater within
+$2.4\times10^{-5}$ of the absorbed flux against the exact cone integral on V-RAD-02's
+slab, which asserts $2\times10^{-4}$.
+
+**Absorptivity is for beams only.** Diffuse radiation enters at $\varepsilon_e$, the
+interface's transmissivity, whatever the heater: a diffuse `RadiativeFluxBC` with its
+own `absorptivity`, or any diffuse `RadiativeFluxBC` on a material where a component
+sets `absorptivity`, is refused. A beam is not part of the solid's thermal exchange,
+so it may enter at an absorptivity for the heater's spectrum (§5.8.2). The radiation
+of a `RadiativeBC` is in the solid's own band and always enters at $\varepsilon_e$.
+
+### 8.4.3 The back face
+
+The back face is the downstream face of the last cell, the `:bottom` face at node 1;
+deactivation compacts the live cells toward it, so it never moves (Chapter 14). Its
+row (the last of (8.5)) transmits $\varepsilon_b$ of what arrives on either side and
+reflects the rest:
+
+| `:bottom` condition | back | $\varepsilon_b$ |
+|---|---|---|
+| no `RadiativeBC` or `RadiativeFluxBC` member (adiabatic, convective, prescribed flux, Dirichlet) | mirror (`MirrorBack`): exchanges no radiation | 0 |
+| a `RadiativeBC` and/or a diffuse `RadiativeFluxBC` | gray interface (`OpenBack`) | $\varepsilon_l$, the last cell's $\varepsilon_{\text{eff}}$ |
+| a collimated or cone `RadiativeFluxBC` | refused | |
+
+$q^{\text{in}}_b$ is the diffuse sum of the `:bottom` members, as at the exposed face.
+An open back is the back of a sample facing open surroundings or an opaque holder at
+$T_\infty$; a substrate (Kaowool, a holder) modelled as cells is part of the column,
+its cells absorbing and emitting through the same rows, usually optically thick.
+
+Beams that reach the back join $I^+_b$: a mirror sends them back up as diffuse
+radiation, an open back reflects $1-\varepsilon_l$ of them that way and lets
+$\varepsilon_l$ leave. The back's $\varepsilon_l$ is not floored: the exposed face's
+floor alone keeps the rows nonsingular. An exact specular mirror would send a beam back up as a beam
+along its own direction; the conversion is the other idealisation of an insulated
+back, a diffuse one, and keeps the rows at $2 + N_{\text{beam}}$ per face. V-RAD-02 and
+V-RAD-05 report the difference from a specular mirror (§8.9.4).
+
+### 8.4.4 Refusals
+
+Under `RADIATIVE_TRANSFER`, `setup` and the kernel's constructor refuse, with an
+`ArgumentError`:
+
+- a mesh of more than one dimension, and coordinates other than planar (the rows
+  carry fluxes per unit face area and the sources read the face areas, which agree
+  only where the areas are equal);
+- a `:top` condition with no `RadiativeBC` or `RadiativeFluxBC` member, and a `:top`
+  tag of more than one face;
+- a radiative member on a tag other than `:top` and `:bottom`, and a collimated or cone
+  `RadiativeFluxBC` on a tag other than `:top`;
+- a `RadiativeBC` with its own `ε` on any tag;
+- a diffuse `RadiativeFluxBC` with its own `absorptivity`, and any diffuse
+  `RadiativeFluxBC` on a material where a component sets `absorptivity`.
+
+No check compares the absorption coefficients with the model: `SURFACE_ABSORPTION` with non-zero
+$\alpha_j$ (not read) and `RADIATIVE_TRANSFER` with every $\alpha_j = 0$ (a transparent
+column: the radiation crossing the exposed face reaches the back, where a mirror
+returns it) both run without a warning.
+
+---
+
+## 8.5 Source, Energy Coupling and Equilibrium
+
+### 8.5.1 Coupling into the energy equation
 
 The condensed-phase energy equation (§3.3, §7.3) carries a volumetric radiation
 source $Q_{\text{rad}}$ on its right-hand side:
@@ -6912,353 +6904,488 @@ C_i\,\frac{\mathrm{d}T_i}{\mathrm{d}t} = E_i - \sum_j h_j(T_i)\,\dot M_{j,i}
 $$
 
 with $C_i$ the heat-capacity sum of the cell (§5.4) and $\dot M_{j,i}$ the
-face-flux part of its mass rate. The two models populate $Q_{\text{rad}}$ — or
-bypass it for the surface route — as follows.
+face-flux part of its mass rate. The two models populate $Q_{\text{rad}}$, or
+bypass it for the surface route, as follows.
 
-- **`SURFACE_ABSORPTION`.** $Q_{\text{rad}}=0$: no kernel adds a
-  radiative source. A `RadiativeFluxBC` enters the surface energy balance of its
-  face as $q_{\text{BC}}=a\,q_{\text{inc}}$ (§8.2); the balance solves for $T_s$,
-  and the flux conducted from the face into the boundary cell, $k(T_s-T_n)/d$,
-  enters that cell's $E_n$ through the boundary face (§12.2). A `RadiativeBC`
-  acts in the same balance.
+- **`SURFACE_ABSORPTION`.** $Q_{\text{rad}}=0$: no kernel adds a radiative source. A
+  `RadiativeFluxBC` enters the surface energy balance of its face as
+  $q_{\text{BC}}=a\,q_{\text{inc}}$ (§8.2) and a `RadiativeBC` as
+  $\varepsilon\sigma(F\,T_\infty^4-T_s^4)$; the balance solves for $T_s$, and the flux
+  conducted from the face into the boundary cell, $k(T_s-T_n)/d$, enters that cell's
+  $E_n$ through the boundary face (§12.2).
 
-- **`BEER_LAMBERT`.** Cell $i$'s energy source gains the absorbed power
-  $S^{\text{rad}}_i = I_{\text{up}}A_{\text{up}} - I_{\text{down}}A_{\text{down}}$
-  [W] of §8.3.3, the same term in both energy forms; in the temperature form it is
-  divided by $C_i$ with the rest of the row, so
-  $(\mathrm{d}T_i/\mathrm{d}t)_{\text{rad}} = S^{\text{rad}}_i/C_i =
-  q^{\text{rad}}_i/\rho c_{p,i}^{\text{eff}}$ at consistent intensities. The
-  `RadiativeFluxBC` contributes **zero** to the surface balance under this model
-  (`evaluate_bc_flux_and_derivative` returns $(0, 0)$), so the incident energy is
-  not double-counted: it is already deposited in the cells. A `RadiativeBC` stays
-  active at the face: Beer–Lambert deposits only the *incident* beam, and the
-  emission of the material remains a surface process.
+- **`RADIATIVE_TRANSFER`.** Cell $i$'s energy source gains $S^{\text{rad}}_i$ of
+  (8.6), the same term in both energy forms. A `RadiativeBC` and a `RadiativeFluxBC`
+  contribute **zero** to the surface balance (`evaluate_bc_flux_and_derivative`
+  returns $(0, 0)$ for both under this model): the radiation they describe crosses the
+  interface through the rows, inward and outward, and is absorbed and emitted by the
+  cells. The surface balance keeps convection, prescribed fluxes, blowing and
+  conduction (§12.2), so $T_s$ is the temperature that balances those.
 
-**The radiation-model dispatch of `RadiativeFluxBC` is the linchpin.** It keeps
-the incident energy single-counted across the models: deposited at the face for
-`SURFACE_ABSORPTION`, in the cells (and therefore zero at the
-face) for `BEER_LAMBERT`.
+**The radiative conditions dispatch on the radiation model.** The dispatch
+keeps every flux counted once: at the face under `SURFACE_ABSORPTION`, in the rows
+and the cells under `RADIATIVE_TRANSFER`.
 
-| Condition | `SURFACE_ABSORPTION` | `BEER_LAMBERT` |
+| Condition | `SURFACE_ABSORPTION` | `RADIATIVE_TRANSFER` |
 |---|---|---|
-| `RadiativeFluxBC` at `:top` | $a\,q_{\text{inc}}$ in the surface balance | zero in the surface balance; the first member feeds the beam |
-| `RadiativeFluxBC` at another tag | $a\,q_{\text{inc}}$ in that face's balance | refused by `setup` |
-| `RadiativeBC` | $\varepsilon\sigma(F\,T_\infty^4-T_s^4)$ in the surface balance | the same |
+| `RadiativeFluxBC` at `:top` | $a\,q_{\text{inc}}$ in the surface balance | zero in the surface balance; diffuse into $q^{\text{in}}_e$, beams into their rows |
+| `RadiativeFluxBC` at `:bottom` | $a\,q_{\text{inc}}$ in that face's balance | zero there; diffuse into $q^{\text{in}}_b$ (an open back); beams refused |
+| `RadiativeBC` | $\varepsilon\sigma(F\,T_\infty^4-T_s^4)$ in the surface balance | zero in the surface balance; $F\sigma T_\infty^4$ into $q^{\text{in}}$ of its face; its `ε` refused |
 | `ConvectiveBC`, `HeatFluxBC`, … | unchanged | unchanged |
 
 The same dispatch threads through `CombinedThermalBC`, so a cone-calorimeter
 condition such as
 `RadiativeFluxBC(50e3) + RadiativeBC(T_inf = 300.0) + ConvectiveBC(h = 10.0, T_inf = 300.0)`
-behaves correctly under both models: under `BEER_LAMBERT` its radiative-flux
-member contributes exactly zero at the face and feeds the beam, while the
-re-radiative and convective members act at the face. The diagnostics follow the
-same split: `sol.extras.surface_heat_flux_absorbed` is the flux absorbed at the
-face (zero under `BEER_LAMBERT`), and `sol.extras.volumetric_absorption` the flux
-absorbed in depth (zero under `SURFACE_ABSORPTION`).
+works under both models: under `RADIATIVE_TRANSFER` its radiative members feed the
+exposed row and contribute zero at the face, while the convective member acts there.
+
+### 8.5.2 Conservation and equilibrium
+
+**Conservation.** The sources (8.6) telescope: for any trial fluxes,
+
+$$
+\sum_i S^{\text{rad}}_i = A_e\Big(I^-_e - I^+_e + \sum_h I_{h,e}\Big)
+- A_b\Big(I^-_b + \sum_h I_{h,b} - I^+_b\Big),
+$$
+
+the net radiation entering through the exposed face minus the net radiation leaving
+through the back. Three series of `sol.extras` report the terms, per unit face area at
+every saved time (`radiation_crossing`, `src/Outputs/solution.jl`):
+
+| extra | value | meaning |
+|---|---|---|
+| `radiation_absorbed` | $\varepsilon_e\,q^{\text{in}}_e + \sum_h I_{h,e}$ | radiation crossing the exposed face inward |
+| `radiation_emitted` | `radiation_absorbed` $-\big(I^-_e - I^+_e + \sum_h I_{h,e}\big)$ | radiation crossing it outward: $\varepsilon_e I^+_e$ where the exposed row holds |
+| `radiation_back` | $I^-_b + \sum_h I_{h,b} - I^+_b$ | net radiation leaving through the back; zero at a mirror |
+
+so that $\sum_i S^{\text{rad}}_i/A = $ `radiation_absorbed` $-$ `radiation_emitted`
+$-$ `radiation_back` to round-off at every saved state, including the states a
+Rodas5P solve interpolates between step ends (§8.7.2). All three are zero under
+`SURFACE_ABSORPTION` and `NaN` once no cell is live. The surface-flux series describe
+the surface balance: under `RADIATIVE_TRANSFER` `surface_heat_flux_absorbed` and
+`surface_heat_flux_reradiation` are zero and `surface_heat_flux_net` holds no
+radiation; `surface_emissivity` is the first live cell's $\varepsilon_{\text{eff}}$,
+the interface's transmissivity before the floor (§12.9). The energy ledger (Chapter 16)
+needs no radiative term of its own: the source lives in $E_i$, and the rows store no
+energy.
+
+**Equilibrium.** An isothermal medium at $T$ facing diffuse radiation $\sigma T^4$ on
+both sides, or on one side with a mirror behind it, satisfies every thermal row with
+$I^- = I^+ = \sigma T^4$, at any optical thickness, mesh and emissivity: substitute
+into (8.5). Every source (8.6) is then zero. A solid in an enclosure at its own
+temperature therefore stays at it, Kirchhoff's law by construction, because the
+interface transmits $\varepsilon_e$ both ways and every cell absorbs and emits with
+one $\alpha_i$. V-RAD-01 checks it on the rows to round-off and through time
+integration to $10^{-8}$ K (§8.7.5). Beams are not part of the equilibrium; they
+are absorbed as they travel.
 
 ---
 
-## 8.5 Regime Diagnostics
+## 8.6 Mesh Criterion and Regime
 
-The validity bands of the models are stated in terms of the optical thickness of
-the layer, $\tau=\alpha_{\text{eff}}L=\int_0^L\alpha_{\text{eff}}\,\mathrm{d}z$
+**Which model.** The validity bands are stated in terms of the optical thickness of
+the layer, $\tau_L=\int_0^L\alpha_{\text{eff}}\,\mathrm{d}z$, $\alpha_{\text{eff}}L$ for a uniform layer
 (`RadiationModel` docstring, `src/Materials/radiation_types.jl`):
 
-| $\tau=\alpha_{\text{eff}} L$ | regime | recommendation |
+| $\tau_L$ | regime | recommendation |
 |---|---|---|
-| $\tau>10$ | optically thick | surface absorption is adequate |
-| $\tau<10$ | semi-transparent | `BEER_LAMBERT` |
+| $\tau_L>10$ | optically thick | surface absorption is adequate |
+| $\tau_L<10$ | semi-transparent | `RADIATIVE_TRANSFER` |
 
-The per-cell optical thickness $\tau_i=\alpha_i\Delta z_i$ is a resolution
-measure, not a validity criterion: the exact cell average of §8.3.2 is correct at
-any $\tau_i$, and refining the mesh shrinks every $\tau_i$ without changing the
-physics. What it decides is whether `SURFACE_ABSORPTION` is close to the in-depth
-answer, which needs $\tau_n\gg1$ in the exposed cell (§8.2.2).
+What decides whether `SURFACE_ABSORPTION` is close to the in-depth answer is the
+exposed cell, $\tau_n\gg1$ (§8.2.2). No function computes $\tau_L$ for a material; it
+follows from the component values, $\tau_L = L\sum_j\xi_j\alpha_j$ for a uniform layer.
+A run diagnoses itself through `radiation_back` (what crosses the column) and the
+cell sources ($\sum_i S^{\text{rad}}_i/A$ against `radiation_absorbed`).
 
-No function computes $\tau$ for a material; it follows from the component values,
-$\tau = L\sum_j\xi_j\alpha_j$ for a uniform layer. A run diagnoses itself through
-two series of `sol.extras`, both per unit exposed area at every saved time:
-`volumetric_absorption`, $I_e - I_bA_b/A_e$, the intensity the cells absorbed, and
-`radiation_transmitted`, $I_bA_b/A_e$, the intensity leaving through the back face
-(`src/Outputs/solution.jl`). Their sum is the entering intensity $I_e$ by
-construction, and by the telescoping of §8.3.3 the first is exactly the power the
-cells absorbed per unit exposed area. Their ratio gives the optical thickness the
-beam actually crossed,
+**The resolution of the emission.** The rows are exact for each cell's constant
+emissive power, so the mesh error is the staircase of $\sigma T^4$. For an emissive
+power that falls linearly into the depth, by $\Delta\mathcal B$ per cell, the rows carry at
+every interior face the net flux $\Delta\mathcal B\coth\big(\tau_i/(2\bar\mu)\big)$, which is
+$\frac{\tau_i}{2\bar\mu}\coth\frac{\tau_i}{2\bar\mu}$ times the Rosseland flux
+$\Delta\mathcal B\,2\bar\mu/\tau_i$ of the continuum (V-RAD-04):
 
-$$
-\tau = \ln\frac{I_e}{I_b} = \ln\frac{\text{volumetric\_absorption}+\text{radiation\_transmitted}}{\text{radiation\_transmitted}},
-$$
+| $\alpha_i\Delta z_i$ | 0.1 | 0.14 | 0.25 | 0.5 | 1 | 2 | 5 |
+|---|---|---|---|---|---|---|---|
+| $\frac{\tau_i}{2\bar\mu}\coth\frac{\tau_i}{2\bar\mu} - 1$ | +0.2 % | +0.4 % | +1.2 % | +4.6 % | +18 % | +66 % | +275 % |
 
-which for the slab of §8.3.5 is $\ln(45\,000/16\,554.6)=1.000$. A transmitted
-fraction near one signals a layer that absorbs little in depth (every $\alpha_j=0$
-transmits the whole absorbed share of the incident flux); a fraction that stays
-near zero with most of the absorption in the exposed cell signals that surface
-absorption would do.
+so $\alpha_i\Delta z_i \le 0.5$ keeps the discrete radiative conductivity within 5 % of
+the continuum's. In an optically thick cell it tends to $4\sigma T^3\Delta z_i$, first
+order in the cell size, where the continuum's, $16\sigma T^3/(3\alpha)$, vanishes: 0.006
+W·m⁻¹·K⁻¹ at 650 K in 98 µm cells of V-BO's Kaowool (0.011 at 800 K, 0.012 at 650 K in
+197 µm cells), 0.008 W·m⁻¹·K⁻¹ in a 50 µm char cell at 900 K, against conductivities of
+0.06–0.2. An optically thick exposed cell also emits through the interface at its
+centre temperature, not at the surface's: where the surface is much hotter than the
+cell centre, grade the mesh toward the surface (§13.9) or use
+`SURFACE_ABSORPTION` for an opaque material.
 
----
-
-## 8.6 The Beer–Lambert Jacobian
-
-### 8.6.1 Banded, not triangular
-
-Eliminated, the attenuation recurrence makes the source of cell $i$ depend on the
-absorption coefficient of every cell between it and the exposed face, through
-$I_{\text{up}}(i)= a\,q_{\text{inc}}\exp(-\sum_{k>i}\alpha_k\Delta z_k)$: a dense
-upper-triangular block in the Jacobian. With the face intensities as unknowns,
-every row is local (§8.3.3), and the pattern built from the mesh connectivity
-(`jacobian_pattern`, `src/ColoredJacobian/pattern.jl`; §15.11) is banded:
-
-- the intensity row of face $f$ reaches the intensities of nodes $f-1$, $f$ and
-  $f+1$, the masses and energy of the cells on either side of the face (the
-  attenuation of the cell the beam leaves through it, and for the exposed face
-  the absorptivity of the exposed cell), on a moving mesh the positions of nodes
-  $f-1\dots f+1$, and under a variable cross section the area;
-- every cell row reads the intensities of its two faces.
-
-Every row holds its diagonal, and the coloring stays bounded independently of the
-cell count: the kernel tests assert at most $3(N_C+1)+2$ colors on a fixed mesh
-(`test/kernels/test_radiation.jl`). The Jacobian is the colored forward-mode
-derivative of the residual itself (§15.6); no derivative of the radiation terms is
-hand-coded.
-
-### 8.6.2 The entries
-
-For a live cell $i$ with upstream face $u$ and downstream face $d$, the colored
-derivative contains
-
-$$
-\frac{\partial r_d}{\partial I_d}=1,\qquad
-\frac{\partial r_d}{\partial I_u}=-e^{-\tau_i},\qquad
-\frac{\partial r_d}{\partial x_i}=I_u\,e^{-\tau_i}\,\Delta_i\,\frac{\partial\alpha_i}{\partial x_i},
-\qquad
-\frac{\partial S^{\text{rad}}_i}{\partial I_u}=A_u,\qquad
-\frac{\partial S^{\text{rad}}_i}{\partial I_d}=-A_d,
-$$
-
-with $x_i$ a mass of cell $i$: $\partial\alpha_i/\partial m_{j,i} = \alpha_j\,
-(\mathrm{d}m^+_{j,i}/\mathrm{d}m_{j,i})/V_i$, which is $\alpha_j/V_i$ above the
-cell's positive-part scale. The mass absorption coefficients are constants, so
-$\partial\alpha_i/\partial T_i = 0$. On a moving mesh the same pass gives the
-position columns, through $\Delta_i$, through the volume inside $\xi^+$, and
-through the face areas. The exposed-face row has $\partial r_e/\partial I_e = 1$
-and, on the Kirchhoff path,
-
-$$
-\frac{\partial r_e}{\partial x_s} = -\,q_{\text{inc}}\,\frac{\partial a_{\text{eff}}}{\partial x_s},
-$$
-
-with $x_s$ the masses and the energy state of the exposed cell: $a_{\text{eff}}$
-depends on the composition through the mixing volume fractions, and on the
-temperature through $\varepsilon_j(T)$ (a component without its own absorptivity)
-and through temperature-dependent densities inside the volume fractions. With an
-explicit absorptivity these entries vanish. The tests check exactly this pattern
-of zeros: under Kirchhoff's law the exposed cell's mass column reaches the
-exposed-face row and under an explicit absorptivity it does not; its temperature
-column reaches that row only when the cell's absorptivity depends on temperature
-and the condition sets none of its own.
-
-### 8.6.3 The eliminated sensitivities
-
-Eliminating the intensity block (its Schur complement) recovers the
-upper-triangular sensitivities of the eliminated model, so the two descriptions
-are the same derivative. With
-$q^{\text{rad}}_i=I_{\text{up}}(i)\,(1-e^{-\alpha_i\Delta z_i})/\Delta z_i$ and a
-state variable $x_k$ of cell $k$ (a temperature or a mass),
-
-$$
-\frac{\partial q^{\text{rad}}_i}{\partial x_k} =
-\begin{cases}
-\big(I_{\text{up}}(i) - q^{\text{rad}}_i\,\Delta z_i\big)\,\dfrac{\partial \alpha_i}{\partial x_i}, & k=i,\\[2.0ex]
--\,q^{\text{rad}}_i\,\Delta z_k\,\dfrac{\partial \alpha_k}{\partial x_k}, & k \text{ between } i \text{ and the exposed face},\\[1.0ex]
-0, & k \text{ deeper than } i .
-\end{cases}
-$$
-
-The **diagonal** term has a clean identity. From
-$q^{\text{rad}}_i=I_{\text{up}}(1-e^{-\alpha_i\Delta z_i})/\Delta z_i$,
-
-$$
-\frac{\partial q^{\text{rad}}_i}{\partial\alpha_i}
-= I_{\text{up}}\,e^{-\alpha_i\Delta z_i}
-= I_{\text{up}} - q^{\text{rad}}_i\,\Delta z_i ,
-$$
-
-so the diagonal coefficient is exactly
-$\big(I_{\text{up}}-q^{\text{rad}}_i\Delta z_i\big)\partial\alpha_i/\partial x_i$.
-(The form $I_{\text{up}}(1-(1-e^{-\tau})/\tau)$ is sometimes quoted; it is *not*
-equal to this and is incorrect.) The **off-diagonal** term comes from
-$\partial I_{\text{up}}(i)/\partial\alpha_k = -I_{\text{up}}(i)\,\Delta z_k$ for
-every cell $k$ the beam crosses before cell $i$.
-
-**The Kirchhoff surface-absorptivity chain.** On the Kirchhoff path every
-$q^{\text{rad}}_i$ is proportional to $a_{\text{eff}}$ of the exposed cell $s$, so
-each eliminated source also depends on that cell's state,
-
-$$
-\frac{\partial q^{\text{rad}}_i}{\partial x_s} \mathrel{+}=
-\frac{q^{\text{rad}}_i}{a_{\text{eff}}}\,
-\frac{\partial a_{\text{eff}}}{\partial x_s}\qquad(i\neq s).
-$$
-
-In the row form this whole chain is the single entry $\partial r_e/\partial x_s$
-of §8.6.2, carried down the column by the attenuation rows. On a moving mesh the
-eliminated sources also depend on every node position above them, through the
-$\Delta z_k$ of the transmission; in the row form these are the position entries
-of each row's own cell.
-
-### 8.6.4 Verification
-
-The kernel tests (`test/kernels/test_radiation.jl`) compare the colored Jacobian
-with the dense forward-mode reference (§15.13) entry by entry to a relative
-$10^{-12}$, on the initial state, a hot state, a perturbed state, the zero state
-and a negative state, in both energy forms, for a Kirchhoff and an explicit
-absorptivity, two absorber laws (a component absorptivity, and an absorptivity
-that depends on temperature), with and without gas transport, and on a fixed and a
-moving mesh; the pattern contains every non-zero of the dense reference. The
-exposed cell's temperature and mass columns are compared with central differences
-of the residual, an oracle independent of automatic differentiation. A further
-test checks the telescoping and the exact cell averages at consistent
-intensities: each cell absorbs $I_{\text{up}}(1-e^{-\tau_i})$ and the cells
-together absorb the entering intensity less the transmitted one, to a relative
-$10^{-12}$. The residual allocates nothing.
+**Conductivity under this model.** The radiation absorbed and emitted at $\alpha_j$
+travels through the rows, so under `RADIATIVE_TRANSFER` a component's $k_j$ is the
+conductive part: a deck must not also put a Rosseland term
+$16n^2\sigma T^3/(3\alpha_j)$ for $\alpha_j$'s band into $k_j$, and nothing is
+subtracted automatically. Radiation across pores smaller than a cell, as in a char,
+is not resolved by the rows and stays in $k_j$ (§5.5).
 
 ---
 
-## 8.7 Comparison with reference solvers
+## 8.7 Rows in the State and the Jacobian
 
-Radiation comparisons must match where energy is deposited as well as how
-much enters the material. The versions in §1.6.5 differ in beam attenuation,
-emission and surface treatment. For the 1D configurations below, compare
-optical depth, entering flux and deposition profile before interpreting a
-temperature difference as a discretization error.
+### 8.7.1 Families in the node block
+
+The $N_{\text{rad}}$ radiation rows of face $f$ are the last rows of the node block of
+its node (on a line face $f$ sits at node $f$), $N_{\text{rad}} = 2 + N_{\text{beam}}$ for
+the one gray band:
+
+```
+node block of node f:  [z (moving) | w (moving, velocities) | radiation rows 1 … N_rad]
+radiation_index(layout, f, k)       k = 1: I⁻,  k = 2: I⁺,  k = 2 + h: beam h
+```
+
+The layout knows only their number (`StateLayout(...; radiation_rows)`,
+`has_radiation`, `radiation_rows`); the kernel owns the meaning of each row, and the
+beams of several `RadiativeFluxBC` members follow one another. The derived state holds
+them as `ds.q` ($N_{\text{rad}}\times N_{\text{face}}$) and the contributions as
+`c.r_radiation`, which `assemble_rows!` writes into the residual (§15.3). All of them
+are algebraic.
+
+Deactivation moves and masks whole node blocks (§14.3.1), so the radiation rows go
+with their node. A dead face beyond the first live cell is a masked identity row
+holding zero; the exposed face moves to the upstream face of the new first live
+cell, and the next evaluation reads that face's rows (§8.4.1).
+
+### 8.7.2 The consistent start and the re-sweep
+
+`consistent_radiation!` writes the face fluxes that satisfy every radiation row at a
+given state, in closed form (`src/Kernels/radiative_transfer.jl`):
+
+1. zero every face upstream of the first live cell;
+2. carry each beam down from its entering value through (8.4), exactly, noting what
+   reaches the back;
+3. the thermal rows are linear in the fluxes: with $I^-_e$ left as a parameter, a
+   downward pass gives $I^-_b$ as an affine function of it, the back row gives $I^+_b$,
+   and an upward pass gives $I^+_e$ as another; the exposed row then fixes $I^-_e$, its
+   denominator being the determinant of §8.3.3;
+4. one downward and one upward pass write the values.
+
+No iteration and no allocation. It runs inside `consistent_state!` at setup (after a
+variable cross section's rows, whose area the absorption coefficients read, and before
+the closure's velocities, §15.4), after every deactivation event (the exposed face
+moves, and the old fluxes miss the new rows by the order of the optical thickness of
+the cells that left), and on the interpolated output states of a Hermite method such
+as KenCarp4. Under the default Rodas5P a saved state between step ends carries the
+dense output of the rows, consistent to the interpolation error; `radiation_emitted`
+is defined from the net intake so that the identity of §8.5.2 holds there too.
+
+### 8.7.3 Tolerances and the domain test
+
+Every row is a flux in W·m⁻². All radiation rows share one scale, fixed at setup
+(`_transfer_scale`, `src/Integration/setup.jl`),
+
+$$
+q_{\text{scale}} = \max\!\Big(1,\ \max_t\, q^{\text{arr}}(t),\ \sigma T_{\text{rad}}^4\Big)\ \ \mathrm{W\,m^{-2}},
+$$
+
+with $q^{\text{arr}}$ the radiation arriving from outside at the exposed face and at an
+open back (diffuse members, $F\sigma T_\infty^4$ and the full flux of every beam
+member), sampled at 101 times over the time span, and $T_{\text{rad}}$ the largest
+initial cell temperature. The surroundings enter at their view factor, through
+$q^{\text{arr}}$ only, so surroundings out of view add nothing. The scale reads the whole
+time span: a run extended to a later end can take a larger $q_{\text{scale}}$, and its
+trajectory then differs from the shorter run's within the radiation rows' tolerance. A
+radiation row's absolute tolerance is $\mathrm{reltol}\cdot q_{\text{scale}}$. The
+domain test reads each live radiation row against its own flux,
+$\lvert r\rvert/(\mathrm{reltol}\,\lvert I\rvert + \mathrm{atol}_r)$, the form of the
+integrator's own error weight, so a deck heated by convection or a prescribed flux, whose
+rows carry far more than $\sigma T_{\text{rad}}^4$, is still read relatively
+(§15.5.4).
+
+### 8.7.4 The Jacobian
+
+A radiation row at face $f$ reads, outside the radiation rows, the cells beside the
+face (the temperature through $\mathcal B_i$ and $\varepsilon$, the masses through
+$\alpha_i$ and $\varepsilon$), the node positions around it on a moving mesh, and the
+area under a variable cross section. Among the radiation rows the reach is
+directional (`radiation_reach`): $I^-$ and each beam read their own family at $f$ and
+at the face upstream of $f$, $I^+$ its own at $f$ and at the face toward the back;
+$I^-$ and $I^+$ at the same face read each other, since any face can become the
+exposed face and the back reflects $I^-$ into $I^+$; and at the back face $I^+$ reads
+every beam arriving there. Each cell row
+reads every family at its two faces. The pattern is built from these reaches
+(§15.11). Each family adds exactly two colors to the coloring, which a test asserts
+against its color model (`test/jacobian/test_pattern.jl`). The derivatives are those of the colored
+forward-mode differentiation of the residual (§15.6); nothing is hand-coded.
+
+### 8.7.5 Verification
+
+The kernel tests (`test/kernels/test_radiative_transfer.jl`) check, in both energy
+forms: every live row at the consistent start; the rows against the exact two-stream
+solution (`test/verification/exact/two_stream.jl`) for frozen piecewise-constant
+temperatures and absorption coefficients, mirror and open backs, diffuse, collimated
+and cone heaters, to $10^{-12}$; the telescoping of the sources at arbitrary trial
+fluxes and against the three extras; the colored Jacobian against the dense
+forward-mode reference over five states, and against central differences of the
+residual in the columns of the exposed cell; containment in the pattern; a moving
+mesh; and refusal off planar coordinates. `test/jacobian/test_radiative_containment.jl`
+adds containment for every heater and back, zero allocations per residual and per
+Jacobian and the states after `deactivate!`; `test/deactivation/test_slots.jl` the
+kernel's tables through deactivation; `test/kernels/test_boundary_conditions.jl` the
+face rules and their refusals. The verification suite adds:
+
+| case | checks |
+|---|---|
+| V-RAD-01 | a slab in an enclosure at its own temperature: every face flux $\sigma T_\infty^4$ and every source zero to $10^{-12}\sigma T_\infty^4$ for $\alpha L = 10^{-3}$–$10^3$, $\varepsilon = 0.3$–1, three meshes, both backs; through time integration $\lvert T - T_\infty\rvert \le 10^{-8}$ K |
+| V-RAD-02 | a heater through a slab, collimated, diffuse and cone, both backs, against closed forms to $10^{-12}$ of $\varepsilon q$; three cone beams against the exact cone integral |
+| V-RAD-03 | an isothermal slab emitting to 0 K, against closed forms independent of the mesh, to $10^{-12}$ of $\sigma T^4$ |
+| V-RAD-04 | a linear emissive power: the net flux $\Delta\mathcal B\coth\big(\tau_i/(2\bar\mu)\big)$ at every face to $10^{-12}$; the approach to Rosseland reported |
+| V-RAD-05 | burning PMMA profiles of the solver's own runs against exact gray transfer: the closure's model error, pinned at three times its observed value |
+| V-RAD-06 | the radiative energy ledger through burnout, every accepted step |
+| V-RAD-07 | in-depth heating with emission and a sub-surface peak, against an independent method-of-lines solution of the same rows, and its order under refinement |
+| V-MMS-05 | conduction with radiative transfer on a moving mesh against a manufactured solution: second order |
+
+---
+
+## 8.8 Worked Numbers
+
+A 10 mm semi-transparent slab with $\alpha_{\text{eff}}=100\ \mathrm{m^{-1}}$
+($\rho = 1000\ \mathrm{kg\,m^{-3}}$, $\alpha_j = 0.1\ \mathrm{m^2\,kg^{-1}}$), ten cells of
+1 mm ($\tau_i = 0.1$, $\tau_L = 1$), $\varepsilon_{\text{eff}}=0.9$, at 300 K throughout,
+faces a diffuse heater of 50 kW·m⁻² and surroundings at 300 K through its exposed face,
+behind it an adiabatic back, a mirror. The diffuse radiation arriving is
+$q^{\text{in}}_e = 50\,000 + \sigma\,300^4 = 50\,459.3$ W·m⁻², of which
+$\varepsilon_e q^{\text{in}}_e = 45\,413.4$ W·m⁻² crosses the interface. The slab's own
+emission at 300 K balances the surroundings' share exactly (§8.5.2), so what the slab
+absorbs is the heater's: with $e^{-\tau_L/\bar\mu} = e^{-1.5}$ and the mirror, the
+heater's net intake is
+
+$$
+\varepsilon\,q\,\frac{1 - e^{-2\tau_L/\bar\mu}}{1 - (1-\varepsilon)\,e^{-2\tau_L/\bar\mu}}
+= 0.9\times50\,000\times\frac{1-e^{-3}}{1-0.1\,e^{-3}} = 42\,973.5\ \mathrm{W\,m^{-2}},
+$$
+
+the rest, 2026.5 W·m⁻² of the heater's 45 kW·m⁻², reflecting off the mirror and leaving
+through the exposed face. The run below reproduces these numbers at its consistent
+start:
+
+```julia
+using Pyrolysis
+
+slab = SolidComponent(:slab, ρ = 1000.0, c = 1500.0, k = 0.2, ε = 0.9, α = 0.1)
+material = Material(name = :slab, components = (slab,), reactions = ())
+problem = PyrolysisProblem(
+    mesh = uniform_mesh(0.01, 10),
+    material = material,
+    bc_set = BoundaryConditionSet(
+        thermal = (
+            top = RadiativeFluxBC(50e3) + RadiativeBC(T_inf = 300.0),
+            bottom = AdiabaticBC(),
+        ),
+    ),
+    T_initial = z -> 300.0,
+    ξ_initial = [z -> 1000.0],
+    tspan = (0.0, 1.0),
+    output_times = [0.0, 1.0],
+)
+sol = solve(problem; radiation_model = RADIATIVE_TRANSFER)
+sol.extras.radiation_absorbed[1]        # 45413.4 W/m² crossing the exposed face inward
+sol.extras.radiation_emitted[1]         # 2439.8 W/m² crossing it outward
+sol.extras.radiation_back[1]            # 0.0: the mirror
+sol.extras.surface_heat_flux_absorbed[1] # 0.0: nothing is absorbed at the face
+```
+
+The slab absorbs $45\,413.4 - 2439.8 = 42\,973.5$ W·m⁻², the heater's net intake above;
+the outward 2439.8 W·m⁻² is the slab's 300 K emission through the interface,
+$0.9\,\sigma\,300^4 = 413.4$, plus the heater's reflected 2026.5. From the exposed face
+down, $I^-$ is 45684.5, 39385.0, 33962.9, … , 10550.4 W·m⁻² and $I^+$ is 2710.9, 3075.3,
+3498.7, … , 10550.4 W·m⁻², equal at the mirror; the cell sources fall from 6.664
+MW·m⁻³ in the exposed cell to 3.039 MW·m⁻³ in the last.
+
+With `RadiativeFluxBC(50e3; distribution = Collimated())` the heater enters as a beam at
+$a_{\text{eff}} = 0.9$: 45000.0 W·m⁻² at the exposed face, $45\,000\,e^{-1} = 16\,554.6$
+W·m⁻² at the mirror, which turns it into $I^+$. The slab then absorbs 41658.9 W·m⁻²,
+`radiation_emitted` is 3754.4 W·m⁻², and the cell sources run from 4.935 MW·m⁻³ at the
+top through a minimum of 3.849 MW·m⁻³ in the fourth cell from the back to 4.072
+MW·m⁻³ in the last, which the reflected flux heats from below. With
+`radiation_model = SURFACE_ABSORPTION` the same deck absorbs 45000 W·m⁻² at the face,
+of which 43972 W·m⁻² is conducted in at the start, the rest re-radiated, and nothing in
+depth.
+
+---
+
+## 8.9 Comparison with reference solvers
+
+Radiation comparisons must match where energy is absorbed and emitted as well as how
+much enters the material. The versions in §1.6.5 differ in the angular treatment of
+radiation in the solid, in whether the solid emits from its depth, in how the face
+and the back treat radiation and in how the field is coupled in time. For the 1D
+configurations below, compare optical depth, the entering flux and its angular
+distribution, the back's treatment and the deposition profile before interpreting a
+temperature difference as a discretization error. §5.15 converts the absorption
+coefficients.
 
 | Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
 |:---|:---|:---|:---|:---|
-| In-depth transport | incident Beer–Lambert beam | Beer–Lambert absorption distribution | face-normal exponential attenuation | optional hemispheric two-flux model |
-| Numerical deposition | each traversed cell | MAX or RAND element selection | each traversed cell | forward/backward flux balance |
-| Emission treatment | surface emission separately | absorption-weighted/selected-element emission | surface re-radiation subtracted before positive net-flux attenuation | surface or internal emission, according to model |
-| Match before comparing | radiation model, absorption coefficients and surface emission | deposition algorithm and absorption-weighted re-radiation | optical depth and the entering net flux, `QENET` | angular closure, optical depth and boundary reflection |
+| Transport in the solid | gray two-stream with emission, diffusivity 3/2; beams for a collimated or cone heater | absorbed net radiation assigned to one element | the net surface flux marched as a normal beam | optional gray two-flux model with emission, factor 2 |
+| Cell integration | exact for constant emission, at any optical thickness | linear share of the optical thickness | exact exponential per cell | implicit per cell, first order |
+| Coupling in time | algebraic rows solved with the state | element and emission per time step | explicit, previous surface temperature | explicit, once per sub-step; face reflection a sub-step behind |
+| Exposed face | gray interface at the cell's $\varepsilon$ both ways; zero radiation in the surface balance | $\varepsilon$ of the selected element | net flux $\varepsilon\big(q-\sigma(T^4-T_\infty^4)\big)$ enters when positive | gray interface at $\varepsilon$ both ways; no radiation in the face balance |
+| Back | mirror, or open at the back cell's $\varepsilon$ | radiation not absorbed is not deposited | transmitted remainder leaves | mirror for an insulated back |
+| Match before comparing | the heater's distribution, $\alpha$ and $\varepsilon$, the back | element selection and its emission | the net-flux entry and the lost remainder | the factor 2 against 3/2 and the cell size, the back |
 
-### 8.7.1 ThermaKin2Ds
+### 8.9.1 ThermaKin2Ds
 
-TK Eq. 11 uses the same mass-specific Beer–Lambert attenuation coefficient
-$\sum_j\alpha_j\xi_j$ as Pyrolysis.jl. Its numerical deposition is different:
-TK §3 describes `MAX` (all absorbed radiation assigned to the maximum-absorption
-element) and `RAND` (an element sampled from the absorption distribution).
-Re-radiation uses the temperature and emissivity of that selected element.
-TK Eqs. 12 and 23 weight re-radiation and reflectivity by absorption through
-the object; they are not generally a surface-only $\varepsilon\sigma T_s^4$
-condition. Pyrolysis.jl deposits the attenuated beam in every traversed cell
-and applies `RadiativeBC` at the boundary.
+TK Eq. 11 uses the same mass-specific attenuation coefficient $\sum_j\alpha_j\xi_j$ as
+Pyrolysis.jl. Its deposition is different: the absorbed radiation of a step is
+assigned to one element, the one with the largest share (`MAX`) or one sampled from
+the absorption distribution (`RAND`), whose shares come from the linear part of each
+element's optical thickness (TK §3). The emission $\varepsilon\sigma T^4$ is that of the
+same element, scaled by the fraction of the external radiation absorbed (TK Eq. 12), so
+emission and absorption share one kernel (TK Eqs. 12 and 23). The
+model has no radiative transport between elements and no diffuse field; Pyrolysis.jl
+absorbs and emits in every cell and carries what each emits to the others.
 
-TK also describes a $T^3$ conductivity contribution for optically thick
-radiative diffusion. Such a property law can be supplied here, but it is not
-part of our Beer–Lambert kernel.
+TK also describes a $T^3$ conductivity contribution for optically thick radiative
+diffusion. Such a property law can be supplied here under `SURFACE_ABSORPTION`; under
+`RADIATIVE_TRANSFER` the rows carry that transport for $\alpha_j$'s band (§8.6).
 
-### 8.7.2 Gpyro V2
+### 8.9.2 Gpyro V2
 
 GP Eqs. 66–67 and V2 user guide §4.2 describe exponential attenuation with
 an effective absorption coefficient $\bar\kappa$ [m⁻¹]. V2's
 [`IN_DEPTH_RADIATION_ABSORPTION`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L122-L179)
 marches along the coordinate normal to the irradiated face, transmitting
-$q_{i+1}=q_i\exp(-\bar\kappa_i\Delta_i)$ and depositing the difference
-in each cell. It has no internal emission term. This attenuation law
-corresponds to our incident-beam model when optical depth and entering
-flux match. The component units and mixture weights require §5.15's conversion.
+$q_{i+1}=q_i\exp(-\bar\kappa_i\Delta z_i)$, depositing the difference in each cell and
+leaving the remainder at the end of the sample undeposited. It has no internal
+emission term. The march corresponds to one of our collimated beams when optical depth
+and entering flux match, and neither code then emits from the depth.
 
 The entering flux needs a separate check. In the active
-[thermal boundary path](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L1239-L1312),
-V2 forms `QENET` from absorbed irradiation minus surface re-radiation when
-`RERAD` is enabled. If `QENET` is positive and the boundary-cell absorption
-coefficient is below $10^6$ m⁻¹, that **net** flux enters the attenuation
-routine; otherwise it is applied at the boundary cell. Pyrolysis.jl
-attenuates incident irradiation and handles surface emission separately.
-Thus identical incident heat flux and absorption coefficients do not by
+[thermal boundary path](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L1196-L1213),
+V2 forms `QENET` from the absorbed irradiation minus the surface re-radiation
+$\varepsilon\sigma(T_{s,\text{old}}^4 - T_\infty^4)$ at the previous step's surface
+temperature (the cell temperature on a half-cell boundary) when `RERAD` is enabled. If
+`QENET` is positive and the boundary-cell absorption coefficient is below $10^6$ m⁻¹,
+that **net** flux enters the march; otherwise it is applied at the boundary cell.
+Pyrolysis.jl transmits the incoming radiation and the solid's emission through the
+interface separately, each at $\varepsilon_e$, and carries the emission from every
+cell. Thus identical incident heat flux and absorption coefficients do not by
 themselves establish the same radiative source distribution.
 
 GP Eq. 7 separately permits a $T^3$ pore-radiation conductivity term,
 implemented in the [thermal property assembly](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L252-L305).
-That contribution belongs in a matched conductivity law, not in the
-Beer–Lambert attenuation coefficient.
+That contribution belongs in a matched conductivity law, not in the attenuation
+coefficient.
 
-### 8.7.3 FDS
+### 8.9.3 FDS
 
-FDS 6.11.0 defaults to opaque surface absorption. Its optional in-depth
-Schuster–Schwarzschild model propagates forward and backward hemispheric
-intensities, including thermal emission. In the documented angular closure,
-$dI^+/dx=\kappa_s(\sigma T^4/\pi-I^+)/\mu_+$, with $\mu_+=1/2$.
-Consequently, even when internal emission is negligible, the attenuation
-length is not automatically our normally incident beam's $1/\alpha_{\mathrm{eff}}$.
-Match angular assumptions, optical depth and boundary reflection as well as
-units; do not simply copy $\kappa_s$ into a mass-specific $\alpha_j$.
-The condensed-phase model described here is gray; FDS's gas-phase spectral
-radiation options do not establish a gray-band solid model.
+FDS 6.11.0 defaults to opaque surface absorption; a wall with a material whose
+`KAPPA_S` is below $4.9\times10^4$ m⁻¹ switches on its in-depth model. That model is a gray two-flux
+(Schuster–Schwarzschild) pair of forward and backward fluxes with thermal emission.
+In the documented closure,
+$\mathrm{d}I^+_{\text{FDS}}/\mathrm{d}x=\kappa_s(\sigma T^4/\pi-I^+_{\text{FDS}})/\mu_{\text{FDS}}$
+with $\mu_{\text{FDS}}=1/2$ and $I^+_{\text{FDS}}$ a radiance ($\pi I^+_{\text{FDS}}$ is our
+$I^+$), which is our (8.1) with the diffusivity 2 in place of 3/2: the
+two closures attenuate a diffuse field at $2\kappa_s$ and $1.5\alpha$, so the same
+absorption coefficient does not give the same deposition. The implementation integrates
+each cell by an implicit step,
+$I_d = (I_u + 2\kappa_s\Delta z\,\sigma T^4)/(1 + 2\kappa_s\Delta z)$, first order in the
+cell's optical thickness, so its effective attenuation is
+$\ln(1+2\kappa_s\Delta z)/\Delta z$, below $2\kappa_s$ on any finite cell. Our diffuse row
+transmits $t=e^{-1.5\alpha\Delta z}$ across a cell and gains $\sigma T^4(1-t)$, so at
+$\alpha=\ln(1+2\kappa_s\Delta z)/(1.5\,\Delta z)$ on cells of FDS's width the transmission
+and the emission of the two rows agree cell by cell. With that coefficient at FDS's 50 µm
+cells, and on UMD, UMET_GP and UMET_TK the one item FDS cannot express aligned, seven of
+the eight MaCFP PMMA property sets that absorb in depth agree with FDS 6.11.1 to at most
+0.32 % in the time to half mass loss and 0.58 % in peak mass-loss rate, with RMS surface
+and back temperature differences of at most 1.9 K; the eighth, BUW-FZJ_C, whose residue's
+coefficient makes a factor applied per component approximate, agrees to 0.68 % and 0.71 %
+(§18.6.5). FDS's exposed face
+transmits $\varepsilon$ both ways, with the reflected upward flux taken from the
+previous sub-step, and the face balance holds no radiation; an insulated back is a
+mirror. Match the angular factor, the optical depth and the cell size as well as
+units; do not simply copy $\kappa_s$ into a mass-specific $\alpha_j$. The
+condensed-phase model is gray; FDS's gas-phase spectral radiation options do not
+establish a gray-band solid model.
 
-### 8.7.4 Sources and numerical evidence
+### 8.9.4 Sources and numerical evidence
 
-TK Eqs. 11–12, 23 and §3 describe its attenuation, emission and deposition.
-GP Eqs. 7, 66–67 and V2 user guide §§4.2, 8 are checked against the
-linked V2 routines. FDS's [radiation equations](https://github.com/firemodels/fds/blob/FDS-6.11.0/Manuals/FDS_Technical_Reference_Guide/Solid_Chapter.tex#L52-L90)
-and [two-flux implementation](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2255-L2295) establish
-its angular and emission terms. Our beam deposits are assembled in
-`src/Kernels/radiation.jl`.
+TK Eqs. 11–12, 23 and §3 describe its attenuation, emission and deposition. GP Eqs. 7,
+66–67 and V2 user guide §§4.2, 8 are checked against the linked V2 routines. FDS's
+[radiation equations](https://github.com/firemodels/fds/blob/FDS-6.11.0/Manuals/FDS_Technical_Reference_Guide/Solid_Chapter.tex#L52-L90),
+[two-flux implementation](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2255-L2295)
+and [insulated back](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2152-L2160)
+establish its angular closure, cell integration and boundaries. Our rows, sources and
+sweep are in `src/Kernels/radiative_transfer.jl`.
 
-V-RAD-01 uses the pinned Gpyro V2 executable (§18.1.3), with 400
-intervals matching Julia's plotted mesh, full native boundary-node profiles,
-and independent time/space refinements. It checks the specified
-absorption/conduction problem with reradiation disabled. User Guide §5.6
-explains the incident-flux and surface-emission choices for other comparisons.
+V-RAD-05 measures the two-stream closure against exact gray transfer on frames of the
+solver's own burning PMMA runs (10 and 25 kW·m⁻² collimated, 50 % and 10 % of the
+PMMA left): the thermal field's flux leaving the exposed face moves by at most 0.0044
+of the absorbed heater flux, and with the heater's beam converted at the mirror by at
+most 0.016; the cell sources of the top half millimetre move by 0.039–0.068 in the $L_1$ norm
+(0.046–0.081 over the sample with the heater's beam converted at the mirror); with
+the same heater diffuse, attenuated as $e^{-D\tau}$ where exact transfer gives
+$2E_3(\tau)$, the flux leaving moves by at most 0.0024 and the sources over the sample
+by 0.012–0.051; and the exposed cell, which the closure underweights in the thin
+limit, absorbs 0.755–0.791 of its exact share. V-RAD-02 reports the conversion at the
+back against a specular mirror on its slab. No verification case compares the in-depth
+radiation of Pyrolysis.jl with another code's. The MaCFP PMMA validation (§18.6.5) does: against
+FDS it is matched, with the attenuation of §8.9.3 at FDS's cell size and the items FDS cannot
+express aligned, and agrees within 0.71 % in the time to half mass loss and in peak
+mass-loss rate on eight property sets; against Gpyro V2 and ThermaKin2Ds it is unmatched,
+because their deposition has no exact counterpart here (Gpyro marches the net surface
+flux and emits nothing from the depth, §8.9.2; ThermaKin2Ds deposits each step in one
+element, §8.9.1), so their differences measure those kernels rather than the
+discretization. User Guide §5.6 explains the heater
+and surroundings choices for comparisons.
 
 ---
 
-## 8.8 Limitations and Open Issues
+## 8.10 Limitations and Open Issues
 
 The radiation subsystem makes several deliberate simplifications; the following
 are the open issues most likely to matter in practice.
 
 1. **No scattering.** There is no scattering coefficient. Strongly scattering
-   chars or foams would need $\sigma_s>0$ and, for anisotropy, a higher-order
-   closure.
+   chars or foams would need $\sigma_s>0$, which couples $I^+$ and $I^-$ within each
+   cell's closed form; the rows would stay cell-local.
 
-2. **Gray (wavelength-independent) properties.** $\alpha_j$, $\varepsilon_j$ and
-   $a_j$ are gray; real polymers and chars are spectrally selective. A band
-   extension would need per-band absorption coefficients and one beam per band.
+2. **Gray, refractive index one.** $\alpha_j$, $\varepsilon_j$ and $a_j$ are gray, and
+   the interface transmits $\varepsilon$ with no internal reflection beyond
+   $1-\varepsilon$. Real polymers are spectrally selective and refract (PMMA:
+   $n\approx1.49$). A band extension would repeat the rows per band, each band's emissive
+   power the blackbody fraction of that band times $\sigma T_i^4$; a refractive index would put $n^2$ into
+   $\mathcal B_i$ and separate the interface's inside and outside reflectivities.
 
-3. **No emission in depth.** `BEER_LAMBERT` carries the incident beam only: the
-   medium's own emission, and the radiative transport it drives inside a hot,
-   optically thick char, are not modeled; emission is the surface process of
-   `RadiativeBC`. Neither the first-order spherical-harmonics approximation (an
-   incident-radiation field $G$) nor a two-flux pair $I^\pm$ is implemented.
-   Either would be one more block of algebraic unknowns of the state with
-   tridiagonal rows (a quasi-steady diffusion equation for $G$, or two opposed
-   attenuation-and-emission recurrences), banded like the intensity rows of
-   §8.3.3 and differentiated by the same colored automatic differentiation.
+3. **The two-stream closure.** $1/\bar\mu = 3/2$ is exact for the Rosseland limit and
+   25 % low for a thin layer's exchange with a diffuse field (§8.3.1). Beams are exact.
 
-4. **One beam, through `:top`, on a planar line.** Only the first
-   `RadiativeFluxBC` member of the `:top` condition feeds the beam; a second member
-   is dropped silently (§8.3.4). The beam enters through the single `:top` face;
-   `BEER_LAMBERT` is refused off planar coordinates and on meshes of more than one
-   dimension.
+4. **Cell-constant emission.** An optically thick cell carries a radiative
+   conductivity of about $4\sigma T^3\Delta z_i$ and an optically thick exposed cell
+   emits at its centre temperature (§8.6); keep $\alpha_i\Delta z_i\le0.5$ where the
+   in-depth emission matters, and grade toward the surface.
 
-5. **The transmitted beam leaves.** The intensity reaching the back face is lost
-   through it (§8.3.3). For a sample on an opaque holder that is a modelling
-   error; `sol.extras.radiation_transmitted` measures its size, and no warning is
-   issued. Nor is any warning issued for a model that does not match the material
-   (§8.1.2).
+5. **One exposed face on a planar line.** Beams enter through the single `:top` face
+   only; radiative transfer is refused off planar coordinates and on meshes of more
+   than one dimension, where the two-stream does not generalize.
 
-6. **Surface versus cell optical properties.** A `RadiativeBC` with its own
-   emissivity law evaluates $\varepsilon(T_s)$ at the surface temperature.
-   The surface iteration and its implicit derivative differentiate this
-   complete flux (§12.2.3). The default
-   $\varepsilon_{\text{eff}}$ and $a_{\text{eff}}$ are those of the boundary cell
-   at its composition and trial temperature, not at $T_s$; they are constants
-   within the iteration.
+6. **Beams at the back continue as diffuse radiation** (§8.4.3), not as reflected
+   beams.
 
-7. **`SURFACE_ABSORPTION` assumes an opaque first cell** (§8.2). Absorbed incident
-   radiation enters through the *boundary balance*; the model is accurate only
-   when the first cell is optically thick ($\tau_n\gg1$). If the first cell is
-   coarse or only marginally opaque, refine the surface cell or switch to
-   `BEER_LAMBERT`.
+7. **Surface versus cell optical properties.** Under `SURFACE_ABSORPTION` a
+   `RadiativeBC` with its own emissivity law evaluates $\varepsilon(T_s)$ at the surface
+   temperature, and the surface iteration and its implicit derivative differentiate
+   this complete flux (§12.2.3); the default $\varepsilon_{\text{eff}}$ and
+   $a_{\text{eff}}$ are those of the boundary cell at its composition and trial
+   temperature, not at $T_s$, constants within the iteration. Under
+   `RADIATIVE_TRANSFER` the interface's $\varepsilon_e$ is always the first live cell's
+   at its trial temperature.
+
+8. **`SURFACE_ABSORPTION` assumes an opaque first cell** (§8.2). Absorbed incident
+   radiation enters through the *boundary balance*, and the solid's emission is a
+   surface process at $T_s$; the model is accurate only when the first cell is
+   optically thick ($\tau_n\gg1$). If the first cell is coarse or only marginally
+   opaque, refine the surface cell or use `RADIATIVE_TRANSFER`.
+
+9. **No warning for a model that does not match the material** (§8.4.4).
 
 ---
 
@@ -8670,7 +8797,7 @@ which is (10.3): the area carries the lateral part of the strain and the node mo
 
 The area, the lateral rate and the node velocities are algebraic unknowns; the masses, the energy states, the node positions and the history pairs are differential ones. Every row is evaluated in one residual pass at one state: the state mapping reads $A$ from the state and computes the cell volumes and face areas with it; the kernels run; `closure_rows!` computes the strain rates, the history sources and the velocity rows with the $\theta_A$ of the state; the row assembly writes the history rows and then the two cross-section rows from the column sums. No channel is computed from another in sequence: the integrator advances all rows together as one semi-explicit DAE with the mass matrix zero on the algebraic rows (the default `Rodas5P`, a Rosenbrock method, linearizes them in each stage with the colored Jacobian; Chapter 15). The DAE is of index one: given the differential unknowns, the cross-section rows are solved explicitly by $A=A_0\,\mathrm{law}(\bar\chi_c)$ and the lateral rate, and the balance rows by one sweep from the pinned node.
 
-The integrator starts from a state whose algebraic rows hold. `consistent_state!` (through `_consistent_algebraic!`, `src/Integration/setup.jl`) makes one residual pass for the history rates at the initial state, sets $A$ and $\theta_A$ from the column sums (`consistent_lateral`), and repeats both at the new area, since the history rates read the concentrations there; it then sets the face intensities at that area (§8), makes a pass for the strain rates, and sweeps the balance rows once from the pinned node (`consistent_velocities!`); a velocity row left above $10^{-10}$ of its scale is an error at setup. A deactivation event repeats these steps after its transfer (§14.3.5). On every proposal its error test accepts, the integrator's domain test (§15.5.4) rejects a non-positive area and requires the residuals of the area row and the lateral-rate row to lie within $r_{\mathrm{tol}}|A|$ and $r_{\mathrm{tol}}(|\theta_A|+\bar{|\theta|})$ plus their absolute tolerances, with $\bar{|\theta|}$ the volume-weighted mean of $|\theta_i|$.
+The integrator starts from a state whose algebraic rows hold. `consistent_state!` (through `_consistent_algebraic!`, `src/Integration/setup.jl`) makes one residual pass for the history rates at the initial state, sets $A$ and $\theta_A$ from the column sums (`consistent_lateral`), and repeats both at the new area, since the history rates read the concentrations there; it then sets the radiative face fluxes at that area (§8.7.2), makes a pass for the strain rates, and sweeps the balance rows once from the pinned node (`consistent_velocities!`); a velocity row left above $10^{-10}$ of its scale is an error at setup. A deactivation event repeats these steps after its transfer (§14.3.5). On every proposal its error test accepts, the integrator's domain test (§15.5.4) rejects a non-positive area and requires the residuals of the area row and the lateral-rate row to lie within $r_{\mathrm{tol}}|A|$ and $r_{\mathrm{tol}}(|\theta_A|+\bar{|\theta|})$ plus their absolute tolerances, with $\bar{|\theta|}$ the volume-weighted mean of $|\theta_i|$.
 
 ---
 
@@ -8760,7 +8887,7 @@ $$
 \tag{10.18}
 $$
 
-with the enthalpy inventory $H_i$ in place of $T_i$ under `energy_state = :enthalpy`, a face intensity appended to every node block under `BEER_LAMBERT` (§6.4). The total length is $N_{\mathrm{state}} = n(N_C+3) + 2\,n_{\mathrm{nodes}} + 2$ (plus $n_{\mathrm{nodes}}$ intensities under `BEER_LAMBERT`). For $N_C=3$ and $n=5$ (so $n_{\mathrm{nodes}}=6$) this is $5\cdot6+6\cdot2+2=44$, which `test/closures/test_variable_cross_section.jl` asserts as `5 * (1 + 3 + 2) + 6 * 2 + 2`; the same problem without a lateral law has $5\cdot4+6\cdot2=32$, asserted as `5 * (1 + 3) + 6 * 2`. The solve of §10.5.2 ($N_C=2$, $n=10$) has 74 unknowns. A fixed mesh carries none of these rows: `setup` refuses a lateral law without `use_ale = true`.
+with the enthalpy inventory $H_i$ in place of $T_i$ under `energy_state = :enthalpy`, the radiation rows appended to every node block under `RADIATIVE_TRANSFER` (§8.7.1). The total length is $N_{\mathrm{state}} = n(N_C+3) + 2\,n_{\mathrm{nodes}} + 2$ (plus $N_{\mathrm{rad}}\,n_{\mathrm{nodes}}$ radiation rows under `RADIATIVE_TRANSFER`). For $N_C=3$ and $n=5$ (so $n_{\mathrm{nodes}}=6$) this is $5\cdot6+6\cdot2+2=44$, which `test/closures/test_variable_cross_section.jl` asserts as `5 * (1 + 3 + 2) + 6 * 2 + 2`; the same problem without a lateral law has $5\cdot4+6\cdot2=32$, asserted as `5 * (1 + 3) + 6 * 2`. The solve of §10.5.2 ($N_C=2$, $n=10$) has 74 unknowns. A fixed mesh carries none of these rows: `setup` refuses a lateral law without `use_ale = true`.
 
 The history rows are differential (ones on the mass matrix), the area and lateral-rate rows algebraic (zeros). Their absolute tolerances are the cell's mass tolerance $r_{\mathrm{tol}}\,\varepsilon_m\,m^s_i(0)$ for both members of the pair, $r_{\mathrm{tol}}A_0$ for the area, and for the lateral rate the smallest node-velocity tolerance divided by the initial thickness (`abstol_vector`, `src/States/tolerances.jl`). The rows are reached through `history_index(layout, i, k)`, `area_index(layout)` and `lateral_rate_index(layout)`, and their presence through `has_history(layout)` and `has_chi(layout)` (`src/States/layout.jl`). The colored Jacobian writes the two dense cross-section rows after its colored pass, through the six column sums (`LateralRows`, §15.9).
 
@@ -8934,7 +9061,8 @@ $$
 where the solid velocity $\mathbf v_s$ satisfies the volume balance of every cell
 (the *balance rows*, §11.3) and the correction $\mathbf c$ is zero unless the mesh is
 asked to move relative to the solid: by the equidistribution correction that carries a
-vanishing layer to burnout in one event (§11.7), or by a prescribed mesh velocity for
+vanishing layer's cells to burnout together, in one or two events (§11.7), or by a
+prescribed mesh velocity for
 verification (§11.7.7). Wherever $\mathbf c \ne 0$ every inventory crosses the faces
 of the mesh at the relative velocity $-\mathbf c$ (the *relative fluxes*, §11.6). The
 per-cell component masses are the states, so mass is conserved exactly, and the
@@ -9328,8 +9456,8 @@ line, and a line mesh pins its first node.
 **Consistent velocities.** The integrator starts from a state whose algebraic rows
 hold. `consistent_velocities!` sweeps (11.9) once from the pinned node: the
 corrections read positions only, so one pass is exact. `setup` calls it for
-the initial state (through `consistent_state!`, which also sets the face intensities
-and the cross-section rows), and every deactivation event calls it again after its
+the initial state (through `consistent_state!`, which also sets the radiative face
+fluxes and the cross-section rows), and every deactivation event calls it again after its
 transfer, a dead cell's row node taking zero velocity (Chapter 14). A velocity row left
 above round-off by the sweep is an error at setup; at an event it ends the solve with
 return code `:Failure` and a warning that no consistent node velocities exist.
@@ -9710,7 +9838,7 @@ reach the threshold one at a time, each an event that restarts the integrator, a
 last cells of the layer become very thin and stiff before they go. The
 equidistribution correction moves the mesh relative to the solid inside a layer that
 deactivation can remove, so that the layer's cells thin together, reach the threshold
-together and, with the near-threshold band, leave in one event
+together and, with the near-threshold band, leave in one or two events
 (`EquidistributionCorrection`, `src/Closures/correction.jl`).
 
 ### 11.7.2 The node correction
@@ -9726,7 +9854,7 @@ c_i = a_i\,\frac{n_{\text{layer}}^2}{\tau_{\text{eq}}}\,
 $$
 (`_correction!`), with $\Delta z_i = z_{i+1} - z_i$ the current cell thickness,
 $a_i$ the activation of §11.7.3 and $\tau_{\text{eq}}$ [s] the layer's equidistribution
-time (the keyword $\tau$, §11.7.5). A positive $c_i$ moves the node in $+z$ relative to the
+time (the keyword $\tau$; by default estimated twice, which (11.24) of §11.7.5 writes out). A positive $c_i$ moves the node in $+z$ relative to the
 solid, into the outer cell: the correction moves each node into the thicker of its two
 cells, so $\Delta z$ itself relaxes toward a common value over the layer.
 
@@ -9788,42 +9916,70 @@ correction on layers that cannot vanish.
 
 ### 11.7.5 The layer time
 
-The equidistribution time is one value for every layer when $\tau$ is a number. By
-default it is `ActivationTime()`: each layer's time is set once, when its first cell
-activates (falls below $r_{\text{hi}}$ of its initial thickness), from the layer's
-thickness $L_{\text{layer}}$ (from its inner bounding node to its outermost live node)
-and its thinning rate $\dot L_{\text{layer}}$ (their velocity difference) at that time,
+The equidistribution time is one value for every layer when $\tau$ is a number, and
+(11.21) holds with it. By default it is `ActivationTime()`, which estimates each layer's
+time twice from the layer's thickness $L_{\text{layer}}$ (from its inner bounding node
+to its outermost live node) and its thinning rate $\dot L_{\text{layer}}$ (their
+velocity difference) at the moment of the estimate,
 $$
 \boxed{\;
-\tau_{\text{eq}} = \lambda_\tau\,\frac{L_{\text{layer}}}{|\dot L_{\text{layer}}|}
+\tau_{\text{eq},k} = \lambda_\tau\,\frac{L_{\text{layer}}}{|\dot L_{\text{layer}}|}
 \;}
 \tag{11.23}
 $$
-with $\lambda_\tau$ the keyword `λ` of `ActivationTime`, by default
-`ACTIVATION_TIME_FACTOR` = 1.8. The rate scales with the physical rates and
-$\lambda_\tau$ is a pure number, so a deck whose rates are all multiplied by $s$ gets
-$\tau_{\text{eq}}/s$, which a test asserts in dimensionless time. With it the 5.9 mm
-PMMA layer of V-BO-01 at 50 kW/m² gets about 720 s, and a layer equalizes in about
-$\tau_{\text{eq}}/\pi^2 \approx 0.18$ of the life $L_{\text{layer}}/|\dot L_{\text{layer}}|$
-the estimate implies, about a fifth of it. Before the estimate the layer's correction is zero,
-since no cell of it is active. A layer thinning no faster than `floor` (default 1)
-times its initial thickness over the solve's horizon keeps the `fallback` time
-(`EQUIDISTRIBUTION_TIME` = 720 s, with which V-BO-01 ends in one deactivation at 30,
-60 and 120 cells across the layer) until a cell crosses $r_{\text{lo}}$, where the
-estimate is taken once more; a layer that thickens keeps the fallback. A layer is
-estimated once: a cell that re-activates later changes nothing.
+the first ($k = 1$) when a cell of the layer first falls below $r_{\text{hi}}$ of its
+initial thickness, the second ($k = 2$) when a cell first falls below $r_{\text{lo}}$.
+A cell starts at its initial thickness, so the first estimate needs
+$r_{\text{hi}} < 1$: `ActivationTime` refuses $r_{\text{hi}} \ge 1$, which a fixed
+$\tau$ accepts.
+$\lambda_\tau$ is the keyword `λ` of `ActivationTime`, by default
+`ACTIVATION_TIME_FACTOR` = 1.8, so a layer equalizes in about
+$\tau_{\text{eq},k}/\pi^2 \approx 0.18$ of the life $L_{\text{layer}}/|\dot L_{\text{layer}}|$
+each estimate implies, about a fifth of it.
+
+The first estimate sets the layer's gain. The second, taken nearer the layer's end
+where its rate has grown, enters through a second switch of each cell,
+$$
+a^{\text{lo}}_i = \mathcal S(x_i - 1),
+$$
+with $x_i$ the argument of $\mathcal S$ in (11.22),
+$x_i = \big(\ln r_{\text{hi}} - \ln(\Delta z_i/\Delta z_i(0))\big)/(\ln r_{\text{hi}} - \ln r_{\text{lo}})$:
+zero while the cell keeps at least
+$r_{\text{lo}}$ of its initial thickness, one at and below $r_{\text{lo}}^2/r_{\text{hi}}$
+of it ($1/30$ by default), and $C^1$ in $\ln\Delta z$ between. A node's
+$a^{\text{lo}}_i$ is the smooth "or" of its two cells', as for $a_i$, and the node
+correction is
+$$
+c_i = \left(\frac{a_i}{\tau_{\text{eq},1}}
++ a^{\text{lo}}_i\Big(\frac{1}{\tau_{\text{eq},2}} - \frac{1}{\tau_{\text{eq},1}}\Big)\right)
+n_{\text{layer}}^2\,\big(\Delta z_i - \Delta z_{i-1}\big)
+\tag{11.24}
+$$
+(`_correction!`, `switches`): (11.21) at $\tau_{\text{eq},1}$ where both of the node's
+cells keep more than $r_{\text{lo}}$ of their thickness, and at $\tau_{\text{eq},2}$ once
+one of them is below $r_{\text{lo}}^2/r_{\text{hi}}$. Neither estimate changes the
+right-hand side where it is taken: the first is taken where $a_i$ leaves zero, the
+second where $a^{\text{lo}}_i$ does, both with zero slope. Before its first estimate a
+layer has no gain. A layer not thinning at its first estimate has no correction until
+its second ($\tau_{\text{eq},1}=\infty$); one not thinning at its second keeps its first
+($\tau_{\text{eq},2}=\tau_{\text{eq},1}$). Each estimate is taken once: a cell that
+re-activates later changes nothing.
+
+The rate scales with the physical rates and $\lambda_\tau$ is a pure number, so a deck
+whose rates are all multiplied by $s$ gets both times divided by $s$, which a test
+asserts in dimensionless time. The 5.9 mm PMMA
+layer of V-BO-01 at 50 kW/m² (60 cells) gets about 868 s at its first estimate, at
+$t \approx$ 74 s, and 509 s at its second, at 160 s.
 
 The estimate is an event of the integrator. A continuous callback watches the smallest
 margin $\Delta z_i/(r\,\Delta z_i(0)) - 1$ over the live cells of the layers still
-waiting ($r = r_{\text{hi}}$ before the first estimate, $r_{\text{lo}}$ while a floored
-rate waits for the second), locates its first root inside the step, and sets the time
-of every waiting layer whose margin is within `reltol` of zero
-(`estimate_layer_times!`). The state is not modified, and the layer's correction is
-zero up to its activation, so the event changes the right-hand side only where the
-activation has just begun; the integrator re-evaluates its derivative there under the
-policy's flag rule (Chapter 15). Every `integrate` call starts with every layer back
-before its first activation, so repeated integrations of one problem are
-bit-identical.
+waiting ($r = r_{\text{hi}}$ before a layer's first estimate, $r_{\text{lo}}$ before its
+second), locates its first root inside the step, and estimates every waiting layer
+whose margin is within `reltol` of zero (`estimate_layer_times!`). The state is not
+modified, and the event changes the right-hand side only where a switch has just begun
+to rise; the integrator re-evaluates its derivative there under the policy's flag rule
+(Chapter 15). Every `integrate` call starts with every layer back before its first
+estimate, so repeated integrations of one problem are bit-identical.
 
 ### 11.7.6 Installation, keywords and outputs
 
@@ -9873,7 +10029,7 @@ sol = solve(problem; use_ale = true, deactivation = true)
 
 # The same correction, every parameter spelled out.
 corr = EquidistributionCorrection(
-    τ = ActivationTime(λ = 1.8, fallback = 720.0),
+    τ = ActivationTime(λ = 1.8),
     activation = (0.3, 0.1),
     layers = :vanishing,
 )
@@ -9882,20 +10038,22 @@ sol = solve(problem; use_ale = true, deactivation = true, correction = corr)
 sol.statistics.invocations    # deactivation invocations
 sol.correction_velocity       # c at every node and saved time [m/s]
 sol.extras.min_cell_thickness # the thinnest live cell at every saved time [m]
-sol.definition.closure.correction.time    # each moving layer's τ_eq [s]
-sol.definition.closure.correction.set_at  # the time it was set [s]
+c = sol.definition.closure.correction
+c.first_estimate              # each moving layer's first estimate τ_eq,1 [s]
+c.time                        # its latest estimate [s]
+c.set_at                      # the time of the latest estimate [s]
 ```
 
 Measured with this script: the default call installs the correction with one moving
 layer, the PMMA, bounded by the board–PMMA interface (node 31), which `setup` takes
-as a Lagrangian node from the initial composition; the layer's equidistribution time
-is set to about 172 s at $t \approx 35$ s, and the 30 PMMA cells leave in two
-invocations, at $t \approx 91.9$ s and $96.6$ s, the solve then continuing on the
-board to the end of its time span (return code `:Success`). The explicit correction
-reproduces the default bit for bit. At `threshold = 3e-3` the layer leaves in one
-invocation. With `correction = NoCorrection()` the 30 cells leave in 30 invocations,
-from $t \approx 58.7$ s to $96.8$ s, some from under live cells (Chapter 14), at 887
-accepted steps against the correction's 530.
+as a Lagrangian node from the initial composition. The layer's first estimate is about
+172 s, at $t \approx 34.8$ s, and its second about 65 s, at $t \approx 61.2$ s; the 30
+PMMA cells leave in one invocation at $t \approx 94.3$ s, and the solve continues on the
+board to the end of its time span (return code `:Success`) in 747 accepted steps. The
+explicit correction reproduces the default bit for bit. With
+`correction = NoCorrection()` the 30 cells leave in 30 invocations, from
+$t \approx 58.7$ s to $96.8$ s, some from under live cells (Chapter 14), in 984
+accepted steps.
 
 ### 11.7.7 The prescribed mesh velocity (`PrescribedCorrection`)
 
@@ -10025,7 +10183,7 @@ The principal limitations and open issues are:
    integrator's order (§11.5.2).
 
 5. **The correction is a numerical device with a verified envelope.** The
-   equidistribution time is set from one estimate per layer, the activation
+   equidistribution time is set from two estimates per layer, the activation
    thresholds are user parameters, and the relative fluxes it switches
    on add smooth numerical diffusion wherever $\mathbf c \ne 0$. The burnout path is
    verified on the decks listed in User Guide Chapter 10; other materials, thicker or
@@ -10360,12 +10518,17 @@ $G-\sigma T_\infty^4$ over the full hemisphere, so the cone calorimeter is
 modelled with $F=1$ — the **emissivity** $\varepsilon$
 (either a supplied constant or function of the surface temperature, evaluated at the
 trial clamp of the iterate, or, when `nothing`, the composition-weighted
-$\varepsilon_{\text{eff}}$ of §5.8.2), and the surroundings temperature
+$\varepsilon_{\text{eff}}$ of §5.8.1), and the surroundings temperature
 $T_\infty$. This term is the surface's own re-radiation to and absorption from a
 gray environment; it is the dominant cooling mechanism for a hot pyrolyzing
 surface. Its quartic temperature dependence is why the face temperature, not the
-cell-center temperature, must enter it (§12.1.1). The condition stays at the
-surface under both radiation models. (`surface_balance.jl`.)
+cell-center temperature, must enter it (§12.1.1). This is the condition under
+`SURFACE_ABSORPTION` (`surface_balance.jl`). Under `RADIATIVE_TRANSFER` it contributes
+zero to the surface balance: the surroundings' $F\sigma T_\infty^4$ enters the diffuse
+radiation arriving at its face, which crosses the interface at the cell's
+$\varepsilon_{\text{eff}}$, and the solid's emission leaves through the same interface
+from the radiation rows; a `RadiativeBC` with its own `ε` is refused there (§8.4.1,
+§8.5.1).
 
 The displayed slope holds emissivity fixed. If emissivity depends on surface
 temperature, the full derivative additionally contains
@@ -10395,46 +10558,47 @@ incident radiation must be deposited exactly once:
   $T_{\text{cell}}$ when there is net heating. A direct call of
   `solve_boundary_temperature!` defaults its `radiation_model` keyword to
   `SURFACE_ABSORPTION`.
-- **`BEER_LAMBERT`**: the radiation is absorbed *in depth* by `BeerLambertKernel`,
-  through face intensities that are algebraic unknowns of the state, the exposed
-  face's intensity being $a_s\,q_{\text{inc}}(t)$ with $a_s$ the condition's own
-  absorptivity or that of the outermost live cell (§8.3, §8.3.4). To avoid
-  double-counting, the condition contributes nothing to the surface balance,
+- **`RADIATIVE_TRANSFER`**: the radiation crosses the exposed face and is absorbed
+  *in depth* by `RadiativeTransferKernel`, through face fluxes that are algebraic
+  unknowns of the state (§8.3). How it enters is set by the condition's
+  `distribution`: `Diffuse()` (the default) adds $q_{\text{inc}}$ to the diffuse
+  radiation arriving at the face, which crosses at the first live cell's
+  $\varepsilon_{\text{eff}}$; `Collimated()` and `Cone(θ₁, θ₂; directions)` enter as
+  beams with the absorbed flux $a_s\,q_{\text{inc}}(t)$, $a_s$ the condition's own
+  absorptivity or that of the first live cell (§8.4.2). To avoid double-counting, the
+  condition contributes nothing to the surface balance,
   $$q_{\text{BC}} = 0, \qquad dq_{\text{BC}}/dT_s = 0 .$$
 
-Under `BEER_LAMBERT` the beam is fed by the **first** `RadiativeFluxBC` member of
-the `:top` condition (`get_radiative_flux_bc`, which returns the first
-`RadiativeFluxBC` it finds in a `CombinedThermalBC`), while every member contributes
-zero to the surface balance: a second radiative-flux member is dropped silently. On
-a slab of emissivity 0.9, `RadiativeFluxBC(30e3) + RadiativeFluxBC(20e3)` gives an exposed-face intensity of 27 000 W·m⁻² ($0.9\times30$ kW·m⁻²) under
-`BEER_LAMBERT` and a conducted surface flux of 45 000 W·m⁻² ($0.9\times50$ kW·m⁻²)
-under `SURFACE_ABSORPTION`. Combine the incident fluxes into one condition when the
-model is `BEER_LAMBERT` (§12.12). `setup` refuses a `RadiativeFluxBC` on any other tag
-under `BEER_LAMBERT` (in-depth radiation enters through the `:top` faces only), and
-refuses `BEER_LAMBERT` on cylindrical or spherical coordinates.
+Under `RADIATIVE_TRANSFER` the diffuse members of a condition add to the arriving
+diffuse radiation and each collimated or cone member adds its own beams.
+`setup` refuses, under `RADIATIVE_TRANSFER`: an `absorptivity` on a diffuse member, and
+any diffuse member on a material where a component sets `absorptivity` (diffuse
+radiation enters at the emissivity, §8.4.2); a collimated or cone member on a tag
+other than `:top`; a radiative member on a tag other than `:top` and `:bottom`;
+cylindrical and spherical coordinates (§8.4.4). A diffuse member on `:bottom` makes
+the back an open gray interface (§8.4.3).
 
 A note on consistency. The surface balance applies $a_s q_{\text{inc}}$ as a
 boundary flux under `SURFACE_ABSORPTION`, and no volumetric source exists under that
-model, so the energy enters once, through the face; only `BEER_LAMBERT` routes it
-through the volume, and only then is the boundary flux suppressed. The diagnostic
+model, so the energy enters once, through the face; only `RADIATIVE_TRANSFER` routes
+it through the volume, and only then is the boundary flux suppressed. The diagnostic
 decomposition `compute_boundary_heat_fluxes` follows the *same* dispatch: its `net`
 is the flux the balance actually applies — $a_s q_{\text{inc}}$ is inside `net`
-under `SURFACE_ABSORPTION` and absent under `BEER_LAMBERT`, where the
-in-depth deposit is reported separately as `extras.volumetric_absorption`
-(§12.9.1). The number called absorptivity means two things: under
-`SURFACE_ABSORPTION` it is the absorptivity of an opaque
-face to the heater's spectrum (§5.8.2); under `BEER_LAMBERT` it is the
-fraction of the incident flux that enters the medium, $1-\rho_s$ with
-$\rho_s$ the surface reflectance ($0.04$–$0.08$ for PMMA, $n\approx1.49$),
-the absorption coefficient of §5.8.3 doing the absorbing.
+under `SURFACE_ABSORPTION` and absent under `RADIATIVE_TRANSFER`, where the radiation
+crossing the faces is reported separately as `extras.radiation_absorbed`,
+`radiation_emitted` and `radiation_back` (§8.5.2, §12.9.1). The number called
+absorptivity means two things: under `SURFACE_ABSORPTION` it is the absorptivity of an
+opaque face to the heater's spectrum (§5.8.2); under `RADIATIVE_TRANSFER` it is the
+fraction of a beam that enters the medium, $1-\rho_s$ with $\rho_s$ the surface
+reflectance ($0.04$–$0.08$ for PMMA, $n\approx1.49$), the absorption coefficient of
+§5.8.3 doing the absorbing.
 
-> **Implementation note.** `BeerLambertKernel(topology, geometry, bc_set)`
-> (`src/Kernels/radiation.jl`) takes its source from
-> `get_radiative_flux_bc(bc_set.thermal[:top])` (a zero flux when the condition has
-> no radiative-flux member) and evaluates the incident intensity at the time of each
-> residual evaluation (`incident_intensity`, §8.3.4). The surface balance receives
-> the radiation model from the thermal boundary kernel, which `setup` builds with
-> the solve's `radiation_model`.
+> **Implementation note.** `RadiativeTransferKernel(topology, geometry, bc_set,
+> material)` (`src/Kernels/radiative_transfer.jl`) collects the `:top` condition's
+> diffuse members (`incoming_radiation`) and its beam members (`BeamSource`, one row
+> per direction) and evaluates them at the time of each residual evaluation. The
+> surface balance receives the radiation model from the thermal boundary kernel, which
+> `setup` builds with the solve's `radiation_model`.
 
 ### 12.3.6 `DirichletThermalBC` (prescribed surface temperature)
 
@@ -10644,7 +10808,7 @@ state from $T_i(0)$ (the temperature, or the inventory $H_i=\sum_j m_{j,i}h_j(T_
 under `energy_state = :enthalpy`), writes the history pair under a lateral law
 (§12.8.3) and the node positions on a moving mesh, and then sets the algebraic
 unknowns consistent with them (`consistent_state!`: the area and lateral rate,
-the face intensities, the node velocities; §15.4). For example:
+the radiative face fluxes, the node velocities; §15.4). For example:
 
 ```julia
 using Pyrolysis
@@ -10738,12 +10902,12 @@ from the components. Consequences of the model dispatch:
 - `SURFACE_ABSORPTION`: a `RadiativeFluxBC` contributes
   `absorbed = net` $= a_s q_{\text{inc}}$ ($a_s$ the explicit BC absorptivity or $a_{\text{eff}}$) — the
   flux is applied at the face.
-- `BEER_LAMBERT`: a `RadiativeFluxBC` contributes zero `absorbed` and zero `net` —
-  the radiation enters in depth (§8.3) and is reported separately: per unit exposed
-  area, `extras.volumetric_absorption` $= I_e - I_bA_b/A_e$, the intensity entering
-  the exposed face less what leaves through the last face of the beam, and
-  `extras.radiation_transmitted` $= I_bA_b/A_e$ (§8.3.5 works the numbers for a
-  slab).
+- `RADIATIVE_TRANSFER`: a `RadiativeFluxBC` and a `RadiativeBC` contribute zero to
+  every component and to `net` — the radiation crosses the faces through the radiation
+  rows (§8.4) and is reported separately, per unit face area:
+  `extras.radiation_absorbed`, the radiation crossing the exposed face inward;
+  `radiation_emitted`, crossing it outward; and `radiation_back`, the net radiation
+  leaving through the back (§8.5.2; §8.8 works the numbers for a slab).
 
 The solution evaluates the decomposition at every saved time
 (`src/Outputs/solution.jl`): at the face temperature of each live `:top` face, with
@@ -10800,7 +10964,7 @@ A shared nominal heat flux or ambient temperature does not guarantee a
 shared boundary problem. Compare the incident, absorbed and net fluxes,
 the temperature at which losses are evaluated, and the composition of any
 incoming gas. The configurations below follow §1.6.5; radiation and interior
-transport are compared separately in §§8.7 and 9.12.
+transport are compared separately in §§8.9 and 9.12.
 
 | Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
 |:---|:---|:---|:---|:---|
@@ -10821,7 +10985,7 @@ incident flux **after reflection**, not the reflected component.
 TK Eqs. 12 and 23 and its MAX/RAND algorithm use absorption-weighted or
 selected-element radiation properties. Only an appropriate surface-absorption
 limit resembles our `RadiativeFluxBC + RadiativeBC + ConvectiveBC` balance;
-the general TK model is not exactly that surface equation (§8.7.1).
+the general TK model is not exactly that surface equation (§8.9.1).
 The manual does not establish a separate surface-temperature solve or
 surface-node construction like ours. In the matched
 ThermaKin2Ds 7 runs, fixed temperatures, films and fluxes act at the boundary
@@ -10844,8 +11008,9 @@ Our boundary temperature is recovered from a one-sided surface balance.
 
 In the active V2 boundary routine, convection and re-radiation use the
 boundary-cell temperature. Absorptivity is included in the entering radiation,
-and positive net radiation can be attenuated in depth (§8.7.2). Our incident
-beam and surface emission are accounted for separately. An impermeable back
+and positive net radiation can be attenuated in depth (§8.9.2). Under surface
+absorption our incident radiation and surface emission are accounted for separately at
+the face; under radiative transfer both cross the face through the radiation rows. An impermeable back
 is one configuration, not a property of every V2 deck; match the actual
 pressure/flux conditions and external gas composition (§9.12.2).
 
@@ -10853,9 +11018,10 @@ pressure/flux conditions and external gas composition (§9.12.2).
 
 The FDS solid-phase chapter imposes conducted flux equal to convective plus
 net radiative surface flux for opaque material. It sets the surface radiation
-source to zero when in-depth radiation carries that exchange. Our
-Beer–Lambert mode also avoids depositing the incident beam twice, but its
-one-way absorption model differs from FDS's emitting two-flux model (§8.7.3).
+source to zero when in-depth radiation carries that exchange. Our radiative
+transfer does the same, its surface balance holding no radiation; its two-stream
+rows differ from FDS's two-flux model in angular factor, cell integration and
+coupling in time (§8.9.3).
 FDS's Newton iteration for surface oxygen in oxidative reactions is separate
 from our Newton solve for surface temperature.
 
@@ -10901,7 +11067,8 @@ zone or in-depth absorption makes its temperature variation significant.
 
 The surface energy balance (§12.2) describes an opaque, gray, diffuse face in
 an inert or flaming atmosphere, its gas-side exchange reduced to a
-coefficient. Outside that: there is no flame feedback (§1.8.1); the incident
+coefficient; under radiative transfer the face is instead a gray interface whose
+radiation the rows of §8.4 carry, and the balance keeps the rest. Outside that: there is no flame feedback (§1.8.1); the incident
 flux is not attenuated by the pyrolysate plume, which absorbs $6$–$14\,\%$ of
 it before ignition and $20$–$27\,\%$ at steady outgassing in a cone-type
 geometry without extraction (Zhou et al. 2009, 2010), up to $35\,\%$ under a
@@ -11195,7 +11362,7 @@ $\xi_{j,i}=m_{j,i}/\tilde V_i$ the kernels read.
 > **Implementation note.** `assemble_rows!` (`src/Assembly/residual.jl`) is the
 > only writer of `du`. It scatters `F_energy` into the energy rows and `F_mass`
 > into the face-flux part of the mass rates (`M_flux`), writes the mass, energy,
-> intensity, position, velocity, history, cross-section and deformation rows, and
+> radiation, position, velocity, history, cross-section and deformation rows, and
 > writes the dead rows last.
 
 ### 13.3.2 The mass rows
@@ -11235,7 +11402,7 @@ terms within $10^{-12}$ relative, the conduction fluxes cancelling pairwise.
 ### 13.3.4 The energy row
 
 With $S_{E,i}$ [W] the cell's energy sources (the reaction heat
-$Q_{\mathrm{rxn},i}\tilde V_i$ and the absorbed in-depth radiation, §13.5) and $F_f$ the face energy flux (the
+$Q_{\mathrm{rxn},i}\tilde V_i$ and the radiative source under radiative transfer, §13.5) and $F_f$ the face energy flux (the
 conduction, the enthalpy the mass fluxes carry, and on a boundary face the flux of
 the condition, §13.7), the cell's energy right-hand side is
 
@@ -11311,11 +11478,11 @@ fields:
 | `F_mass` | $N_C\times n_\text{faces}$ | kg m⁻² s⁻¹ | gas transport, relative fluxes |
 | `F_energy` | $n_\text{faces}$ | W m⁻² | conduction, gas transport (carried enthalpy), thermal boundary, relative fluxes |
 | `S_mass` | $N_C\times n$ | kg s⁻¹ | reactions, external sources |
-| `S_energy` | $n$ | W | reactions, in-depth radiation |
+| `S_energy` | $n$ | W | reactions, radiative transfer |
 | $\theta$ | $n$ | s⁻¹ | mesh closure (strain rates) |
 | `M_flux` | $N_C\times n$ | kg s⁻¹ | assembler ($\dot M_{j,i}$) |
 | `T_face` | $n_\text{faces}$ | K | thermal boundary (surface temperatures) |
-| `r_intensity` | $n_\text{faces}$ | W m⁻² | in-depth radiation (algebraic residuals) |
+| `r_radiation` | $N_\text{rad}\times n_\text{faces}$ | W m⁻² | radiative transfer (algebraic residuals) |
 | `r_velocity`, `r_multiplier` | $D\,n_\text{nodes}$, $n$ | — | mesh closure (algebraic residuals) |
 | `F_carried`, `S_carried` | $2\times n_\text{faces}$, $2\times n$ | kg m⁻² s⁻¹, kg s⁻¹ | relative fluxes, mesh closure (conversion-history pair) |
 | `gradient` | $D\times n$ | K m⁻¹ | conduction ($D\ge2$) |
@@ -11332,7 +11499,7 @@ kernels run; the assembler zeroes `M_flux`; `T_face` and `gradient` are overwrit
 2. `GasTransportKernel{M}`, for mobile gas, with the declared `LumpedTransfer`
    or `DustyGas`. Gas-bearing sealed materials still evaluate their EOS;
    `NoGasTransport` is reserved for materials without gas components.
-3. `BeerLambertKernel`, under `BEER_LAMBERT` (§13.5.2).
+3. `RadiativeTransferKernel`, under `RADIATIVE_TRANSFER` (§13.5.2).
 4. `ConductionKernel`, always (§13.7.1).
 5. `ThermalBoundaryKernel`, always (§13.7.5).
 6. `RelativeFluxKernel`, when the correction is not `NoCorrection`: the
@@ -11394,38 +11561,43 @@ below zero concentration is skipped: its rates and every derivative of them are
 exactly zero. The mass sources are also what the mesh closure reads for the strain
 rates (§11.3.1).
 
-### 13.5.2 In-depth radiation: the face intensities
+### 13.5.2 Radiative transfer: the face fluxes
 
-Under `BEER_LAMBERT` the intensity of every face is an algebraic unknown of the
-state. `BeerLambertKernel` orders the cells from the exposed face (the single
-`:top` face) into the depth and, for each cell $i$, records its upstream face
-(toward the exposed face) and its downstream face. Its rows are
-
-$$
-0=I_e-a\,q_\mathrm{inc}(t)\quad\text{(the face the beam enters)},\qquad
-0=I_\text{down}-I_\text{up}\,e^{-\alpha_i\Delta_i}\quad\text{(the downstream face of each live cell)},
-$$
-
-with $q_\mathrm{inc}$ the incident flux of the `RadiativeFluxBC`, $a$ its explicit
-absorptivity or else the effective absorptivity of the first live cell (§5.8.2),
-$\alpha_i$ the cell's absorption coefficient at the positive-part concentrations
-and $\Delta_i$ its thickness (the sum of its two floored centre-to-face distances).
-The cell absorbs
+Under `RADIATIVE_TRANSFER` the radiation field is carried as algebraic unknowns of the state:
+the two hemispherical fluxes $I^-_f$, $I^+_f$ of every face and one beam $I_{h,f}$ per
+direction of a collimated or cone heater (§8.7.1). `RadiativeTransferKernel` orders the
+cells from the exposed face (the single `:top` face) into the depth and, for each cell
+$i$, records its upstream face $u$ (toward the exposed face) and its downstream face $d$.
+Its rows (8.5) are, for each live cell,
 
 $$
-S_{E,i}\mathrel{+}=I_\text{up}A_\text{up}-I_\text{down}A_\text{down},
+0=I^-_d-\big[\mathcal B_i+(I^-_u-\mathcal B_i)\,e^{-\tau_i/\bar\mu}\big],\qquad
+0=I^+_u-\big[\mathcal B_i+(I^+_d-\mathcal B_i)\,e^{-\tau_i/\bar\mu}\big],\qquad
+0=I_{h,d}-I_{h,u}\,e^{-\tau_i/\mu_h},
 $$
 
-the exact cell average of the attenuated beam, so the absorbed energy telescopes
-to the entering intensity minus the transmitted one
-(`test/kernels/test_radiation.jl`, "the beam's energy telescopes"). Each row reads
-one cell and its two faces, so the Jacobian stays banded where the eliminated
-recurrence would couple every cell to every cell above it. After cells are
-deactivated the beam enters the first live cell's upstream face, and the faces upstream of it carry identity rows. Under `BEER_LAMBERT` the
-incident flux contributes nothing to the surface balance; the condition's other
-members (re-radiation, convection) stay at the surface. `setup` refuses in-depth
-radiation off planar coordinates, where the attenuated intensity and the face
-areas would disagree. The model and its limits are §8.3.
+with $\mathcal B_i=\sigma\tilde T_i^4$, $\tau_i=\alpha_i\Delta z_i$, $\alpha_i$ the
+cell's absorption coefficient at the positive-part concentrations and $\Delta z_i$ the sum
+of its two floored centre-to-face distances, and the boundary rows of the exposed face
+(a gray interface at the first live cell's $\varepsilon$, §8.4.1), of each beam where it
+enters (§8.4.2) and of the back (a mirror or an open interface, §8.4.3). The cell
+absorbs what enters through its two faces less what leaves,
+
+$$
+S_{E,i}\mathrel{+}=A_u\big(I^-_u-I^+_u\big)-A_d\big(I^-_d-I^+_d\big)+\sum_h\big(A_uI_{h,u}-A_dI_{h,d}\big),
+$$
+
+the exact cell average of (8.2) for its constant emission, so the sources telescope to
+the net radiation entering through the exposed face less the net radiation leaving
+through the back (`test/kernels/test_radiative_transfer.jl`, "the cell sources
+telescope"). Each row reads one cell, its own face and the next face along its
+direction, so the Jacobian stays banded where the eliminated recurrence would couple
+every cell to every other. After cells are deactivated the exposed face is the first
+live cell's upstream face, and the faces upstream of it carry identity rows. Under
+`RADIATIVE_TRANSFER` the radiative members of the boundary conditions contribute
+nothing to the surface balance; convection and prescribed fluxes stay at the surface.
+`setup` refuses radiative transfer off planar coordinates, where the fluxes per unit
+face area and the face areas would disagree. The model and its limits are §8.
 
 ### 13.5.3 External sources
 
@@ -11801,15 +11973,15 @@ by `StateLayout` (`src/States/layout.jl`; the full layout and its index formulas
   `energy_state = :enthalpy`), and under a variable cross section the
   conversion-history pair $(G_i, m_{\mathrm{dry},i})$;
 - **node block** $n$: on a moving mesh the position $z_n$ (differential) and the
-  velocity $w_n$ (algebraic); under `BEER_LAMBERT` the intensity of the face at
-  node $n$ (algebraic);
+  velocity $w_n$ (algebraic); under `RADIATIVE_TRANSFER` the $N_{\text{rad}}$ radiative
+  fluxes of the face at node $n$ (algebraic);
 - **globals**, under a variable cross section: the area $A$ and its lateral strain
   rate $\theta_A$ (algebraic).
 
 On a line the order is node 1, cell 1, node 2, …, cell $n$, node $n+1$, so every row's
 unknowns and its neighbours' lie within a fixed distance and the Jacobian is banded.
 No kernel computes an index: every access goes through `mass_index`,
-`energy_index`, `position_index`, `velocity_index`, `intensity_index`,
+`energy_index`, `position_index`, `velocity_index`, `radiation_index`,
 `history_index`, `area_index` and `lateral_rate_index`. `setup` fills the initial
 state from the problem: $m_{j,i}=\xi_j(z_i^c)\,V_i(0)$ and the energy state from
 $T(z_i^c)$ at the cell centres of the reference mesh, then makes the algebraic
@@ -11828,7 +12000,7 @@ order:
    geometry from the positions (`geometry!`, §13.2); a fixed mesh keeps the
    reference geometry computed when its buffers are built;
 3. the carried fields (the history pair; in more dimensions the deformation
-   gradient) and the face intensities;
+   gradient) and the radiative face fluxes (`ds.q`);
 4. per cell, the signed volume $V_i$ and $\tilde V_i=\mathrm{smooth\_floor}(V_i,10^{-8}V_i(0))$,
    the masses, the concentrations $\xi_{j,i}=m_{j,i}/\tilde V_i$ and the positive-part
    concentrations $\xi^+_{j,i}=(m_{j,i})^+/\tilde V_i$ at the cell's scale $\delta_i$;
@@ -11838,8 +12010,8 @@ order:
    the sensible enthalpies $h_j(T_i)$, the conductivity $k_i$ with and without its floor, the surface
    emissivity $\varepsilon_i$ and absorptivity $a_i$, the pore-gas properties the gas
    transport needs (the wall coefficients, molecular resistance, porosity,
-   partial pressures and mobility), and under in-depth
-   radiation the absorption coefficient $\alpha_i$.
+   partial pressures and mobility), and under radiative
+   transfer the absorption coefficient $\alpha_i$.
 
 The node corrections $c_n$ are written next, by the closure (`correction!`, §11.7).
 Which value of each field a kernel reads is fixed:
@@ -12125,10 +12297,9 @@ describes resolution studies; time-integration differences follow in §15.14.
    1.64 % in flux and 1.47 K in the profile at $\Delta z=0.5$ mm, is the quantization.
    Put a node on every interface (§13.9.4).
 
-4. **In-depth radiation on planar lines only.** `setup` refuses `BEER_LAMBERT` off
-   planar coordinates and on meshes of more dimensions. Only the first
-   `RadiativeFluxBC` member of a combined `:top` condition feeds the beam; a second
-   radiative member is dropped without a warning (§8).
+4. **Radiative transfer on planar lines only.** `setup` refuses `RADIATIVE_TRANSFER`
+   off planar coordinates and on meshes of more dimensions, where the two-stream rows
+   do not generalize; beams enter through the single `:top` face (§8.4, §8.10).
 
 5. **More dimensions at the residual level.** Meshes of quadrilaterals and
    hexahedra are assembled and differentiated (§13.2.5, §13.6.4) but are not a
@@ -12305,32 +12476,35 @@ velocity exactly zero (V-BO-08).
 ### 14.2.2 The layer time
 
 The correction relaxes a layer over its equidistribution time $\tau_{\rm eq}$.
-By default each layer sets it once, at its first activation
-(`ActivationTime()`): when a cell of the layer first falls below the activation
-threshold $r_{\rm hi}$ of its initial thickness, the layer's thickness $L_{\rm layer}$
-and thinning rate $\dot L_{\rm layer}$ give
+By default each layer estimates it twice (`ActivationTime()`): when a cell of
+the layer first falls below the activation threshold $r_{\rm hi}$ of its initial
+thickness, and again when a cell first falls below $r_{\rm lo}$, each time from the
+layer's thickness $L_{\rm layer}$ and thinning rate $\dot L_{\rm layer}$,
 
 $$
-\tau_{\rm eq}=\lambda_\tau\,\frac{L_{\rm layer}}{|\dot L_{\rm layer}|},\qquad \lambda_\tau=1.8
+\tau_{{\rm eq},k}=\lambda_\tau\,\frac{L_{\rm layer}}{|\dot L_{\rm layer}|},\qquad \lambda_\tau=1.8
 \ (\texttt{ACTIVATION\_TIME\_FACTOR}),
 $$
 
-where $\lambda_\tau$ is the $\lambda$ keyword of `ActivationTime`. Since $\dot L_{\rm layer}$
-scales with the physical rates and $\lambda_\tau$ is a pure number, a deck
-whose rates are all multiplied by $s$ gets $\tau_{\rm eq}/s$. Before the
-estimate the layer's correction is zero. A layer thinning no faster than its
-initial thickness over the solve's horizon keeps the fallback time
-(`EQUIDISTRIBUTION_TIME` $=720$ s) until a cell crosses $r_{\rm lo}$, where the
-estimate is taken once more; a thickening layer keeps the fallback. The
-activation thresholds default to $(r_{\rm hi},r_{\rm lo})=(0.3,0.1)$.
+where $\lambda_\tau$ is the $\lambda$ keyword of `ActivationTime`. The first
+estimate sets the layer's gain; the second enters through each cell's second
+switch, which rises from zero at $r_{\rm lo}$ to one at $r_{\rm lo}^2/r_{\rm hi}$ of its
+initial thickness, so the correction runs at $\tau_{{\rm eq},1}$ until the layer's
+cells pass $r_{\rm lo}$ and at $\tau_{{\rm eq},2}$ below $r_{\rm lo}^2/r_{\rm hi}$ (§11.7.5).
+Since $\dot L_{\rm layer}$ scales with the physical rates and $\lambda_\tau$ is a pure
+number, a deck whose rates are all multiplied by $s$ gets both times divided by $s$.
+Before its first estimate a layer has no gain; a layer not thinning at its first
+estimate has no correction until its second, and one not thinning at its second keeps
+its first. The activation thresholds default to
+$(r_{\rm hi},r_{\rm lo})=(0.3,0.1)$.
 
-The estimate is taken by an event of its own: a continuous callback on the
+The estimates are taken by an event of their own: a continuous callback on the
 smallest margin $\Delta z_i/(r\,\Delta z_i(0))-1$ over the live cells of the layers still
-waiting ($r=r_{\rm hi}$ before the first activation, $r_{\rm lo}$ while a slow
-layer waits for the second), located inside the step and widened by the
-relative tolerance as the deactivation event is (§14.3.5). It does not modify
-the state; the layer's correction is zero up to its activation, so the event
-changes the right-hand side only where the activation has just begun. The
+waiting ($r=r_{\rm hi}$ before a layer's first estimate, $r_{\rm lo}$ before its
+second), located inside the step and widened by the relative tolerance as the
+deactivation event is (§14.3.5). It does not modify the state, and each estimate
+enters where its switch leaves zero with zero slope, so the event changes the
+right-hand side only where a switch has just begun to rise. The
 callback is present on every moving mesh, with an infinite margin when no
 layer waits, so the integrator's type does not depend on the correction
 (§15.5.7). The correction's node formula and its smooth activation switch are
@@ -12349,15 +12523,18 @@ first reaches $\varepsilon_m$. A narrower band (or none) stops the run at a cell
 above it: the layer then leaves a few cells at a time, and a crossing cell below
 the threshold may lie inward of a live one and leave from under it (§14.3.4). On
 the five burnout decks
-of the supported envelope that fraction is 0.4 to 3.9 % at
-$\varepsilon_m=3\times10^{-3}$ and 1.4 to 9.9 % at $\varepsilon_m=10^{-2}$; on
-the mixed-composition layer of V-BO-07 the other cells still hold up to about
-6 % of their initial mass when the first crosses $\varepsilon_m$.
+of the supported envelope the largest fraction a band of 0.1 merges is 0.3 to 9.9 % at
+$\varepsilon_m=3\times10^{-3}$ and 1.0 to 10 % at $\varepsilon_m=10^{-2}$; where a layer
+leaves in more than one invocation (the uniform layer and the graded mesh at the default
+threshold, the convective-loss deck at both), its slowest cells still held more than
+the band when the first crossed. On the mixed-composition layer of V-BO-07 the other
+cells hold up to 3.9 % of their initial mass when the first crosses
+$\varepsilon_m=10^{-2}$.
 
 ### 14.2.4 The supported envelope
 
-The burnout path (the equidistribution correction with its layer time set at
-activation, the near-threshold band, located deactivation events) is verified
+The burnout path (the equidistribution correction with its layer time estimated
+twice, the near-threshold band, located deactivation events) is verified
 under joint refinement of the mesh and the tolerance on five decks built on
 the 5.9 mm PMMA layer on Kaowool under 50 kW/m² of V-BO-01: a uniform mesh, a
 mesh graded threefold toward the surface (V-BO-06), a layer with a second,
@@ -12366,17 +12543,20 @@ convective loss in place of re-radiation and an adiabatic back. The numerical
 parameters are $\varepsilon_m$, $\varepsilon_{\rm band}$, $(r_{\rm hi},r_{\rm
 lo})$, the layer time, the tolerance and the cells across the layer; the
 material parameters are those of the decks. Inside the envelope every quantity
-of interest (complete burnout, the mass lost, the peak mass-loss rate and its
-time, the burnout time, the mass ledger) is within tolerance at every
-resolution and the burst at the end of a layer converges under refinement:
-$\varepsilon_m=3\times10^{-3}$ with $\varepsilon_{\rm band}=0.1$ on all five
-decks from 30 cells across the layer (10 on the 1 mm layer), and the default
-$\varepsilon_m=10^{-2}$ with $\varepsilon_{\rm band}=0.1$ on the single-solid
-layers from 30 cells (60 on the convective-loss deck) but not on the mixed
-layer, whose burst stops converging between 120 and 240 cells. The number of
-invocations is reported, not a criterion: one on every deck inside the
-envelope except the convective-loss deck at $10^{-2}$, which takes two from 60
-cells. The full statement, with its limits, is User Guide chapter 10.
+of interest of its deck (complete burnout, the mass lost, the mass ledger and, with a
+radiative face, a converged surface balance at every accepted step) is within tolerance at every resolution and the
+burst at the end of a layer converges under refinement: $\varepsilon_m=10^{-2}$ with $\varepsilon_{\rm band}=0.1$, the default, on all five decks
+from 30 cells across the layer (10 on the 1 mm layer) under the default activation, and
+from 60 cells on the mixed layer and the convective-loss deck under $(0.7,0.3)$; and
+$\varepsilon_m=3\times10^{-3}$ with $\varepsilon_{\rm band}=0.1$ on the uniform and 1 mm
+layers and the convective-loss deck from 30 cells (60 under $(0.7,0.3)$ on the last), on
+the graded mesh from 60, and on the mixed layer from 60 under the default activation
+only, since under $(0.7,0.3)$ it does not burn out at 30 and 60 cells. The
+number of invocations is reported, not a criterion: at the default threshold two on
+the uniform layer and the graded mesh, one on the mixed and 1 mm layers and three or
+four on the convective-loss deck; at $3\times10^{-3}$ one on every deck but the
+convective-loss deck, which takes two or three. The full statement, with its limits,
+is User Guide chapter 10.
 
 ---
 
@@ -12418,8 +12598,8 @@ The state layout carries a mask over its rows, `layout.mask::BitVector`
 energy row is; the state mapping copies that into `ds.active` at every residual
 evaluation (`derive!`). Deactivating cell $i$ masks every row of its cell block
 (masses, energy state, history pair) and every row of its far node, the node
-away from the receiver (position, velocity and, under `BEER_LAMBERT`, the face
-intensity).
+away from the receiver (position, velocity and, under `RADIATIVE_TRANSFER`, the
+radiative fluxes of the face at that node).
 
 The row assembly writes a dead row as (`_dead_rows!`,
 `src/Assembly/residual.jl`)
@@ -12436,8 +12616,8 @@ differential unknown keeps its value and contributes no error; a dead algebraic
 unknown is held at zero. The kernels read no dead cell either: an interior face
 contributes only when both of its cells are live, every boundary condition
 applies on the face that bounds the live cells on its side (`live_face`,
-`src/Meshes/topology.jl`), the in-depth beam enters through the upstream face
-of the first live cell, the balance row of a dead cell carries no velocity, the
+`src/Meshes/topology.jl`), the radiation rows take the upstream face of the first
+live cell as the exposed face, the balance row of a dead cell carries no velocity, the
 correction is zero at every node beside a dead cell, and the cross-section rows
 sum the live cells' history pairs only. The live rows therefore do not depend on
 the dead unknowns, and the system splits into the live problem and a block of
@@ -12446,8 +12626,8 @@ identity rows.
 What the dead rows hold after an event is set by the transfer (§14.3.3): zero
 masses; the merged temperature in the temperature form, zero in the enthalpy
 form; on a moving mesh node positions collapsed onto the receiver's far face
-with zero velocities; face intensities of zero, written by the consistent sweep
-that follows every event. The outputs read the mask of each saved time:
+with zero velocities; radiative face fluxes of zero, written by the consistent
+sweep that follows every event. The outputs read the mask of each saved time:
 `sol.T`, `sol.ξ` and `sol.cell_centers` are `NaN` in a dead cell, `sol.m` is
 zero there, and node positions beyond the outermost live node are `NaN`
 (§14.6).
@@ -12741,13 +12921,15 @@ Lagrangian cells the tail a receiver takes delays it past its inward neighbour, 
 crosses first under a receiver holding $\varepsilon(e^{k\tau}+1)$ at $k\tau<0.48$; at
 order one this is V-BO-11. That void is the transfer's: the cells above it are spent,
 the run leaves, and the column closes over it, each such event marked `interior`
-(`interior_events`). Under in-depth absorption a cell beneath the surface can instead
-empty under cells that still hold their material, a pocket that is physical in PMMA and
-that the model has no gap to carry heat across. A live cell outward of the run is a
-skin when it holds `VOID_SKIN` $=10$ thresholds or more of its reference, or has no
-reference. On 17 decks, 163 crossings of the first kind hold 1.07 to 5.99 thresholds and
-45 under in-depth absorption 29 to 4760; 10 sits in the gap. The rule reads magnitude
-alone, so a thin, nearly spent skin reads as spent.
+(`interior_events`). A cell beneath the surface can instead empty under cells that
+still hold their material, a pocket that is physical in PMMA and that the model has no
+gap to represent (§14.4). A live cell outward of the run is a skin when it holds
+`VOID_SKIN` $=10$ thresholds or more of its reference, or has no reference. A crossing
+of the first kind holds a few thresholds (1.07 to 5.99 over 163 crossings on 17
+decks); 10 sits above them. The rule reads magnitude alone, so a thin, nearly spent
+skin reads as spent: on the fixed mesh of V-BO-05 under radiative transfer, where the
+PMMA empties nearly uniformly beneath its surface, the cells outward of the first
+crossing hold 1.0 to 1.4 thresholds.
 
 ### 14.3.5 The event in the integrator: location and the safety net
 
@@ -12776,8 +12958,8 @@ rows and checks the result:
 1. under a variable cross section the area and its lateral rate, in two
    passes, since the history rates the lateral rate reads depend on the
    concentrations at the area;
-2. the face intensities by the attenuation recurrence from the exposed face
-   (`_consistent_intensities!`), at that area, which writes zero on the faces
+2. the radiative face fluxes by the closed-form sweep from the new exposed face
+   (`consistent_radiation!`, §8.7.2), at that area, which writes zero on the faces
    upstream of the first live cell;
 3. the node velocities by one sweep of the balance rows from the pinned node
    (`_consistent_algebraic!`, §15.4); a velocity row left above round-off
@@ -12843,27 +13025,29 @@ PMMA cell deactivates as the top live cell, the run loses exactly the layer's
 mass and ends on the bare substrate, and the maximum live-cell temperature over
 every accepted step is 915 K.
 
-Under in-depth absorption the temperature maximum of a regressing
-non-charring polymer lies below the surface, so the exposed cell reacts slowest.
+Under radiative transfer the temperature maximum of a regressing
+non-charring polymer lies below the surface, since the exposed cell loses its
+emission and convection at the face, so the exposed cell reacts slowest.
 On a fixed mesh it keeps its volume and loses concentration: it persists as a
 low-density skin while the cells beneath it empty, and the layer gasifies from
 within. The first cell below its threshold then lies inward of a live cell, the
 pass of §14.3.4 cannot take it, and the solve ends with return code
 `:Terminated`, outcome `:interior` and a warning naming the cell. On the deck of
-V-BO-05 (the V-BO-01 deck, in-depth absorption included, on a fixed mesh) this
-happens before any deactivation, when the lowest PMMA cell, next to the
-Kaowool, crosses $\varepsilon_m$: at 260.35, 259.79, 259.62 and 259.57 s at 30,
-60, 120 and 240 cells, both energy forms within 5 ms, with the maximum live-cell
-temperature below 1000 K.
+V-BO-05 (the V-BO-01 deck under radiative transfer, on a fixed mesh) the PMMA near
+the surface empties nearly uniformly, the exposed cell slowest, and a cell 0.1–0.15
+mm below the surface crosses $\varepsilon_m$ first while the cells above it still hold
+1.0 to 1.4 thresholds: at 157.5, 157.0 and 156.95 s at 60, 120 and 240 cells, before
+any deactivation. At 30 cells the exposed cell reaches the threshold first and goes,
+and the next crossing, one cell beneath the new exposed cell, stops the solve at
+172.5 s. Both energy forms agree within 3 ms, and the maximum live-cell temperature
+is 692 K.
 
-The stop is deliberate. A void cell conducts with the gas conductivity and
-absorbs nothing, and nothing in the model carries heat across a void by
-radiation: the in-depth model absorbs and does not emit, and the only emission
-is the surface balance's at the exposed face. The beam transmitted through a
-void column lands on the first condensed cell below it, which can return that
-heat upward only by conduction through the gas, so continued past its first
-void the deck would heat the substrate beneath it far outside the property
-bracket. On a moving mesh the configuration rarely arises under the correction: an
+The stop is deliberate. The pass of §14.3.4 removes a cell only into the live cell
+beneath its run, and on a fixed mesh only the outermost live cell can go, so a cell
+emptied beneath a live skin has no way out; kept, it is a cell of pore gas between
+the skin and the condensed cell below, a cavity the model does not represent: its
+faces are not the gray surfaces of a gap, and the nearly empty cell, whose
+concentrations keep falling, is what the threshold exists to remove. On a moving mesh the configuration rarely arises under the correction: an
 emptying cell collapses, and the correction brings the layer to the threshold
 together. A crossing cell under spent cells leaves and the column closes over it; beneath
 a skin the solve stops as it does here (§14.3.4).
@@ -13118,8 +13302,10 @@ $\varepsilon_m\le\varepsilon_{\rm band}<1$.
 **Installation of the correction**: `use_ale`, `deactivation` and some cell with
 $\sum_j\mathrm{res}_j m_{j,i}(0)<\varepsilon_m m^s_i(0)$.
 
-**Layer time**: $\tau_{\rm eq}=\lambda_\tau L_{\rm layer}/|\dot L_{\rm layer}|$, $\lambda_\tau=1.8$, at the
-layer's first activation ($\Delta z_i<0.3\,\Delta z_i(0)$), fallback 720 s.
+**Layer time**: $\tau_{{\rm eq},k}=\lambda_\tau L_{\rm layer}/|\dot L_{\rm layer}|$, $\lambda_\tau=1.8$, at the
+layer's first activation ($\Delta z_i<0.3\,\Delta z_i(0)$, $k=1$) and again at
+$\Delta z_i<0.1\,\Delta z_i(0)$ ($k=2$), the second blended in over the second switch
+(11.24).
 
 **Transfer** (`_merge!`):
 
@@ -13153,7 +13339,7 @@ $\varepsilon_m$, a remaining crossing inward of a live cell ending the solve wit
 1. **Interior voids.** The model carries no conduction or radiation model for a
    gas gap. On a fixed mesh a cell below the threshold inward of a live cell ends
    the solve with outcome `:interior` (§14.4), which a non-charring polymer under
-   in-depth absorption reaches before its first deactivation. A moving mesh stops the
+   radiative transfer reaches before its first deactivation. A moving mesh stops the
    same way beneath a skin, and closes only a void under spent cells (§14.3.4). The
    skin is read from magnitude, at a limit measured on the decks there.
 2. **One invocation per layer is not guaranteed.** The correction and the band
@@ -13161,18 +13347,16 @@ $\varepsilon_m$, a remaining crossing inward of a live cell ending the solve wit
    (§14.2.4), but graded meshes, heterogeneous layers and non-uniform reaction
    work against it; the number of invocations is reported, and a band narrower
    than what the slowest cell keeps takes the layer a few cells at a time.
-3. **The burst after a layer's deactivation.** At 30 cells across the layer the
-   largest per-step rate just after a layer's deactivation can exceed the main
-   peak, up to threefold on the graded mesh; it falls below the main peak by 60
-   to 120 cells, and the peak sampled at the output times is within tolerance
-   from 30 cells. On the mixed layer of V-BO-07 at the default
-   $\varepsilon_m=10^{-2}$ the burst stops converging between 120 and 240 cells;
-   $\varepsilon_m=3\times10^{-3}$ converges there.
+3. **The burst after a layer's deactivation.** Inside the envelope the largest
+   per-step rate just after a layer's deactivation stays below the main peak on
+   every deck but the graded mesh at 30 cells, where it exceeds it by up to 9.5 %;
+   outside it the burst need not converge (§18.8.2).
 4. **The envelope's extent.** Materials outside the five decks (other materials,
    thicker or charring layers, higher heating) are not inside the envelope by
-   that study; the V-BO-01 ladder at 25 and 100 kW/m², at half and twice its
-   pre-exponential factor and with its flux stepped after activation, at 30 to
-   120 cells, passes, the hot decks with two invocations.
+   that study. The V-BO-01 ladder at 25 and 100 kW/m², at half and twice its
+   pre-exponential factor and with its flux halved or raised by half at 150 s, at
+   30 to 120 cells, passes the same QoIs in one or two invocations; its burst
+   converges on all but the 100 kW/m² deck and the raised flux (§18.8.2).
 5. **Element death is residual-level.** Deactivation on a mesh of more than one
    dimension is refused by `setup`; element death is tested at the residual and
    Jacobian level only (§14.5).
@@ -13235,7 +13419,7 @@ Conventions used in this chapter (binding, from §2, Nomenclature):
 
 ![Interleaved node and cell state strip and three actual six-cell Jacobian patterns, distinguishing algebraic rows, local coupling, wider correction reach and global area coupling.](assets/figures/15_state_jacobian.svg)
 
-**Figure 15. State layout and Jacobian structure.** The schematic strip shows the interleaved ordering of a six-cell, two-component, variable-area setup. The matrices are actual stored patterns, with Beer–Lambert intensity unknowns. Grey entries are allocated dependencies; blue entries are nonzero initial-state AD derivatives. Correction reserves a wider stencil even while initially inactive. Variable area adds history and the two global algebraic rows outlined in purple. Deactivation preserves this allocation. The CSV records each stored entry and its initial derivative.
+**Figure 15. State layout and Jacobian structure.** The schematic strip shows the interleaved ordering of a six-cell, two-component, variable-area setup. The matrices are actual stored patterns, with the radiative transfer fluxes as unknowns. Grey entries are allocated dependencies; blue entries are nonzero initial-state AD derivatives. Correction reserves a wider stencil even while initially inactive. Variable area adds history and the two global algebraic rows outlined in purple. Deactivation preserves this allocation. The CSV records each stored entry and its initial derivative.
 
 ### 15.1.1 Interleaved blocks
 
@@ -13254,37 +13438,38 @@ cell's block follows the blocks of its nodes not yet placed, cell by cell
 
 | Block | Unknowns, in order | Present |
 |---|---|---|
-| node $n$ | position $z_n$; velocity $w_n$; intensity $I_n$ of the face at node $n$ | position and velocity on a moving mesh (`use_ale`, the velocities when the closure's unknowns are the node velocities); intensity under `BEER_LAMBERT` (a line) |
+| node $n$ | position $z_n$; velocity $w_n$; the radiation rows of the face at node $n$ ($I^-_n$, $I^+_n$, then one per beam direction) | position and velocity on a moving mesh (`use_ale`, the velocities when the closure's unknowns are the node velocities); the radiation rows under `RADIATIVE_TRANSFER` (a line) |
 | cell $i$ | masses $m_{1,i},\dots,m_{N_C,i}$ [kg]; the energy state; the carried fields; the closure's multiplier | always; the energy state is $T_i$ [K] (`energy_state = :temperature`) or the enthalpy inventory $H_i$ [J] (`:enthalpy`); carried fields: the conversion-history pair (under a variable cross section) and, in more dimensions, the deformation gradient; the multiplier under the potential closure of more dimensions |
 | globals | cross-section area $A$; its lateral strain rate $\theta_A$ | under a variable cross section (a line) |
 
-With $N_{\rm node}=2\delta_{\rm mov}+\delta_{\rm BL}$ the width of a node block and
+With $N_{\rm node}=2\delta_{\rm mov}+N_{\rm rad}$ the width of a node block and
 $N_{\rm cell}=N_C+1+2\delta_\chi$ that of a cell block on a line ($\delta_{\rm mov}$,
-$\delta_{\rm BL}$, $\delta_\chi$ equal to one on a moving mesh, under in-depth
-radiation and under a variable cross section, zero otherwise, as in §3.1.2), and $N_{\rm blk}=N_{\rm node}+N_{\rm cell}$ the stride, the indices are
+$\delta_\chi$ equal to one on a moving mesh and under a variable cross section, zero
+otherwise, and $N_{\rm rad}$ the radiation rows per face, as in §3.1.2), and $N_{\rm blk}=N_{\rm node}+N_{\rm cell}$ the stride, the indices are
 
 $$
 \begin{aligned}
-z_n&: (n-1)N_{\rm blk}+1, & w_n&: (n-1)N_{\rm blk}+2, & I_n&: (n-1)N_{\rm blk}+2\delta_{\rm mov}+1,\\
+z_n&: (n-1)N_{\rm blk}+1, & w_n&: (n-1)N_{\rm blk}+2, & \text{rad}_{k,n}&: (n-1)N_{\rm blk}+2\delta_{\rm mov}+k,\\
 m_{j,i}&: (i-1)N_{\rm blk}+N_{\rm node}+j, & \text{energy}_i&: (i-1)N_{\rm blk}+N_{\rm node}+N_C+1, & \text{history}_{i,1..2}&: (i-1)N_{\rm blk}+N_{\rm node}+N_C+1+(1,2),\\
 A&: nN_{\rm blk}+N_{\rm node}+1, & \theta_A&: nN_{\rm blk}+N_{\rm node}+2, & N_{\rm state}&=nN_{\rm blk}+N_{\rm node}+2\delta_\chi,
 \end{aligned}
 $$
 
-which `test/multid/test_layout.jl` checks against every index function. Code
+with $\text{rad}_{k,n}$ radiation row $k$ of the face at node $n$ (`radiation_index`), which
+`test/multid/test_layout.jl` checks against every index function. Code
 never computes an index: kernels, the closure, the deactivation and the outputs
 go through `mass_index`, `energy_index`, `history_index`, `position_index`,
-`velocity_index`, `intensity_index`, `area_index`, `lateral_rate_index`,
+`velocity_index`, `radiation_index`, `area_index`, `lateral_rate_index`,
 `cell_rows` and `node_rows`.
 
-For two components on 12 cells the state has 36 rows on a fixed mesh, 49 under
-in-depth radiation, 62 on a moving mesh and 75 on a moving mesh under in-depth
-radiation (measured with the script of §15.13).
+For two components on 12 cells the state has 36 rows on a fixed mesh, 62 under radiative
+transfer with a diffuse heater ($N_{\rm rad}=2$), 62 on a moving mesh and 88 on a
+moving mesh under radiative transfer (measured with the script of §15.13).
 
 ### 15.1.2 Row kinds and the mask
 
 Every row is **differential** (masses, energy state, node positions, carried
-fields) or **algebraic** (node velocities, multipliers, face intensities, the
+fields) or **algebraic** (node velocities, multipliers, radiation rows, the
 area and the lateral rate); `is_differential(layout)` flags them and
 `mass_matrix(layout)` is the diagonal matrix with one on the differential rows
 and zero on the algebraic ones (§15.5.1).
@@ -13359,7 +13544,7 @@ and the deactivation state (§14.3; `nothing` without deactivation). `solve` is
    the live cells from the mask; on a moving mesh the geometry from the node
    positions, with the node velocities (or the multipliers) and, under a
    variable cross section, the area and its lateral rate; the carried fields;
-   the face intensities; the masses, volumes and concentrations; the
+   the radiative face fluxes; the masses, volumes and concentrations; the
    temperatures (the stored temperature, or the inversion of the enthalpy
    inventory); their trial clamp; the heat-capacity sum; the sensible
    enthalpies; the cell properties; the pore-gas properties the gas transport
@@ -13370,7 +13555,7 @@ and the deactivation state (§14.3; `nothing` without deactivation). `solve` is
    (§11).
 3. **The kernels**, in assembler order (`_kernels`, `src/Integration/setup.jl`):
    the reactions (if the material has any); the gas transport (if gas can
-   move); the in-depth radiation (`BEER_LAMBERT`); conduction; the thermal
+   move); the radiative transfer (`RADIATIVE_TRANSFER`); conduction; the thermal
    boundary; and, under a correction, the inventory fluxes relative to the mesh.
    Each adds its face fluxes and cell sources to the contributions.
 4. **The mesh closure** (`closure_rows!`): the cells' strain rates $\theta_i$
@@ -13412,8 +13597,8 @@ external temperature-rate source $S_T$ adds $S_T$ to the temperature row and
 $C_iS_T$ to the enthalpy row.
 
 On a moving mesh the position rows are $dz_n/dt=w_n$ and the velocity rows
-carry the closure's residuals; the face-intensity rows carry the residuals of
-their attenuation equations; the history rows take their sources and face
+carry the closure's residuals; the radiation rows carry the residuals of
+their transfer equations (8.5); the history rows take their sources and face
 fluxes; the area and lateral-rate rows take the residuals of the lateral rows
 at the column sums of the live cells' history pairs and their rates; the
 deformation-gradient rows (more dimensions) are $dF_i/dt=(\nabla v_s)_iF_i$.
@@ -13453,11 +13638,11 @@ equation (§15.9):
   the solid velocity $w-c$ satisfying the cell's volume balance. The rows are
   bidiagonal from the pinned node. Under a prescribed mesh velocity every row
   is $0=w_n-w(z_n,t)$.
-- **The face-intensity rows** (`BeerLambertKernel`, §8.3): at the exposed face
-  $0=I_e-a\,q_{\rm inc}(t)$, and at every other face, the face of its cell
-  farther from the exposed one, $0=I_{\rm down}-I_{\rm up}\exp(-\alpha_i\Delta_i)$,
-  with $\alpha_i$ the cell's absorption coefficient and $\Delta_i$ its thickness
-  along the beam (§8.3.3).
+- **The radiation rows** (`RadiativeTransferKernel`, §8.3.3): per face the two
+  hemispherical fluxes and one row per beam direction, each the exact transfer across
+  one cell, $0=I^-_d-[\mathcal B_i+(I^-_u-\mathcal B_i)e^{-\tau_i/\bar\mu}]$ and its
+  upward and beam counterparts, with the exposed face a gray interface and the back a
+  mirror or an open interface (8.5).
 - **The cross-section rows** (`LateralShrinkage`, §10):
   $0=A-A_0\,\mathrm{law}(\bar\chi_c)$ and
   $0=\theta_A-\frac{d}{dt}\log\mathrm{law}(\bar\chi_c)$, with $\bar\chi_c$ the
@@ -13466,17 +13651,18 @@ equation (§15.9):
   one per cell (residual level, §14.5).
 
 Each block is solvable for its own unknowns given the differential ones: the
-balance rows by one sweep from the pinned node, the intensity rows by the
-attenuation recurrence from the exposed face, the cross-section rows
+balance rows by one sweep from the pinned node, the radiation rows by the
+closed-form sweep of §8.7.2 (two passes for the affine coefficients, two for the
+values), the cross-section rows
 explicitly, the multipliers by one symmetric positive-definite solve. The
 system is therefore a semi-explicit DAE of index one.
 
 `consistent_state!(u, def, ws, t)` overwrites the algebraic unknowns of
 $\boldsymbol u$ with the values that satisfy their rows at $t$, given its
-differential unknowns: the face intensities by the recurrence; under a variable
-cross section, one residual pass for the strain and history rates, the area and
-lateral rate from the column sums, and a second pass at the consistent lateral
-rate; then the node velocities by one sweep (one pass is exact, since the
+differential unknowns: under a variable cross section, one residual pass for the
+strain and history rates, the area and lateral rate from the column sums, and a
+second pass at the consistent lateral rate; the radiative face fluxes by their sweep,
+at that area; then the node velocities by one sweep (one pass is exact, since the
 corrections read positions only) or the multipliers by one solve. A
 closure row left above $10^{-10}$ of its scale is an error. `setup` calls it at
 $t_0$, and the deactivation event calls its parts after every transfer
@@ -13635,7 +13821,7 @@ controller's smallest factor, when
   |---|---|---|
   | balance row of cell $k$ | $(\lvert\theta_k\rvert+\lvert\theta_A\rvert)V_k+\sum_f A_f\lvert w_f\rvert+\sum_f A_f\lvert c_f\rvert$ | the node's velocity tolerance times its face area |
   | pinned or prescribed velocity | $\lvert w_n\rvert$ | the node's velocity tolerance |
-  | face intensity | the incident-intensity scale | its tolerance |
+  | radiation row | $\lvert I\rvert$, the row's own flux | its tolerance |
   | area | $\lvert A\rvert$ | its tolerance |
   | lateral rate | $\lvert\theta_A\rvert$ plus the volume-weighted mean $\lvert\theta\rvert$ | its tolerance |
 
@@ -13689,7 +13875,7 @@ the deactivation threshold $\varepsilon_m$ (`threshold`), `reltol` and `abstol`:
 | gas component mass in cell $i$ | $p_{tol}M_j\phi_i(0)V_i(0)/(N_gRT_i(0))$; supplemented by the proposed-state pressure norm |
 | temperature | `abstol` [K] |
 | enthalpy inventory | $\varepsilon_m\,m^{\rm s}_i(0)\,c_{p,\rm ref}\,$`abstol`, $c_{p,\rm ref}$ the cell's mass-weighted heat capacity at its initial temperature, so a cell at the threshold resolves its temperature to `abstol` as the temperature form does |
-| face intensity | $\mathrm{rtol}\,I_{\rm scale}$, $I_{\rm scale}$ the largest incident intensity over the solve window (at least 1 W m⁻²) |
+| radiation row | $\mathrm{rtol}\,q_{\rm scale}$, $q_{\rm scale}$ the largest radiation arriving from outside over the solve window or $\sigma T_{\rm rad}^4$, whichever is larger, and at least 1 W m⁻² (§8.7.3) |
 | node position | $\mathrm{rtol}\,\varepsilon_m\,\Delta z_n^{\min}$, $\Delta z_n^{\min}$ the smallest initial size of the cells around node $n$ |
 | node velocity | $\mathrm{rtol}\,\varepsilon_m\,\Delta z_n^{\min}/\Delta t_0$, $\Delta t_0$ the first step `dt` |
 | multiplier (more dimensions) | $\mathrm{rtol}\,\varepsilon_m\,\Delta z_i(0)^2/\Delta t_0$, $\Delta z_i(0)=V_i(0)^{1/D}$ the cell's initial size |
@@ -13737,9 +13923,9 @@ configuration (`test/integration/test_policies.jl`). A problem with other
 material or boundary-condition types compiles only the Pyrolysis kernels, the
 state mapping, the colored Jacobian and the solution's reconstruction. The
 precompile workloads (`src/precompile.jl`) cache the integrator for the fixed
-and moving meshes under surface absorption and Beer–Lambert absorption, lumped wall
-and gas transport, with and without deactivation, and the enthalpy form
-once.
+and moving meshes under surface absorption and radiative transfer, a moving mesh
+under a collimated heater, lumped wall and gas transport, with and without
+deactivation, and the enthalpy form once.
 
 ---
 
@@ -13747,7 +13933,7 @@ once.
 
 The Jacobian $J=\partial\boldsymbol f/\partial\boldsymbol u$ is the forward-mode
 derivative of the whole residual, evaluated on a sparsity pattern built from
-the mesh connectivity (§15.11) with its columns colored (§15.7). There is one
+the mesh connectivity (§15.11) with its columns colored. There is one
 Jacobian and no option that selects another: every solve uses it, and the dense
 forward-mode Jacobian of §15.13 is the reference it is tested against.
 
@@ -13829,12 +14015,13 @@ derivative of the code is also the derivative of the function it computes.
 Figure 15 in §15.1 compares the actual sparsity patterns with and without correction and variable cross section. Its purple outlines identify the two global algebraic rows; pale entries separate structural dependencies from the derivatives that are nonzero at the initial state.
 
 A moving mesh's node velocity is the swept integral of the strain rates of every
-cell between it and the pinned node, and the intensity reaching a cell is the
-incident flux attenuated by every cell above it. Eliminated, either would couple
+cell between it and the pinned node, and the radiation reaching a cell is what
+every other cell emits and transmits toward it. Eliminated, either would couple
 every node or cell to every other one, filling the Jacobian. Both are instead
 algebraic unknowns of the state whose rows are local (§15.4): a balance row
 reads one cell and its two nodes, besides what the corrections of those nodes
-read, and an intensity row reads one cell and its two faces. The pattern stays
+read, and a radiation row reads one cell, its own face and the next face along its
+direction (§8.7.4). The pattern stays
 banded on a line, and the coloring stays bounded independently of the cell
 count.
 
@@ -13952,12 +14139,16 @@ conductivities of the neighbours' neighbours), one otherwise.
   cell centres, the concentrations the neighbours' volumes, the relative fluxes
   everything the corrections of the cell's nodes read; under a prescribed mesh
   velocity with relative fluxes, also the velocities of its nodes. On a line it
-  reads the intensities of its two faces and, under a variable cross section,
+  reads every radiation row of its two faces and, under a variable cross section,
   the area.
-- **A face-intensity row** reaches the intensities of nodes $f-1$ to $f+1$, the
-  unknowns of the cells on either side of its face (the attenuation of the cell
-  it leaves, the absorptivity of the exposed cell), on a moving mesh the
-  positions of those nodes, and the area.
+- **A radiation row** of face $f$ reaches its own family at $f$ and at the next face
+  upstream along its direction (toward the exposed face for $I^-$ and the beams,
+  toward the back for $I^+$), the other thermal family at $f$, and at the back face,
+  for $I^+$, every beam arriving there (`radiation_reach`, §8.7.4); the unknowns of
+  the cells on either side of its face (their temperatures and masses, through the
+  emissive power, the absorption coefficient, the exposed cell's emissivity and the
+  absorptivity a beam enters at); on a moving mesh the positions of nodes $f-1$ to
+  $f+1$; and the area.
 - **A node-position row** reaches its node's velocity, or, when the closure's
   unknowns are the cells' multipliers, the multipliers of the cells around the
   node and the positions of their nodes.
@@ -13978,10 +14169,10 @@ conductivities of the neighbours' neighbours), one otherwise.
 Every row holds its diagonal. The pattern is fixed for a solve: dead rows keep
 their entries and take zero values (§15.12). Radial meshes (cylindrical and
 spherical coordinates) share the planar mesh's pattern, colors and bandwidth.
-For two components on 12 cells the half-bandwidth is 5 on a fixed mesh, 6 under
-in-depth radiation, 9 on a moving mesh, 11 on a moving mesh under in-depth
-radiation and 14 with the equidistribution correction (measured with the script
-of §15.13); it is constant in the cell count.
+For two components on 12 cells the half-bandwidth is 5 on a fixed mesh, 7 under
+radiative transfer with a diffuse heater, 9 on a moving mesh, 13 on a moving mesh
+under radiative transfer and 14 with the equidistribution correction (measured with
+the script of §15.13); it is constant in the cell count.
 
 ---
 
@@ -14036,13 +14227,15 @@ state they visit, a finite residual and reference, a pattern that contains the
 reference, a colored Jacobian with the pattern's structure, and per-entry
 agreement to $10^{-12}$. They cover fixed and moving columns of a PMMA-like and a
 permeable wood-like material without radiation, with surface absorption and with
-in-depth absorption, in both energy forms, at uniform hot, hot and gas-heavy,
+radiative transfer, in both energy forms, at uniform hot, hot and gas-heavy,
 partially decomposed and mixed reacting states and at trial states outside the
 physical domain; the chain-rule regimes of the smooth reaction gates and of
 permeability mixing; the cross section's back-reaction; radial meshes and a
 prescribed mesh velocity; the states after a deactivation; the boundary mass
 flux on the energy row; and a surface absorptivity and an emissivity that depend
-on temperature. The dense reference itself equals central differences
+on temperature. `test/jacobian/test_radiative_containment.jl` adds the radiation
+rows with diffuse, collimated and cone heaters, mirror and open backs, on fixed and
+moving meshes, and their allocations. The dense reference itself equals central differences
 (§15.8). The pattern tests (`test/jacobian/test_pattern.jl`) check the color
 counts and the per-entry comparison's behaviour on a stiff row above a small
 one.
@@ -14080,9 +14273,9 @@ problem = PyrolysisProblem(
 
 for (name, kw) in (
     ("fixed", (;)),
-    ("fixed, Beer-Lambert", (radiation_model = BEER_LAMBERT,)),
+    ("fixed, transfer", (radiation_model = RADIATIVE_TRANSFER,)),
     ("moving", (use_ale = true,)),
-    ("moving, Beer-Lambert", (use_ale = true, radiation_model = BEER_LAMBERT)),
+    ("moving, transfer", (use_ale = true, radiation_model = RADIATIVE_TRANSFER)),
     ("moving, deactivation", (use_ale = true, deactivation = true)),
 )
     cp = setup(problem; kw...)
@@ -14103,9 +14296,9 @@ It prints
 
 ```
 fixed                 36 rows (0 algebraic), half-bandwidth 5, 9 colors, 0 missing, passed = true
-fixed, Beer-Lambert   49 rows (13 algebraic), half-bandwidth 6, 11 colors, 0 missing, passed = true
+fixed, transfer       62 rows (26 algebraic), half-bandwidth 7, 13 colors, 0 missing, passed = true
 moving                62 rows (13 algebraic), half-bandwidth 9, 13 colors, 0 missing, passed = true
-moving, Beer-Lambert  75 rows (26 algebraic), half-bandwidth 11, 15 colors, 0 missing, passed = true
+moving, transfer      88 rows (39 algebraic), half-bandwidth 13, 17 colors, 0 missing, passed = true
 moving, deactivation  62 rows (13 algebraic), half-bandwidth 14, 21 colors, 0 missing, passed = true
 ```
 
@@ -14191,11 +14384,12 @@ $$
 $$
 \frac{dz_n}{dt}=w_n,\qquad
 0=A_{i+1}(w-c)_{i+1}-A_i(w-c)_i-(\theta_i-\theta_A)V_i,\qquad
-0=I_{\rm down}-I_{\rm up}e^{-\alpha_i\Delta_i},
+0=I^-_d-\big[\mathcal B_i+(I^-_u-\mathcal B_i)\,e^{-\tau_i/\bar\mu}\big],
 $$
 
-with the cross-section rows under a variable cross section and identity rows on
-the dead rows, as $\mathsf M\,d\boldsymbol u/dt=\boldsymbol f(\boldsymbol u,t)$.
+with, under radiative transfer, the upward and beam counterparts of that radiation row
+and its boundary rows (8.5), the cross-section rows under a variable cross section and
+identity rows on the dead rows, as $\mathsf M\,d\boldsymbol u/dt=\boldsymbol f(\boldsymbol u,t)$.
 Its Jacobian $J=\partial\boldsymbol f/\partial\boldsymbol u$ is the colored
 forward-mode derivative of the whole residual on the connectivity pattern, with
 the two dense rows of a variable cross section assembled from six column sums;
@@ -14370,8 +14564,8 @@ flux, $\sum_j h_j J_j$ the sensible enthalpy the mass fluxes carry,
 $Q_\mathrm{rxn}=-\sum_r h_r r_r$ the reaction heat with each $h_r$ quoted at
 the local temperature (§6.6.3), $\sum_j \omega_j\,h_j(T)$ the **formation
 term** (the sensible enthalpy a reaction moves from its reactant to its
-products at the local temperature), and $Q_\mathrm{rad}$ the in-depth
-radiation the cells absorb (nonzero under `BEER_LAMBERT` only; under
+products at the local temperature), and $Q_\mathrm{rad}$ the radiation the cells
+absorb less what they emit (nonzero under `RADIATIVE_TRANSFER` only; under
 `SURFACE_ABSORPTION` the absorbed flux is part of the boundary condition's
 flux). At a boundary the signed donor sum $H_r$ uses the surface temperature
 for outflow and the specified incoming temperature for inflow. The boundary
@@ -14577,7 +14771,7 @@ between cells, the limited upwind face value for the relative flux of a moving
 mesh, and the surface temperature $T_s$ on a boundary face. On a boundary face
 $q_f$ is minus the heat conducted from the face into its cell (§16.6). With
 $S_{E,i}$ [W] the cell's energy sources (the reaction heat
-$Q_{\mathrm{rxn},i}\tilde V_i$ and the absorbed in-depth radiation, §13.3.4), the
+$Q_{\mathrm{rxn},i}\tilde V_i$ and the radiative source, §13.3.4), the
 cell's energy right-hand side is
 $E_i=S_{E,i}-\sum_{f\in\partial i}s_{if}F^E_fA_f$. The energy row is (§7, §13)
 
@@ -14602,7 +14796,7 @@ $$
 
 positive when energy enters: the heat conducted in through the live boundary
 faces less the enthalpy carried out through them, plus the reaction heat, the
-absorbed in-depth radiation and the formation terms of the live cells. It is
+radiative sources and the formation terms of the live cells. It is
 the discrete form of the law of §16.2.2 term by term.
 
 > **Implementation note.** `ledger_rates(def, c, ds)` accumulates
@@ -14773,14 +14967,15 @@ into the domain; the conducted flux under a prescribed temperature),
 `surface_heat_flux_absorbed`, `surface_heat_flux_reradiation` and
 `surface_heat_flux_convection` (its members), `surface_heat_flux_conduction`
 ($k(T_s-T_\mathrm{cell})/d$), and `back_heat_flux` for the `:bottom` condition.
-Under `BEER_LAMBERT` the incident flux enters in depth and is not part of the
-net surface flux; the intensity the cells absorb, $\sum_i Q_{\mathrm{rad},i}V_i$ per
-unit exposed area, is `volumetric_absorption`, and the intensity leaving
-through the last face of the beam is `radiation_transmitted`. The ledger counts
-the absorbed part as a volumetric source of the live cells; the transmitted
-part leaves the column without entering the inventory, and the incident flux
-itself is in neither. Under `SURFACE_ABSORPTION` the absorbed incident flux is
-part of the condition's applied flux at the face.
+Under `RADIATIVE_TRANSFER` radiation is not part of the net surface flux: it
+crosses the exposed face and the back through the radiation rows, reported per unit
+face area as `radiation_absorbed` (inward through the exposed face),
+`radiation_emitted` (outward through it) and `radiation_back` (net, out through the
+back), whose balance equals the cells' radiative sources, $\sum_i S^{\rm rad}_i/A$,
+at every saved state (§8.5.2). The ledger counts those sources as volumetric sources
+of the live cells; the rows store no energy, so the ledger needs no radiative term
+of its own. Under `SURFACE_ABSORPTION` the absorbed incident flux is part of the
+condition's applied flux at the face.
 
 ---
 
@@ -15113,7 +15308,7 @@ Conventions used in this chapter (binding, from §2, Nomenclature):
   advances (§15): per cell the component masses and the energy state (the
   temperature, or the sensible-enthalpy inventory); on a moving mesh the node
   positions and node velocities, the velocities algebraic rows; under
-  `BEER_LAMBERT` the face intensities, algebraic rows; under a lateral
+  `RADIATIVE_TRANSFER` the radiative face fluxes, algebraic rows; under a lateral
   shrinkage law the conversion-history pair of every cell and the
   cross-section rows. $M$ is diagonal, with zeros on the algebraic rows.
 - $\mathbf{y}=\mathcal{O}(\mathbf{u},\boldsymbol{\theta})\in\mathbb{R}^{m}$ is a
@@ -16018,7 +16213,7 @@ validation:
 1. **Kernel-level and exact-solution checks** (§18.2): the kernels tested in
    isolation (`test/kernels/`, `test/physics/`), and the cases of the verification
    suite compared against closed-form or manufactured solutions — conduction,
-   kinetics, in-depth absorption, gas transport, coupled fronts, the geometric
+   kinetics, radiative transfer, gas transport, coupled fronts, the geometric
    conservation law, burnout through a deactivation event.
 2. **Jacobian verification** (§18.3): the colored Jacobian compared per entry with
    the dense forward-mode reference of the whole residual, in the test suite. There
@@ -16031,11 +16226,13 @@ validation:
 4. **Convergence studies** (§18.5): spatial, temporal and tolerance refinement,
    confirming that the discretization error shrinks at the designed rate.
 5. **Code- and experiment-level validation** (§18.6): cone calorimeter, Douglas fir,
-   pressure-treated wood, moisture transport, against measurements and other codes.
+   pressure-treated wood, moisture transport and the MaCFP PMMA property sets, against
+   measurements and other codes.
 
 The first three run in the test suite, and the verification suite asserts
 convergence orders as well (§18.1.3); the convergence studies of §18.5 and the
-validation cases are scripted examples in `examples/`.
+validation cases are scripted examples in `examples/`, and the MaCFP PMMA suite is
+in `scripts/macfp_pmma/`.
 
 ### 18.1.3 The verification suite: test mode and report mode
 
@@ -16138,11 +16335,11 @@ against an exact or manufactured solution; the burnout cases V-BO-01, 02, 03 and
 |---|---|---|---|
 | Heat conduction | V-HC-01 – V-HC-05 | Carslaw–Jaeger erfc and eigenfunction series, resistance network, Kirchhoff transform | the convective surface Newton (V-HC-01; Biot sweep V-HC-02a–d), the constant-flux slab to its back-face plateau (V-HC-03), the harmonic-mean face conductivity at a layer jump on and off a face, including the same interface on a fitted mesh (V-HC-04a–d), $k(T)$ (V-HC-05) |
 | Kinetics and surface radiation | V-RX-01 – V-RX-08 | Bateman chain, Khawam–Flanagan isothermal integrals, parallel-reaction splits, implicit radiative-cooling law, insulated-reaction logarithmic temperature history, conversion-basis burnout on fixed and moving meshes (V-RX-06), a series scheme on conversions with an order other than one on the intermediate (V-RX-07), a graded conversion in the closed form cell by cell (V-RX-08) | multi-step coupling, reaction order and the depletion limiter (V-RX-02d keeps it on as a guard), two-product yields and heat superposition, `RadiativeBC` through the surface Newton, reaction heat and sensible-enthalpy formation with unequal species heat capacities |
-| In-depth radiation | V-RAD-01 | Lautenberger eigenfunction series | Beer–Lambert absorption with conduction and a convective face, including the sub-surface temperature peak |
+| Radiative transfer | V-RAD-01 – V-RAD-07 | closed forms of the two-stream rows, exact gray transfer, an independent method-of-lines solution of the same rows | equilibrium in an enclosure at the slab's temperature (V-RAD-01), a diffuse, collimated or cone heater through a slab (V-RAD-02), an isothermal slab's emission (V-RAD-03), a linear emissive power (V-RAD-04), the two-stream closure against exact transfer on burning profiles (V-RAD-05), the radiative energy ledger through burnout (V-RAD-06), in-depth heating with emission and a sub-surface temperature peak (V-RAD-07) |
 | Gas transport | V-GT-01 – V-GT-09 | Gaussian plane source, integrated wall/Darcy resistance, binary dusty-gas exchange, coupled thermal-film solution, Robin diffusion, prescribed-inflow Darcy $P^2$ profile, linear trace friction equation | wall transport and conservation, pressure closure and upwinding, interfaces and flow reversal, binary exchange, nonisothermal transport, transient mass-film uptake, imposed gas inflow and pressure outflow, multicomponent exchange with trace and absent species |
 | Coupled physics | V-CPL-01 – V-CPL-05 | Neumann two-phase Stefan solution, Landau ablation wave, exact shrink/swell endpoints, Frank-Kamenetskii slab, 0D TGA curve | a latent-heat front (apparent heat capacity, V-CPL-01; gated reaction, V-CPL-01b), surface regression on a moving mesh (V-CPL-02, 02b), volume change and the lateral-shrinkage law, the reaction–conduction bifurcation, the boundary and volume coupling of the kinetics |
-| Manufactured solutions | V-MMS-01 – V-MMS-04 | the manufactured-solution driver of §18.2 | design order of the coupled residual on a fixed mesh in space and time, free-stream preservation under prescribed motion, order under prescribed and reaction-driven motion |
-| Burnout | V-BO-01 – V-BO-12 | exact exponential thickness (V-BO-04); otherwise exact mass and thickness budgets, conservation ledgers and termination constraints | deactivation through complete burnout on a moving mesh under in-depth absorption (V-BO-01) and on a fixed mesh under surface absorption (V-BO-02); the transmitted-flux series (V-BO-03); the interior-void stop (V-BO-05, `expected_retcode = :Terminated`); a graded mesh (V-BO-06), a layer of mixed composition (V-BO-07) and a thin layer on a deep substrate (V-BO-08); burnout through the event path on the exact conversion at orders 0.5 and 1.2 (V-BO-09a, b); heated burnout without a residue at orders 0, 0.5 and 1.2 with its threshold and mesh pairs (V-BO-10a–c); a cell that dies under a live one at order one against the corrected default (V-BO-11) |
+| Manufactured solutions | V-MMS-01 – V-MMS-05 | the manufactured-solution driver of §18.2 | design order of the coupled residual on a fixed mesh in space and time, free-stream preservation under prescribed motion, order under prescribed and reaction-driven motion, order with radiative transfer on a moving mesh (V-MMS-05) |
+| Burnout | V-BO-01 – V-BO-12 | exact exponential thickness (V-BO-04); otherwise exact mass and thickness budgets, conservation ledgers and termination constraints | deactivation through complete burnout on a moving mesh under radiative transfer (V-BO-01) and on a fixed mesh under surface absorption (V-BO-02); the radiation leaving through a transparent substrate (V-BO-03); the interior-void stop (V-BO-05, `expected_retcode = :Terminated`); a graded mesh (V-BO-06), a layer of mixed composition (V-BO-07) and a thin layer on a deep substrate (V-BO-08); burnout through the event path on the exact conversion at orders 0.5 and 1.2 (V-BO-09a, b); heated burnout without a residue at orders 0, 0.5 and 1.2 with its threshold and mesh pairs (V-BO-10a–c); a cell that dies under a live one at order one against the corrected default (V-BO-11) |
 
 **Gpyro guide adaptations.** V-GT-07a/b, V-GT-08a/b and V-RX-05a–c cite
 Abdelhafiz et al., [*Gpyro Verification and Validation Manual*, version 1.0
@@ -16178,25 +16375,25 @@ functions have independent integral, constitutive-law and ODE checks in
 
 The burnout cases share V-BO-01's deck (`V-BO-01.jl` defines it, its step
 recorder and its QoIs): a 5.9 mm PMMA slab on 12 mm of Kaowool under 50 kW m⁻², the
-MaCFP PMMA gasification case with the Gpyro V2 property fits, solved at 60 PMMA
-cells (0.098 mm). V-BO-01 requires complete burnout, the exact mass of the PMMA
-layer lost, the peak gas-generation rate (32.39 g m⁻² s⁻¹ within 3 %), its time
-(335 s within 3 %) and the burnout time (363.5 s within 1 %) of a reference run of
-the deck, a mass ledger closed within $3\times10^{-5}$ (§18.4.1), and no accepted state
+MaCFP PMMA gasification case with the Gpyro V2 property fits under radiative transfer,
+the heater diffuse and the Kaowool's back open to the surroundings, solved at 60 PMMA
+cells (0.098 mm). V-BO-01 requires complete burnout (the live thickness at the end is
+the substrate's), the exact mass of the PMMA layer lost (within 0.3 % of the initial
+mass), a mass ledger closed within $3\times10^{-5}$ (§18.4.1), and no accepted state
 whose surface balance did not converge or sits on the trial clamp; the number of
-deactivation invocations is reported, not asserted. V-BO-02 runs the deck on a
-fixed mesh under surface absorption, where only the top cell deactivates, one cell
-at a time (60 events), with the live-cell temperature below 1000 K. V-BO-03 makes
-the substrate transparent and requires the transmitted flux
-(`extras.radiation_transmitted`) to exceed 1 % of the entering flux. V-BO-05 runs the
-deck on a fixed mesh under in-depth absorption, where the sub-surface temperature
-maximum empties the cells beneath a surface skin; it must stop with outcome
-`:interior` and return code `:Terminated` at 259.6 s, before any deactivation
-(§14.4). V-BO-06 grades the PMMA cells toward the surface (each 1/1.02 of the one
-beneath at 60 cells) under V-BO-01's references; V-BO-07 mixes in a second solid of
-half the density and a tenth of the pre-exponential factor, graded from none at
-the substrate to half at the surface, against its own reference run at 240 PMMA
-cells; V-BO-08 burns a 1 mm layer off the 12 mm substrate and requires the correction
+deactivation invocations is reported, not asserted. V-BO-02 runs the deck on a fixed
+mesh under surface absorption, where only the top cell deactivates, one cell at a time
+(60 events), with the live-cell temperature below 1000 K. V-BO-03 makes the substrate
+transparent and requires the radiation leaving through the back
+(`extras.radiation_back`) to exceed 1 % of the radiation entering
+(`extras.radiation_absorbed`); its share peaks at 0.889. V-BO-05 runs the deck on a
+fixed mesh, where the PMMA beneath the surface empties nearly uniformly, the exposed
+cell slowest; it must stop with outcome `:interior` and return code `:Terminated`
+before any deactivation (§14.4). V-BO-06 grades the PMMA cells toward the surface (each
+1/1.02 of the one beneath at 60 cells) under V-BO-01's requirements; V-BO-07 mixes in
+a second solid of half the density and a tenth of the pre-exponential factor, graded
+from none at the substrate to half at the surface, under the same requirements;
+V-BO-08 burns a 1 mm layer off the 12 mm substrate and requires the correction
 velocity to be exactly zero at every Kaowool node at every saved time.
 
 The cases from V-BO-09 hold the event path at reaction orders other than one and on
@@ -16213,9 +16410,10 @@ rate and the mass; the gate `burnout_order_zero.jl` holds `examples/06` to the s
 72 and 144 cells. V-BO-12b requires a char that keeps its volume to keep its cells: no
 event, and the burn without deactivation.
 
-Kernel-level checks sit beside the suite in the module tests: the Beer–Lambert beam's
-energy telescoping and the incident intensity under Kirchhoff's law and an explicit
-absorptivity (`test/kernels/test_radiation.jl`); the depletion limiter, the
+Kernel-level checks sit beside the suite in the module tests: the radiation rows
+against the exact two-stream solution, the telescoping of the cell sources, the
+isothermal equilibrium and the heaters' beams (`test/kernels/test_radiative_transfer.jl`),
+the interface's emissivity in both directions (`test/physics/test_radiation.jl`); the depletion limiter, the
 constant-heating-rate peak temperature and the Kissinger slope
 (`test/kernels/test_kinetics.jl`); the gas-transport fluxes, the vent and the
 upwind side at zero velocity (`test/kernels/test_gas_transport.jl`); the relative
@@ -16235,7 +16433,7 @@ touches them. The coverage matrix in
 `docs/guide/verification/comparison_coverage.md` identifies full and partial matches.
 Both FDS and Gpyro cover V-HC-01/02/04/05, V-RX-01, V-RX-02a–c, V-RX-04,
 V-RX-05a–b, V-CPL-03 P1/P2/P3 and the subcritical V-CPL-04 steady profile.
-Gpyro additionally covers V-HC-03, V-RAD-01, the apparent-heat-capacity route
+Gpyro additionally covers V-HC-03, the apparent-heat-capacity route
 of V-CPL-01, V-GT-07/08 and V-RX-05c. The FDS flux-input restriction is
 discussed in §12.11.3.
 A series marked `crosscode = true` is drawn as a muted
@@ -16257,7 +16455,7 @@ In particular, FDS V-RX-05a–b uses `ADJUST_H=F` to match the specified local
 reaction heat. No gas-transport comparison is attributed to FDS, and the
 V-CPL-04 comparison does not extend to the upper-temperature-gated runaway branch.
 
-The reports compare accuracy, and each case compares cost at matched accuracy: for each external run, that code's cheapest run at least as accurate against this code's cheapest mesh and solver tolerance at least as accurate on every scored reference. The ratio is a cost at equal accuracy for that problem, not a pure solver speedup; on the smallest problems the external times are mostly input, setup and output. See the [comparison basis](guide/verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions and time refinement. ThermaKin2Ds cannot express V-RAD-01, V-CPL-01, V-RX-02a/c or the pressure-driven V-GT-02–06 and V-GT-08; the [coverage matrix](guide/verification/comparison_coverage.md) gives the reasons.
+The reports compare accuracy, and each case compares cost at matched accuracy: for each external run, that code's cheapest run at least as accurate against this code's cheapest mesh and solver tolerance at least as accurate on every scored reference. The ratio is a cost at equal accuracy for that problem, not a pure solver speedup; on the smallest problems the external times are mostly input, setup and output. See the [comparison basis](guide/verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions and time refinement. ThermaKin2Ds cannot express V-CPL-01, V-RX-02a/c or the pressure-driven V-GT-02–06 and V-GT-08; the [coverage matrix](guide/verification/comparison_coverage.md) gives the reasons.
 
 ---
 
@@ -16435,55 +16633,51 @@ Two implementation details must be accounted for when the check is made
   on to require a nonnegative residue below its conversion threshold at twice the
   zero-order burnout time.
 
-### 18.2.3 Beer–Lambert transmitted fraction
+### 18.2.3 Radiative transfer: the rows, equilibrium and conservation
 
-The in-depth radiation model (§8.3) carries the intensity of every face as an
-algebraic unknown (§13.5.2): at the face the beam enters,
-$0=I_e-a\,q_\mathrm{inc}(t)$; at every other face,
-$0=I_\text{down}-I_\text{up}e^{-\tau_i}$ with $\tau_i=\alpha_i\Delta z_i$ the cell's
-optical thickness; and each cell absorbs $I_\text{up}A_\text{up}-I_\text{down}A_\text{down}$,
-the exact cell average of the attenuated beam,
+The radiative transfer rows (§8.3.3) are the exact solution of the gray two-stream
+equations across each cell for its constant emissive power, so for frozen
+temperatures and absorption coefficients they have closed forms
+(`test/verification/exact/two_stream.jl`, with its own self-tests in
+`test/verification/exact/selftests.jl`):
 
-$$
-q'''_i\,\Delta z_i=I_\text{up}\bigl(1-e^{-\tau_i}\bigr)\quad\text{(planar)} .
-$$
+- **Equilibrium.** An isothermal slab facing diffuse radiation at its own temperature
+  has $I^- = I^+ = \sigma T^4$ on every face and no source, at any optical thickness,
+  mesh and emissivity, behind a mirror or an open back. V-RAD-01 asserts it on the
+  rows to $10^{-12}\sigma T^4$ for $\alpha L = 10^{-3}$–$10^{3}$ and, integrated in time
+  through the whole solver, every cell held at the surroundings' temperature to
+  $10^{-8}$ K.
+- **Isothermal emission.** A slab at $\sigma T^4$ facing 0 K through an exposed face of
+  transmissivity $\varepsilon$ emits $\varepsilon\sigma T^4(1-t^2)/(1-(1-\varepsilon)t^2)$
+  behind a mirror, with $t$ standing for $e^{-\tau_L/\bar\mu}$ and $\tau_L$ the slab's
+  optical thickness, independent of the mesh (V-RAD-03, with
+  the open backs, to $10^{-12}$).
+- **A heater through a slab.** Collimated, diffuse and cone heaters through a cold
+  slab, by superposition on the solver's consistent start (V-RAD-02, to $10^{-12}$ of
+  the absorbed flux); three cone beams against the exact cone integral.
+- **Linear emissive power.** A drop $\Delta\mathcal B$ per cell carries the net flux
+  $\Delta\mathcal B\coth\big(\tau_i/(2\bar\mu)\big)$ at every face (V-RAD-04), which
+  exceeds the Rosseland flux by about $\tau_i^2/(12\bar\mu^2)$ of it for thin cells (§8.6).
 
-Two exact energy identities verify the kernel:
-
-- **Total absorbed flux.** The absorbed energy telescopes,
-
-  $$
-  \sum_iq'''_i\,\Delta z_i=a\,q_\mathrm{inc}\big(1-e^{-\tau_\mathrm{total}}\big),
-  \qquad\tau_\mathrm{total}=\sum_i\alpha_i\Delta z_i,
-  $$
-
-  exact at the discrete level and independent of the cell count, because each cell
-  deposits $I_\text{up}(1-e^{-\tau_i})$ and passes $I_\text{up}e^{-\tau_i}$ on. Here $a$
-  is the effective absorptivity of the exposed cell (Kirchhoff's law unless a
-  component sets its own) or the condition's explicit absorptivity (§12.3.5). The
-  solution reports it as `extras.volumetric_absorption`.
-- **Transmitted fraction.** The intensity leaving the last face is
-  $a\,q_\mathrm{inc}e^{-\tau_\mathrm{total}}$, reported as `extras.radiation_transmitted`.
-  Absorbed plus transmitted equals $a\,q_\mathrm{inc}$ to round-off; the remaining
-  $(1-a)\,q_\mathrm{inc}$ is reflected at the surface and never enters the medium.
-
-`test/kernels/test_radiation.jl` ("the beam's energy telescopes, Kirchhoff and
-explicit absorptivity") asserts at a consistent state that the entering intensity is
-$a\,q_\mathrm{inc}$ to $10^{-14}$, that every cell absorbs $I_\text{up}(1-e^{-\tau_i})$ and
-the last face carries the transmitted intensity to $10^{-12}$, and that absorbed plus
-transmitted equals the entering intensity to $10^{-12}$, under both absorptivity
-paths. A transparent cell ($\alpha_i=0$) absorbs nothing and passes the whole
-intensity; in the opposite limit $\tau_1\gg1$ the exposed cell absorbs the entering
-intensity $a\,q_\mathrm{inc}$ entirely, the volumetric counterpart of
-`SURFACE_ABSORPTION`, which applies the same $a\,q_\mathrm{inc}$ at the face (§8.2).
-V-RAD-01 couples the kernel with conduction and a convective face against
-Lautenberger's eigenfunction solution, and V-BO-03 exercises the transmitted series
-through a burnout.
+`test/kernels/test_radiative_transfer.jl` asserts the rows against
+`two_stream_solve` to $10^{-12}$ for frozen piecewise-constant profiles, both backs,
+diffuse and beam heaters and a first live cell inside the column ("rows against the
+exact two-stream solution"); that the cell sources sum to the net radiation entering
+through the exposed face less the net radiation leaving through the back at arbitrary
+trial fluxes ("the cell sources telescope"); and that at a consistent state the three
+extras balance the sources and `radiation_emitted` equals $\varepsilon_e I^+_e$ ("the
+radiation crossing the faces at a consistent state"). A transparent cell
+($\alpha_i=0$) passes every flux unchanged; in the opposite limit $\tau_1\gg1$ the
+exposed cell absorbs what crosses the interface and emits at its own temperature.
+V-RAD-07 couples the rows with conduction and a convective face against an
+independent method-of-lines solution, V-RAD-06 closes the radiative energy ledger
+through burnout at every accepted step, and V-MMS-05 measures second order with
+radiative transfer on a moving mesh.
 
 The incident flux is sampled at every residual evaluation:
 `test/kernels/test_boundary_conditions.jl` ("a time-varying incident flux is sampled
 at every evaluation") solves under $q_0(1+\sin2\pi t)$ and under $q_0$ and requires
-the absorbed intensity at $t=0.25$ s to be twice the constant run's, to $10^{-4}$
+the radiation entering at $t=0.25$ s to be twice the constant run's, to $10^{-12}$
 (a flux frozen at its initial value would make the two runs identical, since
 $\sin 0=\sin2\pi=0$).
 
@@ -16613,7 +16807,7 @@ of the reference and equal it per entry at `rtol = 1e-12`. The containment tests
 finite residual and reference, an empty `missing_entries`, a colored Jacobian with
 the pattern's structure, and that agreement. They cover fixed and moving columns of a
 PMMA-like and a permeable wood-like material, without radiation, with surface
-absorption and with in-depth absorption, with wall and pressure-driven lumped transport, in
+absorption and with radiative transfer, with wall and pressure-driven lumped transport, in
 both energy forms and at 6 and 8 cells; at the set-up state, at uniform hot, hot and
 gas-heavy, partially decomposed and mixed reacting states, and at trial states
 outside the physical domain (perturbed, zero and negated states); the chain-rule
@@ -16626,8 +16820,8 @@ boundary mass flux on the energy row; and a surface absorptivity and an emissivi
 that depend on temperature. The dense reference equals central differences to
 $10^{-6}$ per entry with the same row floor (the testset "the dense Jacobian equals
 central differences"). Each kernel's tests repeat the containment check for its own
-physics (`test/kernels/test_gas_transport.jl`, `test_radiation.jl`,
-`test_relative_flux.jl`), and `test/assembly/test_residual_jacobian.jl` checks the
+physics (`test/kernels/test_gas_transport.jl`, `test_radiative_transfer.jl`,
+`test_relative_flux.jl`; `test/jacobian/test_radiative_containment.jl`), and `test/assembly/test_residual_jacobian.jl` checks the
 assembled residual and Jacobian on a stretched mesh under closed-form, convective and
 combined boundary conditions, on and off the physical states. A residual and a
 colored Jacobian allocate nothing after warm-up (`test/jacobian/test_allocations.jl`),
@@ -16833,8 +17027,9 @@ smooth solutions: the two-point face gradient and the harmonic-mean face coeffic
 are $O(\Delta z^2)$ on a uniform mesh, and the distance-weighted forms keep second order
 on smoothly stretched meshes (§13.6). The verification suite asserts the orders against
 exact solutions where it can: expected order 2 (each observed order above 1.5 and their
-mean above 1.8) for V-HC-01, 02c, 03 and 05, V-RAD-01, V-GT-01, V-CPL-04 and V-MMS-01
-and 03, and above 1.7 with a mean above 1.9 for V-MMS-04; V-HC-01 observes 1.991 and
+mean above 1.8) for V-HC-01, 02c, 03 and 05, V-GT-01, V-CPL-04 and V-MMS-01 and 03,
+above 1.7 with a mean above 1.9 for V-MMS-04, and above 1.8 for the radiative transfer
+of V-RAD-07 and V-MMS-05, with means above 1.8 and 1.85; V-HC-01 observes 1.991 and
 1.998. V-GT-02 expects first order (observed 0.89 and 0.94), the signature of the
 first-order upwind Darcy advection (§13.7.3, §18.7.3). The boundary faces are first-order
 (§13.12); the manufactured-solution cases impose fluxes there so that they do not cap
@@ -16870,7 +17065,7 @@ Stefan problem on a mesh stretched toward the cold wall (about 14 μm at the wal
 energy-row test runs on stretched meshes (§18.4.3), the relative fluxes converge above
 order 1.5 on cells alternating between $h$ and $2h$ (`test/kernels/test_relative_flux.jl`),
 and V-BO-06 burns the V-BO-01 layer on a mesh graded threefold toward the surface under
-V-BO-01's references. An incorrect non-uniform treatment shows up as a loss of order on
+V-BO-01's requirements. An incorrect non-uniform treatment shows up as a loss of order on
 the stretched run that is absent on the uniform one.
 
 ### 18.5.2 Temporal convergence
@@ -16910,25 +17105,27 @@ the *model* rather than of the *discretization*.
 **Burnout: joint refinement of the mesh and the tolerance.** Through a burnout the
 deactivation threshold is a numerical parameter too, and the end-of-layer burst (the
 largest per-step mass-loss rate just after a layer's deactivation) is the sensitive
-quantity. The burnout path (the equidistribution correction with its layer time set at
-activation, the near-threshold band, located events) is verified under joint refinement
+quantity. The burnout path (the equidistribution correction with its layer time estimated
+twice, the near-threshold band, located events) is verified under joint refinement
 of the mesh and the tolerance on five decks built on V-BO-01: the uniform mesh, the mesh
 graded threefold toward the surface (V-BO-06), the mixed layer (V-BO-07), the 1 mm layer
 (V-BO-08), and the 5.9 mm layer with a convective loss in place of re-radiation and an
 adiabatic back. Inside the supported envelope every QoI (complete burnout, the mass lost,
-the peak and its time, the burnout time, the mass ledger) is within tolerance at every
-resolution and the burst converges (the largest per-step excess of $N$ cells over $2N$ and
-the successive $L_1$ differences falling at least 1.5× per doubling): $\varepsilon_m=3\times10^{-3}$
-with $\varepsilon_\text{band}=0.1$ on all five decks from 30 cells across the layer (10 on
-the 1 mm layer); the default $\varepsilon_m=10^{-2}$ with $\varepsilon_\text{band}=0.1$ on the
-single-solid layers from 30 cells (60 on the convective-loss deck) but not on the mixed
-layer (§18.8.2); at `reltol` $10^{-6}$ and $10^{-7}$, in either energy form, and with
-either activation bound pair $(0.3,0.1)$ and $(0.7,0.3)$. At 30 cells the largest per-step
-rate just after a layer's deactivation can exceed the main peak, up to threefold on the
-graded mesh; it falls below the main peak by 60 to 120 cells, and the peak sampled at the
-output times is within tolerance from 30 cells. V-BO-01 at 25 and 100 kW m⁻², at half and
-twice its pre-exponential factor and with its flux stepped after activation, at 30 to 120
-cells, passes the same QoIs, the hot decks with two invocations. Materials outside these
+the mass ledger, a converged surface balance) is within tolerance at every resolution and
+the burst converges (the largest per-step excess of $N$ cells over $2N$ and the successive
+$L_1$ differences falling at least 1.5× per doubling): $\varepsilon_m=10^{-2}$ with $\varepsilon_{\text{band}}=0.1$, the default, on all five decks
+from 30 cells across the layer (10 on the 1 mm layer) under the default activation, and
+from 60 cells on the mixed layer and the convective-loss deck under $(0.7,0.3)$; and
+$\varepsilon_m=3\times10^{-3}$ with $\varepsilon_{\text{band}}=0.1$ on the uniform and 1 mm
+layers and the convective-loss deck from 30 cells (60 under $(0.7,0.3)$ on the last), on
+the graded mesh from 60, and on the mixed layer from 60 under the default activation
+only, since under $(0.7,0.3)$ it does not burn out at 30 and 60 cells;
+at `reltol` $10^{-6}$ and $10^{-7}$, the enthalpy form checked at each deck's CI resolution. The largest per-step rate
+just after a layer's deactivation stays below the main peak on every deck but the graded
+mesh at 30 cells, where it exceeds it by up to 9.5 %. V-BO-01 at 25 and 100 kW m⁻², at half
+and twice its pre-exponential factor and with its flux halved or raised by half at 150 s,
+at 30 to 120 cells, passes the same QoIs in one or two invocations; its burst converges
+on all but the 100 kW m⁻² deck and the raised flux (§18.8.2). Materials outside these
 decks (other materials, thicker or charring layers, higher heating) are not inside the
 envelope by this study. The full statement with its numerical parameters is §14.2.4 and
 User Guide chapter 10.
@@ -17025,7 +17222,7 @@ separate modeling differences from numerical errors. Remaining disagreement
 can arise from either, from input transcription, or from output definitions.
 
 - **ThermaKin2Ds:** match reaction extent, heat sign, component properties,
-  gas-transport and radiation algorithms (§§6.9, 8.7, 9.2). Its bimolecular
+  gas-transport and radiation algorithms (§§6.9, 8.9, 9.2). Its bimolecular
   kinetics and general 2D configurations are not represented by our
   single-reactant 1D solves. Replacing a bimolecular reaction by a sequence
   is a new model, not an exact conversion. The ThermaKin2Ds 7 overlays
@@ -17042,15 +17239,57 @@ can arise from either, from input transcription, or from output definitions.
 - **FDS:** the retained 6.11.1 overlays concern matched solid conduction,
   reaction kinetics/heat, radiative boundaries, solid-only volume change
   and subcritical thermal feedback (§18.1.3). Its instantaneous gas release and optional two-flux
-  radiation are not general equivalents of our transport and Beer–Lambert
-  models. Even negligible in-depth emission does not remove the angular
-  attenuation difference (§8.7.3).
+  radiation are not general equivalents of our transport and radiative transfer
+  models: its two-flux closure attenuates a diffuse field at $2\kappa_s$ where our
+  two-stream rows attenuate at $1.5\,\alpha$, and integrates each cell implicitly to
+  first order (§8.9.3). At that attenuation on FDS's cells, with the item FDS cannot
+  express aligned on UMD, UMET_GP and UMET_TK, the eight MaCFP PMMA property sets that
+  absorb in depth agree with FDS 6.11.1 within 0.71 % in the time to half mass loss and
+  in peak mass-loss rate (§18.6.5).
 
 The benchmark definitions, actual input decks and exact-solution errors
 provide the evidence for each comparison (§18.1.3). The MaCFP community
 predictions use differing calibrated models; their spread is not a
 solver-only verification result. Cost is compared only at matched accuracy
 (§18.1.3).
+
+### 18.6.5 MaCFP PMMA property sets
+
+The MaCFP condensed-phase working group's database (matl-db, read at a pinned commit)
+holds property sets for one black PMMA, each calibrated by an institution in its own
+code; for the 2021 sets it also holds that institution's predictions of the MaCFP-2
+targets (TGA at 10 and 100 K/min; anaerobic gasification of 6 and 12 mm slabs at 10, 25
+and 65 kW/m² with an insulated back), and for most sets their predictions of the MaCFP-3
+experiments in the NIST gasification apparatus. `scripts/macfp_pmma/` runs every set in
+Pyrolysis.jl, FDS 6.11.1, Gpyro V2 and ThermaKin2Ds 7 from one solver-neutral deck per
+set, and its `report.jl` writes the [MaCFP PMMA validation](guide/validation/macfp_pmma.md)
+page from those runs. The submissions are calibrated models, not measurements: agreement
+with them tests how faithfully a deck and a code reproduce another code's model, and the
+apparatus experiments are the measurements.
+
+Sets that absorb at the surface run under `SURFACE_ABSORPTION`. On them, BUW-FZJ_A aside,
+Pyrolysis.jl and FDS solve the same problem and agree to 0.0–0.3 % in the median time to
+half mass loss, $t_{50}$, and the runs that reproduce what a group evidently ran
+(BUW-FZJ_B's convection, DBI_1's temperature tables read as °C, Aalto's 303 K start) agree
+with those submissions to 0.04, 2.2 and 0.2 % in median $t_{50}$. Sets with an absorption
+coefficient run under `RADIATIVE_TRANSFER` with a diffuse heater and a mirror back. Per
+set, their median $|\Delta t_{50}|$ is 0.8–5.5 % to the submissions and 0.6–3.4 % to FDS;
+matched to FDS's attenuation (§8.9.3), with the item FDS cannot express aligned on UMD,
+UMET_GP and UMET_TK, every case of the eight agrees within 0.71 % in $t_{50}$ and peak
+mass-loss rate. The differences to Gpyro V2 and ThermaKin2Ds follow their deposition: of
+the variants that absorb in depth, the shallowest-depositing one is closest to Gpyro's
+net-flux march on three of the four in-depth sets Gpyro runs, and surface absorption is
+closest to ThermaKin2Ds' `MAX` mode on all four in-depth sets it runs. BUW-FZJ_A, whose
+low-emissivity residue collects in the surface cell, depends on the cell size in every
+code and, in Pyrolysis.jl, on how long the moving mesh keeps a burnt-out layer in the
+surface cell; it is reported apart.
+
+In the apparatus one shared deck (convection, walls, the Kaowool board, a cone heater
+inferred from the measured flux profile) runs every set, and MaCFP's normalized RMS
+scores the runs against the measured repeats beside the groups' own predictions. On the
+apparatus's inert Kaowool stack the shared deck runs above the measurements, by 6–27 K at
+5.72 mm and by up to 93 K at 17.16 mm after 1200 s, so the back-temperature scores
+measure the shared deck as much as the property sets.
 
 ---
 
@@ -17073,17 +17312,19 @@ $$
 with $\alpha_j$ the components' mass absorption coefficients (m² kg⁻¹), selects the
 radiation model (§8): for $\tau_\mathrm{total}\gg1$ the incident flux is absorbed within a
 few cells of the surface and `SURFACE_ABSORPTION` is adequate; for an intermediate or
-thin column `BEER_LAMBERT` distributes it in depth; for $\tau_\mathrm{total}\ll1$ the
-medium is effectively transparent. The package computes no regime verdict; $\tau$
-follows by hand from the components' absorption coefficients and the cell
-thicknesses, and a solve under `BEER_LAMBERT` reports the absorbed and the transmitted
-intensity at every saved time (`sol.extras.volumetric_absorption`,
-`sol.extras.radiation_transmitted`). A transmitted share that is not small means that
-flux leaves through the back face without heating the column, a regime that a back-face
-condition or a substrate layer must represent; V-BO-03 exercises it on a transparent
-substrate (its transmitted share exceeds 1 % of the entering flux as the PMMA thins).
-The absorbed-plus-transmitted identity of §18.2.3 is the underlying conservation check;
-the regime judgement layers on top of it.
+thin column `RADIATIVE_TRANSFER` carries it through the depth, with the column's own
+emission; for $\tau_\mathrm{total}\ll1$ the medium is effectively transparent. The
+package computes no regime verdict; $\tau$ follows by hand from the components'
+absorption coefficients and the cell thicknesses, and a solve under
+`RADIATIVE_TRANSFER` reports the radiation crossing the exposed face inward and outward
+and the net radiation leaving through the back at every saved time
+(`sol.extras.radiation_absorbed`, `radiation_emitted`, `radiation_back`). A back share
+that is not small means that radiation leaves through an open back without heating the
+column; a mirror back keeps it in. V-BO-03 exercises it on a transparent substrate
+(its back share exceeds 1 % of the radiation entering as the PMMA thins). Within a
+column the mesh criterion of §8.6 ($\alpha_i\Delta z_i \le 0.5$ where the emission
+matters) decides the resolution. The telescoping identity of §18.2.3 is the underlying
+conservation check; the regime judgement layers on top of it.
 
 ### 18.7.2 Pore-gas thermal equilibrium
 
@@ -17159,18 +17400,17 @@ implementation; experimental data are needed to validate material parameters.
 
 The burnout path is verified inside the envelope of §18.5.3 (§14.2.4). Outside it the
 QoIs can still pass while the end-of-layer burst (the largest per-step mass-loss rate
-just after a layer's deactivation) does not converge with resolution. V-BO-07, the layer
-of mixed composition, is the documented case: at the default $\varepsilon_m=10^{-2}$ its
-QoIs pass at the CI resolution, but under refinement the largest per-step excess of $N$
-cells over $2N$ stops falling between 120 and 240 cells, while at
-$\varepsilon_m=3\times10^{-3}$ it falls by a factor of two per doubling. When the first
-cell of that layer crosses $\varepsilon_m$, the others still hold up to about 6 % of their
-initial mass (the slow solid concentrated near the surface), so one invocation merges
-cells far from their threshold. The convective-loss deck at $\varepsilon_m=10^{-2}$ takes
-two invocations from 60 cells. A run whose layer is not of the decks' kind, or whose
-invocation count is above one, should be checked by refinement at a lower threshold
-before its burst is trusted; the integrated QoIs (mass lost, burnout time) are the robust
-ones.
+just after a layer's deactivation) does not converge with resolution. The V-BO-01 deck at
+100 kW m⁻², and the same deck with its flux raised by half at 150 s, are the documented
+cases: their QoIs pass at 30 to 120 cells, but the largest per-step excess of $N$ cells
+over $2N$ falls only 1.23 and 1.40 times per doubling, short of 1.5, and both leave the
+layer in two invocations. The mixed layer of V-BO-07 is inside the envelope at the default
+threshold, its other cells holding at most 3.9 % of their initial mass when the first
+crosses $\varepsilon_m=10^{-2}$; under the activation $(0.7,0.3)$ at
+$\varepsilon_m=3\times10^{-3}$ it does not burn out at 30 and 60 cells. A run whose layer is
+not of the decks' kind, or whose heating is outside theirs, should be checked by
+refinement before its burst is trusted; the integrated QoIs (mass lost, complete burnout,
+the ledger) are the robust ones.
 
 ### 18.8.3 Sensitivities across deactivation events
 
@@ -17201,7 +17441,7 @@ dependence.
 ### 18.8.5 Stale-flux regression
 
 One silent failure mode carries a standing regression guard. The incident radiative flux
-is evaluated at *every* residual evaluation with no constancy detection (§8.3.4, §13.5.2),
+is evaluated at *every* residual evaluation with no constancy detection (§8.4, §13.5.2),
 so a time-varying flux can never be frozen at its initial value. A regression would be
 silent, so the modulated-flux comparison under $q_0(1+\sin2\pi t)$ against a constant
 $q_0$ (§18.2.3) is kept as a permanent check in `test/kernels/test_boundary_conditions.jl`.
@@ -17263,8 +17503,10 @@ through `Pkg.test()`. The verification machinery of this chapter has direct cove
   for donor enthalpy and thermal-film conversion.
 - The verification suite: `test/verification/runcases.jl` runs every case of
   `test/verification/cases/` in assert mode (§18.1.3).
-- Radiation: `test/kernels/test_radiation.jl` (the beam's energy, the absorptivity
-  paths, the moving mesh, planar coordinates only) and
+- Radiation: `test/kernels/test_radiative_transfer.jl` (the rows against the exact
+  two-stream solution, the telescoping sources, the equilibrium, the heaters' beams,
+  the moving mesh, planar coordinates only), `test/physics/test_radiation.jl` (the
+  absorption coefficient, the interface's emissivity) and
   `test/kernels/test_boundary_conditions.jl` (the time-varying incident flux).
 - Determinism: `test/integration/test_policies.jl` and `test/closures/test_correction.jl`
   require repeated solves to be bit-identical under each linear solver, with in-depth
@@ -17296,11 +17538,12 @@ The V&V coverage above has gaps that a user should weigh:
 
 1. **MMS coverage.** The manufactured-solution driver (§18.2) covers the coupled residual
    on a fixed mesh (conduction with temperature-dependent properties, two-step kinetics
-   with reaction heat, lumped wall gas transport) and the moving mesh under prescribed and
-   reaction-driven motion. In-depth radiation, gas transport, the variable cross
-   section and deactivation are verified by exact solutions and ledgers (V-RAD-01,
-   V-GT-02, V-CPL-03, V-BO-04) rather than by a manufactured order study, and the boundary
-   faces enter the manufactured cases as imposed fluxes only.
+   with reaction heat, lumped wall gas transport), the moving mesh under prescribed and
+   reaction-driven motion, and radiative transfer with a smooth, uniform absorption
+   coefficient and no beam (V-MMS-05). Gas transport, the variable cross section and
+   deactivation are verified by exact solutions and ledgers (V-GT-02, V-CPL-03, V-BO-04)
+   rather than by a manufactured order study, and the boundary faces enter the
+   manufactured cases as imposed fluxes only.
 
 2. **Convergence reference is self-consistent, not exact, for the full cases.** The
    convergence studies of the validation cases use the finest mesh as the reference
@@ -17330,7 +17573,7 @@ The V&V coverage above has gaps that a user should weigh:
    estimates and the empirical shrinkage laws are unvalidated or simplified, and cases that
    lean on them inherit that uncertainty.
 
-7. **Cross-code coverage.** ThermaKin2Ds cannot express V-RAD-01, V-CPL-01,
+7. **Cross-code coverage.** ThermaKin2Ds cannot express V-CPL-01,
    V-RX-02a/c or the pressure-driven gas cases, and its runs can be reproduced
    only where its non-redistributable source is available. FDS has no
    gas-transport comparison. The MaCFP-2 PMMA community submissions, committed under

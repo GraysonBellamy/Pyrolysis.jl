@@ -1,0 +1,36 @@
+# MaCFP-2 PMMA property set DBI_1 (2021). The MaCFP-2 DBI predictions match DBI_1 (TGA peaks at 10 and 100 K/min).
+id = "DBI_1"
+year = 2021
+json = "PMMA/Material_Properties/2021/MaCFP_PMMA_DBI_1.json"
+calibration_code = "FDS"         # kinetics from a custom fit; predictions in FDS 6.7.x (INFERENCE)
+predictions = "DBI"
+tga_predictions = { 10 = "DBI_TGA_10Kmin.csv", 100 = "DBI_TGA_100Kmin.csv" }
+absorption = "surface"           # JSON "None"
+order_basis = "own"              # normalised rate (1-alpha)^n reproduces their TGA
+notes = [
+  "n = 1.03 with a normalised rate law; FDS >= 6.7.8 needs A/rho0^0.03.",
+  "cp and k tables end at 413 K and 337 K; held constant beyond (FDS RAMP convention).",
+  "Their submissions match only with the table temperatures read as °C, i.e. the kelvin values entered in an FDS RAMP; their FDS deck is unpublished.",
+  "cp falls from 1800 to 1400 J/kgK over 308-413 K, opposite to every other set's DSC; kept as written.",
+  "matl-db's MaCFP-3 DBI-1 validation runs are not this set: they add kappa 2250 1/m and eps 0.96 (DBI README, \"Non-calibrated model\").",
+  "matl-db's Verification deck leaves A unconverted for n = 1.03.",
+  "DBI_2, DBI_3 and DBI_4 differ only in A, E, n and the fitting method; no submission uses them, so they have no deck.",
+]
+
+[gas]
+cp = 0.0
+
+[[components]]
+id = "PMMA"
+rho = 1181.5
+y0 = 1.0
+emissivity = 1.0
+k = { form = "table", T = [293.05, 298.05, 302.95, 307.85, 312.75, 317.75, 322.65, 327.55, 332.45, 337.35], v = [0.17331, 0.17384, 0.17402, 0.17448, 0.17609, 0.17784, 0.17862, 0.17821, 0.17775, 0.1777] }
+cp = { form = "table", T = [308.15, 313.15, 373.15, 413.15], v = [1800.0, 1700.0, 1600.0, 1400.0] }
+
+[[reactions]]
+reactant = "PMMA"
+A = 6.31e8
+E = 1.332e5
+n = 1.03
+dH = 631670.0

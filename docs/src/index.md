@@ -3,15 +3,15 @@
 A Julia package for simulating thermal decomposition (pyrolysis) of materials
 under high heat flux. Pyrolysis.jl uses a finite-volume discretisation on a
 mesh that moves with the solid (Arbitrary Lagrangian–Eulerian), with cell
-deactivation at burnout, Arrhenius kinetics, in-depth radiation absorption,
-and lumped or dusty-gas transport through a shared pore state.
+deactivation at burnout, Arrhenius kinetics, radiative transfer through the
+solid, and lumped or dusty-gas transport through a shared pore state.
 
 ## Features
 
 - Multi-component materials with temperature-dependent properties
 - Single-step and multi-step Arrhenius decomposition kinetics
 - Conservative species transport with lumped transfer or dusty-gas friction
-- In-depth radiation absorption via Beer–Lambert (or surface absorption)
+- Radiative transfer through the solid, absorbed and emitted in depth (or absorption at the surface)
 - Material volume changes — shrinkage, swelling, intumescence
 - Mesh motion with the solid, surface regression and internal interface
   tracking; component masses as the states, so mass is conserved exactly

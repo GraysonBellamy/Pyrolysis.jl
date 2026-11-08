@@ -1,0 +1,34 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+50,"L∞ T against the reference, t=30.0 s",4.941199449604028e-8,NaN,4.941199449604028e-8,1.2e-6,true
+50,"L∞ T against the reference, t=60.0 s",5.05463049194077e-9,NaN,5.05463049194077e-9,1.2e-6,true
+50,"L∞ T against the reference, t=90.0 s",2.6786437956616282e-8,NaN,2.6786437956616282e-8,1.2e-6,true
+50,"L∞ T against the reference, t=180.0 s",3.853415364574175e-9,NaN,3.853415364574175e-9,1.2e-6,true
+50,"front-face temperature, t=30.0 s",456.49135809074727,456.491358139656,4.8908702865446685e-8,1.2e-6,true
+50,"front-face temperature, t=60.0 s",516.6097222394174,516.609722234413,5.004380909667816e-9,1.2e-6,true
+50,"front-face temperature, t=90.0 s",551.7403537413376,551.740353761722,2.038439106399892e-8,1.2e-6,true
+50,"front-face temperature, t=180.0 s",606.2147888115448,606.21478880773,3.8148755265865475e-9,1.2e-6,true
+50,"sub-surface peak value, t=90 s",556.3637172881492,556.363717311063,2.2913809516467154e-8,1.2e-6,true
+50,"peak cell equals the reference's at every save",0.0,NaN,0.0,0.5,true
+50,"peak below the exposed cell from 10 s",5.0,NaN,5.0,0.5,false
+100,"L∞ T against the reference, t=30.0 s",4.506790673985961e-8,NaN,4.506790673985961e-8,1.2e-6,true
+100,"L∞ T against the reference, t=60.0 s",5.3237272368278354e-9,NaN,5.3237272368278354e-9,1.2e-6,true
+100,"L∞ T against the reference, t=90.0 s",2.8189219847263303e-8,NaN,2.8189219847263303e-8,1.2e-6,true
+100,"L∞ T against the reference, t=180.0 s",4.4635726226260886e-9,NaN,4.4635726226260886e-9,1.2e-6,true
+100,"front-face temperature, t=30.0 s",456.72940259424786,456.729402639092,4.484411419980461e-8,1.2e-6,true
+100,"front-face temperature, t=60.0 s",516.8487471297121,516.848747124415,5.297124516800977e-9,1.2e-6,true
+100,"front-face temperature, t=90.0 s",551.9792625947033,551.979262622753,2.804972609737888e-8,1.2e-6,true
+100,"front-face temperature, t=180.0 s",606.4437339241996,606.443733919758,4.441631062945817e-9,1.2e-6,true
+100,"sub-surface peak value, t=90 s",556.4730624279306,556.473062455764,2.7833380045194644e-8,1.2e-6,true
+100,"peak cell equals the reference's at every save",0.0,NaN,0.0,0.5,true
+100,"peak below the exposed cell from 10 s",0.0,NaN,0.0,0.5,true
+200,"L∞ T against the reference, t=30.0 s",8.170161436282797e-9,NaN,8.170161436282797e-9,1.2e-6,true
+200,"L∞ T against the reference, t=60.0 s",3.849515906040324e-8,NaN,3.849515906040324e-8,1.2e-6,true
+200,"L∞ T against the reference, t=90.0 s",3.9366568671539426e-8,NaN,3.9366568671539426e-8,1.2e-6,true
+200,"L∞ T against the reference, t=180.0 s",4.698222255683504e-9,NaN,4.698222255683504e-9,1.2e-6,true
+200,"front-face temperature, t=30.0 s",456.7890645421847,456.789064534034,8.15066414361354e-9,1.2e-6,true
+200,"front-face temperature, t=60.0 s",516.9086881287849,516.908688167184,3.8399093682528473e-8,1.2e-6,true
+200,"front-face temperature, t=90.0 s",552.0391977693519,552.039197802757,3.3405171961931046e-8,1.2e-6,true
+200,"front-face temperature, t=180.0 s",606.50119495508,606.501194950413,4.66695837531006e-9,1.2e-6,true
+200,"sub-surface peak value, t=90 s",556.4850496615392,556.485049696785,3.524587555148173e-8,1.2e-6,true
+200,"peak cell equals the reference's at every save",0.0,NaN,0.0,0.5,true
+200,"peak below the exposed cell from 10 s",0.0,NaN,0.0,0.5,true

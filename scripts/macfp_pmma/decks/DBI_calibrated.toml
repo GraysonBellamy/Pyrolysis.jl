@@ -1,0 +1,33 @@
+# MaCFP-3 PMMA property set DBI_calibrated (2023): DBI_1 with dH 983 kJ/kg, rho 1181.6, kappa 2250, eps 0.96.
+id = "DBI_calibrated"
+year = 2023
+json = "PMMA/Material_Properties/2023/MaCFP_PMMA_DBI_calibrated.json"
+calibration_code = "FDS"
+validation = "DBI/csv_files_calibrated/DBI-cal"
+absorption = "in-depth"
+kappa_kernel = "two-flux"
+order_basis = "own"
+notes = [
+  "n = 1.03, normalised rate law; cp and k tables held constant beyond 413 K and 337 K.",
+  "DBI's DBI_1 submissions match only with the table temperatures read as °C; the same FDS reading applies to these runs, unverified (deck unpublished).",
+  "matl-db's Verification deck leaves A unconverted for n = 1.03.",
+]
+
+[gas]
+cp = 0.0
+
+[[components]]
+id = "PMMA"
+rho = 1181.6
+y0 = 1.0
+emissivity = 0.96
+kappa = 2250.0
+k = { form = "table", T = [293.05, 298.05, 302.95, 307.85, 312.75, 317.75, 322.65, 327.55, 332.45, 337.35], v = [0.17331, 0.17384, 0.17402, 0.17448, 0.17609, 0.17784, 0.17862, 0.17821, 0.17775, 0.1777] }
+cp = { form = "table", T = [308.15, 313.15, 373.15, 413.15], v = [1800.0, 1700.0, 1600.0, 1400.0] }
+
+[[reactions]]
+reactant = "PMMA"
+A = 6.31e8
+E = 1.332e5
+n = 1.03
+dH = 983000.0

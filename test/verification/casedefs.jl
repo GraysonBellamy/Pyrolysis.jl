@@ -12,7 +12,8 @@ exact solutions use depth x = L − z.
 
 using Pyrolysis
 using Pyrolysis.Materials: DepletionLimiter, STEFAN_BOLTZMANN
-using Pyrolysis.Materials: BEER_LAMBERT
+using Pyrolysis.Kernels: RadiativeTransferKernel, find_kernel, radiation_crossing
+using Pyrolysis.States: derive!
 using Pyrolysis.Problem: step_profile
 using Pyrolysis.Physics: ideal_gas_pressure, background_gas_concentration
 using Pyrolysis.Properties: skeletal_volume_fraction
@@ -243,6 +244,46 @@ if !isdefined(@__MODULE__, :VerificationCase)
             )
             cols[i]
         end
+    end
+
+    """
+        radiation_fields(problem; radiation_model = RADIATIVE_TRANSFER, kwargs...)
+
+    The radiation of `problem`'s consistent start, in the suite's energy
+    state: `setup` solves the radiation rows for the initial temperatures and
+    compositions, and nothing is integrated in time. Returns `retcode`
+    (`:Success`), the face fluxes `qm` (q⁻, toward the back) and `qp` (q⁺,
+    toward the exposed face) [W/m²] and the beams `I` (faces × directions),
+    every face ordered from the exposed face to the back, the cells'
+    absorption coefficients `κ` [1/m] and emissivities `ε` in the same
+    order, and the radiation
+    crossing the faces at the start, `absorbed`, `emitted` and `back` (the
+    outputs' `radiation_absorbed`, `_emitted` and `_back`). The cases whose
+    answer is the consistent start take it as their `solve_fn`; `kwargs` go
+    to `setup`.
+    """
+    function radiation_fields(problem; radiation_model = RADIATIVE_TRANSFER, kwargs...)
+        prepared = setup(
+            problem;
+            energy_state = VERIFICATION_ENERGY_STATE,
+            radiation_model,
+            kwargs...,
+        )
+        def, ds = prepared.def, prepared.ws.derived
+        derive!(ds, prepared.u0, def.layout, def.setup)
+        kernel = find_kernel(RadiativeTransferKernel, def.kernels)
+        faces = reverse(axes(ds.q, 2))   # on a line face 1 is the back
+        cells = reverse(eachindex(ds.α))
+        crossing = radiation_crossing(kernel, ds, first(problem.tspan))
+        return (;
+            retcode = :Success,
+            qm = ds.q[1, faces],
+            qp = ds.q[2, faces],
+            I = permutedims(ds.q[3:end, faces]),
+            κ = ds.α[cells],
+            ε = ds.ε[cells],
+            crossing...,
+        )
     end
 
     const VERIFICATION_CASE_BUILDERS = Function[]

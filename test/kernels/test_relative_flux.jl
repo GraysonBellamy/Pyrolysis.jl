@@ -11,7 +11,7 @@ using Pyrolysis.Assembly: residual!
 using Pyrolysis.ColoredJacobian
 using Pyrolysis.Integration
 using Pyrolysis.Integration: setup, integrate, consistent_state!, PreparedProblem
-using Pyrolysis.Closures: EquidistributionCorrection
+using Pyrolysis.Closures: EquidistributionCorrection, EQUIDISTRIBUTION_TIME
 
 const _L = 0.01
 
@@ -260,7 +260,7 @@ end
     cp = setup(
         problem;
         use_ale = true,
-        correction = EquidistributionCorrection(layers = :all),
+        correction = EquidistributionCorrection(layers = :all, τ = EQUIDISTRIBUTION_TIME),
     )
     # The third cell compressed to a fifth of its thickness, which activates
     # the correction at its nodes: the mesh crosses the empty second cell's

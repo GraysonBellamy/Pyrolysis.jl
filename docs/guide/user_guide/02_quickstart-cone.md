@@ -274,7 +274,7 @@ Other thermal BCs available (full reference in UG 5 / Technical Reference §12):
 | `AdiabaticBC()` | `0` | perfect insulation |
 | `HeatFluxBC(q)` | prescribed `q` or `q(t)` | `+` into domain; not subject to absorptivity |
 | `ConvectiveBC(; h, T_inf)` | `h(T_∞ − T_s)` | `h`, `T_inf` may be functions of `t` |
-| `RadiativeBC(; ε, T_inf, F)` | `ε·σ·(F·T_∞⁴ − T_s⁴)` | re-radiation; `F` scales the surroundings' irradiation only; `ε = nothing` ⇒ `ε_eff` |
+| `RadiativeBC(; ε, T_inf, F)` | `ε·σ·(F·T_∞⁴ − T_s⁴)` under `SURFACE_ABSORPTION`; zero at the face under `RADIATIVE_TRANSFER` | re-radiation; `F` scales the surroundings' irradiation only; `ε = nothing` ⇒ `ε_eff` |
 | `RadiativeFluxBC(flux; absorptivity)` | `a·flux`, `a` the absorptivity (model-dependent) | incident external radiation |
 | `DirichletThermalBC(T)` | enforces `T_s = T` | fixed-temperature face |
 | `bc1 + bc2 + …` | sum | `CombinedThermalBC` |
@@ -458,30 +458,34 @@ UG 10's subject.
 
 ### 2.6.2 Choosing the radiation model
 
-The cone heater's incident flux can be deposited at the surface or in depth;
-for an opaque solid like PMMA, surface absorption is the right, fast choice:
+The cone heater's radiation can be absorbed at the surface or carried through
+the solid; for an opaque solid like this deck's PMMA, surface absorption is the
+right, fast choice:
 
 | `radiation_model` | Behaviour | Use when |
 |---|---|---|
-| `SURFACE_ABSORPTION` (default) | A `RadiativeFluxBC` is absorbed *at the surface*, in the surface energy balance; component `α` is not read | opaque material (optical thickness ≫ 1) |
-| `BEER_LAMBERT` | In-depth exponential absorption using the component `α`; the `RadiativeFluxBC` contributes no boundary flux | semi-transparent material (polymers, foams) |
+| `SURFACE_ABSORPTION` (default) | A `RadiativeFluxBC` is absorbed *at the surface*, in the surface energy balance, and a `RadiativeBC` exchanges `ε·σ·(F·T_∞⁴ − T_s⁴)` there; component `α` is not read | opaque material (optical thickness ≫ 1) |
+| `RADIATIVE_TRANSFER` | Radiation crosses the exposed face at the exposed cell's emissivity and travels through the solid; every cell absorbs and emits at its `α`; the radiative conditions contribute nothing to the surface balance | semi-transparent material (polymers, foams) |
 
-Under `BEER_LAMBERT` the *same* `RadiativeFluxBC` is absorbed in depth
-(and returns zero as a boundary flux) — switching models changes where the
-energy goes, by design. The face intensities become algebraic unknowns of the
-state: the intensity entering the exposed face is `a·Φ`, with the condition's
-explicit `absorptivity` or, without one, the exposed cell's effective surface
-absorptivity (`= ε_eff` by Kirchhoff's law unless a component sets
-`absorptivity`), and each cell absorbs what the beam loses across it at its
-absorption coefficient. The surface temperature Newton solve still runs (it
-balances conducted, convective, and re-radiated flux). The absorbed power is
-reported in `solution.extras.volumetric_absorption` and the power leaving
-through the back face in `solution.extras.radiation_transmitted`; with every
-`α` zero the beam crosses the slab unabsorbed. `BEER_LAMBERT` needs planar
-coordinates and at most one `RadiativeFluxBC` on the exposed boundary;
-setup rejects multiple incident flux conditions. Sources sharing one
-absorptivity can be combined in a single flux function. See Technical
-Reference §8.
+Under `RADIATIVE_TRANSFER` the radiation field is two hemispherical fluxes per
+face, toward the back and toward the exposed face, unknowns of the state solved
+with it; the exposed face transmits the exposed cell's `ε_eff` in both
+directions, so the heater, the surroundings' `F·σ·T_∞⁴` and the solid's own
+emission all cross it at one emissivity. The surface temperature Newton solve
+still runs and balances conduction, convection and any prescribed flux. The
+radiation crossing the faces is reported through `solution.extras.radiation_absorbed`
+(entering through the exposed face), `radiation_emitted` (leaving through it) and
+`radiation_back` (leaving through the back).
+
+This deck cannot switch as it stands: radiative transfer refuses a diffuse
+`RadiativeFluxBC` with its own `absorptivity` and a `RadiativeBC` with its own `ε`,
+since the interface's transmissivity is the cell's emissivity both ways. To run it
+in depth, give the components their absorption coefficients `α`, drop `absorptivity`
+from the heater and `ε` from every `RadiativeBC`, the back's included (or send the
+heater in as a beam, `RadiativeFluxBC(q; absorptivity, distribution = Collimated())`,
+which may keep its absorptivity), and pass
+`radiation_model = RADIATIVE_TRANSFER`. It also needs a planar line. See §5.6 and
+Technical Reference §8.
 
 ### 2.6.3 Other solve options worth knowing
 
@@ -616,7 +620,7 @@ println("mass lost      = ",
         round((1 - total_m[end] / total_m[1]) * 100, digits = 1), " %")
 ```
 
-For this deck the peak surface temperature is 672.3 K, the peak MLR
+For this deck the peak surface temperature is 672.4 K, the peak MLR
 5.49 g/(m²·s), and the mass lost 92.7 % (values from a run of this script).
 The surface series read `NaN` once no live cell borders the surface, so take
 `maximum(filter(isfinite, T_surface))` on a run that burns out completely.
@@ -835,10 +839,11 @@ plot(solution; kind = :mlr)
 
 ## 2.11 What to do next
 
-- **Switch to in-depth radiation.** Set `radiation_model = BEER_LAMBERT` (the
-  solids already carry `α = 1.47` m²/kg) to model a semi-transparent polymer.
-  Compare the surface-temperature trace to the surface-absorption run above.
-  (Technical Reference §8.)
+- **Switch to radiative transfer.** Set `radiation_model = RADIATIVE_TRANSFER`
+  (the solids already carry `α = 1.47` m²/kg) to model a semi-transparent
+  polymer, after dropping `absorptivity` from the `RadiativeFluxBC` and `ε` from
+  the `RadiativeBC` members (§2.6.2). Compare the surface-temperature trace to the
+  surface-absorption run above. (Technical Reference §8.)
 - **Add pressure-driven transport.** Give a component a permeability `κ > 0` to
   switch the solver into lumped gas transport mode for pressure-treated wood or charring
   systems. (UG 7; Technical Reference §9.)

@@ -94,8 +94,11 @@ requires explicit superficial transfer `λ`. Zero `λ` closes wall transfer inde
 Darcy flow. Neither coefficient is inferred from gas loading.
 
 `ε` accepts a temperature law; `absorptivity` sets a constant incident-radiation
-absorptivity, with `nothing` applying Kirchhoff's relation. `α` is mass-based
-in-depth absorption and is used under `BEER_LAMBERT`.
+absorptivity, with `nothing` applying Kirchhoff's relation. `α` is the mass-based
+absorption coefficient of radiative transfer in the solid, read only under
+`RADIATIVE_TRANSFER`, where every cell absorbs and emits at `Σ ξ_j α_j`. Under
+radiative transfer a component's `absorptivity` applies to a collimated or cone
+heater only, and a diffuse heater on such a material is refused (§5.6).
 
 Bulk density `ρ` sets the volume a condensed component holds: its bulk
 occupancy `ξ/ρ` drives the volume-change law and weights conductivity,
@@ -110,7 +113,11 @@ conductivity when moisture is a separate component, since the moisture conducts
 by its own volume share; and where radiation crosses the pores or passes through
 a semi-transparent solid, put it into `k` as a `T^3` term,
 `k = k₀(T) + 16 n² σ T³ / (3 β)`, rather than into a constant chosen at one
-temperature. Heat capacities `c` are sensible: reaction and latent heats go into
+temperature. That term is for `SURFACE_ABSORPTION`. Under `RADIATIVE_TRANSFER` the
+solid's radiation travels through the radiation rows at the components' `α`, so `k`
+is the conductive part: do not also add a Rosseland term for that band, and nothing
+is subtracted for you. Radiation across pores smaller than a cell, as in a char,
+is not resolved by the rows and stays in `k` (Technical Reference §5.5, §8.6). Heat capacities `c` are sensible: reaction and latent heats go into
 the reactions, and a `c` law must stay physical over the temperatures a solve
 reaches, so continue a fit beyond its measured window at its low-temperature
 slope or hold it constant (Technical Reference §5.4).

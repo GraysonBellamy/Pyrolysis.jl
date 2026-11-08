@@ -257,8 +257,8 @@ comparison-accuracy CSV record all seven configurations.
 | V-GT-01: Gaussian gas diffusion | Excluded | Not run | Available | Profiles and variance growth |
 | V-GT-07a–b: diffusion through a mass film | Excluded | Available | Available | Profiles, uptake and inventory |
 
-Other retained comparisons include V-RAD-01 (Gpyro V2), the
-apparent-heat-capacity route of V-CPL-01 (Gpyro V2) and Gpyro V-GT-08.
+Other retained comparisons include the apparent-heat-capacity route of
+V-CPL-01 (Gpyro V2) and Gpyro V-GT-08.
 
 V-HC-04c remains an off-face geometry-resolution test. V-HC-04d places a
 Julia mesh face at the same physical 10.2 mm interface; both report prescribed
@@ -279,7 +279,6 @@ and `space_half` runs separate temporal and spatial sensitivity.
 |:--|:--|
 | Gas transport / FDS | No matching porous-solid gas storage and transport equations; gas-production capability does not supply them |
 | V-HC-03 / FDS | A matching pure net-flux boundary on a conducting material has not been established: `NET_HEAT_FLUX` is incompatible with `MATL_ID`, and external irradiation also emits thermal radiation |
-| V-RAD-01 / FDS | Native internal radiation includes emission; this benchmark specifies absorption-only deposition |
 | V-RX-02d | Package-specific smooth depletion limiter; ordinary zero-order burnout is a different equation |
 | V-RX-03 and V-RX-05c / FDS | Retained pore gas contributes storage and energy; FDS releases generated gas |
 | V-CPL-01 / additional FDS run | FDS samples heat capacity on a 1 K property table, which does not resolve this 0.316 K-wide Gaussian latent-heat peak; a tabulated trial is not published as the same closure |
@@ -287,7 +286,6 @@ and `space_half` runs separate temporal and spatial sensitivity.
 | V-CPL-02/02b, remaining V-CPL-03 permutations, V-CPL-05 | Full matching of gas retention/transport, reaction gates, deformation and lateral geometry laws has not been established; matching only an endpoint or an isolated TGA rate would not verify the full case |
 | V-CPL-04 runaway / bifurcation | Native Arrhenius self-heating alone lacks the benchmark's upper-temperature gate |
 | V-MMS and burnout regressions | Custom forcing, mesh/deactivation semantics or coupled gas laws are not represented by a matched native deck |
-| V-RAD-01 / ThermaKin2Ds | External radiation is deposited in one element per step (maximum or random absorption), not distributed by Beer–Lambert absorption |
 | V-CPL-01 / ThermaKin2Ds | Properties are p₀ + p₁T + p₂Tⁿ; there is no Gaussian latent-heat peak |
 | V-RX-02a/c / ThermaKin2Ds | Rates are first order in each of at most two reactants |
 | V-GT-02 to V-GT-06, V-GT-08 / ThermaKin2Ds | Gas transport is volume-fraction diffusion; there is no pressure, Darcy or dusty-gas law |

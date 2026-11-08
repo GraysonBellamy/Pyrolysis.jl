@@ -73,7 +73,7 @@ validation:
 1. **Kernel-level and exact-solution checks** (§18.2): the kernels tested in
    isolation (`test/kernels/`, `test/physics/`), and the cases of the verification
    suite compared against closed-form or manufactured solutions — conduction,
-   kinetics, in-depth absorption, gas transport, coupled fronts, the geometric
+   kinetics, radiative transfer, gas transport, coupled fronts, the geometric
    conservation law, burnout through a deactivation event.
 2. **Jacobian verification** (§18.3): the colored Jacobian compared per entry with
    the dense forward-mode reference of the whole residual, in the test suite. There
@@ -86,11 +86,13 @@ validation:
 4. **Convergence studies** (§18.5): spatial, temporal and tolerance refinement,
    confirming that the discretization error shrinks at the designed rate.
 5. **Code- and experiment-level validation** (§18.6): cone calorimeter, Douglas fir,
-   pressure-treated wood, moisture transport, against measurements and other codes.
+   pressure-treated wood, moisture transport and the MaCFP PMMA property sets, against
+   measurements and other codes.
 
 The first three run in the test suite, and the verification suite asserts
 convergence orders as well (§18.1.3); the convergence studies of §18.5 and the
-validation cases are scripted examples in `examples/`.
+validation cases are scripted examples in `examples/`, and the MaCFP PMMA suite is
+in `scripts/macfp_pmma/`.
 
 ### 18.1.3 The verification suite: test mode and report mode
 
@@ -193,11 +195,11 @@ against an exact or manufactured solution; the burnout cases V-BO-01, 02, 03 and
 |---|---|---|---|
 | Heat conduction | V-HC-01 – V-HC-05 | Carslaw–Jaeger erfc and eigenfunction series, resistance network, Kirchhoff transform | the convective surface Newton (V-HC-01; Biot sweep V-HC-02a–d), the constant-flux slab to its back-face plateau (V-HC-03), the harmonic-mean face conductivity at a layer jump on and off a face, including the same interface on a fitted mesh (V-HC-04a–d), $k(T)$ (V-HC-05) |
 | Kinetics and surface radiation | V-RX-01 – V-RX-08 | Bateman chain, Khawam–Flanagan isothermal integrals, parallel-reaction splits, implicit radiative-cooling law, insulated-reaction logarithmic temperature history, conversion-basis burnout on fixed and moving meshes (V-RX-06), a series scheme on conversions with an order other than one on the intermediate (V-RX-07), a graded conversion in the closed form cell by cell (V-RX-08) | multi-step coupling, reaction order and the depletion limiter (V-RX-02d keeps it on as a guard), two-product yields and heat superposition, `RadiativeBC` through the surface Newton, reaction heat and sensible-enthalpy formation with unequal species heat capacities |
-| In-depth radiation | V-RAD-01 | Lautenberger eigenfunction series | Beer–Lambert absorption with conduction and a convective face, including the sub-surface temperature peak |
+| Radiative transfer | V-RAD-01 – V-RAD-07 | closed forms of the two-stream rows, exact gray transfer, an independent method-of-lines solution of the same rows | equilibrium in an enclosure at the slab's temperature (V-RAD-01), a diffuse, collimated or cone heater through a slab (V-RAD-02), an isothermal slab's emission (V-RAD-03), a linear emissive power (V-RAD-04), the two-stream closure against exact transfer on burning profiles (V-RAD-05), the radiative energy ledger through burnout (V-RAD-06), in-depth heating with emission and a sub-surface temperature peak (V-RAD-07) |
 | Gas transport | V-GT-01 – V-GT-09 | Gaussian plane source, integrated wall/Darcy resistance, binary dusty-gas exchange, coupled thermal-film solution, Robin diffusion, prescribed-inflow Darcy $P^2$ profile, linear trace friction equation | wall transport and conservation, pressure closure and upwinding, interfaces and flow reversal, binary exchange, nonisothermal transport, transient mass-film uptake, imposed gas inflow and pressure outflow, multicomponent exchange with trace and absent species |
 | Coupled physics | V-CPL-01 – V-CPL-05 | Neumann two-phase Stefan solution, Landau ablation wave, exact shrink/swell endpoints, Frank-Kamenetskii slab, 0D TGA curve | a latent-heat front (apparent heat capacity, V-CPL-01; gated reaction, V-CPL-01b), surface regression on a moving mesh (V-CPL-02, 02b), volume change and the lateral-shrinkage law, the reaction–conduction bifurcation, the boundary and volume coupling of the kinetics |
-| Manufactured solutions | V-MMS-01 – V-MMS-04 | the manufactured-solution driver of §18.2 | design order of the coupled residual on a fixed mesh in space and time, free-stream preservation under prescribed motion, order under prescribed and reaction-driven motion |
-| Burnout | V-BO-01 – V-BO-12 | exact exponential thickness (V-BO-04); otherwise exact mass and thickness budgets, conservation ledgers and termination constraints | deactivation through complete burnout on a moving mesh under in-depth absorption (V-BO-01) and on a fixed mesh under surface absorption (V-BO-02); the transmitted-flux series (V-BO-03); the interior-void stop (V-BO-05, `expected_retcode = :Terminated`); a graded mesh (V-BO-06), a layer of mixed composition (V-BO-07) and a thin layer on a deep substrate (V-BO-08); burnout through the event path on the exact conversion at orders 0.5 and 1.2 (V-BO-09a, b); heated burnout without a residue at orders 0, 0.5 and 1.2 with its threshold and mesh pairs (V-BO-10a–c); a cell that dies under a live one at order one against the corrected default (V-BO-11) |
+| Manufactured solutions | V-MMS-01 – V-MMS-05 | the manufactured-solution driver of §18.2 | design order of the coupled residual on a fixed mesh in space and time, free-stream preservation under prescribed motion, order under prescribed and reaction-driven motion, order with radiative transfer on a moving mesh (V-MMS-05) |
+| Burnout | V-BO-01 – V-BO-12 | exact exponential thickness (V-BO-04); otherwise exact mass and thickness budgets, conservation ledgers and termination constraints | deactivation through complete burnout on a moving mesh under radiative transfer (V-BO-01) and on a fixed mesh under surface absorption (V-BO-02); the radiation leaving through a transparent substrate (V-BO-03); the interior-void stop (V-BO-05, `expected_retcode = :Terminated`); a graded mesh (V-BO-06), a layer of mixed composition (V-BO-07) and a thin layer on a deep substrate (V-BO-08); burnout through the event path on the exact conversion at orders 0.5 and 1.2 (V-BO-09a, b); heated burnout without a residue at orders 0, 0.5 and 1.2 with its threshold and mesh pairs (V-BO-10a–c); a cell that dies under a live one at order one against the corrected default (V-BO-11) |
 
 **Gpyro guide adaptations.** V-GT-07a/b, V-GT-08a/b and V-RX-05a–c cite
 Abdelhafiz et al., [*Gpyro Verification and Validation Manual*, version 1.0
@@ -233,25 +235,25 @@ functions have independent integral, constitutive-law and ODE checks in
 
 The burnout cases share V-BO-01's deck (`V-BO-01.jl` defines it, its step
 recorder and its QoIs): a 5.9 mm PMMA slab on 12 mm of Kaowool under 50 kW m⁻², the
-MaCFP PMMA gasification case with the Gpyro V2 property fits, solved at 60 PMMA
-cells (0.098 mm). V-BO-01 requires complete burnout, the exact mass of the PMMA
-layer lost, the peak gas-generation rate (32.39 g m⁻² s⁻¹ within 3 %), its time
-(335 s within 3 %) and the burnout time (363.5 s within 1 %) of a reference run of
-the deck, a mass ledger closed within $3\times10^{-5}$ (§18.4.1), and no accepted state
+MaCFP PMMA gasification case with the Gpyro V2 property fits under radiative transfer,
+the heater diffuse and the Kaowool's back open to the surroundings, solved at 60 PMMA
+cells (0.098 mm). V-BO-01 requires complete burnout (the live thickness at the end is
+the substrate's), the exact mass of the PMMA layer lost (within 0.3 % of the initial
+mass), a mass ledger closed within $3\times10^{-5}$ (§18.4.1), and no accepted state
 whose surface balance did not converge or sits on the trial clamp; the number of
-deactivation invocations is reported, not asserted. V-BO-02 runs the deck on a
-fixed mesh under surface absorption, where only the top cell deactivates, one cell
-at a time (60 events), with the live-cell temperature below 1000 K. V-BO-03 makes
-the substrate transparent and requires the transmitted flux
-(`extras.radiation_transmitted`) to exceed 1 % of the entering flux. V-BO-05 runs the
-deck on a fixed mesh under in-depth absorption, where the sub-surface temperature
-maximum empties the cells beneath a surface skin; it must stop with outcome
-`:interior` and return code `:Terminated` at 259.6 s, before any deactivation
-(§14.4). V-BO-06 grades the PMMA cells toward the surface (each 1/1.02 of the one
-beneath at 60 cells) under V-BO-01's references; V-BO-07 mixes in a second solid of
-half the density and a tenth of the pre-exponential factor, graded from none at
-the substrate to half at the surface, against its own reference run at 240 PMMA
-cells; V-BO-08 burns a 1 mm layer off the 12 mm substrate and requires the correction
+deactivation invocations is reported, not asserted. V-BO-02 runs the deck on a fixed
+mesh under surface absorption, where only the top cell deactivates, one cell at a time
+(60 events), with the live-cell temperature below 1000 K. V-BO-03 makes the substrate
+transparent and requires the radiation leaving through the back
+(`extras.radiation_back`) to exceed 1 % of the radiation entering
+(`extras.radiation_absorbed`); its share peaks at 0.889. V-BO-05 runs the deck on a
+fixed mesh, where the PMMA beneath the surface empties nearly uniformly, the exposed
+cell slowest; it must stop with outcome `:interior` and return code `:Terminated`
+before any deactivation (§14.4). V-BO-06 grades the PMMA cells toward the surface (each
+1/1.02 of the one beneath at 60 cells) under V-BO-01's requirements; V-BO-07 mixes in
+a second solid of half the density and a tenth of the pre-exponential factor, graded
+from none at the substrate to half at the surface, under the same requirements;
+V-BO-08 burns a 1 mm layer off the 12 mm substrate and requires the correction
 velocity to be exactly zero at every Kaowool node at every saved time.
 
 The cases from V-BO-09 hold the event path at reaction orders other than one and on
@@ -268,9 +270,10 @@ rate and the mass; the gate `burnout_order_zero.jl` holds `examples/06` to the s
 72 and 144 cells. V-BO-12b requires a char that keeps its volume to keep its cells: no
 event, and the burn without deactivation.
 
-Kernel-level checks sit beside the suite in the module tests: the Beer–Lambert beam's
-energy telescoping and the incident intensity under Kirchhoff's law and an explicit
-absorptivity (`test/kernels/test_radiation.jl`); the depletion limiter, the
+Kernel-level checks sit beside the suite in the module tests: the radiation rows
+against the exact two-stream solution, the telescoping of the cell sources, the
+isothermal equilibrium and the heaters' beams (`test/kernels/test_radiative_transfer.jl`),
+the interface's emissivity in both directions (`test/physics/test_radiation.jl`); the depletion limiter, the
 constant-heating-rate peak temperature and the Kissinger slope
 (`test/kernels/test_kinetics.jl`); the gas-transport fluxes, the vent and the
 upwind side at zero velocity (`test/kernels/test_gas_transport.jl`); the relative
@@ -290,7 +293,7 @@ touches them. The coverage matrix in
 `docs/guide/verification/comparison_coverage.md` identifies full and partial matches.
 Both FDS and Gpyro cover V-HC-01/02/04/05, V-RX-01, V-RX-02a–c, V-RX-04,
 V-RX-05a–b, V-CPL-03 P1/P2/P3 and the subcritical V-CPL-04 steady profile.
-Gpyro additionally covers V-HC-03, V-RAD-01, the apparent-heat-capacity route
+Gpyro additionally covers V-HC-03, the apparent-heat-capacity route
 of V-CPL-01, V-GT-07/08 and V-RX-05c. The FDS flux-input restriction is
 discussed in §12.11.3.
 A series marked `crosscode = true` is drawn as a muted
@@ -312,7 +315,7 @@ In particular, FDS V-RX-05a–b uses `ADJUST_H=F` to match the specified local
 reaction heat. No gas-transport comparison is attributed to FDS, and the
 V-CPL-04 comparison does not extend to the upper-temperature-gated runaway branch.
 
-The reports compare accuracy, and each case compares cost at matched accuracy: for each external run, that code's cheapest run at least as accurate against this code's cheapest resolution at least as accurate on every scored reference. The ratio is a cost at equal accuracy for that problem, not a pure solver speedup; on the smallest problems the external times are mostly input, setup and output. See the [comparison basis](../verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions and time refinement. ThermaKin2Ds cannot express V-RAD-01, V-CPL-01, V-RX-02a/c or the pressure-driven V-GT-02–06 and V-GT-08; the [coverage matrix](../verification/comparison_coverage.md) gives the reasons.
+The reports compare accuracy, and each case compares cost at matched accuracy: for each external run, that code's cheapest run at least as accurate against this code's cheapest mesh and solver tolerance at least as accurate on every scored reference. The ratio is a cost at equal accuracy for that problem, not a pure solver speedup; on the smallest problems the external times are mostly input, setup and output. See the [comparison basis](../verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions and time refinement. ThermaKin2Ds cannot express V-CPL-01, V-RX-02a/c or the pressure-driven V-GT-02–06 and V-GT-08; the [coverage matrix](../verification/comparison_coverage.md) gives the reasons.
 
 ---
 
@@ -490,55 +493,51 @@ Two implementation details must be accounted for when the check is made
   on to require a nonnegative residue below its conversion threshold at twice the
   zero-order burnout time.
 
-### 18.2.3 Beer–Lambert transmitted fraction
+### 18.2.3 Radiative transfer: the rows, equilibrium and conservation
 
-The in-depth radiation model (§8.3) carries the intensity of every face as an
-algebraic unknown (§13.5.2): at the face the beam enters,
-$0=I_e-a\,q_\mathrm{inc}(t)$; at every other face,
-$0=I_\text{down}-I_\text{up}e^{-\tau_i}$ with $\tau_i=\alpha_i\Delta z_i$ the cell's
-optical thickness; and each cell absorbs $I_\text{up}A_\text{up}-I_\text{down}A_\text{down}$,
-the exact cell average of the attenuated beam,
+The radiative transfer rows (§8.3.3) are the exact solution of the gray two-stream
+equations across each cell for its constant emissive power, so for frozen
+temperatures and absorption coefficients they have closed forms
+(`test/verification/exact/two_stream.jl`, with its own self-tests in
+`test/verification/exact/selftests.jl`):
 
-$$
-q'''_i\,\Delta z_i=I_\text{up}\bigl(1-e^{-\tau_i}\bigr)\quad\text{(planar)} .
-$$
+- **Equilibrium.** An isothermal slab facing diffuse radiation at its own temperature
+  has $I^- = I^+ = \sigma T^4$ on every face and no source, at any optical thickness,
+  mesh and emissivity, behind a mirror or an open back. V-RAD-01 asserts it on the
+  rows to $10^{-12}\sigma T^4$ for $\alpha L = 10^{-3}$–$10^{3}$ and, integrated in time
+  through the whole solver, every cell held at the surroundings' temperature to
+  $10^{-8}$ K.
+- **Isothermal emission.** A slab at $\sigma T^4$ facing 0 K through an exposed face of
+  transmissivity $\varepsilon$ emits $\varepsilon\sigma T^4(1-t^2)/(1-(1-\varepsilon)t^2)$
+  behind a mirror, with $t$ standing for $e^{-\tau_L/\bar\mu}$ and $\tau_L$ the slab's
+  optical thickness, independent of the mesh (V-RAD-03, with
+  the open backs, to $10^{-12}$).
+- **A heater through a slab.** Collimated, diffuse and cone heaters through a cold
+  slab, by superposition on the solver's consistent start (V-RAD-02, to $10^{-12}$ of
+  the absorbed flux); three cone beams against the exact cone integral.
+- **Linear emissive power.** A drop $\Delta\mathcal B$ per cell carries the net flux
+  $\Delta\mathcal B\coth\big(\tau_i/(2\bar\mu)\big)$ at every face (V-RAD-04), which
+  exceeds the Rosseland flux by about $\tau_i^2/(12\bar\mu^2)$ of it for thin cells (§8.6).
 
-Two exact energy identities verify the kernel:
-
-- **Total absorbed flux.** The absorbed energy telescopes,
-
-  $$
-  \sum_iq'''_i\,\Delta z_i=a\,q_\mathrm{inc}\big(1-e^{-\tau_\mathrm{total}}\big),
-  \qquad\tau_\mathrm{total}=\sum_i\alpha_i\Delta z_i,
-  $$
-
-  exact at the discrete level and independent of the cell count, because each cell
-  deposits $I_\text{up}(1-e^{-\tau_i})$ and passes $I_\text{up}e^{-\tau_i}$ on. Here $a$
-  is the effective absorptivity of the exposed cell (Kirchhoff's law unless a
-  component sets its own) or the condition's explicit absorptivity (§12.3.5). The
-  solution reports it as `extras.volumetric_absorption`.
-- **Transmitted fraction.** The intensity leaving the last face is
-  $a\,q_\mathrm{inc}e^{-\tau_\mathrm{total}}$, reported as `extras.radiation_transmitted`.
-  Absorbed plus transmitted equals $a\,q_\mathrm{inc}$ to round-off; the remaining
-  $(1-a)\,q_\mathrm{inc}$ is reflected at the surface and never enters the medium.
-
-`test/kernels/test_radiation.jl` ("the beam's energy telescopes, Kirchhoff and
-explicit absorptivity") asserts at a consistent state that the entering intensity is
-$a\,q_\mathrm{inc}$ to $10^{-14}$, that every cell absorbs $I_\text{up}(1-e^{-\tau_i})$ and
-the last face carries the transmitted intensity to $10^{-12}$, and that absorbed plus
-transmitted equals the entering intensity to $10^{-12}$, under both absorptivity
-paths. A transparent cell ($\alpha_i=0$) absorbs nothing and passes the whole
-intensity; in the opposite limit $\tau_1\gg1$ the exposed cell absorbs the entering
-intensity $a\,q_\mathrm{inc}$ entirely, the volumetric counterpart of
-`SURFACE_ABSORPTION`, which applies the same $a\,q_\mathrm{inc}$ at the face (§8.2).
-V-RAD-01 couples the kernel with conduction and a convective face against
-Lautenberger's eigenfunction solution, and V-BO-03 exercises the transmitted series
-through a burnout.
+`test/kernels/test_radiative_transfer.jl` asserts the rows against
+`two_stream_solve` to $10^{-12}$ for frozen piecewise-constant profiles, both backs,
+diffuse and beam heaters and a first live cell inside the column ("rows against the
+exact two-stream solution"); that the cell sources sum to the net radiation entering
+through the exposed face less the net radiation leaving through the back at arbitrary
+trial fluxes ("the cell sources telescope"); and that at a consistent state the three
+extras balance the sources and `radiation_emitted` equals $\varepsilon_e I^+_e$ ("the
+radiation crossing the faces at a consistent state"). A transparent cell
+($\alpha_i=0$) passes every flux unchanged; in the opposite limit $\tau_1\gg1$ the
+exposed cell absorbs what crosses the interface and emits at its own temperature.
+V-RAD-07 couples the rows with conduction and a convective face against an
+independent method-of-lines solution, V-RAD-06 closes the radiative energy ledger
+through burnout at every accepted step, and V-MMS-05 measures second order with
+radiative transfer on a moving mesh.
 
 The incident flux is sampled at every residual evaluation:
 `test/kernels/test_boundary_conditions.jl` ("a time-varying incident flux is sampled
 at every evaluation") solves under $q_0(1+\sin2\pi t)$ and under $q_0$ and requires
-the absorbed intensity at $t=0.25$ s to be twice the constant run's, to $10^{-4}$
+the radiation entering at $t=0.25$ s to be twice the constant run's, to $10^{-12}$
 (a flux frozen at its initial value would make the two runs identical, since
 $\sin 0=\sin2\pi=0$).
 
@@ -668,7 +667,7 @@ of the reference and equal it per entry at `rtol = 1e-12`. The containment tests
 finite residual and reference, an empty `missing_entries`, a colored Jacobian with
 the pattern's structure, and that agreement. They cover fixed and moving columns of a
 PMMA-like and a permeable wood-like material, without radiation, with surface
-absorption and with in-depth absorption, with wall and pressure-driven lumped transport, in
+absorption and with radiative transfer, with wall and pressure-driven lumped transport, in
 both energy forms and at 6 and 8 cells; at the set-up state, at uniform hot, hot and
 gas-heavy, partially decomposed and mixed reacting states, and at trial states
 outside the physical domain (perturbed, zero and negated states); the chain-rule
@@ -681,8 +680,8 @@ boundary mass flux on the energy row; and a surface absorptivity and an emissivi
 that depend on temperature. The dense reference equals central differences to
 $10^{-6}$ per entry with the same row floor (the testset "the dense Jacobian equals
 central differences"). Each kernel's tests repeat the containment check for its own
-physics (`test/kernels/test_gas_transport.jl`, `test_radiation.jl`,
-`test_relative_flux.jl`), and `test/assembly/test_residual_jacobian.jl` checks the
+physics (`test/kernels/test_gas_transport.jl`, `test_radiative_transfer.jl`,
+`test_relative_flux.jl`; `test/jacobian/test_radiative_containment.jl`), and `test/assembly/test_residual_jacobian.jl` checks the
 assembled residual and Jacobian on a stretched mesh under closed-form, convective and
 combined boundary conditions, on and off the physical states. A residual and a
 colored Jacobian allocate nothing after warm-up (`test/jacobian/test_allocations.jl`),
@@ -888,8 +887,9 @@ smooth solutions: the two-point face gradient and the harmonic-mean face coeffic
 are $O(\Delta z^2)$ on a uniform mesh, and the distance-weighted forms keep second order
 on smoothly stretched meshes (§13.6). The verification suite asserts the orders against
 exact solutions where it can: expected order 2 (each observed order above 1.5 and their
-mean above 1.8) for V-HC-01, 02c, 03 and 05, V-RAD-01, V-GT-01, V-CPL-04 and V-MMS-01
-and 03, and above 1.7 with a mean above 1.9 for V-MMS-04; V-HC-01 observes 1.991 and
+mean above 1.8) for V-HC-01, 02c, 03 and 05, V-GT-01, V-CPL-04 and V-MMS-01 and 03,
+above 1.7 with a mean above 1.9 for V-MMS-04, and above 1.8 for the radiative transfer
+of V-RAD-07 and V-MMS-05, with means above 1.8 and 1.85; V-HC-01 observes 1.991 and
 1.998. V-GT-02 expects first order (observed 0.89 and 0.94), the signature of the
 first-order upwind Darcy advection (§13.7.3, §18.7.3). The boundary faces are first-order
 (§13.12); the manufactured-solution cases impose fluxes there so that they do not cap
@@ -925,7 +925,7 @@ Stefan problem on a mesh stretched toward the cold wall (about 14 μm at the wal
 energy-row test runs on stretched meshes (§18.4.3), the relative fluxes converge above
 order 1.5 on cells alternating between $h$ and $2h$ (`test/kernels/test_relative_flux.jl`),
 and V-BO-06 burns the V-BO-01 layer on a mesh graded threefold toward the surface under
-V-BO-01's references. An incorrect non-uniform treatment shows up as a loss of order on
+V-BO-01's requirements. An incorrect non-uniform treatment shows up as a loss of order on
 the stretched run that is absent on the uniform one.
 
 ### 18.5.2 Temporal convergence
@@ -965,25 +965,27 @@ the *model* rather than of the *discretization*.
 **Burnout: joint refinement of the mesh and the tolerance.** Through a burnout the
 deactivation threshold is a numerical parameter too, and the end-of-layer burst (the
 largest per-step mass-loss rate just after a layer's deactivation) is the sensitive
-quantity. The burnout path (the equidistribution correction with its layer time set at
-activation, the near-threshold band, located events) is verified under joint refinement
+quantity. The burnout path (the equidistribution correction with its layer time estimated
+twice, the near-threshold band, located events) is verified under joint refinement
 of the mesh and the tolerance on five decks built on V-BO-01: the uniform mesh, the mesh
 graded threefold toward the surface (V-BO-06), the mixed layer (V-BO-07), the 1 mm layer
 (V-BO-08), and the 5.9 mm layer with a convective loss in place of re-radiation and an
 adiabatic back. Inside the supported envelope every QoI (complete burnout, the mass lost,
-the peak and its time, the burnout time, the mass ledger) is within tolerance at every
-resolution and the burst converges (the largest per-step excess of $N$ cells over $2N$ and
-the successive $L_1$ differences falling at least 1.5× per doubling): $\varepsilon_m=3\times10^{-3}$
-with $\varepsilon_\text{band}=0.1$ on all five decks from 30 cells across the layer (10 on
-the 1 mm layer); the default $\varepsilon_m=10^{-2}$ with $\varepsilon_\text{band}=0.1$ on the
-single-solid layers from 30 cells (60 on the convective-loss deck) but not on the mixed
-layer (§18.8.2); at `reltol` $10^{-6}$ and $10^{-7}$, in either energy form, and with
-either activation bound pair $(0.3,0.1)$ and $(0.7,0.3)$. At 30 cells the largest per-step
-rate just after a layer's deactivation can exceed the main peak, up to threefold on the
-graded mesh; it falls below the main peak by 60 to 120 cells, and the peak sampled at the
-output times is within tolerance from 30 cells. V-BO-01 at 25 and 100 kW m⁻², at half and
-twice its pre-exponential factor and with its flux stepped after activation, at 30 to 120
-cells, passes the same QoIs, the hot decks with two invocations. Materials outside these
+the mass ledger, a converged surface balance) is within tolerance at every resolution and
+the burst converges (the largest per-step excess of $N$ cells over $2N$ and the successive
+$L_1$ differences falling at least 1.5× per doubling): $\varepsilon_m=10^{-2}$ with $\varepsilon_{\text{band}}=0.1$, the default, on all five decks
+from 30 cells across the layer (10 on the 1 mm layer) under the default activation, and
+from 60 cells on the mixed layer and the convective-loss deck under $(0.7,0.3)$; and
+$\varepsilon_m=3\times10^{-3}$ with $\varepsilon_{\text{band}}=0.1$ on the uniform and 1 mm
+layers and the convective-loss deck from 30 cells (60 under $(0.7,0.3)$ on the last), on
+the graded mesh from 60, and on the mixed layer from 60 under the default activation
+only, since under $(0.7,0.3)$ it does not burn out at 30 and 60 cells;
+at `reltol` $10^{-6}$ and $10^{-7}$, the enthalpy form checked at each deck's CI resolution. The largest per-step rate
+just after a layer's deactivation stays below the main peak on every deck but the graded
+mesh at 30 cells, where it exceeds it by up to 9.5 %. V-BO-01 at 25 and 100 kW m⁻², at half
+and twice its pre-exponential factor and with its flux halved or raised by half at 150 s,
+at 30 to 120 cells, passes the same QoIs in one or two invocations; its burst converges
+on all but the 100 kW m⁻² deck and the raised flux (§18.8.2). Materials outside these
 decks (other materials, thicker or charring layers, higher heating) are not inside the
 envelope by this study. The full statement with its numerical parameters is §14.2.4 and
 User Guide chapter 10.
@@ -1080,7 +1082,7 @@ separate modeling differences from numerical errors. Remaining disagreement
 can arise from either, from input transcription, or from output definitions.
 
 - **ThermaKin2Ds:** match reaction extent, heat sign, component properties,
-  gas-transport and radiation algorithms (§§6.9, 8.7, 9.2). Its bimolecular
+  gas-transport and radiation algorithms (§§6.9, 8.9, 9.2). Its bimolecular
   kinetics and general 2D configurations are not represented by our
   single-reactant 1D solves. Replacing a bimolecular reaction by a sequence
   is a new model, not an exact conversion. The ThermaKin2Ds 7 overlays
@@ -1097,15 +1099,57 @@ can arise from either, from input transcription, or from output definitions.
 - **FDS:** the retained 6.11.1 overlays concern matched solid conduction,
   reaction kinetics/heat, radiative boundaries, solid-only volume change
   and subcritical thermal feedback (§18.1.3). Its instantaneous gas release and optional two-flux
-  radiation are not general equivalents of our transport and Beer–Lambert
-  models. Even negligible in-depth emission does not remove the angular
-  attenuation difference (§8.7.3).
+  radiation are not general equivalents of our transport and radiative transfer
+  models: its two-flux closure attenuates a diffuse field at $2\kappa_s$ where our
+  two-stream rows attenuate at $1.5\,\alpha$, and integrates each cell implicitly to
+  first order (§8.9.3). At that attenuation on FDS's cells, with the item FDS cannot
+  express aligned on UMD, UMET_GP and UMET_TK, the eight MaCFP PMMA property sets that
+  absorb in depth agree with FDS 6.11.1 within 0.71 % in the time to half mass loss and
+  in peak mass-loss rate (§18.6.5).
 
 The benchmark definitions, actual input decks and exact-solution errors
 provide the evidence for each comparison (§18.1.3). The MaCFP community
 predictions use differing calibrated models; their spread is not a
 solver-only verification result. Cost is compared only at matched accuracy
 (§18.1.3).
+
+### 18.6.5 MaCFP PMMA property sets
+
+The MaCFP condensed-phase working group's database (matl-db, read at a pinned commit)
+holds property sets for one black PMMA, each calibrated by an institution in its own
+code; for the 2021 sets it also holds that institution's predictions of the MaCFP-2
+targets (TGA at 10 and 100 K/min; anaerobic gasification of 6 and 12 mm slabs at 10, 25
+and 65 kW/m² with an insulated back), and for most sets their predictions of the MaCFP-3
+experiments in the NIST gasification apparatus. `scripts/macfp_pmma/` runs every set in
+Pyrolysis.jl, FDS 6.11.1, Gpyro V2 and ThermaKin2Ds 7 from one solver-neutral deck per
+set, and its `report.jl` writes the [MaCFP PMMA validation](../validation/macfp_pmma.md)
+page from those runs. The submissions are calibrated models, not measurements: agreement
+with them tests how faithfully a deck and a code reproduce another code's model, and the
+apparatus experiments are the measurements.
+
+Sets that absorb at the surface run under `SURFACE_ABSORPTION`. On them, BUW-FZJ_A aside,
+Pyrolysis.jl and FDS solve the same problem and agree to 0.0–0.3 % in the median time to
+half mass loss, $t_{50}$, and the runs that reproduce what a group evidently ran
+(BUW-FZJ_B's convection, DBI_1's temperature tables read as °C, Aalto's 303 K start) agree
+with those submissions to 0.04, 2.2 and 0.2 % in median $t_{50}$. Sets with an absorption
+coefficient run under `RADIATIVE_TRANSFER` with a diffuse heater and a mirror back. Per
+set, their median $|\Delta t_{50}|$ is 0.8–5.5 % to the submissions and 0.6–3.4 % to FDS;
+matched to FDS's attenuation (§8.9.3), with the item FDS cannot express aligned on UMD,
+UMET_GP and UMET_TK, every case of the eight agrees within 0.71 % in $t_{50}$ and peak
+mass-loss rate. The differences to Gpyro V2 and ThermaKin2Ds follow their deposition: of
+the variants that absorb in depth, the shallowest-depositing one is closest to Gpyro's
+net-flux march on three of the four in-depth sets Gpyro runs, and surface absorption is
+closest to ThermaKin2Ds' `MAX` mode on all four in-depth sets it runs. BUW-FZJ_A, whose
+low-emissivity residue collects in the surface cell, depends on the cell size in every
+code and, in Pyrolysis.jl, on how long the moving mesh keeps a burnt-out layer in the
+surface cell; it is reported apart.
+
+In the apparatus one shared deck (convection, walls, the Kaowool board, a cone heater
+inferred from the measured flux profile) runs every set, and MaCFP's normalized RMS
+scores the runs against the measured repeats beside the groups' own predictions. On the
+apparatus's inert Kaowool stack the shared deck runs above the measurements, by 6–27 K at
+5.72 mm and by up to 93 K at 17.16 mm after 1200 s, so the back-temperature scores
+measure the shared deck as much as the property sets.
 
 ---
 
@@ -1128,17 +1172,19 @@ $$
 with $\alpha_j$ the components' mass absorption coefficients (m² kg⁻¹), selects the
 radiation model (§8): for $\tau_\mathrm{total}\gg1$ the incident flux is absorbed within a
 few cells of the surface and `SURFACE_ABSORPTION` is adequate; for an intermediate or
-thin column `BEER_LAMBERT` distributes it in depth; for $\tau_\mathrm{total}\ll1$ the
-medium is effectively transparent. The package computes no regime verdict; $\tau$
-follows by hand from the components' absorption coefficients and the cell
-thicknesses, and a solve under `BEER_LAMBERT` reports the absorbed and the transmitted
-intensity at every saved time (`sol.extras.volumetric_absorption`,
-`sol.extras.radiation_transmitted`). A transmitted share that is not small means that
-flux leaves through the back face without heating the column, a regime that a back-face
-condition or a substrate layer must represent; V-BO-03 exercises it on a transparent
-substrate (its transmitted share exceeds 1 % of the entering flux as the PMMA thins).
-The absorbed-plus-transmitted identity of §18.2.3 is the underlying conservation check;
-the regime judgement layers on top of it.
+thin column `RADIATIVE_TRANSFER` carries it through the depth, with the column's own
+emission; for $\tau_\mathrm{total}\ll1$ the medium is effectively transparent. The
+package computes no regime verdict; $\tau$ follows by hand from the components'
+absorption coefficients and the cell thicknesses, and a solve under
+`RADIATIVE_TRANSFER` reports the radiation crossing the exposed face inward and outward
+and the net radiation leaving through the back at every saved time
+(`sol.extras.radiation_absorbed`, `radiation_emitted`, `radiation_back`). A back share
+that is not small means that radiation leaves through an open back without heating the
+column; a mirror back keeps it in. V-BO-03 exercises it on a transparent substrate
+(its back share exceeds 1 % of the radiation entering as the PMMA thins). Within a
+column the mesh criterion of §8.6 ($\alpha_i\Delta z_i \le 0.5$ where the emission
+matters) decides the resolution. The telescoping identity of §18.2.3 is the underlying
+conservation check; the regime judgement layers on top of it.
 
 ### 18.7.2 Pore-gas thermal equilibrium
 
@@ -1214,18 +1260,17 @@ implementation; experimental data are needed to validate material parameters.
 
 The burnout path is verified inside the envelope of §18.5.3 (§14.2.4). Outside it the
 QoIs can still pass while the end-of-layer burst (the largest per-step mass-loss rate
-just after a layer's deactivation) does not converge with resolution. V-BO-07, the layer
-of mixed composition, is the documented case: at the default $\varepsilon_m=10^{-2}$ its
-QoIs pass at the CI resolution, but under refinement the largest per-step excess of $N$
-cells over $2N$ stops falling between 120 and 240 cells, while at
-$\varepsilon_m=3\times10^{-3}$ it falls by a factor of two per doubling. When the first
-cell of that layer crosses $\varepsilon_m$, the others still hold up to about 6 % of their
-initial mass (the slow solid concentrated near the surface), so one invocation merges
-cells far from their threshold. The convective-loss deck at $\varepsilon_m=10^{-2}$ takes
-two invocations from 60 cells. A run whose layer is not of the decks' kind, or whose
-invocation count is above one, should be checked by refinement at a lower threshold
-before its burst is trusted; the integrated QoIs (mass lost, burnout time) are the robust
-ones.
+just after a layer's deactivation) does not converge with resolution. The V-BO-01 deck at
+100 kW m⁻², and the same deck with its flux raised by half at 150 s, are the documented
+cases: their QoIs pass at 30 to 120 cells, but the largest per-step excess of $N$ cells
+over $2N$ falls only 1.23 and 1.40 times per doubling, short of 1.5, and both leave the
+layer in two invocations. The mixed layer of V-BO-07 is inside the envelope at the default
+threshold, its other cells holding at most 3.9 % of their initial mass when the first
+crosses $\varepsilon_m=10^{-2}$; under the activation $(0.7,0.3)$ at
+$\varepsilon_m=3\times10^{-3}$ it does not burn out at 30 and 60 cells. A run whose layer is
+not of the decks' kind, or whose heating is outside theirs, should be checked by
+refinement before its burst is trusted; the integrated QoIs (mass lost, complete burnout,
+the ledger) are the robust ones.
 
 ### 18.8.3 Sensitivities across deactivation events
 
@@ -1256,7 +1301,7 @@ dependence.
 ### 18.8.5 Stale-flux regression
 
 One silent failure mode carries a standing regression guard. The incident radiative flux
-is evaluated at *every* residual evaluation with no constancy detection (§8.3.4, §13.5.2),
+is evaluated at *every* residual evaluation with no constancy detection (§8.4, §13.5.2),
 so a time-varying flux can never be frozen at its initial value. A regression would be
 silent, so the modulated-flux comparison under $q_0(1+\sin2\pi t)$ against a constant
 $q_0$ (§18.2.3) is kept as a permanent check in `test/kernels/test_boundary_conditions.jl`.
@@ -1318,8 +1363,10 @@ through `Pkg.test()`. The verification machinery of this chapter has direct cove
   for donor enthalpy and thermal-film conversion.
 - The verification suite: `test/verification/runcases.jl` runs every case of
   `test/verification/cases/` in assert mode (§18.1.3).
-- Radiation: `test/kernels/test_radiation.jl` (the beam's energy, the absorptivity
-  paths, the moving mesh, planar coordinates only) and
+- Radiation: `test/kernels/test_radiative_transfer.jl` (the rows against the exact
+  two-stream solution, the telescoping sources, the equilibrium, the heaters' beams,
+  the moving mesh, planar coordinates only), `test/physics/test_radiation.jl` (the
+  absorption coefficient, the interface's emissivity) and
   `test/kernels/test_boundary_conditions.jl` (the time-varying incident flux).
 - Determinism: `test/integration/test_policies.jl` and `test/closures/test_correction.jl`
   require repeated solves to be bit-identical under each linear solver, with in-depth
@@ -1351,11 +1398,12 @@ The V&V coverage above has gaps that a user should weigh:
 
 1. **MMS coverage.** The manufactured-solution driver (§18.2) covers the coupled residual
    on a fixed mesh (conduction with temperature-dependent properties, two-step kinetics
-   with reaction heat, lumped wall gas transport) and the moving mesh under prescribed and
-   reaction-driven motion. In-depth radiation, gas transport, the variable cross
-   section and deactivation are verified by exact solutions and ledgers (V-RAD-01,
-   V-GT-02, V-CPL-03, V-BO-04) rather than by a manufactured order study, and the boundary
-   faces enter the manufactured cases as imposed fluxes only.
+   with reaction heat, lumped wall gas transport), the moving mesh under prescribed and
+   reaction-driven motion, and radiative transfer with a smooth, uniform absorption
+   coefficient and no beam (V-MMS-05). Gas transport, the variable cross section and
+   deactivation are verified by exact solutions and ledgers (V-GT-02, V-CPL-03, V-BO-04)
+   rather than by a manufactured order study, and the boundary faces enter the
+   manufactured cases as imposed fluxes only.
 
 2. **Convergence reference is self-consistent, not exact, for the full cases.** The
    convergence studies of the validation cases use the finest mesh as the reference
@@ -1385,7 +1433,7 @@ The V&V coverage above has gaps that a user should weigh:
    estimates and the empirical shrinkage laws are unvalidated or simplified, and cases that
    lean on them inherit that uncertainty.
 
-7. **Cross-code coverage.** ThermaKin2Ds cannot express V-RAD-01, V-CPL-01,
+7. **Cross-code coverage.** ThermaKin2Ds cannot express V-CPL-01,
    V-RX-02a/c or the pressure-driven gas cases, and its runs can be reproduced
    only where its non-redistributable source is available. FDS has no
    gas-transport comparison. The MaCFP-2 PMMA community submissions, committed under

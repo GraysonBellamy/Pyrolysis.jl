@@ -1,6 +1,6 @@
 using Test
 using Pyrolysis
-using Pyrolysis.Materials: BEER_LAMBERT
+using Pyrolysis.Materials: RADIATIVE_TRANSFER
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.Kernels:
@@ -8,10 +8,11 @@ using Pyrolysis.Kernels:
     ConductionKernel,
     GasTransportKernel,
     ThermalBoundaryKernel,
-    BeerLambertKernel,
+    RadiativeTransferKernel,
     RelativeFluxKernel,
     find_kernel
-using Pyrolysis.Closures: NoCorrection, EquidistributionCorrection
+using Pyrolysis.Closures:
+    NoCorrection, EquidistributionCorrection, EQUIDISTRIBUTION_TIME, slot_gains!
 using Pyrolysis.Deactivation
 using Pyrolysis.Integration
 using Pyrolysis.Integration: setup, integrate
@@ -62,13 +63,13 @@ const _T = [640.0, 630.0, 625.0, 610.0, 600.0, 590.0, 585.0, 570.0]
 const _L = [2, 2, 2, 1, 1, 1, 1, 1]
 const _R = [500.0, 480.0, 450.0, 400.0, 390.0, 370.0, 360.0, 340.0]
 
-_set_up(p, energy; radiating = false) = setup(
+_set_up(p, energy; model = SURFACE_ABSORPTION) = setup(
     p;
     energy_state = energy,
     use_ale = true,
     deactivation = true,
     correction = NoCorrection(),
-    radiation_model = radiating ? BEER_LAMBERT : SURFACE_ABSORPTION,
+    radiation_model = model,
 )
 
 # The registered tables by name: (kind, live array).
@@ -89,8 +90,8 @@ function _named_tables(cp)
     )
     gas = find_kernel(GasTransportKernel, k)
     gas === nothing || (out["gas floor"] = (:face, gas.d_floor))
-    beam = find_kernel(BeerLambertKernel, k)
-    beam === nothing || (out["beam floor"] = (:matrix, beam.d_floor))
+    transfer = find_kernel(RadiativeTransferKernel, k)
+    transfer === nothing || (out["transfer floor"] = (:matrix, transfer.d_floor))
     return out
 end
 
@@ -255,46 +256,42 @@ function _compare_with_fresh(cp, fresh, top)
     end
 end
 
-@testset "a removed cell's tables equal a fresh setup without it: cell $k, $(energy) form, $(radiating ? "in-depth" : "surface") radiation" for k in
-                                                                                                                                                (
+@testset "a removed cell's tables equal a fresh setup without it: cell $k, $(energy) form, $(model)" for k in
+                                                                                                         (
         1,
         3,
         5,
         7,
     ),
     energy in (:temperature, :enthalpy),
-    radiating in (false, true)
+    model in (SURFACE_ABSORPTION, RADIATIVE_TRANSFER)
 
-    cp = _set_up(_column(_H, _T, _L, _R; radiating), energy; radiating)
+    radiating = model !== SURFACE_ABSORPTION
+    cp = _set_up(_column(_H, _T, _L, _R; radiating), energy; model)
     keep = [i for i = 1:8 if i != k]
-    fresh = _set_up(
-        _column(_H[keep], _T[keep], _L[keep], _R[keep]; radiating),
-        energy;
-        radiating,
-    )
+    fresh =
+        _set_up(_column(_H[keep], _T[keep], _L[keep], _R[keep]; radiating), energy; model)
     layout, cells = cp.def.layout, cp.deactivation
     _kill!(cells, layout, 8)
     arrange_slots!(cells.tables, layout, vcat(keep, k), Tuple{Int,Int,Float64}[])
     _compare_with_fresh(cp, fresh, 7)
 end
 
-@testset "a cell a pass takes from under live cells leaves the tables of a fresh setup: cell $k, $(energy) form, $(radiating ? "in-depth" : "surface") radiation" for k in
-                                                                                                                                                                      (
+@testset "a cell a pass takes from under live cells leaves the tables of a fresh setup: cell $k, $(energy) form, $(model)" for k in
+                                                                                                                               (
         1,
         3,
         5,
         7,
     ),
     energy in (:temperature, :enthalpy),
-    radiating in (false, true)
+    model in (SURFACE_ABSORPTION, RADIATIVE_TRANSFER)
 
-    cp = _set_up(_column(_H, _T, _L, _R; radiating), energy; radiating)
+    radiating = model !== SURFACE_ABSORPTION
+    cp = _set_up(_column(_H, _T, _L, _R; radiating), energy; model)
     keep = [i for i = 1:8 if i != k]
-    fresh = _set_up(
-        _column(_H[keep], _T[keep], _L[keep], _R[keep]; radiating),
-        energy;
-        radiating,
-    )
+    fresh =
+        _set_up(_column(_H[keep], _T[keep], _L[keep], _R[keep]; radiating), energy; model)
     layout, cells = cp.def.layout, cp.deactivation
     u = copy(cp.u0)
     # Cell k empties under spent cells.
@@ -319,13 +316,17 @@ end
         _column(h, T, layer, ρ);
         use_ale = true,
         deactivation = true,
-        correction = EquidistributionCorrection(layers = :all),
+        correction = EquidistributionCorrection(layers = :all, τ = EQUIDISTRIBUTION_TIME),
     )
     layout, cells = cp.def.layout, cp.deactivation
     corr = cp.def.closure.correction
     @test corr.origin === cells.tables.origin
-    gain = copy(corr.gain)
+    # A shift by initial node, as a second estimate leaves one.
+    corr.initial_shift .= 0.5 .* corr.initial_gain
+    slot_gains!(corr)
+    gain, shift = copy(corr.gain), copy(corr.shift)
     @test iszero(gain[5]) && all(!iszero, gain[[2, 3, 4, 6, 7, 8, 9, 10]])
+    @test shift == 0.5 .* gain
     kernel = find_kernel(RelativeFluxKernel, cp.def.kernels)
     η = copy(kernel.η)
     floors = copy(kernel.d_floor)
@@ -335,15 +336,17 @@ end
     _kill!(cells, layout, 9)
     origin = [1, 2, 3, 6, 7, 8, 9, 10, 4, 5]
     arrange_slots!(cells.tables, layout, origin, Tuple{Int,Int,Float64}[])
-    @test corr.gain[4] == 0
-    @test corr.gain[[2, 3]] == gain[[2, 3]]
-    @test corr.gain[5:8] == gain[7:10]
+    for (now, before) in ((corr.gain, gain), (corr.shift, shift))
+        @test now[4] == 0
+        @test now[[2, 3]] == before[[2, 3]]
+        @test now[5:8] == before[7:10]
+    end
     @test kernel.η[4] == η[6]
     @test kernel.d_floor[1, 5] == floors[1, 7] && kernel.d_floor[2, 4] == floors[2, 6]
     # Two layers of live cells, each in its own contiguous slots.
     @test Pyrolysis.Closures._live_cells(corr, layout, 1) == 1:3
     @test Pyrolysis.Closures._live_cells(corr, layout, 2) == 4:8
     reset_cells!(cells, layout)
-    @test corr.gain == gain
+    @test corr.gain == gain && corr.shift == shift
     @test kernel.d_floor == floors
 end

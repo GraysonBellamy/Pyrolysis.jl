@@ -1,0 +1,58 @@
+# MaCFP-2 PMMA property set UMET_GP (2021; the JSON says Lab "UMD", a copy defect). Run by UMET in Gpyro.
+id = "UMET_GP"
+year = 2021
+json = "PMMA/Material_Properties/2021/MaCFP_PMMA_UMET_GP.json"
+calibration_code = "Gpyro"
+predictions = "UMET_GP"
+validation = "EDF/EDF"            # MaCFP-3 prediction files (Validation_Results/<dir>/<prefix>)
+tga_predictions = { 10 = "UMET_TGA_10K_Gpyro.csv", 100 = "UMET_TGA_100K_Gpyro.csv" }
+absorption = "in-depth"
+kappa_kernel = "beer-lambert"
+order_basis = "own"              # Gpyro normalisation reproduces their TGA
+notes = [
+  "Gpyro default gas cp 1000 J/kgK enters only its gas-solid exchange (<= 0.8 % effect); gas cp 0 here.",
+  "Density 1200 (T/300)^-0.236 held at its 293 K value 1206.7: Pyrolysis.jl has no thermal-expansion strain.",
+  "dH of reaction 1 read per kg of reactant (basis not stated).",
+  "For the intermediate Gpyro normalises by its cumulative formed mass; Pyrolysis.jl by its lineage inventory.",
+  "The JSON's single property values apply to both A and B (its schema has no per-component entry).",
+  "The JSON's mass diffusivity 2e-5 m2/s is not carried: Gpyro reads it only when it solves gas species.",
+  "Their submitted initial mass (72.252 g at 6 mm) corresponds to 1204.2 kg/m3, UMET_TK's density at 293 K, not this set's 1206.7; their 25 and 65 kW/m2 final masses are negative (to -0.25 g).",
+  "matl-db's Verification deck leaves A unconverted for n = 3 and 1.8 and never creates the intermediate.",
+]
+
+[gas]
+cp = 0.0
+
+[[components]]
+id = "A"
+rho = 1206.7
+y0 = 1.0
+emissivity = 0.85
+kappa = 2700.0
+k = { form = "constant", value = 0.209 }
+cp = { form = "power", c0 = 1140.0, Tr = 300.0, n = 0.987 }
+
+[[components]]
+id = "B"
+rho = 1206.7
+y0 = 0.0
+emissivity = 0.85
+kappa = 2700.0
+k = { form = "constant", value = 0.209 }
+cp = { form = "power", c0 = 1140.0, Tr = 300.0, n = 0.987 }
+
+[[reactions]]
+reactant = "A"
+A = 1.0e12
+E = 1.24e5
+n = 3.0
+dH = 2.71e4
+residue = "B"
+residue_yield = 0.962
+
+[[reactions]]
+reactant = "B"
+A = 2.51e17
+E = 2.35e5
+n = 1.8
+dH = 1.0406e6

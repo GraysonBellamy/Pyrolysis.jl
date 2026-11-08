@@ -20,8 +20,16 @@ guide_pages(name) =
 
 # The documentation scan: no name the package no longer defines and no
 # planning marker in what the site publishes (the guides, the hand-written
-# pages, the verification report). The lists are the code scan's,
-# test/code_scan/removed_names.txt.
+# pages, the verification and validation reports). The lists are the code
+# scan's, test/code_scan/removed_names.txt.
+# The Markdown pages of a generated report under docs/guide/, its detail pages
+# included.
+function report_files(name)
+    d = joinpath(@__DIR__, "guide", name)
+    isdir(d) || return String[]
+    return [joinpath(r, f) for (r, _, fs) in walkdir(d) for f in fs if endswith(f, ".md")]
+end
+
 function documentation_scan()
     lists = Dict("names" => Regex[], "markers" => Regex[])
     section = ""
@@ -48,9 +56,8 @@ function documentation_scan()
             joinpath(@__DIR__, "src", "api", f) for
             f in readdir(joinpath(@__DIR__, "src", "api"))
         ],
-        let d = joinpath(@__DIR__, "guide", "verification")
-            isdir(d) ? [joinpath(d, f) for f in readdir(d) if endswith(f, ".md")] : String[]
-        end,
+        report_files("verification"),
+        report_files("validation"),
     )
     hits = String[]
     for f in files,
@@ -118,6 +125,18 @@ let src = joinpath(@__DIR__, "guide", "verification"),
     end
 end
 
+# The validation pages are generated OFFLINE as well, by
+# scripts/macfp_pmma/report.jl into the COMMITTED docs/guide/validation/, and
+# copied the same way.
+let src = joinpath(@__DIR__, "guide", "validation"),
+    dst = joinpath(@__DIR__, "src", "guide", "validation")
+
+    if isdir(src)
+        rm(dst; force = true, recursive = true)
+        cp(src, dst)
+    end
+end
+
 # index.md first, then one chapter per case family (V-HC-01.md, ...); the
 # NN_slug.md convention of chapter_files doesn't apply here.
 function verification_pages()
@@ -127,6 +146,32 @@ function verification_pages()
     return ["guide/verification/$f" for f in vcat("index.md", chapters)]
 end
 
+# One entry per validation suite: its overview (macfp_pmma.md, ...) alone, or, when
+# the suite writes detail pages beside it (macfp_pmma/NN_slug.md), a section
+# titled by the overview's heading that holds the overview and then those pages.
+function validation_pages()
+    dir = joinpath(@__DIR__, "src", "guide", "validation")
+    isdir(dir) || return Any[]
+    entries = Any[]
+    for f in sort(filter(f -> endswith(f, ".md"), readdir(dir)))
+        name = f[1:(end-3)]
+        overview = "guide/validation/$f"
+        sub = joinpath(dir, name)
+        if isdir(sub)
+            heading = first(filter(l -> startswith(l, "# "), readlines(joinpath(dir, f))))
+            title = String(strip(heading[3:end]))
+            details = [
+                "guide/validation/$name/$g" for
+                g in sort(filter(g -> endswith(g, ".md"), readdir(sub)))
+            ]
+            push!(entries, title => Any["Overview" => overview; details])
+        else
+            push!(entries, overview)
+        end
+    end
+    return entries
+end
+
 pages = Any[
     "Home"=>"index.md",
     "User Guide"=>guide_pages("user_guide"),
@@ -134,6 +179,9 @@ pages = Any[
 ]
 let vpages = verification_pages()
     isempty(vpages) || push!(pages, "Verification" => vpages)
+end
+let vpages = validation_pages()
+    isempty(vpages) || push!(pages, "Validation" => vpages)
 end
 append!(
     pages,

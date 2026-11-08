@@ -304,12 +304,17 @@ $G-\sigma T_\infty^4$ over the full hemisphere, so the cone calorimeter is
 modelled with $F=1$ — the **emissivity** $\varepsilon$
 (either a supplied constant or function of the surface temperature, evaluated at the
 trial clamp of the iterate, or, when `nothing`, the composition-weighted
-$\varepsilon_{\text{eff}}$ of §5.8.2), and the surroundings temperature
+$\varepsilon_{\text{eff}}$ of §5.8.1), and the surroundings temperature
 $T_\infty$. This term is the surface's own re-radiation to and absorption from a
 gray environment; it is the dominant cooling mechanism for a hot pyrolyzing
 surface. Its quartic temperature dependence is why the face temperature, not the
-cell-center temperature, must enter it (§12.1.1). The condition stays at the
-surface under both radiation models. (`surface_balance.jl`.)
+cell-center temperature, must enter it (§12.1.1). This is the condition under
+`SURFACE_ABSORPTION` (`surface_balance.jl`). Under `RADIATIVE_TRANSFER` it contributes
+zero to the surface balance: the surroundings' $F\sigma T_\infty^4$ enters the diffuse
+radiation arriving at its face, which crosses the interface at the cell's
+$\varepsilon_{\text{eff}}$, and the solid's emission leaves through the same interface
+from the radiation rows; a `RadiativeBC` with its own `ε` is refused there (§8.4.1,
+§8.5.1).
 
 The displayed slope holds emissivity fixed. If emissivity depends on surface
 temperature, the full derivative additionally contains
@@ -339,46 +344,47 @@ incident radiation must be deposited exactly once:
   $T_{\text{cell}}$ when there is net heating. A direct call of
   `solve_boundary_temperature!` defaults its `radiation_model` keyword to
   `SURFACE_ABSORPTION`.
-- **`BEER_LAMBERT`**: the radiation is absorbed *in depth* by `BeerLambertKernel`,
-  through face intensities that are algebraic unknowns of the state, the exposed
-  face's intensity being $a_s\,q_{\text{inc}}(t)$ with $a_s$ the condition's own
-  absorptivity or that of the outermost live cell (§8.3, §8.3.4). To avoid
-  double-counting, the condition contributes nothing to the surface balance,
+- **`RADIATIVE_TRANSFER`**: the radiation crosses the exposed face and is absorbed
+  *in depth* by `RadiativeTransferKernel`, through face fluxes that are algebraic
+  unknowns of the state (§8.3). How it enters is set by the condition's
+  `distribution`: `Diffuse()` (the default) adds $q_{\text{inc}}$ to the diffuse
+  radiation arriving at the face, which crosses at the first live cell's
+  $\varepsilon_{\text{eff}}$; `Collimated()` and `Cone(θ₁, θ₂; directions)` enter as
+  beams with the absorbed flux $a_s\,q_{\text{inc}}(t)$, $a_s$ the condition's own
+  absorptivity or that of the first live cell (§8.4.2). To avoid double-counting, the
+  condition contributes nothing to the surface balance,
   $$q_{\text{BC}} = 0, \qquad dq_{\text{BC}}/dT_s = 0 .$$
 
-Under `BEER_LAMBERT` the beam is fed by the **first** `RadiativeFluxBC` member of
-the `:top` condition (`get_radiative_flux_bc`, which returns the first
-`RadiativeFluxBC` it finds in a `CombinedThermalBC`), while every member contributes
-zero to the surface balance: a second radiative-flux member is dropped silently. On
-a slab of emissivity 0.9, `RadiativeFluxBC(30e3) + RadiativeFluxBC(20e3)` gives an exposed-face intensity of 27 000 W·m⁻² ($0.9\times30$ kW·m⁻²) under
-`BEER_LAMBERT` and a conducted surface flux of 45 000 W·m⁻² ($0.9\times50$ kW·m⁻²)
-under `SURFACE_ABSORPTION`. Combine the incident fluxes into one condition when the
-model is `BEER_LAMBERT` (§12.12). `setup` refuses a `RadiativeFluxBC` on any other tag
-under `BEER_LAMBERT` (in-depth radiation enters through the `:top` faces only), and
-refuses `BEER_LAMBERT` on cylindrical or spherical coordinates.
+Under `RADIATIVE_TRANSFER` the diffuse members of a condition add to the arriving
+diffuse radiation and each collimated or cone member adds its own beams.
+`setup` refuses, under `RADIATIVE_TRANSFER`: an `absorptivity` on a diffuse member, and
+any diffuse member on a material where a component sets `absorptivity` (diffuse
+radiation enters at the emissivity, §8.4.2); a collimated or cone member on a tag
+other than `:top`; a radiative member on a tag other than `:top` and `:bottom`;
+cylindrical and spherical coordinates (§8.4.4). A diffuse member on `:bottom` makes
+the back an open gray interface (§8.4.3).
 
 A note on consistency. The surface balance applies $a_s q_{\text{inc}}$ as a
 boundary flux under `SURFACE_ABSORPTION`, and no volumetric source exists under that
-model, so the energy enters once, through the face; only `BEER_LAMBERT` routes it
-through the volume, and only then is the boundary flux suppressed. The diagnostic
+model, so the energy enters once, through the face; only `RADIATIVE_TRANSFER` routes
+it through the volume, and only then is the boundary flux suppressed. The diagnostic
 decomposition `compute_boundary_heat_fluxes` follows the *same* dispatch: its `net`
 is the flux the balance actually applies — $a_s q_{\text{inc}}$ is inside `net`
-under `SURFACE_ABSORPTION` and absent under `BEER_LAMBERT`, where the
-in-depth deposit is reported separately as `extras.volumetric_absorption`
-(§12.9.1). The number called absorptivity means two things: under
-`SURFACE_ABSORPTION` it is the absorptivity of an opaque
-face to the heater's spectrum (§5.8.2); under `BEER_LAMBERT` it is the
-fraction of the incident flux that enters the medium, $1-\rho_s$ with
-$\rho_s$ the surface reflectance ($0.04$–$0.08$ for PMMA, $n\approx1.49$),
-the absorption coefficient of §5.8.3 doing the absorbing.
+under `SURFACE_ABSORPTION` and absent under `RADIATIVE_TRANSFER`, where the radiation
+crossing the faces is reported separately as `extras.radiation_absorbed`,
+`radiation_emitted` and `radiation_back` (§8.5.2, §12.9.1). The number called
+absorptivity means two things: under `SURFACE_ABSORPTION` it is the absorptivity of an
+opaque face to the heater's spectrum (§5.8.2); under `RADIATIVE_TRANSFER` it is the
+fraction of a beam that enters the medium, $1-\rho_s$ with $\rho_s$ the surface
+reflectance ($0.04$–$0.08$ for PMMA, $n\approx1.49$), the absorption coefficient of
+§5.8.3 doing the absorbing.
 
-> **Implementation note.** `BeerLambertKernel(topology, geometry, bc_set)`
-> (`src/Kernels/radiation.jl`) takes its source from
-> `get_radiative_flux_bc(bc_set.thermal[:top])` (a zero flux when the condition has
-> no radiative-flux member) and evaluates the incident intensity at the time of each
-> residual evaluation (`incident_intensity`, §8.3.4). The surface balance receives
-> the radiation model from the thermal boundary kernel, which `setup` builds with
-> the solve's `radiation_model`.
+> **Implementation note.** `RadiativeTransferKernel(topology, geometry, bc_set,
+> material)` (`src/Kernels/radiative_transfer.jl`) collects the `:top` condition's
+> diffuse members (`incoming_radiation`) and its beam members (`BeamSource`, one row
+> per direction) and evaluates them at the time of each residual evaluation. The
+> surface balance receives the radiation model from the thermal boundary kernel, which
+> `setup` builds with the solve's `radiation_model`.
 
 ### 12.3.6 `DirichletThermalBC` (prescribed surface temperature)
 
@@ -588,7 +594,7 @@ state from $T_i(0)$ (the temperature, or the inventory $H_i=\sum_j m_{j,i}h_j(T_
 under `energy_state = :enthalpy`), writes the history pair under a lateral law
 (§12.8.3) and the node positions on a moving mesh, and then sets the algebraic
 unknowns consistent with them (`consistent_state!`: the area and lateral rate,
-the face intensities, the node velocities; §15.4). For example:
+the radiative face fluxes, the node velocities; §15.4). For example:
 
 ```julia
 using Pyrolysis
@@ -682,12 +688,12 @@ from the components. Consequences of the model dispatch:
 - `SURFACE_ABSORPTION`: a `RadiativeFluxBC` contributes
   `absorbed = net` $= a_s q_{\text{inc}}$ ($a_s$ the explicit BC absorptivity or $a_{\text{eff}}$) — the
   flux is applied at the face.
-- `BEER_LAMBERT`: a `RadiativeFluxBC` contributes zero `absorbed` and zero `net` —
-  the radiation enters in depth (§8.3) and is reported separately: per unit exposed
-  area, `extras.volumetric_absorption` $= I_e - I_bA_b/A_e$, the intensity entering
-  the exposed face less what leaves through the last face of the beam, and
-  `extras.radiation_transmitted` $= I_bA_b/A_e$ (§8.3.5 works the numbers for a
-  slab).
+- `RADIATIVE_TRANSFER`: a `RadiativeFluxBC` and a `RadiativeBC` contribute zero to
+  every component and to `net` — the radiation crosses the faces through the radiation
+  rows (§8.4) and is reported separately, per unit face area:
+  `extras.radiation_absorbed`, the radiation crossing the exposed face inward;
+  `radiation_emitted`, crossing it outward; and `radiation_back`, the net radiation
+  leaving through the back (§8.5.2; §8.8 works the numbers for a slab).
 
 The solution evaluates the decomposition at every saved time
 (`src/Outputs/solution.jl`): at the face temperature of each live `:top` face, with
@@ -744,7 +750,7 @@ A shared nominal heat flux or ambient temperature does not guarantee a
 shared boundary problem. Compare the incident, absorbed and net fluxes,
 the temperature at which losses are evaluated, and the composition of any
 incoming gas. The configurations below follow §1.6.5; radiation and interior
-transport are compared separately in §§8.7 and 9.12.
+transport are compared separately in §§8.9 and 9.12.
 
 | Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
 |:---|:---|:---|:---|:---|
@@ -765,7 +771,7 @@ incident flux **after reflection**, not the reflected component.
 TK Eqs. 12 and 23 and its MAX/RAND algorithm use absorption-weighted or
 selected-element radiation properties. Only an appropriate surface-absorption
 limit resembles our `RadiativeFluxBC + RadiativeBC + ConvectiveBC` balance;
-the general TK model is not exactly that surface equation (§8.7.1).
+the general TK model is not exactly that surface equation (§8.9.1).
 The manual does not establish a separate surface-temperature solve or
 surface-node construction like ours. In the matched
 ThermaKin2Ds 7 runs, fixed temperatures, films and fluxes act at the boundary
@@ -788,8 +794,9 @@ Our boundary temperature is recovered from a one-sided surface balance.
 
 In the active V2 boundary routine, convection and re-radiation use the
 boundary-cell temperature. Absorptivity is included in the entering radiation,
-and positive net radiation can be attenuated in depth (§8.7.2). Our incident
-beam and surface emission are accounted for separately. An impermeable back
+and positive net radiation can be attenuated in depth (§8.9.2). Under surface
+absorption our incident radiation and surface emission are accounted for separately at
+the face; under radiative transfer both cross the face through the radiation rows. An impermeable back
 is one configuration, not a property of every V2 deck; match the actual
 pressure/flux conditions and external gas composition (§9.12.2).
 
@@ -797,9 +804,10 @@ pressure/flux conditions and external gas composition (§9.12.2).
 
 The FDS solid-phase chapter imposes conducted flux equal to convective plus
 net radiative surface flux for opaque material. It sets the surface radiation
-source to zero when in-depth radiation carries that exchange. Our
-Beer–Lambert mode also avoids depositing the incident beam twice, but its
-one-way absorption model differs from FDS's emitting two-flux model (§8.7.3).
+source to zero when in-depth radiation carries that exchange. Our radiative
+transfer does the same, its surface balance holding no radiation; its two-stream
+rows differ from FDS's two-flux model in angular factor, cell integration and
+coupling in time (§8.9.3).
 FDS's Newton iteration for surface oxygen in oxidative reactions is separate
 from our Newton solve for surface temperature.
 
@@ -845,7 +853,8 @@ zone or in-depth absorption makes its temperature variation significant.
 
 The surface energy balance (§12.2) describes an opaque, gray, diffuse face in
 an inert or flaming atmosphere, its gas-side exchange reduced to a
-coefficient. Outside that: there is no flame feedback (§1.8.1); the incident
+coefficient; under radiative transfer the face is instead a gray interface whose
+radiation the rows of §8.4 carry, and the balance keeps the rest. Outside that: there is no flame feedback (§1.8.1); the incident
 flux is not attenuated by the pyrolysate plume, which absorbs $6$–$14\,\%$ of
 it before ignition and $20$–$27\,\%$ at steady outgassing in a cone-type
 geometry without extraction (Zhou et al. 2009, 2010), up to $35\,\%$ under a

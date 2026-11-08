@@ -269,15 +269,20 @@ where the heated layer is optically thick, $\beta\,\delta_T \gtrsim 3$ with $\be
 the extinction coefficient and $\delta_T$ the thermal thickness, the radiation that
 crosses the pores or passes through a semi-transparent component is a diffusive
 transport with the Rosseland conductivity $16n^{2}\sigma T^{3}/(3\beta)$, $n$ the
-refractive index of the component ($n = 1$ in pores). That term belongs inside
-$k_j(T)$, as $k_j = k_{0,j}(T) + 16n^{2}\sigma T^{3}/(3\beta_j)$. Measured wood char
+refractive index of the component ($n = 1$ in pores). Under `SURFACE_ABSORPTION`
+that term belongs inside $k_j(T)$, as $k_j = k_{0,j}(T) + 16n^{2}\sigma T^{3}/(3\beta_j)$. Measured wood char
 follows that form with $\beta \approx 800$–1000 m⁻¹. For PMMA, with
 $\beta_R \approx 3900$ m⁻¹ and $n^{2} \approx 2.1$ from its own emission spectrum,
 the term is 0.045 W·m⁻¹·K⁻¹ at 650 K, half of the value a cone-calibrated law
 assigns there, and a law that falls with temperature above the glass transition
-is a calibration constant standing in for it (§8.2.2). Below the optically thick
-limit, in the first millimetre of a polymer before ignition, the radiative
-transport is not local and no conductivity represents it (§8).
+is a calibration constant standing in for it (§8.2.2). Under `RADIATIVE_TRANSFER`
+the rows carry the radiation absorbed and emitted at $\alpha_j$, so $k_j$ is the
+conductive part: a deck does not also put a Rosseland term for $\alpha_j$'s band into
+$k_j$, and nothing is subtracted automatically; radiation across pores smaller than a
+cell, as in a char, is not resolved by the rows and stays in $k_j$ (§8.6). Below the
+optically thick limit, in the first millimetre of a polymer before ignition, the
+radiative transport is not local and no conductivity represents it; radiative transfer
+resolves it (§8).
 
 The state mapping evaluates `k_i = effective_conductivity(ξ⁺_i, T_trial,i,
 material)` and keeps it twice: smoothly floored at
@@ -518,7 +523,8 @@ sum is evaluated generically over the scalar type, a dual-number temperature
 carries $\partial\varepsilon_{\text{eff}}/\partial T$ into the colored Jacobian
 (§15). The effective emissivity is the surface property of the re-radiation
 boundary condition (§12): the surface balance of a boundary face reads the
-emissivity of its cell.
+emissivity of its cell. Under radiative transfer it is the transmissivity of the
+exposed face, both ways, and of an open back (§8.4).
 
 ### 5.8.2 Effective surface absorptivity
 
@@ -549,11 +555,12 @@ absorbed heater flux from the temperature-dependent emission: an emissivity that
 falls with temperature (integrating-sphere data for virgin wood, for instance)
 does not drag the absorbed cone flux down with it. $a_{\text{eff}}$ is consumed
 by a `RadiativeFluxBC` with `absorptivity = nothing`: in the surface balance of
-its face under `SURFACE_ABSORPTION` (§5.8.2), and under
-`BEER_LAMBERT` as the fraction of the incident flux that enters the first live
-cell, the absorptivity of that cell (`incident_intensity`,
-`src/Kernels/radiation.jl`; §8.3). Surface emission always uses
-$\varepsilon_{\text{eff}}$.
+its face under `SURFACE_ABSORPTION` (§8.2), and under `RADIATIVE_TRANSFER` as the
+fraction of a collimated or cone heater's flux that enters the first live cell as
+beams (`src/Kernels/radiative_transfer.jl`, §8.4.2). Emission always uses
+$\varepsilon_{\text{eff}}$, and so does diffuse radiation crossing the exposed face under
+radiative transfer: a component that sets its own absorptivity refuses a diffuse
+`RadiativeFluxBC` there (§8.4.2).
 
 Kirchhoff's law equates $a_j$ and $\varepsilon_j$ only for a gray surface or
 for a source at the surface's own temperature; a cone heater at $850$–$1150$ K
@@ -567,8 +574,8 @@ measured value through the component `absorptivity` when that matters.
 
 ### 5.8.3 Effective absorption coefficient
 
-The volumetric (extinction) absorption coefficient of the in-depth radiation
-model (`BEER_LAMBERT`, §8) is a **concentration**-weighted sum of the component
+The volumetric absorption coefficient of the radiative transfer rows
+(`RADIATIVE_TRANSFER`, §8) is a **concentration**-weighted sum of the component
 *mass* absorption coefficients $\alpha_j$ [m²·kg⁻¹]:
 
 $$
@@ -578,7 +585,7 @@ $$
 
 `effective_absorption(ξ, material)` → `_sum_absorption`
 (`effective_properties.jl`), evaluated by the state mapping at the positive-part
-concentrations, and only under `BEER_LAMBERT`. The dimensional bookkeeping is
+concentrations, and only under `RADIATIVE_TRANSFER`. The dimensional bookkeeping is
 the key point: a *mass* absorption coefficient $\alpha_j$ [m²·kg⁻¹] times a mass
 concentration $\xi_j$ [kg·m⁻³] yields a *volumetric* absorption coefficient
 [m⁻¹], which is what the optical thickness of a cell, $\tau_i = \alpha_i \Delta z_i$,
@@ -630,7 +637,7 @@ pore-gas viscosity curve in the `gas_viscosity` field, and under gas
 transport the state mapping evaluates it at the cell's trial temperature and
 floors the result smoothly at `MU_FLOOR`,
 `μ_i = smooth_floor(material.gas_viscosity(T_trial,i), 10⁻¹² Pa·s)`, the
-denominator of the cell mobility (§5.7.4; `src/States/derived.jl`). A material
+denominator of the cell mobility (§5.13.2; `src/States/derived.jl`). A material
 that says nothing carries `SutherlandProperty()` — the air triple above — so
 this reduces to (5.24).
 
@@ -995,7 +1002,7 @@ TK Eq. 11 and Pyrolysis.jl use mass-specific component absorption
 $\alpha_j$ [m²/kg], giving
 $\alpha_{\mathrm{eff}}=\sum_j\xi_j\alpha_j$ [m⁻¹]. This matches
 the attenuation coefficient at the same component concentrations; the
-radiation deposition and emission algorithms still differ (§8.7.1).
+radiation deposition and emission algorithms still differ (§8.9.1).
 
 ### 5.15.2 Gpyro V2
 
@@ -1038,8 +1045,8 @@ properties match; our pore-gas heat storage remains an additional term.
 FDS component absorption coefficients are per length. The
 [in-depth radiation assembly](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2255-L2295)
 volume-averages them unless a layer coefficient is specified. Matching
-optical depth is necessary, but the two-flux angular closure and internal
-emission remain different from our incident beam (§8.7.3).
+optical depth is necessary, but the two-flux angular factor and cell integration
+remain different from our two-stream rows (§8.9.3).
 
 ### 5.15.4 Sources and numerical evidence
 

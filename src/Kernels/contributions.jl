@@ -30,8 +30,8 @@ What the kernels return, with the derived state's element type `T`:
   (`NC × n_cells`) [kg/s], filled by the assembler
 - `T_face`: face temperatures (`n_faces`) [K]: on a boundary face the surface
   temperature of its energy balance
-- `r_intensity`: the residual of the algebraic row of every face intensity
-  (`n_faces`) [W/m²]
+- `r_radiation`: the residual of every radiation row, row `k` of face `f` at
+  `r_radiation[k, f]` (`R × n_faces`) [W/m²]
 - `r_velocity`: the residual of the algebraic row of every node velocity
   component (`D · n_nodes`, the components of every node in turn), written
   by the mesh closure
@@ -53,7 +53,7 @@ struct Contributions{NC,T}
     θ::Vector{T}
     M_flux::Matrix{T}
     T_face::Vector{T}
-    r_intensity::Vector{T}
+    r_radiation::Matrix{T}
     r_velocity::Vector{T}
     r_multiplier::Vector{T}
     F_carried::Matrix{T}
@@ -72,9 +72,10 @@ struct Contributions{NC,T}
 end
 
 """
-	Contributions{T}(NC, NR, n_cells, n_faces, n_nodes, D = 1)
+	Contributions{T}(NC, NR, n_cells, n_faces, n_nodes, D = 1; radiation_rows = 0)
 
-Zero-filled contribution buffers for a `D`-dimensional mesh.
+Zero-filled contribution buffers for a `D`-dimensional mesh with
+`radiation_rows` radiation rows per face.
 """
 function Contributions{T}(
     NC::Int,
@@ -82,7 +83,8 @@ function Contributions{T}(
     n_cells::Int,
     n_faces::Int,
     n_nodes::Int,
-    D::Int = 1,
+    D::Int = 1;
+    radiation_rows::Int = 0,
 ) where {T}
     return Contributions{NC,T}(
         zeros(T, NC, n_faces),
@@ -92,7 +94,7 @@ function Contributions{T}(
         zeros(T, n_cells),
         zeros(T, NC, n_cells),
         zeros(T, n_faces),
-        zeros(T, n_faces),
+        zeros(T, radiation_rows, n_faces),
         zeros(T, D * n_nodes),
         zeros(T, n_cells),
         zeros(T, 2, n_faces),
@@ -129,7 +131,7 @@ function reset!(c::Contributions)
     fill!(c.S_mass, zero(eltype(c.S_mass)))
     fill!(c.S_energy, zero(eltype(c.S_energy)))
     fill!(c.θ, zero(eltype(c.θ)))
-    fill!(c.r_intensity, zero(eltype(c.r_intensity)))
+    fill!(c.r_radiation, zero(eltype(c.r_radiation)))
     fill!(c.r_velocity, zero(eltype(c.r_velocity)))
     fill!(c.r_multiplier, zero(eltype(c.r_multiplier)))
     fill!(c.F_carried, zero(eltype(c.F_carried)))

@@ -16,6 +16,7 @@ using SparseMatrixColorings: ColoringProblem, coloring, ncolors
 using ..Meshes
 using ..States
 using ..Kernels: find_kernel, RelativeFluxKernel, ConductionKernel
+using ..Kernels: RadiativeTransferKernel, radiation_reach
 using ..Closures: BalanceRowClosure, lateral_rows
 using ..Closures: NoCorrection, PrescribedCorrection, LayerCorrection
 using ..Assembly

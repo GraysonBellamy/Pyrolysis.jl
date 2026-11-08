@@ -1,0 +1,15 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+16,"mirror back, uniform mesh: every face against the closed form",3.1291643135624676e-15,NaN,3.1291643135624676e-15,1.0e-12,true
+16,"mirror back, graded mesh: every face against the closed form",1.3690093871835795e-15,NaN,1.3690093871835795e-15,1.0e-12,true
+16,"mirror back, irregular mesh: every face against the closed form",6.356115011923762e-16,NaN,6.356115011923762e-16,1.0e-12,true
+16,"open back, uniform mesh: every face against the closed form",1.1734366175859253e-15,NaN,1.1734366175859253e-15,1.0e-12,true
+16,"open back, graded mesh: every face against the closed form",9.778638479882712e-16,NaN,9.778638479882712e-16,1.0e-12,true
+16,"open back, irregular mesh: every face against the closed form",7.822910783906169e-16,NaN,7.822910783906169e-16,1.0e-12,true
+16,"open_layer back, uniform mesh: every face against the closed form",1.5645821567812338e-15,NaN,1.5645821567812338e-15,1.0e-12,true
+16,"open_layer back, graded mesh: every face against the closed form",5.867183087929627e-16,NaN,5.867183087929627e-16,1.0e-12,true
+16,"open_layer back, irregular mesh: every face against the closed form",7.822910783906169e-16,NaN,7.822910783906169e-16,1.0e-12,true
+16,"black faces, Dτ_L = 0.0001: two-stream emission over exact",0.7502260459655856,1.0,0.24977395403441438,Inf,true
+16,"black faces, Dτ_L = 0.01: two-stream emission over exact",0.7613256521280662,1.0,0.23867434787193376,Inf,true
+16,"black faces, Dτ_L = 0.3: two-stream emission over exact",0.8752906882603145,1.0,0.12470931173968547,Inf,true
+16,"black faces, Dτ_L = 1.0: two-stream emission over exact",0.9698219841479214,1.0,0.030178015852078577,Inf,true
+16,"black faces, Dτ_L = 10.0: two-stream emission over exact",1.0002255862120095,1.0,0.0002255862120095209,Inf,true

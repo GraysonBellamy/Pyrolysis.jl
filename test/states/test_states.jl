@@ -2,7 +2,8 @@ using Test
 using ForwardDiff
 using LinearAlgebra
 using Pyrolysis
-using Pyrolysis.Materials: T_REF, T_PROPERTY_MIN, T_PROPERTY_MAX, BEER_LAMBERT
+using Pyrolysis.Materials: T_REF, T_PROPERTY_MIN, T_PROPERTY_MAX
+using Pyrolysis.Materials: RADIATIVE_TRANSFER, STEFAN_BOLTZMANN
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.Meshes: MeshGeometry
@@ -10,16 +11,19 @@ using Pyrolysis.States: StateLayout, state_length
 using Pyrolysis.Integration: setup
 
 @testset "state layout: interleaved blocks and row kinds" begin
-    for (moving, intensities, chi) in (
-        (false, false, false),
-        (true, false, false),
-        (false, true, false),
-        (true, true, false),
-        (true, true, true),
-        (true, false, true),
+    for (moving, R, chi) in (
+        (false, 0, false),
+        (true, 0, false),
+        (false, 1, false),
+        (true, 1, false),
+        (true, 1, true),
+        (true, 0, true),
+        (false, 3, false),
+        (true, 3, true),
     )
         NC, n = 3, 5
-        l = StateLayout(NC, n, TemperatureState(); moving, intensities, chi)
+        l = StateLayout(NC, n, TemperatureState(); moving, radiation_rows = R, chi)
+        @test radiation_rows(l) == R && has_radiation(l) == (R > 0)
         rows = Int[]
         for i = 1:n
             append!(rows, (mass_index(l, i, j) for j = 1:NC))
@@ -28,21 +32,26 @@ using Pyrolysis.Integration: setup
         end
         for nd = 1:(n+1)
             moving && append!(rows, (position_index(l, nd), velocity_index(l, nd)))
-            intensities && push!(rows, intensity_index(l, nd))
+            append!(rows, (radiation_index(l, nd, k) for k = 1:R))
         end
         chi && append!(rows, (area_index(l), lateral_rate_index(l)))
         @test sort(rows) == collect(1:state_length(l))
-        @test state_length(l) ==
-              n * (NC + 1 + 2chi) + (n + 1) * (2moving + intensities) + 2chi
+        @test state_length(l) == n * (NC + 1 + 2chi) + (n + 1) * (2moving + R) + 2chi
         # Interleaving: node n's block, then cell n's block.
         for i = 1:n
             @test first(cell_rows(l, i)) == last(node_rows(l, i)) + 1
             @test first(node_rows(l, i + 1)) == last(cell_rows(l, i)) + 1
         end
+        # The radiation rows are the last rows of every node block.
+        for nd = 1:(n+1), k = 1:R
+            @test radiation_index(l, nd, k) == last(node_rows(l, nd)) - R + k
+        end
+        R > 0 && @test_throws ArgumentError radiation_index(l, 1, R + 1)
+        R == 0 && @test_throws ArgumentError radiation_index(l, 1, 1)
         d = is_differential(l)
-        @test count(!, d) == (n + 1) * (moving + intensities) + 2chi
+        @test count(!, d) == (n + 1) * (moving + R) + 2chi
         moving && @test !d[velocity_index(l, 2)] && d[position_index(l, 2)]
-        intensities && @test !d[intensity_index(l, 1)]
+        @test !any(d[radiation_index(l, nd, k)] for nd = 1:(n+1), k = 1:R)
         @test mass_matrix(l) == Diagonal(Float64.(d))
         @test all(l.mask)
     end
@@ -462,7 +471,11 @@ function _thinning_slab(; law = χ -> 1 - 0.3χ, coordinates = Planar())
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(t -> 3e4 * (1 + 0.5 * sin(t)), absorptivity = 0.9),
+                top = RadiativeFluxBC(
+                    t -> 3e4 * (1 + 0.5 * sin(t));
+                    absorptivity = 0.9,
+                    distribution = Collimated(),
+                ),
                 bottom = AdiabaticBC(),
             ),
         ),
@@ -481,14 +494,14 @@ end
         _thinning_slab();
         energy_state = energy,
         use_ale = true,
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
         reltol,
         abstol,
         threshold,
         time_scale = dt,
     )
     layout, ref = cp.def.layout, cp.def.setup.reference
-    @test is_moving(layout) && has_chi(layout) && has_intensities(layout)
+    @test is_moving(layout) && has_chi(layout) && radiation_rows(layout) == 3
     tol = cp.abstol
     n = n_cells(layout)
     x = ref.positions
@@ -518,14 +531,19 @@ end
     end
     # Node rows: positions at the mass tolerance's share of the thinner
     # neighbouring cell, velocities that over the first step, the face
-    # intensities at the relative tolerance of the largest incident intensity.
-    I_scale = maximum(t -> 0.9 * 3e4 * (1 + 0.5 * sin(t)), range(0.0, 10.0; length = 101))
+    # radiation rows (the two diffuse fluxes and the beam) at the relative
+    # tolerance of the largest flux arriving over the window, which exceeds the
+    # emissive power of the hottest initial cell.
+    q_scale = maximum(t -> 3e4 * (1 + 0.5 * sin(t)), range(0.0, 10.0; length = 101))
+    @test q_scale > STEFAN_BOLTZMANN * maximum(cp.T0)^4
     w_tol = Float64[]
     for nd = 1:(n+1)
         h = min(nd > 1 ? x[nd] - x[nd-1] : Inf, nd <= n ? x[nd+1] - x[nd] : Inf)
         @test tol[position_index(layout, nd)] ≈ reltol * threshold * h rtol = 1e-14
         @test tol[velocity_index(layout, nd)] ≈ reltol * threshold * h / dt rtol = 1e-14
-        @test tol[intensity_index(layout, nd)] ≈ reltol * I_scale rtol = 1e-14
+        for k = 1:3
+            @test tol[radiation_index(layout, nd, k)] ≈ reltol * q_scale rtol = 1e-14
+        end
         push!(w_tol, reltol * threshold * h / dt)
     end
     # On the stretched mesh a node's two cells differ, so the rule picks one.
@@ -535,6 +553,68 @@ end
     @test tol[area_index(layout)] ≈ reltol * ref.cross_section rtol = 1e-14
     @test tol[lateral_rate_index(layout)] ≈ minimum(w_tol) / (x[end] - x[1]) rtol = 1e-14
     @test length(tol) == state_length(layout)
+end
+
+# Under radiative transfer every radiation row's tolerance is the relative
+# tolerance of one scale: the largest radiation arriving at either face over
+# the window (diffuse members, the surroundings' F σ T∞⁴ and the beams), or the
+# emissive power of the hottest initial cell, whichever is larger.
+@testset "radiative transfer rows: tolerance at the scale of the arriving and emitted radiation" begin
+    material = _thinning_slab(law = nothing).material
+    σ = STEFAN_BOLTZMANN
+    flux(t) = 3e4 * (1 + 0.5 * sin(t))
+    times = range(0.0, 10.0; length = 101)
+    cases = (
+        # The arriving radiation dominates.
+        (
+            RadiativeFluxBC(flux) + RadiativeBC(T_inf = 300.0),
+            AdiabaticBC(),
+            maximum(t -> flux(t) + σ * 300.0^4, times),
+            2,
+        ),
+        # A collimated beam beside a diffuse flux: their sum.
+        (
+            RadiativeFluxBC(flux; distribution = Collimated()) +
+            RadiativeFluxBC(5e3) +
+            RadiativeBC(T_inf = 300.0),
+            AdiabaticBC(),
+            maximum(t -> flux(t) + 5e3 + σ * 300.0^4, times),
+            3,
+        ),
+        # The surroundings are hotter than every cell and seen at half view
+        # factor: what arrives from them, F σ T∞⁴ at its largest, sets the
+        # scale; the back is open.
+        (
+            RadiativeBC(T_inf = t -> 900.0 + 20t, F = 0.5),
+            RadiativeBC(T_inf = 350.0) + RadiativeFluxBC(2e3),
+            maximum(t -> 0.5 * σ * (900.0 + 20t)^4, times),
+            2,
+        ),
+        # Hot surroundings out of view arrive with nothing: the cells' own
+        # emission sets the scale.
+        (RadiativeBC(T_inf = 1e4, F = 0.0), AdiabaticBC(), 0.0, 2),
+        # Cold surroundings: the cells' own emission is the larger.
+        (RadiativeBC(T_inf = 300.0), AdiabaticBC(), σ * 300.0^4, 2),
+    )
+    for (top, bottom, scale, R) in cases
+        problem = PyrolysisProblem(;
+            mesh = stretched_mesh(0.01, 6, 1.2),
+            material,
+            bc_set = BoundaryConditionSet(thermal = (; top, bottom)),
+            T_initial = z -> 400.0 + 1e4 * z,
+            ξ_initial = [z -> 1100.0 * (1 - 20z), z -> 300.0 * 20z, z -> 0.2],
+            tspan = (0.0, 10.0),
+        )
+        reltol = 1e-5
+        cp = setup(problem; radiation_model = RADIATIVE_TRANSFER, reltol)
+        layout = cp.def.layout
+        @test radiation_rows(layout) == R
+        @test maximum(cp.T0) > 450.0
+        for nd = 1:n_nodes(layout), k = 1:R
+            row = radiation_index(layout, nd, k)
+            @test cp.abstol[row] ≈ reltol * max(scale, σ * maximum(cp.T0)^4) rtol = 1e-14
+        end
+    end
 end
 
 @testset "derived volumes on a moving mesh are the shells between the nodes: $(nameof(typeof(coords)))" for coords in

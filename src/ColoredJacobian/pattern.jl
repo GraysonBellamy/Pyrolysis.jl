@@ -4,7 +4,8 @@
 
 """
 	jacobian_pattern(def::ResidualDefinition) -> SparseMatrixCSC{Bool,Int}
-	jacobian_pattern(layout, topology; closure = nothing, reach = 1)
+	jacobian_pattern(layout, topology; closure = nothing, reach = 1,
+	                 reconstruction = false, radiation_reach = nothing)
 
 The structural pattern of the residual's Jacobian, from the connectivity
 alone: the cells within `reach` faces of a cell, their nodes, the nodes'
@@ -21,12 +22,16 @@ gradients), one otherwise.
   centers, the concentrations the neighbours' volumes, the relative fluxes
   everything the corrections of the cell's nodes read; under a prescribed
   mesh velocity with relative fluxes, the velocities of its nodes. On a line
-  it reads the intensities of its two faces and, under a variable cross
+  it reads every radiation row of its two faces and, under a variable cross
   section, the area.
-- A face-intensity row (a line) reaches the intensities of nodes
-  `f − 1 … f + 1`, the unknowns of the cells on either side of its face (the
-  attenuation of the cell it leaves, the absorptivity of the exposed cell),
-  on a moving mesh the positions of those nodes, and the area.
+- A radiation row of face `f` (a line) reaches, by the kernel's
+  `radiation_reach`, its own family at `f` and at the face upstream of it in
+  its direction of travel, the rows its reach names at `f` and, at the back
+  face, the beams it reflects; and
+  the unknowns of the cells on either side of its
+  face (the attenuation and emission of the cell it leaves, the emissivity
+  or absorptivity of the exposed cell), on a moving mesh the positions of
+  nodes `f − 1 … f + 1`, and the area.
 - A node-position row reaches its node's velocity, or, when the closure's
   unknowns are the cells' multipliers, the multipliers of the cells around
   the node and the positions of their nodes (`w = W⁻¹ Dᵀ φ`).
@@ -50,18 +55,21 @@ gradients), one otherwise.
   of [`dense_rows`](@ref).
 
 Every row holds its diagonal. The pattern is fixed for a solve: dead rows
-keep their entries and take zero values.
+keep their entries and take zero values. A layout with radiation rows needs a
+`radiation_reach`.
 """
 function jacobian_pattern(def::ResidualDefinition)
     relative = find_kernel(RelativeFluxKernel, def.kernels) !== nothing
     conduction = find_kernel(ConductionKernel, def.kernels)
     cross = conduction !== nothing && conduction.tensor !== nothing
+    transfer = find_kernel(RadiativeTransferKernel, def.kernels)
     return jacobian_pattern(
         def.layout,
         def.setup.topology;
         closure = def.closure,
         reach = relative || cross ? 2 : 1,
         reconstruction = relative,
+        radiation_reach = transfer === nothing ? nothing : radiation_reach(transfer),
     )
 end
 
@@ -71,11 +79,16 @@ function jacobian_pattern(
     closure = nothing,
     reach::Int = 1,
     reconstruction::Bool = false,
+    radiation_reach = nothing,
 )
     N = n_cells(layout)
     L = state_length(layout)
     D = dimension(layout)
-    moving, bl, chi = is_moving(layout), has_intensities(layout), has_chi(layout)
+    moving, chi = is_moving(layout), has_chi(layout)
+    R = radiation_rows(layout)
+    R == 0 ||
+        radiation_reach !== nothing ||
+        throw(ArgumentError("a layout with radiation rows needs their radiation_reach"))
     multipliers = moving && closure_unknowns(layout) === :multipliers
     correction = closure isa BalanceRowClosure ? closure.correction : NoCorrection()
     adjacency = _adjacency(topo)
@@ -102,24 +115,33 @@ function jacobian_pattern(
                     end
                 end
             end
-            if bl
-                add!(r, intensity_index(layout, i))
-                add!(r, intensity_index(layout, i + 1))
+            for k = 1:R
+                add!(r, radiation_index(layout, i, k))
+                add!(r, radiation_index(layout, i + 1, k))
             end
             chi && add!(r, area_index(layout))
         end
     end
-    if bl
-        for f = 1:(N+1)
-            r = intensity_index(layout, f)
-            for nd = max(1, f-1):min(N+1, f+1)
-                add!(r, intensity_index(layout, nd))
-                moving && add!(r, position_index(layout, nd))
-            end
-            for k = max(1, f-1):min(N, f), c in cell_rows(layout, k)
-                add!(r, c)
-            end
-            chi && add!(r, area_index(layout))
+    for f = 1:(N+1), kr = 1:R
+        r = radiation_index(layout, f, kr)
+        add!(r, r)
+        g = f + radiation_reach.along[kr]
+        1 <= g <= N + 1 && add!(r, radiation_index(layout, g, kr))
+        for kc in radiation_reach.same_node[kr]
+            add!(r, radiation_index(layout, f, kc))
+        end
+        for nd = max(1, f-1):min(N+1, f+1)
+            moving && add!(r, position_index(layout, nd))
+        end
+        for k = max(1, f-1):min(N, f), c in cell_rows(layout, k)
+            add!(r, c)
+        end
+        chi && add!(r, area_index(layout))
+    end
+    if R > 0
+        f = radiation_reach.back_face
+        for (kr, kc) in radiation_reach.back
+            add!(radiation_index(layout, f, kr), radiation_index(layout, f, kc))
         end
     end
     if has_deformation(layout)

@@ -1,0 +1,30 @@
+# MaCFP-2 PMMA kinetics-only set UCLAN (2021; the JSON says Lab "Sandia", a copy defect). TGA only.
+id = "UCLAN"
+year = 2021
+json = "PMMA/Material_Properties/2021/MaCFP_PMMA_UCLAN.json"
+calibration_code = "ThermaKin"
+kinetics_only = true
+tga_predictions = { 10 = "UCLAN_SimulationTGA_10K.csv", 100 = "UCLAN_SimulationTGA_100K.csv" }
+absorption = "surface"
+notes = [
+  "Thermal properties are placeholders: the JSON gives kinetics only.",
+  "matl-db's UMET 2023 JSON reuses these A and E verbatim (its Source: \"UCLAN, data; SANDIA 2021, calibration\").",
+]
+
+[gas]
+cp = 0.0
+
+[[components]]
+id = "PMMA"
+rho = 1180.0
+y0 = 1.0
+emissivity = 0.9
+k = { form = "constant", value = 0.2 }
+cp = { form = "constant", value = 1500.0 }
+
+[[reactions]]
+reactant = "PMMA"
+A = 6.73e10
+E = 1.6e5
+n = 1.0
+dH = 0.0

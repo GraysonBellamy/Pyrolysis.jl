@@ -304,46 +304,6 @@ path = "gpyro/vhc05.csv"
 index = 1
 
 [[series]]
-case = "V-RAD-01"
-curve = "T_profiles"
-reference = "t = 30.0 s"
-label = "Gpyro V2, t = 30.0 s"
-path = "gpyro/vrad01.csv"
-index = 1
-
-[[series]]
-case = "V-RAD-01"
-curve = "T_profiles"
-reference = "t = 60.0 s"
-label = "Gpyro V2, t = 60.0 s"
-path = "gpyro/vrad01.csv"
-index = 2
-
-[[series]]
-case = "V-RAD-01"
-curve = "T_profiles"
-reference = "t = 90.0 s"
-label = "Gpyro V2, t = 90.0 s"
-path = "gpyro/vrad01.csv"
-index = 3
-
-[[series]]
-case = "V-RAD-01"
-curve = "T_profiles"
-reference = "t = 180.0 s"
-label = "Gpyro V2, t = 180.0 s"
-path = "gpyro/vrad01.csv"
-index = 4
-
-[[series]]
-case = "V-RAD-01"
-curve = "surface_T_history"
-reference = "front face"
-label = "Gpyro V2"
-path = "gpyro/vrad01.csv"
-index = 5
-
-[[series]]
 case = "V-RX-01"
 curve = "xi_histories"
 reference = "ξ_A"

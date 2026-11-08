@@ -1,0 +1,3 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"L∞ T error on moving mesh, t=10.0 s",6.682765535970248e-5,NaN,6.682765535970248e-5,0.011,true,"manufactured T* with radiative transfer on a 30%-compressed mesh"
+"relative L∞ ξ_solid (uniform) error, t=10.0 s",6.862895437128221e-13,NaN,6.862895437128221e-13,1.0e-10,true,"uniform solid: its absorption coefficient follows the manufactured one"

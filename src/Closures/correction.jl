@@ -34,10 +34,7 @@ end
 """
 	EQUIDISTRIBUTION_TIME
 
-The fallback equidistribution time `τ` [s] of [`ActivationTime`](@ref), for
-a layer whose thinning gives no estimate: with it the 5.9 mm PMMA layer of
-V-BO-01 at 50 kW/m² ends in one deactivation at 30, 60 and 120 cells across
-it.
+A fixed equidistribution time `τ` [s] for `EquidistributionCorrection(τ = …)`.
 """
 const EQUIDISTRIBUTION_TIME = 720.0
 
@@ -45,48 +42,39 @@ const EQUIDISTRIBUTION_TIME = 720.0
 	ACTIVATION_TIME_FACTOR
 
 The factor `λ` of [`ActivationTime`](@ref): a layer's equidistribution time
-is `λ` times the time its thickness would take to vanish at the thinning rate
-of its first activation. With it the 5.9 mm PMMA layer of V-BO-01 at 50 kW/m²
-gets about [`EQUIDISTRIBUTION_TIME`](@ref), and a layer synchronizes in about
-a fifth of that estimated life.
+is `λ` times the time its thickness would take to vanish at its thinning rate
+when the time is estimated. A layer synchronizes in about a fifth of that
+estimated life.
 """
 const ACTIVATION_TIME_FACTOR = 1.8
 
 """
-	ActivationTime(; λ = ACTIVATION_TIME_FACTOR, fallback = EQUIDISTRIBUTION_TIME,
-	               floor = 1.0)
+	ActivationTime(; λ = ACTIVATION_TIME_FACTOR)
 
-A layer's equidistribution time set once, when its first cell activates
-(falls below `r_hi` of its initial thickness), from the layer's thickness
-`h` and its thinning rate `ḣ` at that time:
+A layer's equidistribution time from its own thinning, estimated twice: when
+its first cell activates (falls below `r_hi` of its initial thickness) and
+when its first cell falls below `r_lo`, each time from the layer's thickness
+`h` and its thinning rate `ḣ` then,
 
 	τ = λ h / |ḣ|.
 
-The rate scales with the physical rates and `λ` is a pure number, so a deck
-whose rates are all multiplied by `s` gets `τ/s`. Before the estimate the
-layer's correction is zero, since no cell of it is active. A layer thinning
-no faster than `floor` times its initial thickness over the solve's horizon
-keeps `fallback` [s] until a cell crosses `r_lo` of its initial thickness,
-where the estimate is taken once more; a layer that thickens keeps
-`fallback`. A layer is estimated once: a cell that re-activates later changes
-nothing.
+The first estimate holds the activated cells together while the layer's rate
+still rises; the second, taken nearer the layer's end, is blended in over the
+correction's second switch ([`EquidistributionCorrection`](@ref)), so neither
+estimate changes the right-hand side where it is taken. The first estimate
+needs a cell to fall below `r_hi`, so the activation's `r_hi` must be below 1.
+A layer not thinning at its first estimate has no correction until its
+second; one not thinning at its second keeps its first. The rate scales with
+the physical rates and `λ` is a pure number, so a deck whose rates are all
+multiplied by `s` gets `τ/s`. Before the first estimate the layer has no time
+and no gain, and a cell that re-activates after the second changes nothing.
 """
 struct ActivationTime
     λ::Float64
-    fallback::Float64
-    floor::Float64
-    function ActivationTime(;
-        λ::Real = ACTIVATION_TIME_FACTOR,
-        fallback::Real = EQUIDISTRIBUTION_TIME,
-        floor::Real = 1.0,
-    )
+    function ActivationTime(; λ::Real = ACTIVATION_TIME_FACTOR)
         λ > 0 ||
             throw(ArgumentError("the activation time's factor must be positive, got $λ"))
-        fallback > 0 ||
-            throw(ArgumentError("the fallback time must be positive, got $fallback"))
-        floor >= 0 ||
-            throw(ArgumentError("the rate floor must not be negative, got $floor"))
-        return new(Float64(λ), Float64(fallback), Float64(floor))
+        return new(Float64(λ))
     end
 end
 
@@ -101,14 +89,21 @@ node `n` of a layer of `N` cells, between cell `n − 1` (inward) and cell `n`,
 
 which moves the node into the thicker cell, so `h` relaxes
 toward a common value over the layer in about `τ/π²` whatever `N`: `τ` [s] is
-the layer's equidistribution time, by default set for each layer at its first
-activation from its thinning ([`ActivationTime`](@ref)), or one value for
-every layer. The activation `aₙ = 1 − (1 − aₙ₋₁)(1 − aₙ)`
-is the smooth "or" of the two cells' switches
-`aᵢ = S((ln r_hi − ln(hᵢ/hᵢ(0))) / (ln r_hi − ln r_lo))`, `S(x) = x²(3 − 2x)`
-clamped to `[0, 1]`, with `activation = (r_hi, r_lo)`: zero while a cell keeps
-at least `r_hi` of its initial thickness, one at and below `r_lo`, `C¹` in
-`ln h` between.
+the layer's equidistribution time, by default estimated for each layer from
+its thinning ([`ActivationTime`](@ref)), or one value for every layer. The
+activation `aₙ = 1 − (1 − aₙ₋₁)(1 − aₙ)` is the smooth "or" of the two cells'
+switches `aᵢ = S(xᵢ)`, `xᵢ = (ln r_hi − ln(hᵢ/hᵢ(0))) / (ln r_hi − ln r_lo)`,
+`S(x) = x²(3 − 2x)` clamped to `[0, 1]`, with `activation = (r_hi, r_lo)`:
+zero while a cell keeps at least `r_hi` of its initial thickness, one at and
+below `r_lo`, `C¹` in `ln h` between. Under [`ActivationTime`](@ref) `r_hi`
+must be below 1, while a fixed `τ` accepts any `r_hi`, and the layer's first
+estimate `τ₁` gives the time above and its second `τ₂` enters
+through the cells' second switches `bᵢ = S(xᵢ − 1)`, zero at and above `r_lo`
+and one at and below `r_lo²/r_hi`:
+
+	cₙ = (aₙ/τ₁ + bₙ (1/τ₂ − 1/τ₁)) N² (hₙ − hₙ₋₁),
+
+`bₙ` the smooth "or" of the two cells' `bᵢ`.
 
 A layer is bounded by the pinned node, the mesh's Lagrangian nodes (the layer
 interfaces) and the end nodes; `c = 0` at each of them, at every node beside
@@ -140,6 +135,15 @@ function EquidistributionCorrection(;
             "the activation needs 0 < r_lo < r_hi, got (r_hi, r_lo) = $activation",
         ),
     )
+    τ isa ActivationTime &&
+        r_hi >= 1 &&
+        throw(
+            ArgumentError(
+                "an ActivationTime takes a layer's first estimate when one of its cells " *
+                "first falls below r_hi of its initial thickness, so it needs r_hi < 1, " *
+                "got (r_hi, r_lo) = $activation; a fixed τ accepts any activation",
+            ),
+        )
     layers in (:vanishing, :all) ||
         throw(ArgumentError("layers must be :vanishing or :all, got $(repr(layers))"))
     return EquidistributionCorrection(
@@ -154,18 +158,22 @@ end
 	LayerCorrection <: Correction
 
 An [`EquidistributionCorrection`](@ref) bound to a mesh: per node the gain
-`N²/τ` of its layer (zero at the layers' bounding nodes), by slot, and the same
-gains by initial node; the activation's bounds `r_hi` and `r_lo` with `ln r_hi`
-and `ln r_hi − ln r_lo`; per moving layer its bounding nodes on the initial mesh,
-its equidistribution time, the time that time was set at (`NaN` while it is not),
-the stage of its estimate (zero before the first activation, one while a
-floored rate waits for the second, two once set), and its initial thickness,
-with the [`ActivationTime`](@ref) rule (`nothing` for one fixed time); per
-initial cell the layer it starts in, and per slot the initial cell there.
+`N²/τ₁` of its layer and the shift `N²/τ₂ − N²/τ₁` of its second estimate
+(both zero at the layers' bounding nodes, the shift zero under one fixed time),
+by slot, and the same by initial node; the activation's bounds `r_hi` and `r_lo`
+with `ln r_hi` and `ln r_hi − ln r_lo`; per moving layer its bounding nodes on
+the initial mesh, its equidistribution time (`Inf` before the first estimate,
+then the latest), the time of its latest estimate (`NaN` before the first), the
+stage of its estimate (zero before the first activation, one after the first
+estimate, two after the second) and its first estimate, with the
+[`ActivationTime`](@ref) rule (`nothing` for one fixed time); per initial cell
+the layer it starts in, and per slot the initial cell there.
 """
 struct LayerCorrection <: Correction
     gain::Vector{Float64}
     initial_gain::Vector{Float64}
+    shift::Vector{Float64}
+    initial_shift::Vector{Float64}
     r_hi::Float64
     r_lo::Float64
     log_hi::Float64
@@ -174,8 +182,8 @@ struct LayerCorrection <: Correction
     time::Vector{Float64}
     set_at::Vector{Float64}
     stage::Vector{Int}
+    first_estimate::Vector{Float64}
     estimate::Union{Nothing,ActivationTime}
-    span::Vector{Float64}
     layer::Vector{Int}
     origin::Vector{Int}
 end
@@ -305,75 +313,80 @@ function bind_correction(
     condensed = ntuple(j -> !is_gas(material.components[j]), Val(NC))
     bounds = sort!(unique([1; nn; topo.pinned; topo.lagrangian]))
     v = residues(material)
-    gain = zeros(nn)
     layers = Tuple{Int,Int}[]
-    span = Float64[]
     layer = zeros(Int, n)
     for (k, (lo, hi)) in enumerate(zip(bounds[1:(end-1)], bounds[2:end]))
         moves = corr.layers === :all || vanishes(v, m0, lo:(hi-1), condensed, threshold)
-        if moves
-            push!(layers, (lo, hi))
-            push!(span, reference.positions[hi] - reference.positions[lo])
-        end
+        moves && push!(layers, (lo, hi))
         layer[lo:(hi-1)] .= k
     end
     estimate = corr.τ isa ActivationTime ? corr.τ : nothing
+    nl = length(layers)
     lc = LayerCorrection(
-        gain,
-        copy(gain),
+        zeros(nn),
+        zeros(nn),
+        zeros(nn),
+        zeros(nn),
         corr.r_hi,
         corr.r_lo,
         log(corr.r_hi),
         log(corr.r_hi) - log(corr.r_lo),
         layers,
-        zeros(length(layers)),
-        zeros(length(layers)),
-        zeros(Int, length(layers)),
+        fill(Inf, nl),
+        fill(NaN, nl),
+        zeros(Int, nl),
+        fill(Inf, nl),
         estimate,
-        span,
         layer,
         collect(1:n),
     )
     return _bind_times!(lc, corr.τ)
 end
 
-# The bound correction's layer times: one fixed time set from the start, or
-# every layer before its first activation.
+# The bound correction's layer times: one fixed time from the start, or every
+# layer before its first activation.
 function _bind_times!(corr::LayerCorrection, τ::Float64)
     for k in eachindex(corr.layers)
-        _set_layer_time!(corr, k, τ, 0.0)
+        _layer_gains!(corr, k, τ, τ)
+        corr.time[k] = τ
+        corr.set_at[k] = 0.0
+        corr.stage[k] = 2
+        corr.first_estimate[k] = τ
     end
     return corr
 end
 _bind_times!(corr::LayerCorrection, ::ActivationTime) = reset_layer_times!(corr)
 
-# Layer `k`'s equidistribution time `τ`, set at `t`, and its nodes' gain.
-function _set_layer_time!(corr::LayerCorrection, k::Int, τ::Float64, t::Float64)
+# Layer `k`'s gain `N²/τ₁` and shift `N²/τ₂ − N²/τ₁` at its nodes, by initial
+# node and by slot (an infinite time gives no gain).
+function _layer_gains!(corr::LayerCorrection, k::Int, τ₁::Float64, τ₂::Float64)
     lo, hi = corr.layers[k]
-    corr.initial_gain[(lo+1):(hi-1)] .= (hi - lo)^2 / τ
+    g₁, g₂ = (hi - lo)^2 / τ₁, (hi - lo)^2 / τ₂
+    corr.initial_gain[(lo+1):(hi-1)] .= g₁
+    corr.initial_shift[(lo+1):(hi-1)] .= g₂ - g₁
     slot_gains!(corr)
-    corr.time[k] = τ
-    corr.set_at[k] = t
-    corr.stage[k] = 2
     return corr
 end
 
 """
 	slot_gains!(correction::LayerCorrection) -> correction
 
-The gains by slot: a node between two cells of one layer keeps the gain of the
-outer cell's inward node, and a node between cells of two layers has none, so a
-correction never moves a node across the layers it bounds, whichever cells have
-left the column between them.
+The gains and shifts by slot: a node between two cells of one layer keeps
+those of the outer cell's inward node, and a node between cells of two layers
+has none, so a correction never moves a node across the layers it bounds,
+whichever cells have left the column between them.
 """
 function slot_gains!(corr::LayerCorrection)
     origin = corr.origin
-    corr.gain[1] = 0.0
-    corr.gain[end] = 0.0
+    for v in (corr.gain, corr.shift)
+        v[1] = 0.0
+        v[end] = 0.0
+    end
     for s = 2:length(origin)
         below, above = origin[s-1], origin[s]
-        corr.gain[s] =
-            corr.layer[below] == corr.layer[above] ? corr.initial_gain[above] : 0.0
+        same = corr.layer[below] == corr.layer[above]
+        corr.gain[s] = same ? corr.initial_gain[above] : 0.0
+        corr.shift[s] = same ? corr.initial_shift[above] : 0.0
     end
     return corr
 end
@@ -392,15 +405,17 @@ estimates_layer_times(corr::LayerCorrection) =
 	reset_layer_times!(correction::LayerCorrection) -> correction
 
 Every layer of an [`ActivationTime`](@ref) correction back before its first
-activation, at the fallback time; a correction with one fixed time is
+activation, with no time and no gain; a correction with one fixed time is
 unchanged.
 """
 function reset_layer_times!(corr::LayerCorrection)
-    est = corr.estimate
-    est === nothing && return corr
+    corr.estimate === nothing && return corr
     for k in eachindex(corr.layers)
-        _set_layer_time!(corr, k, est.fallback, NaN)
+        _layer_gains!(corr, k, Inf, Inf)
+        corr.time[k] = Inf
+        corr.set_at[k] = NaN
         corr.stage[k] = 0
+        corr.first_estimate[k] = Inf
     end
     return corr
 end
@@ -422,10 +437,9 @@ end
 	layer_time_margin(correction, layout, reference, u) -> Float64
 
 The smallest margin `hᵢ/(r hᵢ(0)) − 1` over the live cells of the layers
-whose equidistribution time is still to be estimated, `r` the activation's
-`r_hi` before a layer's first activation and `r_lo` while a floored rate waits
-for the second; `Inf` when none is waiting. It crosses zero downward where
-[`estimate_layer_times!`](@ref) runs.
+still to be estimated, `r` the activation's `r_hi` before a layer's first
+estimate and `r_lo` before its second; `Inf` when none is waiting. It crosses
+zero downward where [`estimate_layer_times!`](@ref) runs.
 """
 function layer_time_margin(
     corr::LayerCorrection,
@@ -447,23 +461,21 @@ function layer_time_margin(
 end
 
 """
-	estimate_layer_times!(correction, layout, reference, u, t, horizon; slack) -> correction
+	estimate_layer_times!(correction, layout, reference, u, t; slack) -> correction
 
 At the state `u` at time `t`, every waiting layer whose margin
-([`layer_time_margin`](@ref)) is at most `slack` takes its equidistribution
-time from its thickness `h` (the distance between its bounding nodes, the
-outer one its outermost live node) and its thinning rate `ḣ` (their velocity
-difference) as [`ActivationTime`](@ref) states, the floor being the
-[`ActivationTime`](@ref)'s `floor` times the layer's initial thickness over
-`horizon` [s].
+([`layer_time_margin`](@ref)) is at most `slack` takes its next estimate of
+its equidistribution time from its thickness `h` (the distance between its
+bounding nodes, the outer one its outermost live node) and its thinning rate
+`ḣ` (their velocity difference) as [`ActivationTime`](@ref) states: the first
+sets its gain, the second its shift.
 """
 function estimate_layer_times!(
     corr::LayerCorrection,
     layout::StateLayout,
     reference::CellReference,
     u::AbstractVector,
-    t::Real,
-    horizon::Real;
+    t::Real;
     slack::Real = 0.0,
 )
     est = corr.estimate
@@ -482,14 +494,16 @@ function estimate_layer_times!(
         lo, hi = first(cells), last(cells) + 1
         h = u[position_index(layout, hi)] - u[position_index(layout, lo)]
         ḣ = u[velocity_index(layout, hi)] - u[velocity_index(layout, lo)]
-        floor = est.floor * corr.span[k] / horizon
-        if ḣ < -floor
-            _set_layer_time!(corr, k, est.λ * h / -ḣ, Float64(t))
-        elseif ḣ <= 0 && stage == 0
-            corr.stage[k] = 1
+        τ = ḣ < 0 ? est.λ * h / -ḣ : stage == 0 ? Inf : corr.first_estimate[k]
+        if stage == 0
+            corr.first_estimate[k] = τ
+            _layer_gains!(corr, k, τ, τ)
         else
-            _set_layer_time!(corr, k, est.fallback, Float64(t))
+            _layer_gains!(corr, k, corr.first_estimate[k], τ)
         end
+        corr.time[k] = τ
+        corr.set_at[k] = Float64(t)
+        corr.stage[k] = stage + 1
     end
     return corr
 end
@@ -502,13 +516,26 @@ above `r_hi h0`, one at and below `r_lo h0` (zero and negative thicknesses
 included, the thickness floored smoothly at `DISTANCE_FLOOR_FRACTION · h0`
 before the logarithm), and `C¹` in `ln h` between.
 """
-@inline function activation(corr::LayerCorrection, h, h0)
-    h >= corr.r_hi * h0 && return zero(h)
+@inline activation(corr::LayerCorrection, h, h0) = first(switches(corr, h, h0))
+
+"""
+	switches(correction::LayerCorrection, h, h0) -> (a, b)
+
+The two switches of a cell of thickness `h` and initial thickness `h0`: its
+[`activation`](@ref) `a = S(x)` and its second switch `b = S(x − 1)`, zero at
+and above `r_lo h0` and one at and below `(r_lo²/r_hi) h0`, `C¹` in `ln h`
+between, `x` as in [`EquidistributionCorrection`](@ref).
+"""
+@inline function switches(corr::LayerCorrection, h, h0)
+    h >= corr.r_hi * h0 && return (zero(h), zero(h))
     r = smooth_floor(h, DISTANCE_FLOOR_FRACTION * h0) / h0
     x = (corr.log_hi - log(r)) / corr.log_span
-    x >= 1 && return one(x)
-    return x * x * (3 - 2x)
+    x >= 2 && return (one(x), one(x))
+    x >= 1 && return (one(x), _smoothstep(x - 1))
+    return (_smoothstep(x), zero(x))
 end
+
+@inline _smoothstep(x) = x * x * (3 - 2x)
 
 # The node corrections `c` at the derived state `ds` (`correction!`).
 @inline _correction!(c, ::NoCorrection, ds, reference) = nothing
@@ -526,16 +553,21 @@ function _correction!(c, corr::LayerCorrection, ds::DerivedState, reference)
     c[1] = zero(T)
     c[nn] = zero(T)
     h_in = x[2] - x[1]
-    a_in = activation(corr, h_in, h0[1])
+    a_in, b_in = switches(corr, h_in, h0[1])
     @inbounds for nd = 2:(nn-1)
         h_out = x[nd+1] - x[nd]
-        a_out = activation(corr, h_out, h0[nd])
+        a_out, b_out = switches(corr, h_out, h0[nd])
         a = 1 - (1 - a_in) * (1 - a_out)
-        g = corr.gain[nd]
+        g, s = corr.gain[nd], corr.shift[nd]
         c[nd] =
-            iszero(g) || !(ds.active[nd-1] && ds.active[nd]) || iszero(a) ? zero(T) :
-            a * g * (h_out - h_in)
-        h_in, a_in = h_out, a_out
+            if (iszero(g) && iszero(s)) || !(ds.active[nd-1] && ds.active[nd]) || iszero(a)
+                zero(T)
+            elseif iszero(s)
+                a * g * (h_out - h_in)
+            else
+                (a * g + (1 - (1 - b_in) * (1 - b_out)) * s) * (h_out - h_in)
+            end
+        h_in, a_in, b_in = h_out, a_out, b_out
     end
     return nothing
 end

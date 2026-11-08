@@ -20,7 +20,7 @@ model. Coupled species/thermal roots are assembled in `Kernels/gas_boundary.jl`.
 
 using ..Materials: STEFAN_BOLTZMANN, T_PROPERTY_MIN, T_PROPERTY_MAX
 using ..Materials: evaluate_param, evaluate_param_T
-using ..Materials: RadiationModel, SURFACE_ABSORPTION, BEER_LAMBERT
+using ..Materials: RadiationModel, SURFACE_ABSORPTION, RADIATIVE_TRANSFER
 using ForwardDiff
 using StaticArrays: SVector
 using ..Physics: primal, bounded_transport_root, implicit_transport_root, TransportFailure
@@ -246,10 +246,12 @@ function evaluate_bc_flux_and_derivative end
 
 Radiation-model aware variant used by the boundary temperature solve.
 
-It keeps `RadiativeFluxBC` consistent with the residual: under `BEER_LAMBERT`
-the incident radiation is absorbed in depth and contributes **zero** boundary
-flux here; under `SURFACE_ABSORPTION` it is absorbed at the
-surface, at the surface absorptivity.
+It keeps `RadiativeFluxBC` consistent with the residual: under
+`RADIATIVE_TRANSFER` the incident radiation is absorbed in depth and
+contributes **zero** boundary flux here; under `SURFACE_ABSORPTION` it is
+absorbed at the surface, at the surface absorptivity. Under
+`RADIATIVE_TRANSFER` a `RadiativeBC` contributes zero as well: its exchange
+with the surroundings crosses the face through the radiation rows.
 """
 @inline function evaluate_bc_flux_and_derivative(
     bc::AbstractThermalBC,
@@ -260,6 +262,22 @@ surface, at the surface absorptivity.
     a_eff::Real = ε_eff,
 )
     return evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff; a_eff = a_eff)
+end
+
+# Under `RADIATIVE_TRANSFER` the surroundings' radiation and the emission cross
+# the exposed face through the radiation rows, so a `RadiativeBC` applies no
+# flux at the face.
+@inline function evaluate_bc_flux_and_derivative(
+    bc::RadiativeBC,
+    T_s::Real,
+    t::Real,
+    ε_eff::Real,
+    radiation_model::RadiationModel;
+    a_eff::Real = ε_eff,
+)
+    q, dq_dT = evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff; a_eff = a_eff)
+    radiation_model == RADIATIVE_TRANSFER && return zero(q), zero(dq_dT)
+    return q, dq_dT
 end
 
 """
@@ -427,12 +445,13 @@ end
 end
 
 # ----------------------------------------------------------------------------
-# RadiativeFluxBC: q = α × incident_flux at the surface, or zero where the
+# RadiativeFluxBC: q = a × incident_flux at the surface, or zero where the
 # incident radiation is absorbed in depth. With `absorptivity = nothing` the BC
 # absorbs at the material's mixture surface absorptivity `a_eff` (= ε_eff
 # unless a component overrides it).
 # - SURFACE_ABSORPTION: treat as boundary heat flux for correct T_surface
-# - BEER_LAMBERT: handled volumetrically, return 0 to avoid double-counting
+# - RADIATIVE_TRANSFER: handled volumetrically, return 0 to avoid
+#   double-counting
 # ----------------------------------------------------------------------------
 @inline function evaluate_bc_flux_and_derivative(
     bc::RadiativeFluxBC,
@@ -446,12 +465,12 @@ end
         # Radiation absorbed at boundary - include in boundary balance
         # This ensures T_surface is physically correct (hotter than T_cell when net heating)
         flux = evaluate_param(bc.flux, t)
-        α = if bc.absorptivity === nothing
+        a = if bc.absorptivity === nothing
             a_eff
         else
             evaluate_param(bc.absorptivity, t)
         end
-        return flux * α, 0.0
+        return flux * a, 0.0
     end
 
     # In-depth absorption handles the incident radiation volumetrically, so

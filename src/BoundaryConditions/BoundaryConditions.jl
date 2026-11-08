@@ -33,6 +33,7 @@ include("surface_balance.jl")
 # Thermal boundary conditions
 export AdiabaticBC, HeatFluxBC, ConvectiveBC, RadiativeBC, DirichletThermalBC
 export CombinedThermalBC, RadiativeFluxBC
+export AngularDistribution, Diffuse, Collimated, Cone
 
 # Mass boundary conditions
 export ImpermeableBC, MassFluxBC, GasReservoir, AmbientGasBC, MassTransferFilm
@@ -40,9 +41,6 @@ export validate_gas_boundary, mass_film_flux
 
 # Pressure boundary conditions (Darcy flow)
 export NeumannPressureBC, ConvectivePressureBC
-
-# Radiative-flux helpers
-export get_radiative_flux_bc
 
 # Type-stable boundary-condition container
 export BoundaryConditionSet, reads_time

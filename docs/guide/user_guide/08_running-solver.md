@@ -62,7 +62,7 @@ The full keyword set, with defaults, is:
 | `min_thickness` | `1e-6` | End a moving-mesh solve when the live thickness falls below it [m]; §8.7, §8.9 |
 | `correction` | `nothing` → by rule | Mesh correction (`NoCorrection()`, `EquidistributionCorrection(...)`, `PrescribedCorrection(w)`); §8.7, Chapter 10 |
 | `lagrangian` | `nothing` → the layer interfaces | Node ids that always move with the solid; §8.7 |
-| `radiation_model` | `SURFACE_ABSORPTION` | `SURFACE_ABSORPTION` or `BEER_LAMBERT`; §8.8 |
+| `radiation_model` | `SURFACE_ABSORPTION` | `SURFACE_ABSORPTION` or `RADIATIVE_TRANSFER`; §8.8 |
 | `deactivation` | `false` | Deactivate burned-out cells during the solve; §8.9 |
 | `band` | `nothing` → 0.1 under a moving correction, else `threshold` | `ε_band`, the near-threshold band; §8.9 |
 | `callback` | `nothing` | Your callbacks and `ConservationRecorder`s; §8.10 |
@@ -85,8 +85,8 @@ accessors.
 
 Pyrolysis problems are **stiff**: Arrhenius rates change by orders of magnitude
 across a narrow temperature band, and conduction over fine cells imposes a
-small explicit stability limit. With a moving mesh or in-depth radiation they
-are also differential-algebraic: the node velocities and the face intensities
+small explicit stability limit. With a moving mesh or radiative transfer they
+are also differential-algebraic: the node velocities and the radiative face fluxes
 are algebraic rows of the state, so the integrator receives a mass-matrix
 system. `solve` hands the integrator that system together with the colored
 Jacobian (§8.5), the per-row absolute tolerances (§8.3), a state whose
@@ -178,7 +178,7 @@ alone; the absolute tolerances are set **per row** by `setup` from `abstol`, `re
 | Component mass of cell `i` | `reltol · threshold · m_s,i(0)` [kg] (every component of the cell, a product included) |
 | Node position (moving mesh) | `reltol · threshold · h_n`, `h_n` the smallest initial size of the cells around node `n`; no relative share |
 | Node velocity (moving mesh) | the position tolerance over the time scale `dt` |
-| Face intensity (`BEER_LAMBERT`) | `reltol` times the largest incident intensity over the time span |
+| Radiation row (`RADIATIVE_TRANSFER`) | `reltol` times `q_scale`: the largest radiation arriving from outside over the time span (heaters and the surroundings' `F·σ·T_∞⁴`) or `σT⁴` of the hottest initial cell, whichever is larger, and at least 1 W/m²; the whole time span is read, so a run extended to a later end can take a larger scale and differs from the shorter run within that tolerance |
 | Cross-section area and its lateral rate (lateral shrinkage) | `reltol · A₀`; the velocity tolerance over the initial thickness |
 
 A cell that starts with no condensed mass takes its total initial mass for
@@ -249,7 +249,7 @@ rejected, and the step cut by the controller's smallest factor, when
   area;
 - under gas transport a live cell's porosity leaves `[0, 1]` by more
   than the skeletal volume of its mass tolerances;
-- an algebraic row (a node velocity, a face intensity, the cross-section area
+- an algebraic row (a node velocity, a radiative face flux, the cross-section area
   or its lateral rate) misses its own equation by more than `reltol` times the
   equation's scale plus the unknown's absolute tolerance.
 
@@ -323,8 +323,8 @@ dual-number evaluation of the residual per batch of up to 24 colors fills the
 matrix (the two dense rows of a variable cross section are assembled from
 column sums afterwards). It covers every configuration
 exactly, to round-off: the reactions, conduction, gas transport, the boundary
-balances, the node velocities and the correction on a moving mesh, the face
-intensities under `BEER_LAMBERT`, the cross-section rows under a lateral
+balances, the node velocities and the correction on a moving mesh, the radiative
+face fluxes under `RADIATIVE_TRANSFER`, the cross-section rows under a lateral
 shrinkage law, and the identity rows of deactivated cells. There is no Jacobian
 keyword and no strategy to choose; every policy receives this Jacobian, and
 `Rodas5P` evaluates it at every step.
@@ -336,7 +336,7 @@ its initial state through `Pyrolysis.Internal`:
 ```julia
 using Pyrolysis.Internal: jac_prototype, jacobian!, dense_jacobian, compare_entries
 
-cp = setup(problem; use_ale = true, radiation_model = BEER_LAMBERT)  # the solve's set-up keywords
+cp = setup(problem; use_ale = true, radiation_model = RADIATIVE_TRANSFER)  # the solve's set-up keywords
 t0 = cp.problem.tspan[1]
 J = jac_prototype(cp.jacobian)
 jacobian!(J, cp.jacobian, cp.u0, t0)
@@ -449,41 +449,45 @@ theory and the geometric conservation law are in Technical Reference §11.
 
 ## 8.8 Radiation model selection
 
-The `radiation_model` keyword selects where the incident radiant flux of a
-`RadiativeFluxBC` (Chapter 5) is absorbed:
+The `radiation_model` keyword selects where the radiation of the `RadiativeFluxBC` and
+`RadiativeBC` conditions (Chapter 5) is absorbed and emitted:
 
 | Value | Physics | State and Jacobian |
 |---|---|---|
-| `SURFACE_ABSORPTION` (default) | The absorbed flux `a·q` enters the surface energy balance (opaque materials); component absorption coefficients are not read | no extra rows |
-| `BEER_LAMBERT` | Exponential in-depth absorption through the cells' absorption coefficients (semi-transparent materials) | one algebraic intensity row per face; the Jacobian stays banded |
+| `SURFACE_ABSORPTION` (default) | The absorbed flux `a·q` and the re-radiation `ε·σ·(F·T_∞⁴ − T_s⁴)` act in the surface energy balance (opaque materials); component absorption coefficients are not read | no extra rows |
+| `RADIATIVE_TRANSFER` | Radiation travels through the solid, every cell absorbing and emitting at its absorption coefficient and temperature (semi-transparent materials) | two algebraic flux rows per face, plus one per beam direction; the Jacobian stays banded, each family adding two colors |
 
 ```julia
 solve(problem; radiation_model = SURFACE_ABSORPTION)   # opaque char, wood
-solve(problem; radiation_model = BEER_LAMBERT)         # semi-transparent polymer
+solve(problem; radiation_model = RADIATIVE_TRANSFER)   # semi-transparent polymer
 ```
 
-The absorptivity `a` is the condition's own `absorptivity` when given, otherwise
-the effective absorptivity of the exposed cell (Kirchhoff's law unless a
-component sets its own).
+Under `SURFACE_ABSORPTION` the absorptivity `a` is the condition's own `absorptivity`
+when given, otherwise the effective absorptivity of the exposed cell (Kirchhoff's law
+unless a component sets its own).
 
-Under `BEER_LAMBERT`:
+Under `RADIATIVE_TRANSFER`:
 
-- The intensity entering the exposed face is `a·q(t)`; each cell absorbs the
-  exact cell average of the attenuated beam, with the attenuation from the
-  cells' absorption coefficients `α` (m²/kg, at the cell's concentrations).
-  What leaves through the back face is reported in
-  `solution.extras.radiation_transmitted`, what the cells absorbed in
-  `solution.extras.volumetric_absorption`. A material with no absorption
-  coefficient lets the beam cross the slab unabsorbed.
-- The incident flux enters through the `:top` faces only. A
-  `RadiativeFluxBC` on any other boundary is refused:
-  `ArgumentError: in-depth radiation enters through the :top faces only; the
-  condition on :bottom carries an incident radiative flux`. Use
-  `SURFACE_ABSORPTION` or a `HeatFluxBC` for radiant heating of the back face.
-- The model needs planar coordinates; on a cylindrical or spherical mesh it is
-  refused.
-- After surface cells are deactivated, the beam enters the first live cell
-  through its upstream face.
+- The exposed face transmits the exposed cell's `ε_eff` in both directions. Diffuse
+  radiation (each diffuse `RadiativeFluxBC` and each `RadiativeBC`'s `F·σ·T_∞⁴`) crosses
+  it at `ε_eff`; a `Collimated()` or `Cone` heater enters as beams carrying `a·q(t)`.
+  Each cell absorbs and emits exactly across its own thickness, with the cells'
+  absorption coefficients `α` (m²/kg, at the cell's concentrations). The radiation
+  crossing the exposed face inward is `solution.extras.radiation_absorbed`, outward
+  `radiation_emitted`, and the net radiation leaving through the back `radiation_back`;
+  absorbed less emitted less back is what the cells take in. A material with no
+  absorption coefficient lets the radiation cross the slab to the back.
+- `setup` refuses a deck the rows cannot represent, with an `ArgumentError`: no
+  `RadiativeBC` or `RadiativeFluxBC` on `:top` (`radiative transfer needs a RadiativeBC or
+  a RadiativeFluxBC on :top: radiation enters and leaves the solid through the exposed
+  face`); a `RadiativeBC` with its own `ε` (`give the RadiativeBC on :top no ε`); a diffuse
+  `RadiativeFluxBC` with its own `absorptivity`, or on a material where a component sets
+  `absorptivity`; a beam on any tag other than `:top` (`give the RadiativeFluxBC on
+  :bottom a Diffuse() distribution`). On `:bottom` a `RadiativeBC` or a diffuse
+  `RadiativeFluxBC` makes the back an open gray face; without one the back is a mirror.
+- The model needs a planar line; on a cylindrical or spherical mesh it is refused.
+- After surface cells are deactivated, the exposed face is the upstream face of the first
+  live cell, and the radiation rows are solved afresh there.
 
 ### Time-varying radiation flux is always tracked
 
@@ -498,10 +502,10 @@ top_bc = RadiativeFluxBC(t -> 25e3 + 250.0 * t, absorptivity = 0.9) +
          ConvectiveBC(h = 10, T_inf = 300)
 ```
 
-Under `BEER_LAMBERT` the face-intensity tolerances scale with the largest
-incident intensity over the time span (§8.3). Re-radiation losses
-(`RadiativeBC`) and convective losses (`ConvectiveBC`) are ordinary thermal
-boundary conditions, applied under every `radiation_model`. The radiation
+That condition is for `SURFACE_ABSORPTION`; under `RADIATIVE_TRANSFER` drop the
+`absorptivity` and the `ε`. There the radiation rows' tolerances scale with the largest
+radiation arriving over the time span (§8.3). Convective losses (`ConvectiveBC`) are an
+ordinary thermal boundary condition under every `radiation_model`. The radiation
 physics and the surface energy balance are derived in Technical Reference §8
 and §12.
 
@@ -532,7 +536,7 @@ The keywords:
 | `deactivation` | `false` | Deactivate cells during the solve |
 | `threshold` | `1e-2`; `conversion_threshold/10` at an order other than one | `ε_m`; a cell that starts with no condensed mass, or at such an order with no reactive lineage, never deactivates |
 | `band` | `max(threshold, 0.1)` when the equidistribution correction moves a layer, else `threshold` | `ε_band` in `[threshold, 1)`: on a moving mesh, the contiguous cells below this fraction around a cell that crosses `ε_m` go with it |
-| `correction` | by rule (§8.7) | On a moving mesh with `deactivation`, the equidistribution correction makes a layer's cells thin together and leave in one event |
+| `correction` | by rule (§8.7) | On a moving mesh with `deactivation`, the equidistribution correction makes a layer's cells thin together and leave in one or two events |
 
 Each event is located inside the step at the first time a live cell reaches its
 threshold and applied at the interpolated state there. At the end of every step,

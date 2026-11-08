@@ -2,15 +2,14 @@ using Test
 using ForwardDiff
 using SparseArrays
 using Pyrolysis
-using Pyrolysis.Materials: DepletionLimiter, BEER_LAMBERT, SURFACE_ABSORPTION
+using Pyrolysis.Materials: DepletionLimiter, RADIATIVE_TRANSFER, SURFACE_ABSORPTION
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.States: StateLayout, state_length
 using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!, buffers
 using Pyrolysis.ColoredJacobian
-using Pyrolysis.Deactivation
-using Pyrolysis.Integration: setup, consistent_state!, PreparedProblem
+using Pyrolysis.Integration: setup, PreparedProblem
 
 # ============================================================================
 # Materials and columns
@@ -64,9 +63,10 @@ _column(mat, n; top, bottom = AdiabaticBC(), mass = nothing) = PyrolysisProblem(
     tspan = (0.0, 100.0),
 )
 
-# Fixed and moving columns of PMMA and of a permeable wood, without radiation,
-# with surface absorption and with in-depth absorption, the incident flux a
-# radiative flux condition on the top face.
+# Fixed and moving columns of PMMA and of a permeable wood, without radiation
+# and with surface absorption, the incident flux a radiative flux condition on
+# the top face (radiative transfer's columns are in
+# test_radiative_containment.jl).
 const _incident = RadiativeFluxBC(50e3)
 const _column_configurations = (
     baseline_eulerian = (
@@ -88,21 +88,6 @@ const _column_configurations = (
         problem = n -> _column(_pmma(), n; top = HeatFluxBC(50e3)),
         options = (use_ale = true,),
         wood = false,
-    ),
-    ale_beer_lambert_darcy = (
-        problem = n -> _column(_wood(), n; top = _incident),
-        options = (use_ale = true, radiation_model = BEER_LAMBERT),
-        wood = true,
-    ),
-    ale_beer_lambert_darcy_moderate = (
-        problem = n -> _column(_wood(α = 0.5), n; top = _incident),
-        options = (use_ale = true, radiation_model = BEER_LAMBERT),
-        wood = true,
-    ),
-    ale_beer_lambert_wall_moderate = (
-        problem = n -> _column(_wood(α = 0.5, κ = 0.0), n; top = _incident),
-        options = (use_ale = true, radiation_model = BEER_LAMBERT),
-        wood = true,
     ),
 )
 
@@ -376,7 +361,7 @@ const _regimes = (
     ),
     darcy_viscosity_hot_gas = (
         problem = () -> _column(_wood(), 8; top = _incident),
-        options = (use_ale = true, radiation_model = BEER_LAMBERT),
+        options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
         state = cp -> _cell_state(cp, i -> 900.0 + 20i, i -> (400.0 - 10i, 2.0 + 0.5i)),
     ),
     single_cell = (
@@ -568,80 +553,6 @@ end
         correction = PrescribedCorrection(_slide),
         deactivation = true,
     )
-end
-
-# ============================================================================
-# After a deactivation
-# ============================================================================
-
-# The ablating solid of the deactivation tests, absorbing in
-# depth: it decomposes to a gas that takes no volume, so a cell thins with its
-# condensed mass.
-function _ablator(n; L = 3e-3, q = 2.8e6, t_end = 0.8)
-    ρ, c, k = 1000.0, 1000.0, 1.0
-    R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
-    v = 2.0e-3
-    A = v^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (k / (ρ * c) * R * Tp^2)
-    solid = SolidComponent(:solid, φ = 0.3, ρ = ρ, c = c, k = k, λ = 1e-6, α = 50.0)
-    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02)
-    mat = Material(
-        name = :ablator,
-        components = (solid, gas),
-        reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
-    )
-    return PyrolysisProblem(
-        mesh = uniform_mesh(L, n),
-        material = mat,
-        bc_set = BoundaryConditionSet(
-            thermal = (top = RadiativeFluxBC(q), bottom = AdiabaticBC()),
-            mass = (
-                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
-                bottom = ImpermeableBC(),
-            ),
-        ),
-        T_initial = z -> T0 + 1e5 * z,
-        ξ_initial = [z -> ρ, z -> 0.0],
-        tspan = (0.0, t_end),
-    )
-end
-
-# The exposed cell below the threshold, deactivated by the event's own
-# transfer: the pattern still contains the Jacobian, whose exposed face is
-# now the receiver's far face.
-@testset "after deactivate! with in-depth radiation: $(energy) form" for energy in (
-    :temperature,
-    :enthalpy,
-)
-    cp = setup(
-        _ablator(6);
-        energy_state = energy,
-        use_ale = true,
-        radiation_model = BEER_LAMBERT,
-        deactivation = true,
-    )
-    def, layout, cells = cp.def, cp.def.layout, cp.deactivation
-    u = copy(cp.u0)
-    m0 = cells.reference[6]
-    u[mass_index(layout, 6, 2)] += (1 - 0.5 * cells.threshold) * m0
-    u[mass_index(layout, 6, 1)] = 0.5 * cells.threshold * m0
-    consistent_state!(u, def, cp.ws, 0.0)
-    @test deactivate!(u, cells, def, 0.3) === :transferred
-    @test top_live_cell(layout) == 5
-    consistent_state!(u, def, cp.ws, 0.3)
-    for (state, v) in
-        (("after the event", u), ("perturbed", u .* (1 .+ 0.1 .* sin.(1:length(u)))))
-        @testset "$state" begin
-            Jd = _contained(cp, v; t = 0.3)
-            # The beam enters through the receiver's far face (node 6): the
-            # face beneath reads it, and no row reads the dead node's.
-            @test Jd[intensity_index(layout, 5), intensity_index(layout, 6)] != 0
-            @test all(
-                iszero,
-                Jd[1:end .!= intensity_index(layout, 7), intensity_index(layout, 7)],
-            )
-        end
-    end
-    fill!(layout.mask, true)
 end
 
 # ============================================================================

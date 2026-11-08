@@ -5,7 +5,7 @@ Defines a top-level `SUITE::BenchmarkGroup` covering three canonical
 problems:
 
 - PMMA cone (fixed mesh, surface absorption)
-- White-pine-style charring (moving mesh, Beer–Lambert + lumped and Darcy)
+- White-pine-style charring (moving mesh, radiative transfer, lumped and Darcy)
 - Generic charring polymer (moving mesh, lumped, no radiation)
 
 For each problem it benchmarks the three hot operations on the problem

@@ -137,7 +137,7 @@ function problem_for(kind, n; t_end = 80.0, outputs = 3, solid_λ = nothing, flu
     return problem,
     (;
         use_ale = kind in (:ale, :ale_darcy),
-        radiation_model = wood ? BEER_LAMBERT : SURFACE_ABSORPTION,
+        radiation_model = wood ? RADIATIVE_TRANSFER : SURFACE_ABSORPTION,
     )
 end
 

@@ -3,7 +3,7 @@ using LinearAlgebra
 using ForwardDiff
 using SparseArrays
 using Pyrolysis
-using Pyrolysis.Materials: DepletionLimiter, BEER_LAMBERT
+using Pyrolysis.Materials: DepletionLimiter, RADIATIVE_TRANSFER
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.Kernels: RelativeFluxKernel, find_kernel
@@ -84,7 +84,7 @@ end
 
 # A gasifying layer of `n_top` cells absorbing in depth on an inert substrate
 # of `n_bottom` cells, the interface at node `n_bottom + 1` (V-BO-01's
-# configuration: three components, in-depth radiation, a moving mesh).
+# configuration: three components, radiative transfer, a moving mesh).
 function _two_layer(n_top, n_bottom; t_end = 100.0)
     L_top, L_bottom = 2e-3, 3e-3
     top = SolidComponent(
@@ -295,6 +295,12 @@ end
     )
     @test_throws ArgumentError EquidistributionCorrection(τ = 0.0)
     @test_throws ArgumentError EquidistributionCorrection(activation = (0.1, 0.3))
+    # An estimated time needs a cell to fall below r_hi; a fixed τ takes any r_hi.
+    for r_hi in (1.0, 1.5)
+        @test_throws r"needs r_hi < 1" EquidistributionCorrection(activation = (r_hi, 0.5))
+        @test EquidistributionCorrection(τ = 720.0, activation = (r_hi, 0.5)).r_hi == r_hi
+    end
+    @test EquidistributionCorrection(activation = (0.99, 0.5)).τ isa ActivationTime
 
     # The band defaults to CORRECTION_BAND when the bound correction moves some
     # layer, to the threshold otherwise.
@@ -398,7 +404,7 @@ end
     )
     installed = setup(trace_slab; use_ale = true, deactivation = true)
     @test installed.def.closure.correction isa LayerCorrection
-    @test any(!iszero, installed.def.closure.correction.gain)
+    @test estimates_layer_times(installed.def.closure.correction)
     @test installed.deactivation.band == CORRECTION_BAND
     @test setup(trace_slab; use_ale = true, deactivation = true, threshold = 1e-3).def.closure.correction isa
           NoCorrection
@@ -416,13 +422,16 @@ end
         p;
         use_ale = true,
         deactivation = true,
-        correction = EquidistributionCorrection(activation = (1.5, 0.5)),
+        correction = EquidistributionCorrection(
+            τ = EQUIDISTRIBUTION_TIME,
+            activation = (1.5, 0.5),
+        ),
     )
     @test setup(
         p;
         use_ale = true,
         deactivation = true,
-        correction = EquidistributionCorrection(layers = :all),
+        correction = EquidistributionCorrection(layers = :all, τ = EQUIDISTRIBUTION_TIME),
     ).def.closure.correction.gain[2:3] == fill(9 / EQUIDISTRIBUTION_TIME, 2)
     @test_throws ArgumentError EquidistributionCorrection(layers = :none)
     for h in (
@@ -496,6 +505,37 @@ end
     for h in (0.0, -h0, 1e-12 * h0)
         @test activation(corr, h, h0) == 1
         @test isfinite(ForwardDiff.derivative(x -> activation(corr, x, h0), h))
+    end
+end
+
+@testset "the second switch is the activation one ramp further down" begin
+    cp = setup(
+        _inert(3);
+        use_ale = true,
+        correction = EquidistributionCorrection(layers = :all),
+    )
+    corr = cp.def.closure.correction
+    h0 = 2e-4
+    b(s) = last(switches(corr, h0 * exp(s), h0))
+    db(s) = ForwardDiff.derivative(b, s)
+    s_lo, s_end = log(0.1), log(0.1 * 0.1 / 0.3)
+    # Zero wherever the activation ramps, one at and below r_lo²/r_hi.
+    @test all(s -> b(s) == 0, range(0.0, s_lo; length = 7))
+    a_lo, b_lo = switches(corr, 0.1h0, h0)
+    @test a_lo ≈ 1 && abs(b_lo) <= 1e-12
+    @test b(s_end - 0.5) == 1
+    # It follows the activation's ramp, one span lower in ln h.
+    for s in range(s_lo, s_end; length = 5)
+        @test b(s) ≈ activation(corr, h0 * exp(s + log(0.3) - s_lo), h0) atol = 1e-12
+    end
+    for δ in (1e-4, 1e-6)
+        @test abs(b(s_lo + δ) - b(s_lo - δ)) <= 10δ^2
+        @test db(s_lo + δ) == 0 && abs(db(s_lo - δ)) <= 10δ
+        @test abs(b(s_end + δ) - b(s_end - δ)) <= 10δ^2
+        @test abs(db(s_end + δ)) <= 10δ && db(s_end - δ) == 0
+    end
+    for h in (0.0, -h0)
+        @test switches(corr, h, h0) == (1.0, 1.0)
     end
 end
 
@@ -686,7 +726,8 @@ end
         energy_state = energy,
         use_ale = true,
         deactivation = true,
-        radiation_model = name === :two_layer ? BEER_LAMBERT : Pyrolysis.SURFACE_ABSORPTION,
+        radiation_model = name === :two_layer ? RADIATIVE_TRANSFER :
+                          Pyrolysis.SURFACE_ABSORPTION,
         correction = _active,
         config.lagrangian,
     )

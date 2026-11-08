@@ -67,7 +67,7 @@ function _require_supported(
         closure in (:potential, :balance) ||
             throw(ArgumentError("closure must be :potential or :balance, got :$closure"))
         line = (
-            "in-depth radiation" => radiation_model === BEER_LAMBERT,
+            "in-depth radiation" => radiation_model !== SURFACE_ABSORPTION,
             "gas transport" => gas_can_move(problem),
             "the variable cross section" => material.lateral_shrinkage_law !== nothing,
             "deactivation" => deactivation,
@@ -79,9 +79,9 @@ function _require_supported(
             needed && throw(ArgumentError("$what is a line's: the mesh has $D dimensions"))
         end
     end
-    if radiation_model === BEER_LAMBERT && !(coordinates isa Planar)
-        # The intensity rows attenuate the intensity and the cell sources read
-        # the face areas, which agree only where the areas are equal.
+    if radiation_model !== SURFACE_ABSORPTION && !(coordinates isa Planar)
+        # The radiation rows carry fluxes per unit face area and the cell
+        # sources read the face areas, which agree only where the areas are equal.
         throw(ArgumentError("in-depth radiation needs planar coordinates"))
     end
     if material.lateral_shrinkage_law !== nothing
@@ -359,11 +359,12 @@ leaves in one invocation.
 """
 const CORRECTION_BAND = 0.1
 
-# Whether the bound correction of `closure` moves some layer.
+# Whether the bound correction of `closure` moves some layer: a gain already
+# set, or layers whose times the solve estimates.
 _moves(closure) =
     closure isa BalanceRowClosure &&
     closure.correction isa LayerCorrection &&
-    any(!iszero, closure.correction.gain)
+    (any(!iszero, closure.correction.gain) || estimates_layer_times(closure.correction))
 
 # Pore state exists for every gas-bearing material, independently of mobility.
 _gas_transport(problem::PyrolysisProblem) =
@@ -403,8 +404,8 @@ function _kernels(
         !gas_can_move(problem) ? () :
         (GasTransportKernel(gas, topo, g0, problem.bc_set, material, laws),)
     radiation =
-        radiation_model === BEER_LAMBERT ? (BeerLambertKernel(topo, g0, problem.bc_set),) :
-        ()
+        radiation_model === RADIATIVE_TRANSFER ?
+        (RadiativeTransferKernel(topo, g0, problem.bc_set, material),) : ()
     boundary = ThermalBoundaryKernel(
         topo,
         g0,
@@ -425,13 +426,26 @@ function _kernels(
     )
 end
 
-# The largest incident intensity over the solve window [W/m²], at least 1: the
-# scale of the face-intensity tolerances.
-function _intensity_scale(kernels::Tuple, ds, tspan)
-    kernel = find_kernel(BeerLambertKernel, kernels)
+# The radiation rows per face of a radiation model.
+_radiation_rows(model::RadiationModel, bc_set) =
+    model === RADIATIVE_TRANSFER ? radiative_transfer_rows(bc_set) : 0
+
+# The scale of the radiation rows' tolerances [W/m²], at least 1: under
+# radiative transfer the larger of the largest radiation arriving at either
+# face over the solve window (diffuse members, the surroundings' F σ T∞⁴ and
+# the beams), sampled at 101 times, and the emissive power of the hottest
+# initial cell. The window is read whole, so a later end can raise the scale.
+function _transfer_scale(kernels::Tuple, ds, tspan)
+    kernel = find_kernel(RadiativeTransferKernel, kernels)
     kernel === nothing && return 1.0
     times = range(Float64(tspan[1]), Float64(tspan[2]); length = 101)
-    return max(1.0, maximum(t -> abs(incident_intensity(kernel, ds, t)), times))
+    conditions =
+        kernel.back isa OpenBack ? (kernel.top, kernel.back.condition) : (kernel.top,)
+    arriving = 0.0
+    for t in times, bc in conditions
+        arriving = max(arriving, abs(arriving_radiation(bc, t)))
+    end
+    return max(1.0, arriving, STEFAN_BOLTZMANN * maximum(ds.T)^4)
 end
 
 # The area and its lateral rate under a variable cross section: one kernel
@@ -457,9 +471,9 @@ end
 
 # The algebraic unknowns of `u` that satisfy their rows at time `t`, given its
 # differential unknowns, in the order the rows read each other: under a
-# variable cross section its rows first, twice, since the face intensities'
+# variable cross section its rows first, twice, since the radiation rows'
 # optical depths and the history rates the lateral rate reads both read the
-# concentrations at the area; then the face intensities; then one kernel pass
+# concentrations at the area; then the radiation rows; then one kernel pass
 # for the strain rates and the closure's unknowns. Returns `nothing`, or the
 # residual and scale of a closure row left above round-off.
 function _consistent_algebraic!(u, def::ResidualDefinition, ws::ResidualWorkspace, t)
@@ -469,7 +483,7 @@ function _consistent_algebraic!(u, def::ResidualDefinition, ws::ResidualWorkspac
         _consistent_lateral!(du, u, def, ws, t)
         _consistent_lateral!(du, u, def, ws, t)
     end
-    _consistent_intensities!(u, def, ws, t)
+    _consistent_radiation!(u, def, ws, t)
     cl === nothing && return nothing
     residual!(du, u, def, t, ws)
     return _consistent_unknowns!(u, du, cl, def, ws, t)
@@ -543,10 +557,10 @@ end
 
 Overwrite the algebraic unknowns of `u` with the values that satisfy their
 rows at time `t`, given its differential unknowns: under a variable cross
-section the area and its lateral rate first, since the intensities' optical
-depths and the history rates read the concentrations at the area; then the
-face intensities by the attenuation recurrence from the exposed face; then
-the node velocities or the cells' multipliers by the mesh closure. The
+section the area and its lateral rate first, since the radiation rows'
+optical depths and the history rates read the concentrations at the area;
+then the face fluxes of radiative transfer; then the node velocities or the
+cells' multipliers by the mesh closure. The
 integrator starts from such a state; a closure row left above round-off is
 an error.
 """
@@ -563,17 +577,16 @@ function consistent_state!(
     return u
 end
 
-# The face intensities of `u` that satisfy their algebraic rows at time `t`:
-# the consistent values the integrator starts from.
-function _consistent_intensities!(u, def::ResidualDefinition, ws::ResidualWorkspace, t)
+# The face fluxes of `u` that satisfy the radiative transfer rows at time `t`.
+function _consistent_radiation!(u, def::ResidualDefinition, ws::ResidualWorkspace, t)
     layout = def.layout
-    kernel = find_kernel(BeerLambertKernel, def.kernels)
+    kernel = find_kernel(RadiativeTransferKernel, def.kernels)
     kernel === nothing && return u
     ds = ws.derived
     derive!(ds, u, layout, def.setup)
-    sweep_intensities!(ds.I, kernel, ds, def.setup.topology, t)
-    for f in eachindex(ds.I)
-        u[intensity_index(layout, f)] = ds.I[f]
+    consistent_radiation!(ds.q, kernel, ds, def.setup.topology, t)
+    for f in axes(ds.q, 2), k in axes(ds.q, 1)
+        u[radiation_index(layout, f, k)] = ds.q[k, f]
     end
     return u
 end
@@ -588,7 +601,7 @@ _register_kernel!(
     t::SlotTables,
     k::Union{ConductionKernel,GasTransportKernel,ThermalBoundaryKernel},
 ) = register_tables!(t, :face, k.d_floor)
-_register_kernel!(t::SlotTables, k::BeerLambertKernel) =
+_register_kernel!(t::SlotTables, k::RadiativeTransferKernel) =
     register_tables!(t, :matrix, k.d_floor)
 function _register_kernel!(t::SlotTables, k::RelativeFluxKernel)
     register_tables!(t, :matrix, k.ε)
@@ -645,15 +658,18 @@ and its siblings on a line, [`box_mesh`](@ref) and [`cell_mesh`](@ref) in two
 and three dimensions): the initial inventories
 `mᵢⱼ = ξⱼ(xᵢ) Vᵢ` and the energy state from `T(xᵢ)` at the cell centres `xᵢ`
 ([`initial_fields`](@ref)), the gas transport the material and the mass
-conditions need, the kernels, the face intensities consistent with the
-incident flux under `BEER_LAMBERT`, the tolerance vector and the colored
-Jacobian. The coordinate system and the cross-section measure are the mesh's;
+conditions need, the kernels, the radiation rows consistent with the rest of
+the state, the tolerance vector and the colored Jacobian. The coordinate system and the cross-section measure are the mesh's;
 the thermal and mass conditions are keyed by its boundary tags.
 
 `radiation_model` is `SURFACE_ABSORPTION` (the incident flux enters the surface
 balance at the exposed cell's absorptivity, or the condition's own) or
-`BEER_LAMBERT` (it is absorbed in depth, through the face intensities of
-[`BeerLambertKernel`](@ref)).
+`RADIATIVE_TRANSFER` (every cell absorbs and
+emits, through the face fluxes of [`RadiativeTransferKernel`](@ref); the
+`RadiativeBC` and `RadiativeFluxBC` members of the `:top` and `:bottom`
+conditions are the radiation arriving from outside, and leave the surface
+balance; a `RadiativeFluxBC` on `:top` arrives diffuse or as the beams of its
+`distribution`).
 
 `use_ale` moves the mesh with the solid: the mesh's pinned nodes (on a line
 the back node) stay at rest and every other node follows the cells' reaction
@@ -811,7 +827,7 @@ function setup(
         topo,
         energy;
         moving = use_ale,
-        intensities = radiation_model === BEER_LAMBERT,
+        radiation_rows = _radiation_rows(radiation_model, problem.bc_set),
         chi,
         history,
         deformation,
@@ -919,7 +935,7 @@ function setup(
         reltol = Float64(reltol),
         abstol = Float64(abstol),
         threshold = Float64(threshold),
-        intensity_scale = _intensity_scale(kernels, ws.derived, problem.tspan),
+        radiation_scale = _transfer_scale(kernels, ws.derived, problem.tspan),
         time_scale = Float64(time_scale),
     )
     cells === nothing || _register_tables!(

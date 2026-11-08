@@ -1,0 +1,57 @@
+# MaCFP-3 PMMA property set NIST-StMU (2023). FACT kinetics; validated in FDS 6.8 (decks in
+# PMMA/Validation_Results/NIST-StMU-FSRI/FDS_Input_Files/). Component 3 (1 %) is inert.
+id = "NIST-StMU"
+year = 2023
+json = "PMMA/Material_Properties/2023/MaCFP_PMMA_NIST-StMU.json"
+calibration_code = "FDS"
+validation = "NIST-StMU-FSRI/NIST-StMU-FSRI"
+absorption = "in-depth"
+kappa_kernel = "two-flux"
+notes = [
+  "The group's runs use FDS 6.8 with ADJUST_H on (MMA declared as C5H8O); constant dH here.",
+  "matl-db's Verification Master.py names this set \"MaCFP_PMMA_NIST - StMU\" (with spaces), so it has no Verification deck.",
+]
+
+[gas]
+cp = 0.0
+
+[[components]]
+id = "PMMA1"
+rho = 1177.0
+y0 = 0.035
+emissivity = 0.963
+kappa = 2620.0
+k = { form = "constant", value = 0.20 }
+cp = { form = "constant", value = 2130.0 }
+
+[[components]]
+id = "PMMA2"
+rho = 1177.0
+y0 = 0.955
+emissivity = 0.963
+kappa = 2620.0
+k = { form = "constant", value = 0.20 }
+cp = { form = "constant", value = 2130.0 }
+
+[[components]]
+id = "PMMA3"
+rho = 1177.0
+y0 = 0.01
+emissivity = 0.963
+kappa = 2620.0
+k = { form = "constant", value = 0.20 }
+cp = { form = "constant", value = 2130.0 }
+
+[[reactions]]
+reactant = "PMMA1"
+A = 5.81e5
+E = 7.13e4
+n = 1.0
+dH = 1.74e6
+
+[[reactions]]
+reactant = "PMMA2"
+A = 4.05e11
+E = 1.68e5
+n = 1.0
+dH = 9.14e5

@@ -9,7 +9,10 @@ using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!, buffers
 using Pyrolysis.Kernels: GasTransportKernel, ThermalBoundaryKernel, find_kernel, face_peclet
 using Pyrolysis.Kernels: conducted_flux
+using Pyrolysis.Kernels: RadiativeTransferKernel, contribute!, reset!
+using Pyrolysis.Materials: RADIATIVE_TRANSFER
 using Pyrolysis.Outputs: ledger_rates
+using Pyrolysis: Integration
 using Pyrolysis.Integration: setup
 using OrdinaryDiffEq: ODEFunction, ODEProblem
 import OrdinaryDiffEq
@@ -273,4 +276,129 @@ end
     # defect as well as the temperature and condensed-mass rows.
     @test all(>=(2), orders)
     @test orders[end] >= 2.9
+end
+
+# A semi-transparent decomposing slab under radiative transfer, its emissivity
+# falling with temperature: heated on its exposed face by a diffuse or a
+# collimated flux beside surroundings at 300 K, its back a mirror or open to
+# surroundings at 300 K. Its radiation rows are algebraic, so the solver's own
+# adaptive solve carries it.
+function _radiating_column(; distribution = Diffuse(), back = :mirror)
+    solid = SolidComponent(
+        :solid,
+        ρ = 800.0,
+        φ = 0.3,
+        c = 1200.0,
+        k = 0.4,
+        ε = (0.95, -1.5e-4),
+        α = 0.5,
+        λ = 1e-6,
+    )
+    gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02)
+    rxn = Reaction(:gasify, 1 => 2; A = 1e8, E = 1.2e5, h = 1e5)
+    return PyrolysisProblem(
+        mesh = uniform_mesh(0.01, 12),
+        material = Material(name = :slab, components = (solid, gas), reactions = (rxn,)),
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = RadiativeFluxBC(4e4; distribution) +
+                      RadiativeBC(T_inf = 300.0) +
+                      ConvectiveBC(h = 10.0, T_inf = 300.0),
+                bottom = back === :mirror ? AdiabaticBC() : RadiativeBC(T_inf = 300.0),
+            ),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> 300.0,
+        ξ_initial = [z -> 800.0, z -> 0.0],
+        tspan = (0.0, 60.0),
+        output_times = collect(0.0:5.0:60.0),
+    )
+end
+
+# The radiation the live cells absorb, per unit area, from the radiative
+# transfer kernel alone at the state `u`.
+function _absorbed_by_cells(def, ws, u, t)
+    layout, topo = def.layout, def.setup.topology
+    kernel = find_kernel(RadiativeTransferKernel, def.kernels)
+    ds, c = buffers(ws, def, Float64)
+    derive!(ds, u, layout, def.setup)
+    reset!(c)
+    contribute!(c, kernel, ds, topo, def.setup.material, t)
+    S = sum(c.S_energy[i] for i = 1:n_cells(topo) if ds.active[i]; init = 0.0)
+    return S / ds.geometry.face_area[1]
+end
+
+# At every saved state, the interpolated ones among them, what crosses the
+# exposed face inward less what crosses it outward less what leaves through the
+# back is what the cells absorb.
+@testset "the cells absorb the radiation crossing the faces: $(nameof(typeof(distribution))) heater, $(back) back, moving = $(moving)" for distribution in
+                                                                                                                                           (
+        Diffuse(),
+        Collimated(),
+    ),
+    back in (:mirror, :open),
+    moving in (false, true)
+
+    sol = Integration.solve(
+        _radiating_column(; distribution, back);
+        use_ale = moving,
+        radiation_model = RADIATIVE_TRANSFER,
+        abstol = 1e-8,
+        reltol = 1e-6,
+    )
+    @test sol.retcode === :Success
+    def = sol.definition
+    ws = ResidualWorkspace(def, fill(300.0, n_cells(def.setup.topology)))
+    x = sol.extras
+    scale = maximum(x.radiation_absorbed)
+    worst = 0.0
+    for (k, (t, u)) in enumerate(zip(sol.t, sol.raw_solution.u))
+        crossing = x.radiation_absorbed[k] - x.radiation_emitted[k] - x.radiation_back[k]
+        worst = max(worst, abs(_absorbed_by_cells(def, ws, u, t) - crossing))
+    end
+    @info "radiation crossing against the cell sources" distribution back moving worst scale
+    @test worst <= 1e-12 * scale
+    if back === :mirror
+        @test maximum(abs, x.radiation_back) <= 1e-12 * scale
+    else
+        @test all(>(0), x.radiation_back[2:end])
+    end
+end
+
+# The ledger of the live region closes with the radiation the cells absorb in
+# its sources, which carry most of what enters.
+@testset "energy ledger under radiative transfer: $(nameof(typeof(distribution))) heater, $(energy) form" for distribution in
+                                                                                                              (
+        Diffuse(),
+        Collimated(),
+    ),
+    energy in (:temperature, :enthalpy)
+
+    rec = ConservationRecorder()
+    sol = Integration.solve(
+        _radiating_column(; distribution, back = :open);
+        use_ale = true,
+        energy_state = energy,
+        radiation_model = RADIATIVE_TRANSFER,
+        callback = rec,
+        abstol = 1e-8,
+        reltol = 1e-6,
+    )
+    @test sol.retcode === :Success
+    audit = conservation_audit(sol, rec)
+    x = sol.extras
+    net = x.radiation_absorbed .- x.radiation_emitted .- x.radiation_back
+    A = x.cross_section_area_history
+    radiative = sum(
+        (net[k-1] * A[k-1] + net[k] * A[k]) * (sol.t[k] - sol.t[k-1]) / 2 for
+        k = 2:length(sol.t)
+    )
+    @info "energy ledger under radiative transfer" distribution energy audit.energy audit.mass radiative
+    @test abs(audit.energy.relative) <= 1e-6
+    @test abs(audit.mass.defect) <= 1e-8 * audit.mass.initial
+    @test audit.mass.inflow < 0
+    @test radiative >= 0.5 * audit.energy.inflow > 0
 end

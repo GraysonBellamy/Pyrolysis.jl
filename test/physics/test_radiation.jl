@@ -1,27 +1,19 @@
 """
-Tests for Beer–Lambert surface absorptivity. Absorption and emission use
-the same surface coefficient, so switching SURFACE_ABSORPTION →
-BEER_LAMBERT does not change the absorbed power by 1/ε_eff (≈ 11 % at
-ε = 0.9).
-
-Convention:
-- Kirchhoff path (no explicit BC absorptivity, no component absorptivity):
-  the flux entering the medium is ε_eff·I, with ε_eff the exposed cell's
-  effective emissivity — absorption and emission use the same coefficient
-  (detailed balance).
-- Explicit-absorptivity path: the condition's α(t) replaces it.
-- The cells attenuate the beam with the volumetric absorption coefficient
-  α_eff = Σ_k ξ_k α_k of their own composition.
+Tests for the exposed face under radiative transfer. The face is a gray
+interface whose transmissivity is the first live cell's effective emissivity,
+at its temperature and composition, for the radiation entering and for the
+radiation leaving (detailed balance). With no component absorptivity a beam
+enters at that emissivity too. The cells absorb with the volumetric absorption
+coefficient α_eff = Σ_k ξ_k α_k of their own composition.
 """
 
 using Test
 using Pyrolysis
-using Pyrolysis.Materials: BEER_LAMBERT
+using Pyrolysis.Materials: RADIATIVE_TRANSFER, STEFAN_BOLTZMANN
 using Pyrolysis.Properties: mixture_emissivity, effective_absorption
 
-# Two solids with different ε so ε_eff is composition-dependent; non-zero
-# absorption coefficients so Beer–Lambert is non-trivial. No component sets
-# an absorptivity: the surface absorbs at its emissivity.
+# Two solids with different ε so ε_eff is composition-dependent, and non-zero
+# absorption coefficients. No component sets an absorptivity.
 function _radiation_material()
     virgin = SolidComponent(
         :virgin,
@@ -49,7 +41,7 @@ function _radiation_material()
 end
 
 # Graded hot state with a graded mixed composition (ε_eff strictly between
-# the component values in every cell), with consistent intensities.
+# the component values in every cell), with consistent radiation rows.
 _radiation_composition(i) = (400.0 - 10.0 * i, 80.0 + 5.0 * i, 4.0)
 
 function _radiation_state(; n = 8)
@@ -65,7 +57,7 @@ function _radiation_state(; n = 8)
         ),
         tspan = (0.0, 100.0),
     )
-    cp = Pyrolysis.Integration.setup(problem; radiation_model = BEER_LAMBERT)
+    cp = Pyrolysis.Integration.setup(problem; radiation_model = RADIATIVE_TRANSFER)
     def, ws = cp.def, cp.ws
     layout = def.layout
     V = Pyrolysis.Problem.cell_volumes(problem.mesh)
@@ -77,50 +69,70 @@ function _radiation_state(; n = 8)
             u[Pyrolysis.States.mass_index(layout, i, j)] = ξ * V[i]
         end
     end
-    Pyrolysis.Integration._consistent_intensities!(u, def, ws, 0.0)
+    Pyrolysis.Integration._consistent_radiation!(u, def, ws, 0.0)
     du = zeros(length(u))
     Pyrolysis.Assembly.residual!(du, u, def, 0.0, ws)
-    ds, _ = Pyrolysis.Assembly.buffers(ws, def, Float64)
-    kernel = Pyrolysis.Kernels.find_kernel(Pyrolysis.Kernels.BeerLambertKernel, def.kernels)
-    return (; mat, def, ds, kernel, T, n)
+    ds, c = Pyrolysis.Assembly.buffers(ws, def, Float64)
+    K = Pyrolysis.Kernels
+    kernel = K.find_kernel(K.RadiativeTransferKernel, def.kernels)
+    return (; mat, cp, def, layout, u, ds, c, kernel, T, n)
 end
 
-@testset "Beer–Lambert surface absorptivity" begin
+@testset "the absorption coefficient is Σ ξ_k α_k of each cell's composition" begin
     s = _radiation_state()
-    ds, kernel, mat, n = s.ds, s.kernel, s.mat, s.n
-    i_top = kernel.order[1]
-    @test i_top == n
-
-    @testset "Kirchhoff path: the exposed cell absorbs at the emissivity it emits with" begin
-        # No component absorptivity: the surface absorptivity is the
-        # emissivity itself, between the components' (mixed composition).
-        @test ds.a[i_top] === ds.ε[i_top]
-        @test 0.85 < ds.ε[i_top] < 0.95
-        @test ds.ε[i_top] ≈ mixture_emissivity(_radiation_composition(n), s.T[n], mat) rtol =
-            1e-13
-        # The beam entering the medium carries that absorptivity.
-        @test Pyrolysis.Kernels.incident_intensity(kernel, ds, 0.0) ≈ ds.ε[i_top] * 50e3 rtol =
-            1e-13
-        @test ds.I[kernel.exposed] ≈ ds.ε[i_top] * 50e3 rtol = 1e-13
+    one_component = Material(
+        name = :one,
+        components = (
+            SolidComponent(:s, λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.2, α = 5.0),
+        ),
+        reactions = (),
+    )
+    @test effective_absorption((1000.0,), one_component) ≈ 1000.0 * 5.0 rtol = 1e-14
+    # Two solids and a gas without an absorption coefficient.
+    @test effective_absorption((350.0, 120.0, 4.0), s.mat) ≈ 350.0 * 2.0 + 120.0 * 50.0 rtol =
+        1e-14
+    # The cells' coefficients are those sums at their own concentrations.
+    for i = 1:s.n
+        ξ = _radiation_composition(i)
+        @test s.ds.α[i] ≈ ξ[1] * 2.0 + ξ[2] * 50.0 rtol = 1e-13
     end
+    @test allunique(s.ds.α)
+end
 
-    @testset "the absorption coefficient is Σ ξ_k α_k of each cell's composition" begin
-        one_component = Material(
-            name = :one,
-            components = (
-                SolidComponent(:s, λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.2, α = 5.0),
-            ),
-            reactions = (),
-        )
-        @test effective_absorption((1000.0,), one_component) ≈ 1000.0 * 5.0 rtol = 1e-14
-        # Two solids and a gas without an absorption coefficient.
-        @test effective_absorption((350.0, 120.0, 4.0), mat) ≈ 350.0 * 2.0 + 120.0 * 50.0 rtol =
-            1e-14
-        # The cells' coefficients are those sums at their own concentrations.
-        for i = 1:n
-            ξ = _radiation_composition(i)
-            @test ds.α[i] ≈ ξ[1] * 2.0 + ξ[2] * 50.0 rtol = 1e-13
-        end
-        @test allunique(ds.α)
+# Under radiative transfer the exposed face is a gray interface whose
+# transmissivity is the first live cell's emissivity, at its temperature and
+# composition, for the radiation entering and for the radiation leaving: the
+# exposed row reads q⁻ = ε Q + (1 − ε) q⁺, so ε of the diffuse Q enters and
+# ε of the q⁺ arriving from inside leaves.
+@testset "Radiative transfer: the exposed face transmits at the first live cell's emissivity, both ways" begin
+    s = _radiation_state()
+    mat, cp, def, layout, u, ds, c, kernel, T, n =
+        s.mat, s.cp, s.def, s.layout, s.u, s.ds, s.c, s.kernel, s.T, s.n
+    K = Pyrolysis.Kernels
+    Q = 50e3 + STEFAN_BOLTZMANN * 300.0^4
+    for i = 1:n
+        ξ = _radiation_composition(i)
+        @test ds.ε[i] ≈ mixture_emissivity(ξ, T[i], mat) rtol = 1e-13
+        # With no component absorptivity a beam enters at the emissivity.
+        @test ds.a[i] === ds.ε[i]
     end
+    @test 0.85 < ds.ε[n] < 0.95
+    e = n + 1
+    ε = ds.ε[n]
+    @test ds.q[1, e] ≈ ε * Q + (1 - ε) * ds.q[2, e] rtol = 1e-13
+    # The colored Jacobian: the exposed row reflects 1 − ε of q⁺.
+    J = Pyrolysis.ColoredJacobian.jac_prototype(cp.jacobian)
+    Pyrolysis.ColoredJacobian.jacobian!(J, cp.jacobian, u, 0.0)
+    r, col = Pyrolysis.States.radiation_index(layout, e, 1),
+    Pyrolysis.States.radiation_index(layout, e, 2)
+    @test J[r, col] ≈ -(1 - ε) rtol = 1e-13
+    # With the exposed cell dead the next cell's emissivity takes over, at the
+    # face below it.
+    ds.active[n] = false
+    K.reset!(c)
+    K.contribute!(c, kernel, ds, def.setup.topology, mat, 0.0)
+    ε′ = ds.ε[n-1]
+    @test ε′ != ε
+    @test c.r_radiation[1, n] ≈ ds.q[1, n] - (ε′ * Q + (1 - ε′) * ds.q[2, n]) rtol = 1e-13
+    @test c.r_radiation[1, e] == 0 && c.r_radiation[2, e] == 0
 end

@@ -1,6 +1,6 @@
-# V-BO-05 — PMMA-on-Kaowool burnout on a fixed mesh under in-depth absorption stops at the first interior void
+# V-BO-05 — PMMA-on-Kaowool burnout on a fixed mesh under radiative transfer stops at the first interior void
 
-**Tags:** `eulerian`, `burnout`, `depletion`, `beer_lambert`, `coupled`
+**Tags:** `eulerian`, `burnout`, `depletion`, `radiative_transfer`, `coupled`
 
 **References:**
 
@@ -8,19 +8,24 @@
 
 ## Problem statement
 
-The V-BO-01 deck, in-depth absorption included, on a fixed mesh. The
-temperature maximum of the PMMA lies below the surface, so the surface cell
-reacts slowest: it persists as a low-density skin while the cells beneath it
-empty, and the layer gasifies from within. A void cell conducts with the gas
-conductivity and absorbs nothing, and nothing in the model carries heat
-across a void, so the flux transmitted through the void column would heat
-the substrate beneath it far outside the property bracket.
+The V-BO-01 deck, radiative transfer included, on a fixed mesh. The cells
+absorb and emit through the depth while the exposed face also loses heat by
+convection, so the temperature maximum of the PMMA lies below the surface
+and the PMMA beneath the surface empties nearly uniformly, the exposed cell
+slowest.
 
 A cell deactivates when its condensed mass falls below ε_m of its initial
-value, and on a fixed mesh a crossing cell beneath a live cell ends the
-solve with outcome `:interior` and retcode Terminated. The run must stop
-before any deactivation, with the maximum live-cell temperature below
-1000 K. The histories report the time reached at each resolution.
+value. A fixed mesh removes only its outermost live cell, and a void beneath
+a live skin is a gap the model does not represent, so a crossing cell
+beneath a live cell ends the solve with outcome `:interior` and retcode
+Terminated. At the CI resolution, 60 PMMA cells, the cell beneath the
+exposed one crosses first, at 157.5 s, while the exposed cell holds 1.2
+thresholds: the run must stop there before any deactivation, with the
+maximum live-cell temperature below 1000 K. The skin is thin at every
+resolution: at 30 cells the exposed cell reaches the threshold first and
+goes before the stop, and at 120 and 240 the cells over the first crossing
+hold 1.0 to 1.4 thresholds. The histories report the time reached at each
+resolution.
 
 ### Quantities of interest (n = 120)
 
@@ -28,7 +33,7 @@ before any deactivation, with the maximum live-cell temperature below
 | --- | --- | --- | --- | --- | --- | --- |
 | outcome :interior | 1 | 1 | 0 | 0.5 | yes | the solve ended with outcome :interior |
 | deactivation events before the stop | 0 | 0 | 0 | 0.5 | yes | the surface cell persists as a skin while the layer gasifies from within |
-| maximum live-cell temperature up to the stop | 693.4 | — | 693.4 | 1000 | yes | K over every accepted step (observed 693) |
+| maximum live-cell temperature up to the stop | 691.4 | — | 691.4 | 1000 | yes | K over every accepted step (observed 691) |
 
 ![V-BO-05 mlr_history](assets/V-BO-05/V-BO-05_mlr_history.png)
 
@@ -45,6 +50,6 @@ before any deactivation, with the maximum live-cell temperature below
 | integrator | Rodas5P (default) |
 | use_ale | false |
 | deactivation | true |
-| radiation_model | BEER_LAMBERT |
+| radiation_model | RADIATIVE_TRANSFER |
 | abstol | 1.0e-8 |
 | reltol | 1.0e-6 |

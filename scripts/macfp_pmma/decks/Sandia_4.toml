@@ -1,0 +1,60 @@
+# MaCFP-2 PMMA kinetics-only set Sandia_4 (2021, Sandia, Sierra). TGA only; thermal properties are placeholders.
+id = "Sandia_4"
+year = 2021
+json = "PMMA/Material_Properties/2021/MaCFP_PMMA_Sandia_4.json"
+calibration_code = "Sierra"
+kinetics_only = true
+tga_predictions = { 10 = "Sandia_TGA_10K_UMET2stepseries.csv", 100 = "Sandia_TGA_100K_UMET2stepseries.csv" }
+absorption = "surface"
+order_basis = "init"
+density_basis_rho = 1180.0
+notes = [
+  "Normalised by the initial total mass (\"init\"): fits their 10 and 100 K/min TGA better than \"own\" in every comparison.",
+  "JSON solid yield 1.91 for reaction 2 is the order pasted in; 1e-4 reproduces their residue.",
+  "matl-db's Verification deck carries the 1.91 yield (NU_SPEC = -0.91), leaves A unconverted and never creates the intermediate.",
+]
+
+[gas]
+cp = 0.0
+
+[[components]]
+id = "A"
+rho = 1180.0
+y0 = 1.0
+emissivity = 0.9
+k = { form = "constant", value = 0.2 }
+cp = { form = "constant", value = 1500.0 }
+
+[[components]]
+id = "B"
+rho = 1180.0
+y0 = 0.0
+emissivity = 0.9
+k = { form = "constant", value = 0.2 }
+cp = { form = "constant", value = 1500.0 }
+
+[[components]]
+id = "res"
+rho = 1180.0
+y0 = 0.0
+emissivity = 0.9
+k = { form = "constant", value = 0.2 }
+cp = { form = "constant", value = 1500.0 }
+
+[[reactions]]
+reactant = "A"
+A = 1340225.0
+E = 82390.0
+n = 1.0
+dH = 0.0
+residue = "B"
+residue_yield = 0.95
+
+[[reactions]]
+reactant = "B"
+A = 2.42e+19
+E = 256782.0
+n = 1.91
+dH = 0.0
+residue = "res"
+residue_yield = 0.0001

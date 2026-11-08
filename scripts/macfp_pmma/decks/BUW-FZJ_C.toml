@@ -1,0 +1,101 @@
+# MaCFP-3 PMMA property set BUW-FZJ Approach C (2023). The JSON is in FDS units (°C, kJ); converted here.
+# A and E recomputed from the group's FDS reference-temperature inputs (T_ref, ΔT, 60 K/min; FDS 6.7.9),
+# PMMA_MaCFP3_PMMA01.txt in Zenodo 10.5281/zenodo.8005836; the JSON's values are 3-figure roundings.
+id = "BUW-FZJ_C"
+year = 2023
+json = "PMMA/Material_Properties/2023/MaCFP_PMMA_BUW-FZJ_C.json"
+calibration_code = "FDS"
+validation = "BUW-FZJ/BUW-FZJ-C"
+absorption = "in-depth"
+kappa_kernel = "two-flux"
+notes = [
+  "Initial mass fractions sum to 0.994 in the JSON and the deck; normalised here.",
+  "Residue yield 0.010095524 (deck NU_MATL); the JSON's \"Solid Yield\" 0.022 contradicts it and is ignored.",
+  "The k table is non-monotonic (0.149 -> 0.048 -> 0.574 W/mK) and cp jumps between 373 and 473 K: copied as calibrated.",
+  "A and E follow FDS 6.7.9's conversion, r_p = 2*Tdot/dT; FDS >= 6.10 multiplies r_p by (1 - nu_s), which moves A and E by about 1 %.",
+  "The JSON's \"Heat of Pyrolysis\" array holds the string \"None\" for the residue, and its \"Form\" nesting [[[1],[2],[3],[4]],[5]] is unique to this file.",
+]
+
+[gas]
+cp = 0.0
+
+[[components]]
+id = "PMMA1_A"
+rho = 1201.722222222222
+y0 = 0.023408677
+emissivity = 0.920661286422014
+kappa = 3434.326925173834
+k = { form = "table", T = [323.15, 423.15, 573.15, 693.15], v = [0.1493661235437337, 0.0788646039973429, 0.0478595810772007, 0.5738201705430981] }
+cp = { form = "table", T = [373.15, 473.15, 573.15, 693.15], v = [1092.193048203574, 3010.803502504312, 2506.4509858647384, 2997.9447489898297] }
+
+[[components]]
+id = "PMMA1_B"
+rho = 1201.722222222222
+y0 = 0.009937649
+emissivity = 0.920661286422014
+kappa = 3434.326925173834
+k = { form = "table", T = [323.15, 423.15, 573.15, 693.15], v = [0.1493661235437337, 0.0788646039973429, 0.0478595810772007, 0.5738201705430981] }
+cp = { form = "table", T = [373.15, 473.15, 573.15, 693.15], v = [1092.193048203574, 3010.803502504312, 2506.4509858647384, 2997.9447489898297] }
+
+[[components]]
+id = "PMMA2_A"
+rho = 1201.722222222222
+y0 = 0.458516884
+emissivity = 0.920661286422014
+kappa = 3434.326925173834
+k = { form = "table", T = [323.15, 423.15, 573.15, 693.15], v = [0.1493661235437337, 0.0788646039973429, 0.0478595810772007, 0.5738201705430981] }
+cp = { form = "table", T = [373.15, 473.15, 573.15, 693.15], v = [1092.193048203574, 3010.803502504312, 2506.4509858647384, 2997.9447489898297] }
+
+[[components]]
+id = "PMMA2_B"
+rho = 1201.722222222222
+y0 = 0.50813679
+emissivity = 0.920661286422014
+kappa = 3434.326925173834
+k = { form = "table", T = [323.15, 423.15, 573.15, 693.15], v = [0.1493661235437337, 0.0788646039973429, 0.0478595810772007, 0.5738201705430981] }
+cp = { form = "table", T = [373.15, 473.15, 573.15, 693.15], v = [1092.193048203574, 3010.803502504312, 2506.4509858647384, 2997.9447489898297] }
+
+[[components]]
+id = "residue"
+rho = 1155.0
+y0 = 0.0
+emissivity = 0.8822119859282802
+kappa = 50000.0
+k = { form = "constant", value = 1.0240163103340307 }
+cp = { form = "constant", value = 3130.11011972178 }
+
+[[reactions]]
+reactant = "PMMA1_A"
+A = 4.89053e8
+E = 93226.9
+n = 1.0
+dH = 699091.8352143465
+residue = "residue"
+residue_yield = 0.010095524
+
+[[reactions]]
+reactant = "PMMA1_B"
+A = 31503.4
+E = 55252.1
+n = 1.0
+dH = 1992689.506425605
+residue = "residue"
+residue_yield = 0.010095524
+
+[[reactions]]
+reactant = "PMMA2_A"
+A = 1.9454e10
+E = 148096.0
+n = 1.0
+dH = 529183.3655170698
+residue = "residue"
+residue_yield = 0.010095524
+
+[[reactions]]
+reactant = "PMMA2_B"
+A = 7.7987e13
+E = 197080.0
+n = 1.0
+dH = 1187493.955570798
+residue = "residue"
+residue_yield = 0.010095524

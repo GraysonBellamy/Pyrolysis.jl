@@ -1,7 +1,7 @@
 using Test
 using SparseArrays
 using Pyrolysis
-using Pyrolysis.Materials: BEER_LAMBERT, T_REF
+using Pyrolysis.Materials: RADIATIVE_TRANSFER, T_REF
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.States: StateLayout, state_length
@@ -13,6 +13,7 @@ using Pyrolysis.Closures:
     EquidistributionCorrection,
     EQUIDISTRIBUTION_TIME,
     LayerCorrection,
+    estimates_layer_times,
     residues,
     retained_volumes
 using Pyrolysis.ColoredJacobian
@@ -25,7 +26,8 @@ using LinearSolve: KLUFactorization, UMFPACKFactorization
 
 # An ablating solid: it decomposes to a gas that takes no volume, so a cell's
 # thickness falls with its condensed mass, as in V-CPL-02. `radiating` makes
-# the solid absorb in depth; `porous` gives it pores (φ = 0.2) and a
+# the solid absorb in depth, at the absorption coefficient `absorption` per
+# unit concentration; `porous` gives it pores (φ = 0.2) and a
 # permeability, so its gas flows by Darcy's law; `law` is a lateral shrinkage
 # law. `top` replaces the heated condition, `mass_top` the film on the top
 # face, `mesh` the uniform mesh and `ξ_initial` the solid column.
@@ -35,6 +37,7 @@ function _ablator(
     q = 2.8e6,
     t_end = 0.8,
     radiating = false,
+    absorption = 50.0,
     from_bottom = false,
     porous = false,
     porosity = 0.05,
@@ -56,7 +59,7 @@ function _ablator(
         c = c,
         k = k,
         λ = 1e-6,
-        α = radiating ? 50.0 : 0.0,
+        α = radiating ? absorption : 0.0,
         pores...,
     )
     gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02)
@@ -529,7 +532,7 @@ end
     def, layout, cells = cp.def, cp.def.layout, cp.deactivation
     @test cells.band == cells.threshold == ε_m
     @test def.closure.correction isa LayerCorrection
-    @test any(!iszero, def.closure.correction.gain)
+    @test estimates_layer_times(def.closure.correction)
     fractions = (8 => 0.5ε_m, 7 => 0.9ε_m, 6 => 1.5ε_m, 5 => 0.05, 4 => 0.5ε_m)
     u = copy(cp.u0)
     for (i, f) in fractions
@@ -849,20 +852,25 @@ _sensible(laws, s) = sum(s.m[j] * sensible_enthalpy(laws.h[j], s.T) for j in eac
 end
 
 # The masked-rows configurations: the ablator's options and the setup's. The
-# Darcy columns vent through a pressure condition, one under the full surface
-# balance with the beam absorbed in depth; the lateral column carries the
-# history pair and the cross-section rows, which follow the last node.
+# Darcy columns vent through a pressure condition, one under radiative
+# transfer with a diffuse heater beside its convection and surroundings; the
+# lateral columns carry the history pair and the cross-section rows, which
+# follow the last node. Under radiative transfer the exposed face's rows,
+# beams and diffuse fluxes alike, move down to the outermost live node.
 const _surface_balance_top =
     RadiativeFluxBC(2.8e6) +
     ConvectiveBC(h = 10.0, T_inf = 300.0) +
     RadiativeBC(T_inf = 300.0)
+# The ablator's heater as a beam beside its surroundings, for radiative
+# transfer; its absorption coefficient spreads the beam over a few cells.
+_beam_top(q = 2.8e6) =
+    RadiativeFluxBC(q; distribution = Collimated()) +
+    RadiativeBC(T_inf = 300.0) +
+    ConvectiveBC(h = 10.0, T_inf = 300.0)
+const _transfer_ablator = (radiating = true, absorption = 2.0)
 const _masked_configurations = (
     fixed = (ablator = (;), options = (;)),
     moving = (ablator = (;), options = (use_ale = true,)),
-    beer_lambert = (
-        ablator = (radiating = true,),
-        options = (use_ale = true, radiation_model = BEER_LAMBERT),
-    ),
     darcy = (
         ablator = (
             porous = true,
@@ -881,7 +889,7 @@ const _masked_configurations = (
                 GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (gas = 1.0,)),
             ),
         ),
-        options = (use_ale = true, radiation_model = BEER_LAMBERT),
+        options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
     ),
     lateral = (
         ablator = (
@@ -889,6 +897,18 @@ const _masked_configurations = (
             mass_top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
         ),
         options = (use_ale = true,),
+    ),
+    radiative_transfer = (
+        ablator = (_transfer_ablator..., top = _beam_top()),
+        options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
+    ),
+    radiative_transfer_lateral = (
+        ablator = (
+            _transfer_ablator...,
+            law = χ -> 1 - 0.2χ,
+            mass_top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+        ),
+        options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
     ),
 )
 
@@ -1075,15 +1095,60 @@ end
     end
 end
 
-@testset "the consistent sweep after a transfer leaves the velocity and intensity rows at round-off" begin
+# Under radiative transfer a moving column burns out with its radiation rows
+# following the exposed face down: the radiation crossing the faces is
+# reported while a cell lives and is NaN once none does, and the ledger closes
+# with what the last event lost. (Behind a mirror the beam heats the column's
+# inside hotter than its exposed cell, so on a fixed mesh, where only the
+# outermost cell can go, a cell beneath it empties first and the solve ends
+# on the interior void.)
+@testset "a moving column burns out under radiative transfer" begin
+    rec = ConservationRecorder()
+    sol = Integration.solve(
+        _ablator(4; L = 1e-3, t_end = 20.0, _transfer_ablator..., top = _beam_top());
+        use_ale = true,
+        deactivation = true,
+        radiation_model = RADIATIVE_TRANSFER,
+        callback = rec,
+        abstol = 1e-8,
+        reltol = 1e-6,
+        pressure_tolerance = 1e-3,
+    )
+    @test sol.retcode === :Terminated
+    @test sol.outcome === :burned_out
+    @test length(sol.events) == 4
+    x = sol.extras
+    live = x.live_cells .> 0
+    @test !live[end] && count(live) > 2
+    for name in (:radiation_absorbed, :radiation_emitted, :radiation_back)
+        @test all(isfinite, x[name][live])
+        @test all(isnan, x[name][.!live])
+    end
+    @test all(>(0), x.radiation_absorbed[live])
+    # A mirror back: nothing leaves through it.
+    @test maximum(abs, x.radiation_back[live]) <= 1e-10 * 2.8e6
+    audit = conservation_audit(sol, rec)
+    @info "burnout under radiative transfer" audit.energy audit.mass
+    @test audit.mass.lost > 0
+    @test abs(audit.energy.relative) <= 1e-6
+    @test abs(audit.mass.relative) <= 1e-6
+end
+
+# The ablator's options under radiative transfer, heated by a beam `q` at the
+# absorption coefficient `absorption`.
+_radiating_ablator(q; absorption = _transfer_ablator.absorption) =
+    (; q, radiating = true, absorption, top = _beam_top(q))
+
+@testset "the consistent sweep after a transfer leaves the velocity and radiation rows at round-off" begin
     q = 2.8e6
     cp = setup(
-        _ablator(6; q, radiating = true);
+        _ablator(6; _radiating_ablator(q)...);
         use_ale = true,
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
         deactivation = true,
     )
     def, layout, cells = cp.def, cp.def.layout, cp.deactivation
+    R = radiation_rows(layout)
     u = _deplete!(copy(cp.u0), cp, 6, 0.5 * cells.threshold)
     consistent_state!(u, def, cp.ws, 0.0)
     @test deactivate!(u, cells, def, 0.2) === :transferred
@@ -1093,8 +1158,8 @@ end
     ds, c = cp.ws.derived, cp.ws.contributions
     scale = sum(abs, c.θ .* ds.V_eval) + sum(abs, ds.geometry.face_area .* ds.w)
     @test all(abs(du[velocity_index(layout, nd)]) <= 1e-10 * scale for nd = 1:6)
-    @test all(abs(du[intensity_index(layout, f)]) <= 1e-12 * q for f = 1:6)
-    @test !layout.mask[intensity_index(layout, 7)]
+    @test all(abs(du[radiation_index(layout, f, k)]) <= 1e-12 * q for f = 1:6 for k = 1:R)
+    @test all(!layout.mask[radiation_index(layout, 7, k)] for k = 1:R)
 end
 
 @testset "the consistent sweep reports a velocity row it cannot satisfy" begin
@@ -1112,11 +1177,15 @@ end
     # Pores resolved at the start fall below the mass error margin as cells
     # shrink: a cell's mass tolerance keeps its initial reference while its
     # condensed mass shrinks. The local error test alone cannot admit them.
+    # One fixed layer time, long against the solve: the cells shrink and go one
+    # at a time.
+    correction = EquidistributionCorrection(τ = EQUIDISTRIBUTION_TIME)
     cp = setup(
         problem;
         use_ale = true,
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
         deactivation = true,
+        correction,
         reltol = 1e-3,
         abstol = 1e-5,
         pressure_tolerance = 1e-3,
@@ -1132,8 +1201,9 @@ end
     refined = Integration.solve(
         problem;
         use_ale = true,
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
         deactivation = true,
+        correction,
         reltol = 1e-4,
         abstol = 1e-6,
         pressure_tolerance = 1e-3,
@@ -1146,14 +1216,16 @@ end
 
 # A node position carries no relative tolerance, so the pore margin of a thin
 # cell does not grow with its distance from the coordinate origin: wide pores
-# stay resolved at a loose tolerance through every deactivation.
+# stay resolved at a loose tolerance through every deactivation (one fixed
+# layer time, long against the solve, so that the cells go one at a time).
 @testset "wide pores stay resolved as cells shrink at a loose tolerance" begin
     policy = rodas5p_policy(KLUFactorization(); restart = :solver_chosen)
     sol = Integration.solve(
         _ablator(8; radiating = true, porosity = 0.3);
         use_ale = true,
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
         deactivation = true,
+        correction = EquidistributionCorrection(τ = EQUIDISTRIBUTION_TIME),
         reltol = 1e-3,
         abstol = 1e-5,
         pressure_tolerance = 1e-3,
@@ -1296,9 +1368,13 @@ end
     true,
     false,
 )
+    # On the moving mesh one fixed layer time, long against the solve: the
+    # cells go one at a time.
     options = (
         use_ale = moving,
         deactivation = true,
+        correction = moving ? EquidistributionCorrection(τ = EQUIDISTRIBUTION_TIME) :
+                     nothing,
         abstol = 1e-8,
         reltol = 1e-6,
         pressure_tolerance = 1e-3,
@@ -1362,13 +1438,16 @@ end
     @test all(e -> isapprox(e.fraction, 1e-2; rtol = 1e-12), located.events)
 end
 
-@testset "a located event leaves an admissible state with the velocity and intensity rows at round-off" begin
+@testset "a located event leaves an admissible state with the velocity and radiation rows at round-off" begin
     q = 2.8e6
+    # Absorbed near the surface, under one fixed layer time long against the
+    # solve, so that the cells go one at a time.
     cp = setup(
-        _ablator(8; q, radiating = true);
+        _ablator(8; _radiating_ablator(q; absorption = 50.0)...);
         use_ale = true,
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
         deactivation = true,
+        correction = EquidistributionCorrection(τ = EQUIDISTRIBUTION_TIME),
         abstol = 1e-8,
         reltol = 1e-6,
         pressure_tolerance = 1e-3,
@@ -1393,8 +1472,9 @@ end
                 nd = 1:n_nodes(layout) if layout.mask[velocity_index(layout, nd)]
             ]
             intensity = [
-                abs(du[intensity_index(layout, f)]) / q for
-                f = 1:(n_cells(layout)+1) if layout.mask[intensity_index(layout, f)]
+                abs(du[radiation_index(layout, f, k)]) / q for
+                f = 1:(n_cells(layout)+1) for k = 1:radiation_rows(layout) if
+                layout.mask[radiation_index(layout, f, k)]
             ]
             push!(
                 results,
@@ -1494,7 +1574,7 @@ end
         use_ale = moving,
         deactivation = true,
         correction = NoCorrection(),
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
         energy_state = energy,
     )
     layout, d = cp.def.layout, cp.deactivation
@@ -1523,7 +1603,7 @@ end
     du = similar(v)
     residual!(du, v, cp.def, sol.t[end], cp.ws)
     rows = [
-        k for k in (intensity_index(layout, f) for f in eachindex(cp.ws.derived.I)) if
+        k for k in (radiation_index(layout, f, 1) for f in axes(cp.ws.derived.q, 2)) if
         layout.mask[k]
     ]
     @test maximum(abs, du[rows]) < 1e-9
@@ -1760,14 +1840,14 @@ end
 end
 
 @testset "one interior event through the solve: $(name), $(energy) form" for name in (
-        :beam,
+        :transfer,
         :lateral,
         :layers,
     ),
     energy in (:temperature, :enthalpy)
 
     problem =
-        name === :beam ? _burning(5; k = 0.02, radiating = true, t_end = 0.2) :
+        name === :transfer ? _burning(5; k = 0.02, radiating = true, t_end = 0.2) :
         name === :lateral ? _burning(5; k = 0.02, law = χ -> 1 - 0.2χ, t_end = 0.2) :
         _burning(5; k = 0.02, substrate = 0.004, t_end = 0.2)
     cp = setup(
@@ -1776,7 +1856,7 @@ end
         deactivation = true,
         correction = NoCorrection(),
         energy_state = energy,
-        radiation_model = name === :beam ? BEER_LAMBERT : SURFACE_ABSORPTION,
+        radiation_model = name === :transfer ? RADIATIVE_TRANSFER : SURFACE_ABSORPTION,
         reltol = 1e-6,
         abstol = 1e-8,
     )
@@ -2181,14 +2261,14 @@ _on_mesh(p, mesh) = PyrolysisProblem(
 end
 
 @testset "a void beneath a skin ends a moving column's solve" begin
-    # Cell 3 empties under in-depth absorption beneath cells that hold their mass.
+    # Cell 3 empties under radiative transfer beneath cells that hold their mass.
     problem = _burning(5; k = 2.0, radiating = true, t_end = 1.0)
     cp = setup(
         problem;
         use_ale = true,
         deactivation = true,
         correction = NoCorrection(),
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
     )
     u = _prepared(cp, [0.8, 0.8, 0.015, 0.7, 0.6])
     consistent_state!(u, cp.def, cp.ws, 0.0)

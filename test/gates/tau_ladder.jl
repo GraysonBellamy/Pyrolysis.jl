@@ -5,8 +5,9 @@
 #   fixed — one time for every layer, EQUIDISTRIBUTION_TIME;
 #   A     — that time scaled by the layer's initial thickness against
 #           V-BO-01's 5.9 mm, where it was calibrated;
-#   B     — `ActivationTime()`: the time set at the layer's first activation
-#           from its thickness and thinning rate there;
+#   B     — `ActivationTime()`: the time estimated from the layer's thickness
+#           and thinning rate at its first activation and again when its
+#           first cell falls below r_lo;
 #
 # and, reported beside them, B with λ = 0.5 (`B(0.5)`), the factor under
 # which the decks heated hardest keep one invocation.
@@ -31,7 +32,7 @@
 # solve's own error, against which the rescaled pairs are read); V-BO-01, 06,
 # 07 and 08 in the enthalpy form at their CI resolutions.
 #
-# Per run: the layer's time and, under B, when it was set; the first
+# Per run: the layer's time and, under B, when it was last estimated; the first
 # activation t_a (the first accepted step on which a layer cell is below
 # r_hi of its thickness, interpolated linearly) and the activated life from
 # it to the layer's first invocation, with T_sync = τ/π² over that life; the
@@ -89,7 +90,8 @@ _smoothstep(x) = x <= 0 ? 0.0 : x >= 1 ? 1.0 : x * x * (3 - 2x)
 # the top's convective coefficient 30 W/(m²·K) in its place (the re-radiation
 # of a surface near 650 K, linearized), which keeps the bare substrate inside
 # the property bracket after the layer is gone; an adiabatic back; the times
-# over `s`.
+# over `s`. It solves under surface absorption (`RESTRICTED_KWARGS`): the
+# absorbed flux scales with `s`, where in-depth emission would not.
 function restricted_problem(n, s; t_end = 500.0)
     k_pmma(T) = T <= 394.0 ? 0.16 : 0.2156 * (T / 300.0)^-0.745
     c_pmma(T) = T <= 394.0 ? 1127.0793 * (T / 300.0)^1.9283 : 1768.9067 * (T / 300.0)^0.5552
@@ -238,13 +240,22 @@ case_config(id; cells, layer = VBO_L_PMMA, thresholds = ()) = (;
     rescaled = nothing,
 )
 
-variant_config(name, build; cells = (30, 60, 120), rescaled = nothing) = (;
+# The restricted deck's solve keywords: V-BO-01's under surface absorption.
+const RESTRICTED_KWARGS = merge(VBO_SOLVE_KWARGS, (; radiation_model = SURFACE_ABSORPTION))
+
+variant_config(
+    name,
+    build;
+    cells = (30, 60, 120),
+    rescaled = nothing,
+    keywords = VBO_SOLVE_KWARGS,
+) = (;
     name,
     build,
     cells,
     ci = 60,
     layer = VBO_L_PMMA,
-    keywords = VBO_SOLVE_KWARGS,
+    keywords,
     solve_fn = _vbo_solve_fn(name),
     qois = variant_qois(name; surface = rescaled === nothing),
     thresholds = (),
@@ -266,9 +277,24 @@ const CONFIGS = [
     variant_config("100 kW/m²", n -> _vbo_problem(n; flux = 100e3)),
     variant_config("A/2", n -> _vbo_problem(n; A = 1.35e11 / 2)),
     variant_config("2A", n -> _vbo_problem(n; A = 2 * 1.35e11)),
-    variant_config("restricted, s = 1", n -> restricted_problem(n, 1.0); rescaled = 1.0),
-    variant_config("restricted, s = 2", n -> restricted_problem(n, 2.0); rescaled = 2.0),
-    variant_config("restricted, s = 1/2", n -> restricted_problem(n, 0.5); rescaled = 0.5),
+    variant_config(
+        "restricted, s = 1",
+        n -> restricted_problem(n, 1.0);
+        rescaled = 1.0,
+        keywords = RESTRICTED_KWARGS,
+    ),
+    variant_config(
+        "restricted, s = 2",
+        n -> restricted_problem(n, 2.0);
+        rescaled = 2.0,
+        keywords = RESTRICTED_KWARGS,
+    ),
+    variant_config(
+        "restricted, s = 1/2",
+        n -> restricted_problem(n, 0.5);
+        rescaled = 0.5,
+        keywords = RESTRICTED_KWARGS,
+    ),
     variant_config("flux × 0.5 at 150 s", n -> stepped_problem(n, 0.5)),
     variant_config("flux × 1.5 at 150 s", n -> stepped_problem(n, 1.5)),
     (;
@@ -281,7 +307,7 @@ const CONFIGS = [
             use_ale = true,
             deactivation = true,
             min_thickness = 1e-6,
-            radiation_model = BEER_LAMBERT,
+            radiation_model = RADIATIVE_TRANSFER,
             abstol = 1e-8,
             reltol = 1e-6,
         ),
@@ -716,7 +742,7 @@ function write_ladder(runs, families, pairs, load_start, load_end, elapsed)
         println(io, "\n## The runs\n")
         println(
             io,
-            "τ: the layer's time [s] (B: set at t [s]); t_a: the first activation [s]; life: from t_a ",
+            "τ: the layer's time [s] (B: last estimated at t [s]); t_a: the first activation [s]; life: from t_a ",
             "to the layer's first invocation [s]; T_sync/life: τ/π² over that life. Invocations: each ",
             "one's cells (largest merged fraction). QoIs: passing of counted, the failing named. Wall: ",
             "the instrumented solve's, on a loaded machine.\n",

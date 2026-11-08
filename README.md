@@ -5,7 +5,7 @@
 A Julia package for simulating thermal decomposition (pyrolysis) of
 materials under high heat flux. Uses a finite-volume discretisation on a mesh
 that moves with the solid (Arbitrary Lagrangian–Eulerian), with cell
-deactivation at burnout, Arrhenius kinetics, in-depth radiation absorption,
+deactivation at burnout, Arrhenius kinetics, radiative transfer through the solid,
 and conservative lumped or dusty-gas transport.
 
 ## Features
@@ -13,7 +13,7 @@ and conservative lumped or dusty-gas transport.
 - Multi-component materials with temperature-dependent properties
 - Single-step and multi-step Arrhenius decomposition kinetics
 - Gas generation, pore pressure and conservative lumped or dusty-gas transport
-- In-depth radiation absorption via Beer–Lambert (or surface absorption)
+- Radiative transfer through the solid, absorbed and emitted in depth (or absorption at the surface)
 - Material volume changes — shrinkage, swelling, intumescence
 - Mesh motion with the solid, surface regression and internal interface
   tracking; component masses as the states, so mass is conserved exactly
@@ -88,7 +88,7 @@ advanced users. Highlights:
 | Properties | `ConstantProperty`, `LinearProperty`, `PolynomialProperty`, `ArrheniusProperty`, `TableProperty`, `CallableProperty`, `SutherlandProperty`, `StateDependentProperty` |
 | Boundary conditions | `HeatFluxBC`, `ConvectiveBC`, `RadiativeBC`, `RadiativeFluxBC`, `CombinedThermalBC`, `DirichletThermalBC`, `AdiabaticBC`, `ImpermeableBC`, `MassFluxBC`, `GasReservoir`, `AmbientGasBC`, `MassTransferFilm`, `NeumannPressureBC`, `ConvectivePressureBC`, `BoundaryConditionSet` |
 | Gas model | `LumpedTransfer`, `DustyGas`, `LumpedEndpoint`, `DustyEndpoint` |
-| Radiation | `RadiationModel`, `SURFACE_ABSORPTION`, `BEER_LAMBERT` |
+| Radiation | `RadiationModel`, `SURFACE_ABSORPTION`, `RADIATIVE_TRANSFER`, `Diffuse`, `Collimated`, `Cone` |
 | Mesh | `uniform_mesh`, `stretched_mesh`, `line_mesh`, `box_mesh`, `cell_mesh`, `Planar`, `Cylindrical`, `Spherical` |
 | Problem & solve | `PyrolysisProblem`, `validate_problem`, `solve`, `setup`, `integrate`, `PreparedProblem`, `parameter_sweep` |
 | Solver configuration | `default_policy`, `rodas5p_policy`, `fbdf_policy`, `kencarp4_policy`, `StructuredKLU`, `EquidistributionCorrection`, `ActivationTime`, `NoCorrection`, `PrescribedCorrection` |

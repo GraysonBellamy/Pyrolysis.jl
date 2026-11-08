@@ -7,7 +7,8 @@ using Pyrolysis.Integration
 using Pyrolysis.Integration: setup, integrate
 using Pyrolysis.Assembly: residual!, buffers, ResidualWorkspace
 using Pyrolysis.Meshes: n_cells, n_nodes
-using Pyrolysis.States: intensity_index, area_index, lateral_rate_index, velocity_index
+using Pyrolysis.States:
+    radiation_index, radiation_rows, area_index, lateral_rate_index, velocity_index
 using OrdinaryDiffEq: DiscreteCallback
 
 # The char-layer column of V-CPL-06 with a reaction heat (the energy-ledger
@@ -123,6 +124,66 @@ function _per_step_trapezoid(problem; energy_state)
     integrate(cp; callback = step)
     ΔE, ΔM = last_node .- first_node
     return (; energy = ΔE - acc[1], mass = ΔM + acc[2], inflow = acc[1], ΔE)
+end
+
+# An ablating column heated at its top: it decomposes to a gas that takes no
+# volume, so each cell empties, and the last one's inventories leave the live
+# region at the event that finds no cell left.
+function _burning_out(n; L = 1e-3, t_end = 20.0)
+    ρ, c, k = 1000.0, 1000.0, 1.0
+    R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
+    v = 2.0e-3
+    A = v^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (k / (ρ * c) * R * Tp^2)
+    solid = SolidComponent(:solid; ρ, c, k, λ = 1e-6, φ = 0.05)
+    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02)
+    return PyrolysisProblem(
+        mesh = uniform_mesh(L, n),
+        material = Material(
+            name = :ablator,
+            components = (solid, gas),
+            reactions = (Reaction(:ablate, 1 => 2; A, E, h = 1.0e6),),
+        ),
+        bc_set = BoundaryConditionSet(
+            thermal = (top = HeatFluxBC(2.8e6), bottom = AdiabaticBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> T0 + 1e5 * z,
+        ξ_initial = [z -> ρ, z -> 0.0],
+        tspan = (0.0, t_end),
+        output_times = collect(0.0:0.05:t_end),
+    )
+end
+
+# The recorder reads the live region's rates and inventories at the last step,
+# where no cell is live: the ledgers close on the inventories the last event
+# lost.
+@testset "the recorder follows a column to its burnout: moving = $(moving)" for moving in (
+    true,
+    false,
+)
+    rec = ConservationRecorder()
+    sol = Integration.solve(
+        _burning_out(4);
+        use_ale = moving,
+        deactivation = true,
+        callback = rec,
+        abstol = 1e-8,
+        reltol = 1e-6,
+        pressure_tolerance = 1e-3,
+    )
+    @test sol.outcome === :burned_out
+    @test rec.steps == sol.statistics.accepted
+    audit = conservation_audit(sol, rec)
+    @test audit.mass.final == 0 && audit.energy.final == 0
+    @test audit.mass.lost > 0
+    @test abs(audit.mass.relative) <= 1e-6
+    @test abs(audit.energy.relative) <= 1e-6
+    gas = gas_species_audit(sol, rec).species.gas
+    @test gas.final == 0
+    @test abs(gas.relative) <= 1e-6
 end
 
 @testset "the recorder on the gasifying column: $(energy) form" for energy in (
@@ -422,7 +483,7 @@ end
 end
 
 # The shrinking column absorbing in depth under KenCarp4: the saved states hold
-# every algebraic row, the face intensities among them, whose optical depths
+# every algebraic row, the radiation rows among them, whose optical depths
 # read the concentrations at the cross section the state's history gives, so
 # that row takes its value before them.
 @testset "the saved states hold their algebraic rows on a shrinking, absorbing column" begin
@@ -431,7 +492,7 @@ end
     sol = Integration.solve(
         problem;
         use_ale = true,
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
         integrator_policy = kencarp4_policy(),
         _TOL...,
     )
@@ -445,21 +506,27 @@ end
     # Every saved state but the last is the step's interpolant with its
     # algebraic rows from their constraints; the last is the integrator's own,
     # its rows as converged as the method's Newton iteration left them.
-    intensity, area, rate, velocity = 0.0, 0.0, 0.0, 0.0
+    radiation, area, rate, velocity = 0.0, 0.0, 0.0, 0.0
     for (t, u) in zip(sol.t[1:(end-1)], sol.raw_solution.u[1:(end-1)])
         residual!(du, u, def, t, ws)
         ds, c = buffers(ws, def, Float64)
         nodes = 1:n_nodes(topo)
-        intensity = max(intensity, maximum(f -> abs(du[intensity_index(layout, f)]), nodes))
+        radiation = max(
+            radiation,
+            maximum(
+                abs(du[radiation_index(layout, f, k)]) for f in nodes for
+                k = 1:radiation_rows(layout)
+            ),
+        )
         area = max(area, abs(du[area_index(layout)]) / u[area_index(layout)])
         rate = max(rate, abs(du[lateral_rate_index(layout)]) / rate_scale)
         sweep = sum(abs, c.θ .* ds.V_eval) + sum(abs, ds.geometry.face_area .* ds.w)
         velocity =
             max(velocity, maximum(nd -> abs(du[velocity_index(layout, nd)]), nodes) / sweep)
     end
-    @info "absorbing shrinking column: algebraic rows of the saved states" intensity area rate velocity
+    @info "absorbing shrinking column: algebraic rows of the saved states" radiation area rate velocity
     # The incident flux is 5e4 W/m²; the rows hold to round-off.
-    @test intensity <= 1e-10 * 5e4
+    @test radiation <= 1e-10 * 5e4
     @test area <= 1e-12
     @test rate <= 1e-10
     @test velocity <= 1e-10
@@ -469,12 +536,12 @@ end
 end
 
 # A state whose cross section is off its law: `consistent_state!`, the setup's
-# and the deactivation event's path, sets the area before the intensities whose
-# optical depths read it, so every algebraic row holds.
+# and the deactivation event's path, sets the area before the radiation rows
+# whose optical depths read it, so every algebraic row holds.
 @testset "a consistent state holds its algebraic rows on a shrinking, absorbing column" begin
     problem =
         _charring_column(; lateral_shrinkage_law = χ -> 1 - 0.3χ, absorption = (1.0, 2.0))
-    cp = setup(problem; use_ale = true, radiation_model = BEER_LAMBERT, _TOL...)
+    cp = setup(problem; use_ale = true, radiation_model = RADIATIVE_TRANSFER, _TOL...)
     def = cp.def
     layout = def.layout
     nodes = 1:n_nodes(def.setup.topology)
@@ -486,7 +553,10 @@ end
     ds, c = buffers(cp.ws, def, Float64)
     sweep = sum(abs, c.θ .* ds.V_eval) + sum(abs, ds.geometry.face_area .* ds.w)
     @test u[area_index(layout)] ≈ cp.u0[area_index(layout)] rtol = 1e-14
-    @test maximum(f -> abs(du[intensity_index(layout, f)]), nodes) <= 1e-10 * 5e4
+    @test maximum(
+        abs(du[radiation_index(layout, f, k)]) for f in nodes for
+        k = 1:radiation_rows(layout)
+    ) <= 1e-10 * 5e4
     @test abs(du[area_index(layout)]) <= 1e-12 * u[area_index(layout)]
     @test maximum(nd -> abs(du[velocity_index(layout, nd)]), nodes) <= 1e-10 * sweep
 end

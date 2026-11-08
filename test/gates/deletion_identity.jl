@@ -2,7 +2,7 @@
 # identity decks and the containment suite's Jacobians, as digests, so that
 # a commit that deletes and renames only can show it changes no number.
 #
-# The decks are `burnout_identity.jl`'s (eight decks at their CI resolutions
+# The decks are `burnout_identity.jl`'s (sixteen decks at their CI resolutions
 # with their solve keywords, and the Douglas fir deck over its first 60 s),
 # each in both energy forms. Per solve: the digest of the saved temperatures,
 # masses, positions and times; the digest of the event records (ten fields of

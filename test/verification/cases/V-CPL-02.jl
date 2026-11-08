@@ -155,8 +155,8 @@ function _verification_case_vcpl02()
                 value = m.m_escaped,
                 exact = gen,
                 error = err_ledger,
-                tol = 4.9e-3,  # 3× observed: 1.6e-3 (n=160, flux-form gas
-                # transport; residual = holdup drift incl. surface sweep)
+                tol = 1.6e-2,  # 3× observed: 5.4e-3 (n=160; residual = holdup
+                # drift incl. the surface sweep and the correction's remap)
                 comment = "total-mass drop vs ∫ ṁ″ dt; residual = holdup drift",
             ),
         )

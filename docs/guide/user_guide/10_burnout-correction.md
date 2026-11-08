@@ -46,10 +46,11 @@ not tested, so a char layer stays a resolved layer whatever its mass yield
 (§10.4).
 
 As a measure of the cost of leaving it off: the moving-mesh example of
-§10.2.1, run without deactivation, thins its PMMA cells to 0.24 µm and ends at
-307 s with outcome `:pore_closure` after 882 accepted steps and 634 domain
-rejections; with the layer deactivated it reaches 600 s in 695 accepted steps
-and no rejection (both at the tolerances of that example).
+§10.2.1, run without deactivation, thins its PMMA cells to below a nanometre
+and fails at 327 s, return code `:DtLessThanMin` and outcome `:pore_closure`,
+after 6372 accepted steps and 5797 domain rejections; with the layer
+deactivated it reaches 600 s in 865 accepted steps and no domain rejection
+(both at the tolerances of that example).
 
 ---
 
@@ -68,9 +69,9 @@ with the boundary conditions applied at the face of the outermost live cell.
 ### 10.2.1 Turning it on through `solve`
 
 Pass `deactivation = true`, on a moving or a fixed mesh. The complete script
-below burns a 5.9 mm PMMA layer off 12 mm of Kaowool under 50 kW/m² absorbed
-in depth, the configuration of the V-BO verification cases with constant
-properties:
+below burns a 5.9 mm PMMA layer off 12 mm of Kaowool under 50 kW/m² with
+radiative transfer through the solid, the configuration of the V-BO verification
+cases with constant properties:
 
 ```julia
 using Pyrolysis
@@ -94,10 +95,10 @@ z_if = n_kw * dz
 
 bcs = BoundaryConditionSet(
     thermal = (
-        top = RadiativeFluxBC(50e3, absorptivity = 0.96) +
-              RadiativeBC(ε = 0.96, T_inf = 298.0) +
+        top = RadiativeFluxBC(50e3) +              # diffuse: crosses at the PMMA's ε = 0.96
+              RadiativeBC(T_inf = 298.0) +
               ConvectiveBC(h = 8.2, T_inf = 298.0),
-        bottom = RadiativeBC(ε = 1.0, T_inf = 298.0),
+        bottom = RadiativeBC(T_inf = 298.0),       # an open back at the Kaowool's ε = 1
     ),
     mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
@@ -114,18 +115,19 @@ problem = PyrolysisProblem(
 sol = solve(problem;
     use_ale         = true,          # the mesh moves with the solid
     deactivation    = true,          # cells below the threshold leave the system
-    radiation_model = BEER_LAMBERT,
+    radiation_model = RADIATIVE_TRANSFER,
     min_thickness   = 1e-3,          # [m] stop if the live column ever thins this far
 )
 
 sol.retcode                          # :Success
-sol.statistics.invocations           # 1: the PMMA layer left in one event
+sol.statistics.invocations           # 2: the PMMA layer left in two events
 sol.extras.live_cells[end]           # 61: the Kaowool cells
 sol.extras.thickness_history[end]    # ≈ 0.012 m: the bare substrate
 ```
 
-On this deck the 30 PMMA cells leave together at t ≈ 315.5 s into the top
-Kaowool cell, and the solve runs on to 600 s heating the bare substrate.
+On this deck the PMMA leaves in two events: 25 cells at t ≈ 316.9 s into the PMMA
+cell beneath them, then the last 5, next to the Kaowool, at t ≈ 330.1 s into the top
+Kaowool cell. The solve runs on to 600 s heating the bare substrate.
 
 | Keyword | Default | Meaning |
 |---|---|---|
@@ -140,13 +142,13 @@ Kaowool cell, and the solve runs on to 600 s heating the bare substrate.
 Choose the mesh mode by the material, not by cost. A fixed mesh keeps every
 cell's volume, so a gasifying layer thins in *density*, and only the
 outermost live cell can go (§10.8). The layer then burns top down when the
-surface cell is the hottest, as under surface absorption. Under in-depth
-absorption the surface cell of a regressing polymer is the coldest: it stays
-in place as a low-density skin while the cells beneath it empty, and the
-model carries no heat across the void they would leave. A fixed-mesh solve
-therefore ends at the first cell below the surface that reaches the
-threshold, warns, and returns outcome `:interior` (§10.7). The same deck as
-above on a fixed mesh stops this way at t ≈ 236 s, before any deactivation.
+surface cell is the hottest, as under surface absorption. Under radiative
+transfer the surface cell of a regressing polymer loses its emission and
+convection at the face and empties last, the cells beneath it nearly together. A
+fixed-mesh solve therefore ends at the first cell below the surface that reaches
+the threshold under a live one, warns, and returns outcome `:interior` (§10.7).
+The same deck as above on a fixed mesh stops this way at t ≈ 172.8 s: the exposed
+cell goes first, then the cell beneath the new exposed cell crosses.
 A fixed mesh with deactivation suits a layer that burns top down; use
 `use_ale = true` for materials that regress.
 
@@ -169,12 +171,12 @@ callbacks:
    at the end of an accepted step, the safety net for a crossing the location
    does not see;
 3. on a moving mesh under the equidistribution correction, the **layer-time
-   event**, which sets each layer's equidistribution time at its first
-   activation (§10.5.3);
+   event**, which estimates each layer's equidistribution time at its first
+   activation and again when a cell passes `r_lo` (§10.5.3);
 4. on a moving mesh, the **thickness stop** (§10.3).
 
-After each deactivation the algebraic rows are swept to consistency (the face
-intensities under `BEER_LAMBERT`, the node velocities on a moving mesh), the
+After each deactivation the algebraic rows are swept to consistency (the radiative
+face fluxes under `RADIATIVE_TRANSFER`, the node velocities on a moving mesh), the
 result is tested for admissibility, and the integrator restarts with the
 step its policy names (Chapter 11). None of these callbacks is a keyword of
 its own; they are wired by `solve` and `integrate` from the keywords above.
@@ -238,12 +240,13 @@ for k in unique(e.invocation for e in sol.events)
     println("invocation $k at t = $(first(es).t) s: $(length(es)) cells into cell ",
             first(es).receiver, ", largest fraction ", maximum(e.fraction for e in es))
 end
-# invocation 1 at t = 315.5… s: 30 cells into cell 61, largest fraction 0.0339…
+# invocation 1 at t = 316.9… s: 25 cells into cell 66, largest fraction 0.0873…
+# invocation 2 at t = 330.0… s: 5 cells into cell 61, largest fraction 0.0102…
 ```
 
-The largest fraction says how much of its mass the slowest cell of the layer
-still held when the first crossed the threshold; the band must exceed it
-(§10.4). That residue goes to the receiver, which gasifies it at once, so
+The largest fraction is the most any cell of an invocation still held when it
+went; cells above the band stay for a later invocation, as the 5 cells next to
+the Kaowool do here (§10.4). That residue goes to the receiver, which gasifies it at once, so
 the mass-loss rate shows a short burst just after the event, whose
 convergence under refinement is part of the envelope (§10.9).
 
@@ -264,7 +267,7 @@ Reference §16):
 ```julia
 rec = ConservationRecorder()
 sol = solve(problem; use_ale = true, deactivation = true,
-            radiation_model = BEER_LAMBERT, min_thickness = 1e-3, callback = rec)
+            radiation_model = RADIATIVE_TRANSFER, min_thickness = 1e-3, callback = rec)
 audit = conservation_audit(sol, rec)
 audit.mass.relative, audit.energy.relative
 ```
@@ -295,7 +298,7 @@ outcome `:min_thickness`:
 
 ```julia
 sol = solve(problem; use_ale = true, deactivation = true,
-            radiation_model = BEER_LAMBERT, min_thickness = 15e-3)  # stop at 15 mm
+            radiation_model = RADIATIVE_TRANSFER, min_thickness = 15e-3)  # stop at 15 mm
 sol.retcode, sol.outcome     # (:Terminated, :min_thickness)
 succeeded(sol)               # true: a stop the caller asked for
 ```
@@ -337,12 +340,16 @@ reference goes with it, in one merge into the live cell beneath the run:
 The band exists because the cells of a vanishing layer never reach the
 threshold at exactly the same time. Under the equidistribution correction
 they thin together, but when the first crosses `ε_m` the slowest still holds
-a few percent of its mass (3.4 % on the deck of §10.2.1). Without a band the
+a few percent of its mass, or more: on the deck of §10.2.1 the first 25 cells
+leave holding up to 8.7 %, and the 5 next to the Kaowool, still above the band,
+leave 13 s later. Without a band the
 layer would leave one cell at a time, each event a restart, and a cell beneath
 the surface can cross first and leave from under live cells. The band should
 therefore exceed what the slowest cell of a layer keeps when the first reaches
-the threshold: on the verification decks 0.4 to 3.9 % at `ε_m = 3e-3` and 1.4 to
-9.9 % at `ε_m = 1e-2` (§10.9). The default, `0.1`, covers them.
+the threshold. On the verification decks the largest fraction a band of 0.1 merges is
+0.3 to 9.9 % at `ε_m = 3e-3` and 1.0 to 10 % at `ε_m = 1e-2`, and the decks that take
+more than one invocation had cells above it (§10.9). The default, `0.1`, takes most of a
+layer in one event; the rest follows in another.
 
 At a reaction order other than one the threshold reads the cell's **reactive
 inventory**, the mass of each reaction's condensed reactant, against the sum of
@@ -462,40 +469,59 @@ zero at every bounding node of a layer and beside a dead cell.
 
 ### 10.5.3 The layer time
 
-The equidistribution time `τ_eq` of a layer is set once, when its first cell
-activates (falls below `r_hi` of its initial thickness), from the layer's
-thickness `L_layer` and its thinning rate `L̇_layer` at that moment
-(`ActivationTime()`):
+The equidistribution time of a layer is estimated twice (`ActivationTime()`),
+each time from the layer's thickness `L_layer` and its thinning rate `L̇_layer`
+at that moment: when its first cell activates (falls below `r_hi` of its
+initial thickness), and again when a cell first falls below `r_lo`:
 
 ```
-τ_eq = λ_τ L_layer / |L̇_layer|,     λ_τ = 1.8 (the keyword λ)
+τ_eq,k = λ_τ L_layer / |L̇_layer|,     λ_τ = 1.8 (the keyword λ),     k = 1, 2
 ```
 
-so the layer synchronizes (in about `τ_eq/π²`) within about a fifth of its
-estimated life `L_layer/|L̇_layer|`.
+so the layer synchronizes (in about `τ_eq,k/π²`) within about a fifth of the
+life `L_layer/|L̇_layer|` each estimate implies. The first estimate sets the
+layer's gain. The second, taken near the layer's end where it thins faster,
+takes over through a second switch of each cell, `a_i^lo = 𝒮(x_i − 1)` with
+`x_i` the argument of the switch of §10.5.2: zero while the cell keeps at
+least `r_lo` of its initial thickness and one at and below `r_lo²/r_hi` of it
+(1/30 by default). With `ā_n^lo` the smooth "or" of a node's two cells'
+second switches,
+
+```
+c_n = (ā_n/τ_eq,1 + ā_n^lo (1/τ_eq,2 − 1/τ_eq,1)) n_layer² (Δz_n − Δz_{n−1})
+```
+
+which runs at `τ_eq,1` until the cells pass `r_lo` and at `τ_eq,2` below
+`r_lo²/r_hi`. Neither estimate changes the right-hand side where it is taken:
+each switch leaves zero with zero slope there. Before its first estimate a
+layer has no correction; a layer not thinning at its first estimate gets none
+until its second, and one not thinning at its second keeps its first. Each
+estimate is taken once; a cell that re-activates later changes nothing.
+
 The rate scales with the physical rates and `λ_τ` is a pure number, so a deck
-whose rates are all multiplied by `s` gets `τ_eq/s`, and the correction scales
-with it; one fixed `τ` for every deck does not. Before its activation a
-layer's correction is zero anyway, and its time reads the fallback, 720 s. A
-layer thinning more slowly than its initial thickness over the solve's
-horizon keeps the fallback until a cell crosses `r_lo`, where the estimate is
-taken once more; a layer that thickens keeps the fallback. Each layer is
-estimated once; a cell that re-activates later changes nothing.
+whose rates are all multiplied by `s` gets both times divided by `s`, and the
+correction scales with it; one fixed `τ` for every deck does not.
 
-The activation is a located event of its own, so `τ_eq` is taken at the
+The estimates are located events of their own, so each is taken at the
 crossing, not at the end of a step. After the solve, the bound correction
-holds every layer's time and the time it was set at:
+holds every layer's estimates:
 
 ```julia
 c = sol.definition.closure.correction    # the correction bound to the mesh
-c.time, c.set_at                         # ([617.88…], [97.07…]) on the deck of §10.2.1
+c.first_estimate                         # [τ_eq,1] of each moving layer [s]
+c.time, c.set_at                         # its latest estimate and the time it was taken [s]
 ```
+
+On the deck of §10.2.1 the PMMA layer's first estimate is about 745 s, taken at
+t ≈ 81 s, and its second 353 s, at t ≈ 167 s.
 
 | `ActivationTime` keyword | Default | Meaning |
 |---|---|---|
-| `λ` | `1.8` (`ACTIVATION_TIME_FACTOR`) | `λ_τ` in `τ_eq = λ_τ L_layer/\|L̇_layer\|` at the first activation |
-| `fallback` | `720.0` s (`EQUIDISTRIBUTION_TIME`) | the time before the estimate, and of a layer that thins too slowly or thickens |
-| `floor` | `1.0` | the slowest thinning that gives an estimate, in initial thicknesses over the horizon |
+| `λ` | `1.8` (`ACTIVATION_TIME_FACTOR`) | `λ_τ` in `τ_eq,k = λ_τ L_layer/\|L̇_layer\|` at each estimate |
+
+A number for `τ` gives every layer that one fixed time from the start, and the
+second switch then changes nothing; `Pyrolysis.Closures.EQUIDISTRIBUTION_TIME`
+(720 s) is such a value.
 
 ### 10.5.4 The layers
 
@@ -509,28 +535,31 @@ Pass `correction` to override the rule:
 
 ```julia
 # The installed correction, written out:
-sol = solve(problem; use_ale = true, deactivation = true, radiation_model = BEER_LAMBERT,
+sol = solve(problem; use_ale = true, deactivation = true, radiation_model = RADIATIVE_TRANSFER,
             correction = EquidistributionCorrection(
                 τ = ActivationTime(λ = 1.8),   # or a number [s]: one time for every layer
                 activation = (0.3, 0.1),       # (r_hi, r_lo)
                 layers = :vanishing))
 
 # The Lagrangian mesh: each cell keeps its solid.
-sol = solve(problem; use_ale = true, deactivation = true, radiation_model = BEER_LAMBERT,
+sol = solve(problem; use_ale = true, deactivation = true, radiation_model = RADIATIVE_TRANSFER,
             correction = NoCorrection())
 ```
 
-`EquidistributionCorrection` refuses a non-positive `τ` and an activation
-without `0 < r_lo < r_hi`; any correction other than `NoCorrection()` needs
-`use_ale = true`. Under
+`EquidistributionCorrection` refuses a non-positive `τ`, an activation
+without `0 < r_lo < r_hi`, and under `ActivationTime()` an `r_hi` of 1 or
+more, since the first estimate is taken when a cell first falls below `r_hi`
+of its initial thickness (a fixed `τ` accepts any `r_hi`); any correction
+other than `NoCorrection()` needs `use_ale = true`. Under
 `NoCorrection()` the band defaults to the threshold, so only the cells
 already below the threshold go in an event, one invocation to a cell or so: a tail
 handed to a receiver delays it past its inward neighbour, so cells leave from under
-live ones (V-BO-11), and the live cells above move down a slot. Under in-depth
-absorption, where a cell beneath the surface is the hottest, the Lagrangian mesh
-empties that cell first beneath a skin, and the solve ends there: the model has no gap
-to carry heat across a pocket (§10.7). The correction is what carries such a layer
-through burnout in one event.
+live ones (V-BO-11), and the live cells above move down a slot. On the deck of
+§10.2.1 under radiative transfer the Lagrangian mesh takes the PMMA off in 30
+invocations, 17 of them from under live cells, in 1118 accepted steps against the
+correction's two invocations and 865 steps. A cell beneath a skin that still holds its
+material would end the solve instead (§10.7). The correction is what carries a layer
+through burnout in one or two events.
 
 `correction = PrescribedCorrection(w)`, with `w(x, t)` a function of the node
 position and time, prescribes every node's velocity, moving the mesh over a
@@ -592,22 +621,21 @@ bottom run into the live cell above it, and the live cells above move down into 
 slots with their tables, so the live cells are always `1:top_live_cell`.
 `interior_events(sol)` lists these events and `show(sol)` counts them.
 
-Under in-depth absorption a cell beneath the surface can empty under a skin that still
-holds its material: a pocket, physical in PMMA, which the model has no gap to carry heat
-across. A live cell outward of the crossing is a skin when it holds `VOID_SKIN` (10)
-thresholds or more of its reference, or is never tested. On the decks measured the
-cells above a tail's void hold at most 6 thresholds and a skin at least 29; this is a
-measured separation, so a thin, nearly spent skin reads as spent. On a fixed mesh
-the geometry stays with its slots, so any cell under a live one is such a stop. The
-solve warns once,
+A cell beneath the surface can also empty under a skin that still holds its material:
+a pocket, physical in PMMA, which the model has no gap to represent. A live cell
+outward of the crossing is a skin when it holds `VOID_SKIN` (10) thresholds or more of
+its reference, or is never tested. The cells above a tail's void hold at most 6
+thresholds, so a thin, nearly spent skin reads as spent. On a fixed mesh the geometry
+stays with its slots, so any cell under a live one is such a stop. The solve warns
+once,
 
 ```
-┌ Warning: solve(): cell 85 is below its threshold inward of a live cell at t = 236.2…; the solve ends with outcome :interior
+┌ Warning: solve(): cell 89 is below its threshold inward of a live cell at t = 172.81…; the solve ends with outcome :interior
 ```
 
-and ends with `:Terminated`: the regressing polymer under in-depth absorption
-(§10.2.1; the V-BO-05 case asserts the stop). The remedy at order one is the moving mesh
-with its correction, which carries such a layer through burnout in one event.
+and ends with `:Terminated`: the regressing polymer under radiative transfer on a
+fixed mesh (§10.2.1; the V-BO-05 case asserts the stop). The remedy at order one is the moving mesh
+with its correction, which carries such a layer through burnout in one or two events.
 
 ---
 ## 10.8 Fixed-mesh deactivation: the gas is vented
@@ -633,14 +661,14 @@ vented = sum(sum(e.lost_mass) for e in sol.events)
 
 Under surface absorption the surface cell is the hottest and empties first,
 so the layer of §10.2.1 burns top down, one cell per event, with no interior
-void (the V-BO-02 case). Under in-depth absorption it does not (§10.7).
+void (the V-BO-02 case). Under radiative transfer it does not (§10.7).
 
 ---
 
 ## 10.9 The supported envelope
 
-The burnout path (the equidistribution correction with its layer time set at
-activation, the near-threshold band, located deactivation events) is
+The burnout path (the equidistribution correction with its layer time estimated
+twice, the near-threshold band, located deactivation events) is
 verified under joint refinement of the mesh and the tolerance on five decks:
 a 5.9 mm PMMA layer on Kaowool under 50 kW/m² on a uniform mesh (V-BO-01) and
 on a mesh graded threefold toward the surface (V-BO-06); the same layer with
@@ -654,7 +682,7 @@ cases are listed in Technical Reference §18.
 | Parameter | Keyword | Default | Verified |
 |---|---|---|---|
 | threshold `ε_m` | `threshold` | `1e-2` | `3e-3`, `1e-2` |
-| band `ε_band` | `band` | `0.1` under the correction | `0.1` (narrower bands fail, below) |
+| band `ε_band` | `band` | `0.1` under the correction | `0.1`; `0.009` and `0.03` measured as well, and the threshold alone (below) |
 | activation `(r_hi, r_lo)` | `EquidistributionCorrection(activation = …)` | `(0.3, 0.1)` | `(0.3, 0.1)`, `(0.7, 0.3)` |
 | layer time `τ` | `EquidistributionCorrection(τ = …)` | `ActivationTime()`, `λ = 1.8` | the default |
 | tolerance | `reltol` (`abstol` the case's) | `1e-6` | `1e-6`, `1e-7` |
@@ -664,37 +692,38 @@ cases are listed in Technical Reference §18.
 ### 10.9.2 Inside the envelope
 
 Inside the envelope every quantity of interest (complete burnout, the mass
-lost, the peak mass-loss rate and its time, the burnout time, the mass
-ledger) is within its case's tolerance at every resolution, and the
-end-of-layer burst converges: the largest per-step excess of N cells over 2N
-and the successive L1 differences fall at least 1.5× per doubling. On
-V-BO-01 the tolerances are 0.01 mm on the final thickness, 0.3 percentage
-points on the mass loss, 3 % on the peak and its time, 1 % on the burnout
-time and 3e-5 on the mass ledger's relative closure.
+lost, the mass ledger and a converged surface balance at every accepted step)
+is within its case's tolerance at every resolution, and the end-of-layer burst
+converges: the largest per-step excess of N cells over 2N and the successive L1
+differences fall at least 1.5× per doubling. On V-BO-01 the tolerances are
+0.01 mm on the final thickness, 0.3 percentage points on the mass loss and 3e-5
+on the mass ledger's relative closure.
 
-- `ε_m = 3e-3` with `ε_band = 0.1` is inside on all five decks from 30
-  cells across the layer (10 on the 1 mm layer).
-- `ε_m = 1e-2` with `ε_band = 0.1`, the default, is inside on the
-  single-solid layers from 30 cells, from 60 on the convective-loss deck, and
-  not on the mixed layer, whose burst stops converging between 120 and 240
-  cells.
+- `ε_m = 1e-2` with `ε_band = 0.1`, the default, is inside on all five decks
+  from 30 cells across the layer (10 on the 1 mm layer) under the default
+  activation; under `(0.7, 0.3)` the mixed layer and the convective-loss deck are
+  inside from 60 cells.
+- `ε_m = 3e-3` with `ε_band = 0.1` is inside on the uniform and the 1 mm layers
+  from 30 cells, on the convective-loss deck from 30 (from 60 under `(0.7, 0.3)`)
+  and on the graded mesh from 60; the
+  mixed layer is inside from 60 cells under the default activation and outside
+  under `(0.7, 0.3)`, where it does not burn out at 30 and 60 cells.
 
-Both hold at reltol 1e-6 and 1e-7, in either energy form, and under either
-activation, `(0.3, 0.1)` or `(0.7, 0.3)`. For a layer of mixed composition,
-or wherever the end-of-layer burst matters, solve with `threshold = 3e-3`.
+Both hold at reltol 1e-6 and 1e-7; the enthalpy form is checked at each deck's CI resolution.
 
-The band must exceed what the slowest cell of a layer keeps when the first
-reaches the threshold (on these decks 0.4 to 3.9 % at `ε_m = 3e-3` and 1.4
-to 9.9 % at `1e-2`): a narrower band, or none, ends the solve with outcome
-`:interior`.
+The band decides how much of a layer one invocation takes: the largest fraction
+a band of 0.1 merges is 0.3 to 9.9 % at `ε_m = 3e-3` and 1.0 to 10 % at `1e-2` on
+these decks, and cells still above it go in a later invocation. With a band no
+wider than the threshold the layer leaves one cell per event.
 
-The number of deactivation invocations is reported, not a criterion: it is
-one on every deck inside the envelope except the convective-loss deck at
-`ε_m = 1e-2`, which takes two from 60 cells. At 30 cells the largest
-per-step rate just after a layer's deactivation can exceed the main peak, up
-to threefold on the graded mesh; it falls below the main peak by 60 to 120
-cells, and the peak sampled at the output times is within tolerance from 30
-cells.
+The number of deactivation invocations is reported, not a criterion. At the
+default threshold it is two on the uniform layer, two on the graded mesh (one
+under `(0.7, 0.3)`), one on the mixed and the 1 mm layers and three or four on
+the convective-loss deck; at `ε_m = 3e-3` it is one on every deck but the
+convective-loss deck, which takes two or three. The largest per-step rate just
+after a layer's deactivation stays below the main peak on every deck but the
+graded mesh at 30 cells, where it exceeds it by up to 9.5 %, and on that one too
+from 60 cells.
 
 ### 10.9.3 The material parameters
 
@@ -702,8 +731,8 @@ Material parameters outside these decks (other materials, thicker or
 charring layers, higher heating) are outside the verified envelope. A
 refinement ladder adds V-BO-01 at 25 and 100 kW/m², at half and twice its
 pre-exponential factor, and with its flux stepped after activation, at 30 to
-120 cells, all within tolerance at every resolution, the hot decks with two
-invocations. Outside these, run the same check on your own deck: solve at
+120 cells, all within tolerance at every resolution in one or two invocations; the
+burst converges on all but the 100 kW/m² deck and the raised flux. Outside these, run the same check on your own deck: solve at
 two or three resolutions and two tolerances, and read the burnout quantities
 you care about, `sol.statistics.invocations` and the events' largest
 fraction against the band.
@@ -722,7 +751,7 @@ fraction against the band.
 | `lagrangian` | `solve`, `setup` | the layer interfaces | 10.5.1 |
 | `min_thickness` | `solve`, `integrate` | `1e-6` m | 10.3 |
 | `EquidistributionCorrection(; τ, activation, layers)` | exported | `ActivationTime()`, `(0.3, 0.1)`, `:vanishing` | 10.5 |
-| `ActivationTime(; λ, fallback, floor)` | exported | `1.8`, `720.0` s, `1.0` | 10.5.3 |
+| `ActivationTime(; λ)` | exported | `1.8` | 10.5.3 |
 | `NoCorrection()` | exported | — | 10.5.5 |
 | `PrescribedCorrection(w)` | exported | — | 10.5.5 |
 

@@ -63,10 +63,12 @@ Conventions:
 | $A_{\alpha\beta}$, $A_i$ | Arrhenius pre-exponential factor for reaction *i* (or *αβ*) | s⁻¹ |
 | $a_j$ | Surface absorptivity of component *j* for incident radiation (`surface_absorptivity`; $\varepsilon_j(T)$ when unset, Kirchhoff) | – |
 | $a_{\text{eff}}$ | Effective (composition-weighted) surface absorptivity, $\sum_j v_j a_j$ | – |
-| $a$, $a_s$ | Absorptivity applied to the incident flux of a `RadiativeFluxBC`: the condition's own `absorptivity` when it has one, otherwise $a_{\text{eff}}$ of the outermost live cell (§8.3.2, §12.3.5) | – |
+| $a$, $a_s$ | Absorptivity applied to the incident flux of a `RadiativeFluxBC`: the condition's own `absorptivity` when it has one, otherwise $a_{\text{eff}}$ of the outermost live cell; at the face under surface absorption, to the beams under radiative transfer (§8.2, §8.4.2, §12.3.5) | – |
 | $a_i$, $a_n$ | Activation switch of cell *i* / node *n* of the equidistribution correction (§11; overload A9) | – |
+| $a^{\text{lo}}_i$, $a^{\text{lo}}_n$ | Second switch of cell *i* / node *n*, through which a layer's second estimate enters the correction (§11.7.5; overload A9) | – |
 | $B$ | Spalding blowing number $\dot m''c_{p,g}/h$ of the convective blowing models (§12.3.3) | – |
 | $B_{\lambda}$, $B_{\Gamma}$ | Film parameters of the blowing models: $B_{\lambda} = 2\lambda \sum_j N_j c_{p,j}(T_s)/h$ (`CouetteFilm`, $\lambda$ its film constant, overload A6); $B_{\Gamma} = (\dot m'' c_{p,\infty}/h)(\Gamma_{\infty}/\Gamma_g)^{n_{\Gamma}}$ (`PropertyRatioFilm`, `PoolingFilm`) (§12.3.3; overload B1) | – |
+| $\mathcal B_i$ | Emissive power of cell *i*, $\sigma\tilde T_i^4$ at its trial temperature (§8.3.2) | W·m⁻² |
 | $C_i$ | Heat-capacity sum of cell *i*, $\sum_j m_{j,i} c_{p,j}(\tilde T_i)$ at the trial temperature, smoothly floored at $C_{\text{floor},i}$ | J·K⁻¹ |
 | $C_{\text{floor},i}$ | Capacity floor of cell *i*, $\rho c_{p,\text{floor}} V_i(0)$ (§5.4.3, §13.10.4) | J·K⁻¹ |
 | $C_{\text{reg},i}$ | Regularizing capacity of the extended caloric relation: zero while the cell's guaranteed heat capacity is at least $2C_{\text{floor},i}$, rising to $C_{\text{floor},i}$ as that capacity vanishes (§5.4.3, §13.10.4, §16.4) | J·K⁻¹ |
@@ -109,10 +111,8 @@ Conventions:
 | $h_m$ | External mass-transfer (film) coefficient | m·s⁻¹ |
 | $h_P$ | Pressure-transfer coefficient (convective pressure BC) | m·Pa⁻¹·s⁻¹ |
 | $\Delta h$, $\Delta h_g$ | Sensible enthalpy difference $\int c_p dT$ between two temperatures, e.g. $\Delta h_g(T_s, T_{\infty})$; $\Delta h_{c,\text{eff}}$ the effective heat of combustion (User Guide 2) | J·kg⁻¹ |
-| $I(z)$ | Radiation intensity along the beam (Beer–Lambert) | W·m⁻² |
-| $I_f$, $I_{\text{up}}$, $I_{\text{down}}$ | Intensity at face *f* (an algebraic unknown under Beer–Lambert) / at a cell's upstream and downstream face | W·m⁻² |
-| $I_{\text{inc}}$, $I_e$ | Intensity entering the medium through the exposed face *e*, $a q_{\text{inc}}$ (§8.3.2, §8.3.4) | W·m⁻² |
-| $I_b$ | Intensity reaching the last face of the beam, transmitted out through the back (`radiation_transmitted`, §8.3.2) | W·m⁻² |
+| $I^-$, $I^+$; $I^-_f$, $I^+_f$ | Hemispherical radiative flux toward the back / toward the exposed face; at face *f*, algebraic unknowns under radiative transfer (§8.3) | W·m⁻² |
+| $I_h$, $I_{h,f}$ | Flux of the heater's beam of direction *h* across a face normal to $z$, toward the back; at face *f*, an algebraic unknown (§8.3.1, §8.4.2) | W·m⁻² |
 | $J$ | Jacobian $\partial f/\partial u$ of the residual (linear-algebra context only) | mixed |
 | $J_j$, $J_{j,f}$ | Mass flux of (gas) component *j* relative to the solid (at face *f*: the gas-transport flux, §9, §13.7) | kg·m⁻²·s⁻¹ |
 | $J_j^{\text{diff}}$, $J_j^{\text{adv}}$ | Diffusive / advective part of the gas flux | kg·m⁻²·s⁻¹ |
@@ -140,15 +140,16 @@ Conventions:
 | $\dot m_g$, $\dot m''$, $\dot m''_k$ | Outward gas mass flux at the surface ($\dot m''$ in the blowing models, $\dot m''_k$ of species *k*; §12.3.3) | kg·m⁻²·s⁻¹ |
 | $\dot m_{\text{out}}$ | Outflow rate of the live region, positive leaving, $\sum_{f\in\mathcal{F}_{\text{live}}} \sum_j F_{j,f} A_f$ (§16.3.2) | kg·s⁻¹ |
 | $\dot M_{j,i}$ | Face-flux part of the mass rate of component *j* in cell *i*, $-\sum_f s_{if} A_f F_{j,f}$ | kg·s⁻¹ |
-| $\text{mob}_i$, $\text{mob}_f$ | Gas mobility $\kappa/\mu$ of cell *i*; interface fluxes use each half-cell mobility (§5.7.4, §9.6; overload M1) | m²·Pa⁻¹·s⁻¹ |
+| $\text{mob}_i$, $\text{mob}_f$ | Gas mobility $\kappa/\mu$ of cell *i*; interface fluxes use each half-cell mobility (§5.13.2, §9.6; overload M1) | m²·Pa⁻¹·s⁻¹ |
 | $N_j$, $n_j$ | Species mass flux and molar flux relative to the skeleton | kg·m⁻²·s⁻¹; mol·m⁻²·s⁻¹ |
 | $N_C$ (`NC`) | Number of chemical components (type parameter) | – |
 | $N_R$ (`NR`) | Number of reactions (type parameter) | – |
 | $N_{\text{state}}$ | Length of the state vector (§3.1.2, §15.1.1) | – |
 | $N_{\text{node}}$, $N_{\text{cell}}$, $N_{\text{blk}}$ | Rows of a node block / of a cell block of the interleaved state on a line, and their sum, the stride (§15.1.1) | – |
+| $N_{\text{rad}}$, $N_{\text{beam}}$ | Radiation rows per face under radiative transfer, $2 + N_{\text{beam}}$ / beam directions of the `:top` heaters (§8.1.2, §8.7.1) | – |
 | $\mathsf{N}_i$ | Normal matrix of the least-squares gradient of cell *i*, $\sum_k w_k \mathbf{d}_k \mathbf{d}_k^{T}$ (§13.6.4) | – |
 | $n$ | Number of finite-volume cells | – |
-| $n_c$ | Number of colors of the colored Jacobian (§15.7) | – |
+| $n_c$ | Number of colors of the colored Jacobian (§15.6) | – |
 | $n_{\text{layer}}$ | Number of cells across a layer of the equidistribution correction; its gain is $n_{\text{layer}}^{2}/\tau_{\text{eq}}$ (§11.7.2; overload N1) | – |
 | $n_{\text{nodes}}$, $n_{\text{faces}}$ | Number of mesh nodes / faces (= n+1 in 1D) | – |
 | $n_{i,j}$, $n_s$ | Reaction order of reaction *i* w.r.t. reactant *j*, an order on the conversion for $n \ne 1$ | – |
@@ -156,11 +157,12 @@ Conventions:
 | $P$ | Gas pressure in the porous medium | Pa |
 | $P_{\text{ref}}$ | Reference pressure (= 101325) | Pa |
 | $Q_{\text{rxn}}$ | Volumetric reaction heat source, $-\sum h_r r_r$ | W·m⁻³ |
-| $Q_{\text{rad}}$ | Volumetric radiation absorption source | W·m⁻³ |
+| $Q_{\text{rad}}$ | Volumetric radiative source, absorption less emission, (8.2) | W·m⁻³ |
 | $q$, $q_{\text{cond}}$, $q_f$ | (Conductive) heat flux; at face *f*, along its normal | W·m⁻² |
 | $q_{\text{BC}}$ | Boundary-condition heat flux (positive into domain) | W·m⁻² |
 | $q_{\text{inc}}$ | Incident radiative flux of a `RadiativeFluxBC` | W·m⁻² |
-| $q'''$, $q_{\text{rad}}'''$, $q^{\text{rad}}_i$ | Volumetric radiation source (Beer–Lambert; $q^{\text{rad}}_i$ its average over cell *i*, §8.3.2) | W·m⁻³ |
+| $q^{\text{in}}_e$, $q^{\text{in}}_b$ | Diffuse radiation arriving from outside at the exposed / back face: $F\sigma T_\infty^4$ per `RadiativeBC` and $q_{\text{inc}}$ per diffuse `RadiativeFluxBC` (§8.4) | W·m⁻² |
+| $q_{\text{scale}}$, $q^{\text{arr}}$ | Scale of the radiation rows' tolerance, and the radiation arriving from outside at the exposed face and an open back that sets it (§8.7.3) | W·m⁻² |
 | $R_b$ | Blowing ratio $h_{\text{eff}}/h$ of a convective condition's blowing model, 1 at zero species fluxes (§12.3.3; the code's $\chi$, overload B1) | – |
 | $R_g$ ($R$, $R_{\text{gas}}$) | Universal gas constant (= 8.31446261815324) | J·mol⁻¹·K⁻¹ |
 | $r$, $r_i$ | Reaction rate (per unit volume) of reaction *i* | kg·m⁻³·s⁻¹ |
@@ -168,9 +170,9 @@ Conventions:
 | $S$ | Sutherland constant (= 110.4 K, air) in the viscosity law | K |
 | $S_j$, $S_{j,i}$ | Species source term for component *j* (in cell *i*), $\sum_r \nu_{r,j} r_r$ (= $\omega_{j,i}$); the rows carry the cell's reaction source $\omega_{j,i} \tilde V_i$ [kg·s⁻¹] | kg·m⁻³·s⁻¹ |
 | $S_{\text{dry},i}$ | Dry-pyrolysis-gas source term in cell *i* (source of $G_i$) | kg·m⁻³·s⁻¹ |
-| $S_{E,i}$ | Energy source of cell *i*: its reaction heat $Q_{\text{rxn},i} \tilde V_i$ plus the in-depth radiation it absorbs (§7.3.3, §13.3.4, §16.5.1) | W |
+| $S_{E,i}$ | Energy source of cell *i*: its reaction heat $Q_{\text{rxn},i} \tilde V_i$ plus its radiative source $S^{\text{rad}}_i$ (§7.3.3, §13.3.4, §16.5.1) | W |
 | $S_T$, $S_{T,i}$ | External temperature-rate source (manufactured solutions): $S_T$ on the temperature row, $C_i S_T$ on the enthalpy row (§7.3.3, §13.5.3) | K·s⁻¹ |
-| $S^{\text{rad}}_i$ | In-depth radiation absorbed by cell *i*, $I_{\text{up}} A_{\text{up}} - I_{\text{down}} A_{\text{down}}$ (§8.3.3) | W |
+| $S^{\text{rad}}_i$ | Radiation absorbed by cell *i* less what it emits, under radiative transfer, (8.6) (§8.3.3) | W |
 | $s_{if}$ | Orientation of face *f* relative to cell *i* (written $s_{if}$ or $s_{i,f}$; $s_f$ in §6, where *i* is the reaction index and the cell carries no index): +1 when its normal points out of *i* (*i* its owner), −1 otherwise | – |
 | $s_k$ | Diffusivity ratio $D_{k,\infty}/\alpha_{\text{th},\infty}$ of species *k* in the pooling film (§12.3.3) | – |
 | $T$ | Absolute temperature | K |
@@ -178,6 +180,7 @@ Conventions:
 | $T_{\text{cell}}$ | Temperature at the cell center adjacent to a boundary | K |
 | $T_{\infty}$ | Ambient / surroundings temperature | K |
 | $T_{\text{ref}}$ | Reference temperature for enthalpy datum (= 298.15) | K |
+| $T_{\text{rad}}$ | The largest initial cell temperature, for the radiation rows' tolerance scale (§8.7.3) | K |
 | $T_f$ | Face temperature of the enthalpy the gas fluxes carry: the distance-weighted interpolation $(d_n T_o + d_o T_n)/(d_o + d_n)$ at an interior face, the surface temperature for boundary outflow and specified incoming temperature for inflow (§13.6.2) | K |
 | $\bar T_f$, $T_{\text{face}}$ | Face temperature; gas transport uses the distance-weighted interface state $T^*=(d_RT_L+d_LT_R)/(d_L+d_R)$, reducing to the arithmetic mean for equal half-cell distances (§9.6) | K |
 | $\tilde T_f$ | Face temperature of the relative fluxes: the upwind van Albada reconstruction on the stencil of the mass flux it carries (§11.6.4, §13.6.2) | K |
@@ -200,6 +203,7 @@ Conventions:
 | $W$ | The integrator's iteration matrix $J - M/(\gamma_{\text{RK}} \Delta t)$ | – |
 | $w$, $w_n$ | Mesh node velocity (at node *n*), $w = v_s + c$; an algebraic unknown on a moving mesh (overload W1) | m·s⁻¹ |
 | $w_k$ | Weight $\lvert\mathbf{d}_k\rvert^{-2}$ of neighbour *k* in the least-squares gradient (§13.6.4); a quadrature weight in §16.5.3 (overload W1) | m⁻²; – |
+| $w_h$ | Share of a collimated or cone heater's flux carried by beam *h*, $\sum_h w_h = 1$ (§8.4.2; overload W1) | – |
 | $X_{\alpha}$ | Volume fraction (FDS/Gpyro V2 comparison notation; internally $v_j$) | – |
 | $x$, $y$ | Transverse/lateral coordinates (multi-dimensional meshes and comparison text) | m |
 | $x_a$ | Conversion of reactant $a$ against its reference, $\xi_a/\xi_{\text{ref}}$ (§6.4) | – |
@@ -227,13 +231,13 @@ Conventions:
 | $\Gamma$ | Thermal property ratio $k/c_p$ of a gas (property-ratio and pooling films, §12.3.3; overload G1) | kg·m⁻¹·s⁻¹ |
 | $\Gamma_i$ | Volume rate the node corrections sweep through the faces of cell *i*, $A_{i+1} c_{i+1} - A_i c_i$ on a line (§11.5.2; overload G1) | m³·s⁻¹ |
 | $\Delta$ | Forward-difference / change operator (prefix) | varies |
-| $\Delta_i$ | Thickness of cell *i* along the Beer–Lambert beam, the sum of its two floored centre-to-face distances ($\Delta z_i$ away from the floors; §8.3.3, §13.5.2) | m |
 | $\delta_{ij}$ | Kronecker delta | – |
 | $\delta_i$ | Positive-part mass scale of cell *i*, $\text{reltol} \cdot \varepsilon_m \cdot m^s_i(0)$ (its mass tolerance) | kg |
 | $\delta_b$ | Scale of the softplus finite base of the depletion limiter (`base_scale`, default 10⁻⁸; §6.3.2) | kg·m⁻³ |
-| $\delta_{\text{mov}}$, $\delta_{\text{BL}}$, $\delta_{\chi}$ | Configuration flags of the state layout: one on a moving mesh / under Beer–Lambert radiation / under a lateral-shrinkage law, zero otherwise (§3.1.2, §15.1.1) | – |
+| $\delta_{\text{mov}}$, $\delta_{\chi}$ | Configuration flags of the state layout: one on a moving mesh / under a lateral-shrinkage law, zero otherwise (§3.1.2, §15.1.1) | – |
 | $\varepsilon$, $\varepsilon_j$ | Emissivity (of component *j*) | – |
 | $\varepsilon_{\text{eff}}$ | Effective (composition-weighted) emissivity | – |
+| $\varepsilon_e$, $\varepsilon_b$, $\varepsilon_l$ | Transmissivity of the exposed face, $\varepsilon_{\text{eff}}$ of the first live cell smoothly floored at $10^{-3}$ / of the back face, $\varepsilon_l$ or zero for a mirror / $\varepsilon_{\text{eff}}$ of the last cell (§8.4) | – |
 | $\varepsilon_m$ | Deactivation threshold: fraction of a cell's reference below which it deactivates (`threshold`, default 1e-2, at an order other than one a tenth of the limiter's `conversion_threshold`; overload E1) | – |
 | $\varepsilon_{\text{band}}$ | Near-threshold band of deactivation, $\varepsilon_m \le \varepsilon_{\text{band}} < 1$ (`band`) | – |
 | $\varepsilon_{AB}$ | Lennard-Jones well depth (collision integral) | J |
@@ -244,14 +248,17 @@ Conventions:
 | $\theta_A$ | Column-global **radial** volumetric strain rate, $(1/A) dA/dt$ (an algebraic unknown under a lateral-shrinkage law) | s⁻¹ |
 | $\theta_L$ | **Axial** volumetric strain rate ($\theta - \theta_A$) | s⁻¹ |
 | $\theta_i^j$ | Stoichiometric coefficient (ThermaKin comparison notation; internally $\nu_{i,j}$) | – |
+| $\theta_1$, $\theta_2$ | Polar angles from the face normal bounding a cone heater, `Cone(θ₁, θ₂)` (§8.4.2; overload A2) | rad |
 | $\kappa$ ($\kappa_j$, $\kappa_{\text{eff}}$) | Permeability (Darcy) of component *j* / of the cell's mixture | m² |
 | $\kappa_s$ | Solid absorption coefficient (FDS; compare effective $\alpha_{\text{eff}}$, not mass-specific $\alpha_j$) | m⁻¹ |
 | $\Lambda$ | Face buoyancy of the pooling film relative to the hot free stream, $[1 - (M_{\text{face}}/T_s)(T_{\infty}/M_{\infty})]/(1 - T_{\infty}/T_s)$ (§12.3.3; overload B1) | – |
 | $\Lambda_c$, $\Lambda_w$ | Centre and width of the pooling factor's logistic switch in $\Lambda$ (`PoolingFilm` keywords `Λc`, `Λw`, defaults 0.35, 0.10; §12.3.3) | – |
 | $\lambda$ ($\lambda_j$, $\lambda_{\text{face}}$, $\lambda_{\text{eff}}$) | Gas transfer (diffusion) coefficient | m²·s⁻¹ |
-| $\lambda_{\tau}$ | Factor of the layer equidistribution time, $\tau_{\text{eq}} = \lambda_{\tau} L_{\text{layer}}/\vert \dot L_{\text{layer}}\vert $ (`ActivationTime`, default 1.8; overload A6) | – |
+| $\lambda_{\tau}$ | Factor of the layer equidistribution time, $\tau_{\text{eq},k} = \lambda_{\tau} L_{\text{layer}}/\vert \dot L_{\text{layer}}\vert $ at each estimate (`ActivationTime`, default 1.8; overload A6) | – |
 | $\ell$ | Characteristic particle/pore diameter (Carman–Kozeny); in §17 the scalar loss | m |
-| $\mu$, $\mu_i$ | Gas dynamic (Sutherland) viscosity (of cell *i*) | Pa·s |
+| $\mu$, $\mu_i$ | Gas dynamic (Sutherland) viscosity (of cell *i*; overload M2) | Pa·s |
+| $\bar\mu$ | Mean direction cosine of the two-stream closure, 2/3: a hemispherical flux is attenuated at $\alpha/\bar\mu$ (`DIFFUSIVITY` $=1/\bar\mu$; §8.3.1; overload M2) | – |
+| $\mu_h$ | Direction cosine of the heater's beam *h* in the solid (§8.4.2; overload M2) | – |
 | $\mu_{\text{ref}}$ | Reference viscosity (= 1.716×10⁻⁵ at 273.15 K, air) | Pa·s |
 | $\nu$ | Kinematic viscosity (Gpyro V2 Darcy comparison) | m²·s⁻¹ |
 | $\nu_{i,j}$ | Stoichiometric coefficient (yield) of component *j* in reaction *i* (negative reactant, positive product) | – |
@@ -271,7 +278,9 @@ Conventions:
 | $\sigma_s$ | Scattering coefficient (not modeled) | m⁻¹ |
 | $\sigma_{AB}$ | Lennard-Jones collision diameter | Å |
 | $\tau_{\text{eq}}$ | Equidistribution time of a layer in the correction (keyword `τ`; overload T1) | s |
+| $\tau_{\text{eq},1}$, $\tau_{\text{eq},2}$ | A layer's first and second estimate of its equidistribution time under `ActivationTime` (§11.7.5; overload T1) | s |
 | $\tau_i$ | Optical thickness of cell *i*, $\alpha_i \Delta z_i$ (always subscripted or called optical; overload T1) | – |
+| $\tau_L$ | Optical thickness of a whole layer or slab, $\int\alpha\,\mathrm dz$ over it (§8; overload T1) | – |
 | $\varphi$ | Porosity (gas void fraction), $1 - \sum_{S,L} \xi_j/\rho_{i,j}$ (U+03C6, LaTeX `\varphi`; overload A8) | – |
 | $\phi_i$ | Multiplier of cell *i* in the potential closure (multi-dimensional meshes only; U+03D5, LaTeX `\phi`; overload A8) | m²·s⁻¹ |
 | $\chi$, $\chi_i$ | **Pyrolysis progress** in cell *i*, $G_i/m_{\text{dry},i}$ (cumulative dry-gas mass released per unit initial dry-solid mass) | – |
@@ -297,8 +306,12 @@ Conventions:
 | $r$, $\alpha\beta$ | Reaction index; in §15, where stated, a row of the state vector ($f_r$, $s_r$, $J_{rc}$) |
 | $k$ | Layer or cell index inside a sweep (closure and correction context); the receiver of a merge (§14, §16.7); a neighbour in the least-squares gradient (§13.6.4); a species of the pooling film (§12.3.3); a quadrature node (§16.5.3) |
 | $q$ | Parameter index (§17); a node of a face in the multi-dimensional sweep vectors $s_{q,f}$ (§11.6.5) |
-| $e$ | Exposed face of the Beer–Lambert beam ($I_e$, $A_e$, §8); a deactivation event in the ledger ($m^{\text{lost}}_e$, §16) |
-| $b$ | Last face of the beam, at the back ($I_b$, $A_b$, §8) |
+| $e$ | The exposed face, the upstream face of the first live cell ($I^\pm_e$, $A_e$, $\varepsilon_e$, §8); a deactivation event in the ledger ($m^{\text{lost}}_e$, §16) |
+| $b$ | The back face ($I^\pm_b$, $A_b$, $\varepsilon_b$, §8) |
+| $l$ | The last cell of the column, at the back ($\varepsilon_l$, §8.4.3) |
+| $i_1$ | The first live cell, beside the exposed face (§8.3.3) |
+| $u$, $d$ (radiation) | A cell's upstream face, toward the exposed face, and downstream face, toward the back (§8.3) |
+| $h$ (radiation) | A beam direction of a collimated or cone heater ($\mu_h$, $w_h$, $I_{h,f}$, §8.4.2) |
 | $g$ | Gas phase / gaseous component |
 | $s$ | Solid / condensed phase |
 | $\ell$, $\text{liq}$ | Liquid phase |
@@ -309,11 +322,10 @@ Conventions:
 | $\text{eff}$ | Effective (mixture) property |
 | $\text{cell}$ | Cell-centered quantity |
 | $s$ (boundary) | Surface (boundary face) — e.g. $T_s$, $\xi_{j,s}$ |
-| $\text{up}$, $\text{down}$ | Upstream / downstream face of a cell along the Beer–Lambert beam |
-| $\text{inc}$ | Incident (radiation entering the exposed face) |
+| $\text{inc}$ | Incident (a heater's radiation arriving at a face) |
 | $\infty$ | Ambient / surroundings; the free stream of a blowing model |
 | $\text{ref}$ | Reference value |
-| $\text{in}$ | Cell-entrance (radiation); entering the live region ($\dot H_{\text{in}}$) |
+| $\text{in}$ | Arriving from outside ($q^{\text{in}}_e$, §8.4); entering the live region ($\dot H_{\text{in}}$) |
 | $\text{out}$ | Leaving ($\dot m_{\text{out}}$, $v_{\text{out}}$) |
 | $\text{live}$ | Restricted to the live cells or the live boundary faces (§16) |
 | $\text{layer}$ | A layer of the equidistribution correction ($n_{\text{layer}}$, $L_{\text{layer}}$) |
@@ -336,13 +348,13 @@ Conventions:
 |---|---|
 | $x^{\circ}$, $x^{o}$, $x_{\text{init}}$ | Value at previous time step / initial value |
 | $x(0)$ | Value at the initial (reference) state, e.g. $V_i(0)$, $\Delta z_i(0)$, $m^s_i(0)$ |
-| $x^{+}$, $x^{-}$ (radiation) | Forward / backward hemispheric intensity (two-flux, FDS comparison) |
+| $x^{+}$, $x^{-}$ (radiation) | Hemispherical flux toward the exposed face / toward the back ($I^+$, $I^-$, §8) |
 | $x^{+}$ | One-sided positive part, e.g. $\xi^{+}$, $(m)^{+}$ (zero at and below zero, the identity above the scale $\delta_i$); never a state after an event, which carries a hat |
 | $\hat x$ (hat) | The receiver's state after a deactivation merge ($\hat m_{j,k}$, $\hat V_k$, §14.3.3); $\hat n_f$ the unit normal of face *f* |
 | $x^{\text{solid}}$ | Restricted to the condensed (solid and liquid) components |
 | $x^{\text{diff}}$, $x^{\text{adv}}$ | Diffusive / advective flux component |
 | $x^{E}$ | Energy (the face energy flux $F^E_f$) |
-| $x^{\text{rad}}$ | In-depth radiation ($q^{\text{rad}}_i$, $S^{\text{rad}}_i$) |
+| $x^{\text{rad}}$ | Radiative transfer in the solid ($S^{\text{rad}}_i$) |
 | $x^{\text{lost}}$, $x^{\text{reg}}$ | What a deactivation event removes from the live region / the caloric regularization it writes to its record ($m^{\text{lost}}_e$, $H^{\text{lost}}_e$, $H^{\text{reg}}_e$) |
 | $x^{\text{rel}}$ (on a defect) | Relative defect ($d_m^{\text{rel}}$, $d_H^{\text{rel}}$) |
 | $x^{c}$ | Cell-center (e.g. $z_i^c$) |
@@ -403,10 +415,12 @@ Conventions:
 | Near-threshold band under a moving correction | $\varepsilon_{\text{band}}$ | 0.1 | – | `CORRECTION_BAND` |
 | Activation bounds | $(r_{\text{hi}}, r_{\text{lo}})$ | (0.3, 0.1) | – | `EquidistributionCorrection` |
 | Layer-time factor | $\lambda_{\tau}$ | 1.8 | – | `ACTIVATION_TIME_FACTOR` |
-| Fallback equidistribution time | $\tau_{\text{eq}}$ | 720 | s | `EQUIDISTRIBUTION_TIME` |
+| A fixed equidistribution time, for `EquidistributionCorrection(τ = …)` | $\tau_{\text{eq}}$ | 720 | s | `EQUIDISTRIBUTION_TIME` |
 | Depletion-limiter scale | $\xi_{\text{th}}$ | 1.0 | kg·m⁻³ | `DepletionLimiter()` |
 | Join of the depletion onset | $x_J$ | 1.0 | – (units of $\xi_{\text{th}}$) | `DepletionLimiter()` |
 | Scale of the finite power base | $\delta_b$ | 10⁻⁸ | kg·m⁻³ | `DepletionLimiter()` |
+| Diffusivity of the two-stream rows | $1/\bar\mu$ | 3/2 | – | `DIFFUSIVITY` |
+| Floor of the exposed face's transmissivity | — | 10⁻³ | – | `INTERFACE_FLOOR` |
 
 ---
 
@@ -431,7 +445,8 @@ below is authoritative; writers must use the disambiguating subscript/context.
   strain rate. $\theta_i^j$ appears only in the ThermaKin-comparison passage and is
   immediately mapped to $\nu_{i,j}$. The one exception is §17 (sensitivity), where
   the bold $\theta \in \mathbb{R}^p$ is the vector of parameters and $\theta_q$ its *q*-th entry;
-  the strain rate does not appear in that chapter.
+  the strain rate does not appear in that chapter. In Chapter 8 $\theta_1 < \theta_2$ are
+  the polar angles of a cone heater, never a cell's strain rate.
 
 - **A — A3 [area vs. pre-exponential factor].** $A$ is the **cross-sectional
   area** and $A_f$ the area of face $f$; the Arrhenius pre-exponential is $A_i$ /
@@ -447,7 +462,7 @@ below is authoritative; writers must use the disambiguating subscript/context.
 
 - **α — A5 [absorption vs. conversion vs. absorptivity].** $\alpha$ (or $\alpha_{\text{eff}}$) =
   **volumetric absorption coefficient** (m⁻¹); $\alpha_j$ = mass-basis absorption
-  coefficient (m²·kg⁻¹). Conversion (Gpyro V2) is $\alpha_{\text{conv}}$; FDS $\kappa_s$ has the units of $\alpha_{\text{eff}}$, not $\alpha_j$; matching attenuation also requires the angular closure (§8.7.3).
+  coefficient (m²·kg⁻¹). Conversion (Gpyro V2) is $\alpha_{\text{conv}}$; FDS $\kappa_s$ has the units of $\alpha_{\text{eff}}$, not $\alpha_j$; matching attenuation also requires the angular closure (§8.9.3).
   The absorptivity of a surface for incident radiation is **$a$** ($a_j$,
   $a_{\text{eff}}$, $a_s$), never $\alpha$; it equals $\varepsilon_{\text{eff}}$ under Kirchhoff's law unless a
   component sets its own `surface_absorptivity`. The free stream's thermal
@@ -536,7 +551,10 @@ below is authoritative; writers must use the disambiguating subscript/context.
 - **τ — T1 [optical thickness vs. equidistribution time].** $\tau_i$ with a cell
   subscript, or "optical thickness" in words, is $\alpha_i \Delta z_i$; $\tau_{\text{eq}}$ in the
   mesh-correction and burnout chapters (§11, §14) is a layer's equidistribution
-  time [s]. A time variable of integration is written $t$, never $\tau$.
+  time [s], and $\tau_{\text{eq},1}$, $\tau_{\text{eq},2}$ its two estimates
+  ($\tau_{\text{eq},k}$ for either; the subscript after "eq" counts the estimates,
+  never a cell). $\tau_L$ is the optical thickness of a whole layer or slab, $\int\alpha\,\mathrm dz$
+  over it (§8). A time variable of integration is written $t$, never $\tau$.
 
 - **M — M1 [molar mass vs. mass matrix vs. history].** $M$, $M_j$
   (and $M_{\text{face}}$, $M_{\infty}$) is molar mass; $M$ in the linear-algebra context of §15
@@ -552,7 +570,7 @@ below is authoritative; writers must use the disambiguating subscript/context.
 - **a — A9 [absorptivity vs. activation].** $a_j$, $a_{\text{eff}}$, $a_s$ (component,
   effective or surface subscript) are surface absorptivities; $a_i$, $a_n$ (cell
   or node subscript, correction context only) are the correction's activation
-  switches. A row's absolute tolerance is written $\text{atol}_r$ (§15.5.4), never
+  switches, and $a^{\text{lo}}_i$, $a^{\text{lo}}_n$ its second switches. A row's absolute tolerance is written $\text{atol}_r$ (§15.5.4), never
   $a_r$.
 
 - **N — N1 [species fluxes vs. counts].** $N_j$ is species mass flux and
@@ -587,4 +605,9 @@ below is authoritative; writers must use the disambiguating subscript/context.
 
 - **w — W1 [node velocity vs. weights].** $w$, $w_n$ is the mesh node velocity;
   $w_k$ (neighbour or quadrature-node subscript) is a weight of the
-  least-squares gradient (§13.6.4) or of a quadrature rule (§16.5.3).
+  least-squares gradient (§13.6.4) or of a quadrature rule (§16.5.3); $w_h$ (beam
+  subscript, Chapter 8 only) is the share of a heater's flux carried by beam $h$.
+
+- **μ — M2 [viscosity vs. direction cosine].** $\mu$, $\mu_i$ is the gas viscosity;
+  $\bar\mu$ (with the bar) and $\mu_h$ (beam subscript) are direction cosines of the
+  radiation rows, in Chapter 8 only.

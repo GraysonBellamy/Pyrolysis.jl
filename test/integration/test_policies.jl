@@ -1,6 +1,7 @@
 using Test
 using Pyrolysis
-using Pyrolysis.Materials: DepletionLimiter, BEER_LAMBERT, SURFACE_ABSORPTION
+using Pyrolysis.Materials: DepletionLimiter, SURFACE_ABSORPTION
+using Pyrolysis.Materials: RADIATIVE_TRANSFER, STEFAN_BOLTZMANN
 using Pyrolysis.States
 using Pyrolysis.Integration
 using Pyrolysis.Integration: setup, kencarp4_policy, rodas5p_policy, fbdf_policy
@@ -109,7 +110,7 @@ end
     cp = setup(
         _slab(6; κ = 1e-12, radiating = true);
         use_ale = true,
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
     )
     layout = cp.def.layout
     check = DomainCheck(cp; max_consecutive = 3)
@@ -126,8 +127,8 @@ end
     V = cp.def.setup.reference.volume[2]
     u[mass_index(layout, 2, 1)] = 1.2 * 1400.0 * V
     @test check(u, nothing, 0.0)
-    # A velocity off its balance row, and an intensity off its attenuation row.
-    for row in (velocity_index(layout, 4), intensity_index(layout, 2))
+    # A velocity off its balance row, and a radiation flux off its row.
+    for row in (velocity_index(layout, 4), radiation_index(layout, 2, 1))
         u = copy(cp.u0)
         u[row] += 1e3 * cp.abstol[row] / cp.reltol
         @test check(u, nothing, 0.0)
@@ -145,8 +146,88 @@ end
     @test occursin("consecutive", m.message)
 end
 
+# Under radiative transfer a radiation row is tested against its own flux. A
+# deck that starts at its surroundings' temperature has a tolerance scale of
+# σT∞⁴; heated to 900 K without radiation its rows carry the cells' emission,
+# eighty times that, and a defect ten times the scale's bound is within the
+# rows' own relative tolerance, while one a thousand times their own flux's
+# share is not.
+@testset "domain check: radiation rows against their own flux" begin
+    problem = PyrolysisProblem(
+        mesh = stretched_mesh(0.01, 6, 1.15),
+        material = _slab(6; radiating = true).material,
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = HeatFluxBC(3e4) + RadiativeBC(T_inf = 300.0),
+                bottom = AdiabaticBC(),
+            ),
+        ),
+        T_initial = z -> 300.0,
+        tspan = (0.0, 10.0),
+    )
+    cp = setup(problem; radiation_model = RADIATIVE_TRANSFER)
+    def, ws, layout = cp.def, cp.ws, cp.def.layout
+    row = radiation_index(layout, 4, 1)
+    q_scale = cp.abstol[row] / cp.reltol
+    @test q_scale ≈ STEFAN_BOLTZMANN * 300.0^4 rtol = 1e-12
+    check = DomainCheck(cp; max_consecutive = 3)
+    @test !check(cp.u0, nothing, 0.0)
+    hot = copy(cp.u0)
+    for i = 1:6
+        hot[energy_index(layout, i)] = 900.0
+    end
+    Integration._consistent_radiation!(hot, def, ws, 0.0)
+    @test !check(hot, nothing, 0.0)
+    @test hot[row] > 50 * q_scale
+    u = copy(hot)
+    u[row] += 20 * cp.reltol * q_scale
+    @test (u[row] - hot[row]) / (cp.reltol * q_scale + cp.abstol[row]) > 1
+    @test !check(u, nothing, 0.0)
+    @test check.monitor.last < 1
+    u[row] = hot[row] + 1e3 * cp.reltol * hot[row]
+    @test check(u, nothing, 0.0)
+    @test check.monitor.last > 1
+end
+
+# Beam rows are checked as the thermal rows are, against their own flux and
+# their tolerance: a defect ten times that bound is rejected, a tenth of it
+# is not.
+@testset "domain check: beam rows against their own flux" begin
+    problem = PyrolysisProblem(
+        mesh = stretched_mesh(0.01, 6, 1.15),
+        material = _slab(6; radiating = true).material,
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = RadiativeFluxBC(3e4; distribution = Collimated()) +
+                      RadiativeBC(T_inf = 300.0),
+                bottom = AdiabaticBC(),
+            ),
+        ),
+        T_initial = z -> 300.0,
+        tspan = (0.0, 10.0),
+    )
+    cp = setup(problem; radiation_model = RADIATIVE_TRANSFER)
+    layout = cp.def.layout
+    @test radiation_rows(layout) == 3
+    check = DomainCheck(cp; max_consecutive = 3)
+    @test !check(cp.u0, nothing, 0.0)
+    row = radiation_index(layout, 4, 3)
+    @test cp.u0[row] > 0
+    bound = cp.reltol * cp.u0[row] + cp.abstol[row]
+    u = copy(cp.u0)
+    u[row] += 0.1 * bound
+    @test !check(u, nothing, 0.0)
+    u[row] = cp.u0[row] + 10 * bound
+    @test check(u, nothing, 0.0)
+    @test check.monitor.last > 1
+end
+
 @testset "domain check: a proposal the error test rejects is left to it" begin
-    cp = setup(_slab(6; radiating = true); use_ale = true, radiation_model = BEER_LAMBERT)
+    cp = setup(
+        _slab(6; radiating = true);
+        use_ale = true,
+        radiation_model = RADIATIVE_TRANSFER,
+    )
     layout = cp.def.layout
     check = DomainCheck(cp)
     u = copy(cp.u0)
@@ -398,7 +479,7 @@ function _plain_deck()
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = HeatFluxBC(40e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
+                top = HeatFluxBC(40e3) + RadiativeBC(T_inf = 300.0),
                 bottom = AdiabaticBC(),
             ),
             mass = (
@@ -411,7 +492,9 @@ function _plain_deck()
     )
 end
 
-function _rich_deck()
+# Under radiative transfer (`transfer`) its back is open to surroundings at the
+# back cell's emissivity and its heater has the given `distribution`.
+function _rich_deck(; distribution = Diffuse())
     virgin = SolidComponent(
         :virgin,
         ρ = 500.0,
@@ -454,10 +537,10 @@ function _rich_deck()
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(50e3) +
+                top = RadiativeFluxBC(50e3; distribution) +
                       RadiativeBC(T_inf = 300.0) +
                       ConvectiveBC(h = 10.0, T_inf = 300.0),
-                bottom = RadiativeBC(ε = 0.9, T_inf = 300.0),
+                bottom = RadiativeBC(T_inf = 300.0),
             ),
             mass = (
                 top = AmbientGasBC(
@@ -485,7 +568,7 @@ function _solve_types(problem; kw...)
     return only(seen), typeof(sol.raw_solution)
 end
 
-# On a fixed mesh in-depth radiation adds algebraic rows, and so a mass
+# On a fixed mesh radiative transfer adds algebraic rows, and so a mass
 # matrix: a different solver configuration, compared with itself.
 @testset "the integrator's type does not depend on the problem: $name" for (
     name,
@@ -494,21 +577,46 @@ end
 ) in (
     ("fixed mesh", (;), (radiation_model = SURFACE_ABSORPTION,)),
     (
-        "fixed mesh with in-depth radiation",
-        (radiation_model = BEER_LAMBERT,),
-        (radiation_model = BEER_LAMBERT,),
+        "fixed mesh with radiative transfer",
+        (radiation_model = RADIATIVE_TRANSFER,),
+        (radiation_model = RADIATIVE_TRANSFER,),
     ),
-    ("moving mesh", (use_ale = true,), (use_ale = true, radiation_model = BEER_LAMBERT)),
+    (
+        "moving mesh",
+        (use_ale = true,),
+        (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
+    ),
     (
         "moving mesh with deactivation",
         (use_ale = true, deactivation = true),
-        (use_ale = true, radiation_model = BEER_LAMBERT, deactivation = true),
+        (use_ale = true, radiation_model = RADIATIVE_TRANSFER, deactivation = true),
     ),
 )
     integrator_plain, solution_plain = _solve_types(_plain_deck(); plain...)
     integrator_rich, solution_rich = _solve_types(_rich_deck(); rich...)
     @test integrator_plain === integrator_rich
     @test solution_plain === solution_rich
+end
+
+# The number of radiation rows per face (two for a diffuse heater, one more
+# per beam) leaves the integrator and the solution of each mesh's
+# configuration unchanged.
+@testset "the integrator's type does not depend on the radiation rows: $name" for (
+    name,
+    options,
+) in (
+    ("fixed mesh", (;)),
+    ("moving mesh", (use_ale = true,)),
+    ("moving mesh with deactivation", (use_ale = true, deactivation = true)),
+)
+    reference = _solve_types(_rich_deck(); options..., radiation_model = RADIATIVE_TRANSFER)
+    for distribution in (Collimated(), Cone(0.35, 1.27))
+        @test _solve_types(
+            _rich_deck(; distribution);
+            options...,
+            radiation_model = RADIATIVE_TRANSFER,
+        ) === reference
+    end
 end
 
 @testset "a read-only user callback leaves every policy's trajectory unchanged" begin
@@ -562,20 +670,21 @@ end
     end
 end
 
-# In-depth radiation adds the intensity rows, and on a fixed mesh a mass
+# Radiative transfer adds the radiation rows, and on a fixed mesh a mass
 # matrix: a solver configuration of its own on each mesh.
-@testset "repeated solves with in-depth radiation are bit-identical under each linear solver: use_ale = $ale" for ale in
+@testset "repeated solves with radiative transfer are bit-identical under each linear solver: use_ale = $ale" for ale in
                                                                                                                   (
     false,
     true,
 )
+
     problem = _slab(12; radiating = true)
     for linear_solver in (StructuredKLU(), KLUFactorization(), UMFPACKFactorization())
         sols = [
             Integration.solve(
                 problem;
                 use_ale = ale,
-                radiation_model = BEER_LAMBERT,
+                radiation_model = RADIATIVE_TRANSFER,
                 integrator_policy = default_policy(linear_solver),
                 saveat = Float64[],
                 abstol = 1e-8,
@@ -1065,8 +1174,7 @@ end
         ),
         bc_set = BoundaryConditionSet(
             thermal = (
-                top = RadiativeFluxBC(q, absorptivity = 1.0) +
-                      ConvectiveBC(h = 20.0, T_inf = 300.0),
+                top = RadiativeFluxBC(q; absorptivity = 1.0, distribution = Collimated()) + ConvectiveBC(h = 20.0, T_inf = 300.0),
                 bottom = AdiabaticBC(),
             ),
         ),
@@ -1076,7 +1184,7 @@ end
     )
     tight = (
         energy_state = :enthalpy,
-        radiation_model = BEER_LAMBERT,
+        radiation_model = RADIATIVE_TRANSFER,
         abstol = 1e-12,
         reltol = 1e-10,
     )

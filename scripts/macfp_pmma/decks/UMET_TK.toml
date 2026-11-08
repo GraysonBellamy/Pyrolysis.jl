@@ -1,0 +1,56 @@
+# MaCFP-2 PMMA property set UMET_TK (2021). Run by UMET in ThermaKin.
+id = "UMET_TK"
+year = 2021
+json = "PMMA/Material_Properties/2021/MaCFP_PMMA_UMET_TK.json"
+calibration_code = "ThermaKin"
+predictions = "UMET_TK"
+tga_predictions = { 10 = "UMET_TGA_10K_ThermaKin.csv", 100 = "UMET_TGA_100K_ThermaKin.csv" }
+absorption = "in-depth"
+kappa_kernel = "beer-lambert"
+notes = [
+  "kappa 2700: unit not stated; read as 1/m (as UMET_GP). Entered as ThermaKin alpha [m2/kg] it would be surface absorption.",
+  "Density 1380 - 0.6 T held at its 293 K value 1204.2: no thermal-expansion strain.",
+  "Gas cp 2000 J/kgK assumed (ThermaKin needs one; UMET's value unknown).",
+  "dH is per kg of reactant consumed (ThermaKin's rate basis).",
+  "The JSON's single property values apply to both A and B (its schema has no per-component entry).",
+  "The JSON's mass diffusivity 2e-5 m2/s is read as ThermaKin's gas transfer coefficient (gas D).",
+  "matl-db's Verification deck never creates the intermediate (NU_MATL without MATL_ID).",
+]
+
+[gas]
+cp = 2000.0
+D = 2e-5
+
+[[components]]
+id = "A"
+rho = 1204.2
+y0 = 1.0
+emissivity = 0.85
+kappa = 2700.0
+k = { form = "constant", value = 0.209 }
+cp = { form = "linear", a = 7.5, b = 3.7 }
+
+[[components]]
+id = "B"
+rho = 1204.2
+y0 = 0.0
+emissivity = 0.85
+kappa = 2700.0
+k = { form = "constant", value = 0.209 }
+cp = { form = "linear", a = 7.5, b = 3.7 }
+
+[[reactions]]
+reactant = "A"
+A = 3.16e6
+E = 83000.0
+n = 1.0
+dH = 2.71e4
+residue = "B"
+residue_yield = 0.962
+
+[[reactions]]
+reactant = "B"
+A = 2.0e14
+E = 200400.0
+n = 1.0
+dH = 1.0406e6

@@ -1,0 +1,69 @@
+# MaCFP-2 PMMA property set UMD (2021). Fiola, Chaudhari & Stoliarov, Fire Safety J. 120 (2021) 103083, Tables 1-2.
+id = "UMD"
+year = 2021
+json = "PMMA/Material_Properties/2021/MaCFP_PMMA_UMD.json"
+calibration_code = "ThermaKin"
+predictions = "UMD"
+validation = "UMD-FSRI/UMD-FSRI"            # MaCFP-3 prediction files (Validation_Results/<dir>/<prefix>)
+tga_predictions = { 10 = "UMD_10k.csv", 100 = "UMD_100k.csv" }
+absorption = "in-depth"
+kappa_kernel = "beer-lambert"    # ThermaKin alpha = 2.38 m2/kg; JSON gives 2870 1/m
+top_temperature = "avg_1mm"          # their "Top Temperature (1mm)": the mean over the top 1 mm
+notes = [
+  "The glass transition (a pseudo-reaction in ThermaKin) is the reversible 395 K switch of the piecewise cp and k.",
+  "Gas cp 2000 J/kgK from Fiola et al. 2021 (not in the JSON).",
+  "dH is per kg of reactant consumed (ThermaKin's rate basis): reaction 1's 5 kJ/kg is 250 kJ per kg of its gas.",
+  "Intermediate and char take the polymer's properties, as Fiola et al. assume for the residue.",
+  "The JSON's mass diffusivity 2e-5 m2/s is read as ThermaKin's gas transfer coefficient (gas D).",
+  "k = 0.34 - 4.2e-4 T is zero at 810 K and negative above; the suite floors it at 1 % of its 300 K value.",
+  "matl-db's Verification deck reads MATL ID = 'R2' (no underscore), so the intermediate is never created.",
+]
+
+[gas]
+cp = 2000.0
+D = 2e-5
+
+[[components]]
+id = "PMMA"
+rho = 1210.0
+y0 = 1.0
+emissivity = 0.96
+kappa = 2870.0
+k = { form = "switch", T = 395.0, below = { form = "constant", value = 0.16 }, above = { form = "linear", a = 0.34, b = -4.2e-4 } }
+cp = { form = "switch", T = 395.0, below = { form = "linear", a = -1390.0, b = 8.33 }, above = { form = "linear", a = 851.0, b = 3.07 } }
+
+[[components]]
+id = "PMMA_int"
+rho = 1210.0
+y0 = 0.0
+emissivity = 0.96
+kappa = 2870.0
+k = { form = "switch", T = 395.0, below = { form = "constant", value = 0.16 }, above = { form = "linear", a = 0.34, b = -4.2e-4 } }
+cp = { form = "switch", T = 395.0, below = { form = "linear", a = -1390.0, b = 8.33 }, above = { form = "linear", a = 851.0, b = 3.07 } }
+
+[[components]]
+id = "char"
+rho = 1210.0
+y0 = 0.0
+emissivity = 0.96
+kappa = 2870.0
+k = { form = "switch", T = 395.0, below = { form = "constant", value = 0.16 }, above = { form = "linear", a = 0.34, b = -4.2e-4 } }
+cp = { form = "switch", T = 395.0, below = { form = "linear", a = -1390.0, b = 8.33 }, above = { form = "linear", a = 851.0, b = 3.07 } }
+
+[[reactions]]
+reactant = "PMMA"
+A = 4.95e16
+E = 1.64e5
+n = 1.0
+dH = 5.0e3
+residue = "PMMA_int"
+residue_yield = 0.98
+
+[[reactions]]
+reactant = "PMMA_int"
+A = 1.35e11
+E = 1.64e5
+n = 1.0
+dH = 8.17e5
+residue = "char"
+residue_yield = 0.002

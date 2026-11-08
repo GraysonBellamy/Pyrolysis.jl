@@ -1,11 +1,12 @@
 using Test
 using SparseArrays
 using Pyrolysis
-using Pyrolysis.Materials: DepletionLimiter, BEER_LAMBERT, SURFACE_ABSORPTION
+using Pyrolysis.Materials: DepletionLimiter, SURFACE_ABSORPTION, RADIATIVE_TRANSFER
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.States: StateLayout, state_length
 using Pyrolysis.Kernels: RelativeFluxKernel, find_kernel
+using Pyrolysis.Kernels: RadiativeTransferKernel, radiation_reach
 using Pyrolysis.Closures: EquidistributionCorrection, PrescribedCorrection
 using Pyrolysis.ColoredJacobian
 using Pyrolysis.Integration: setup
@@ -77,17 +78,30 @@ function _material(NC; law = nothing, reacting = true)
     return Material(; name = :colors, components, reactions, lateral_shrinkage_law = law)
 end
 
-function _problem(NC, n; law = nothing, reacting = true, coordinates = Planar())
+# Diffuse incidence, a collimated heater (one beam) and a cone (three beams).
+const _heaters = (
+    diffuse = RadiativeFluxBC(3e4) + RadiativeBC(T_inf = 300.0),
+    collimated = RadiativeFluxBC(3e4; distribution = Collimated()) +
+                 RadiativeBC(T_inf = 300.0),
+    cone = RadiativeFluxBC(3e4; distribution = Cone(0.35, 1.27)) +
+           RadiativeBC(T_inf = 300.0),
+)
+
+function _problem(
+    NC,
+    n;
+    law = nothing,
+    reacting = true,
+    coordinates = Planar(),
+    heater = :diffuse,
+)
     mat = _material(NC; law, reacting)
     L = 0.01
     return PyrolysisProblem(
         mesh = stretched_mesh(L, n, 1.05; coordinates),
         material = mat,
         bc_set = BoundaryConditionSet(
-            thermal = (
-                top = RadiativeFluxBC(3e4) + RadiativeBC(T_inf = 300.0),
-                bottom = AdiabaticBC(),
-            ),
+            thermal = (top = _heaters[heater], bottom = AdiabaticBC()),
             mass = (
                 top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
                 bottom = ImpermeableBC(),
@@ -98,8 +112,9 @@ function _problem(NC, n; law = nothing, reacting = true, coordinates = Planar())
     )
 end
 
-# The color count against its model, `3NC + 9 + 2·bl + 7·χ` with `c = 0` and
-# `5NC + 13 + 2·bl + 11·χ` with the reconstruction of the relative fluxes.
+# The color count against its model, `3NC + 9 + 2R + 7·χ` with `c = 0` and
+# `5NC + 13 + 2R + 11·χ` with the reconstruction of the relative fluxes, `R`
+# the radiation rows per face: each family adds two colors.
 # That model is a moving mesh whose cell rows read their two node velocities;
 # at `c = 0` the cell rows read none (the velocities enter the position rows only), two colors
 # fewer, as under the equidistribution correction, whose node corrections
@@ -107,27 +122,27 @@ end
 # than the cell rows; only a prescribed velocity, the correction itself,
 # reaches them. A fixed mesh has no node block (four positions and the two
 # velocities), six fewer.
-_color_model(NC, bl, χ, reconstruction) =
-    reconstruction ? 5NC + 13 + 2bl + 11χ : 3NC + 9 + 2bl + 7χ
-_expected(NC, moving, bl, χ, reconstruction, prescribed) =
-    _color_model(NC, bl, χ, reconstruction) - (!moving ? 6 : prescribed ? 0 : 2)
+_color_model(NC, R, χ, reconstruction) =
+    reconstruction ? 5NC + 13 + 2R + 11χ : 3NC + 9 + 2R + 7χ
+_expected(NC, moving, R, χ, reconstruction, prescribed) =
+    _color_model(NC, R, χ, reconstruction) - (!moving ? 6 : prescribed ? 0 : 2)
 
 const _color_cases = (
     fixed = (options = (;), law = nothing, reacting = true),
-    fixed_beer_lambert = (
-        options = (radiation_model = BEER_LAMBERT,),
+    fixed_radiative_transfer = (
+        options = (radiation_model = RADIATIVE_TRANSFER,),
         law = nothing,
         reacting = true,
     ),
     moving = (options = (use_ale = true,), law = nothing, reacting = true),
-    moving_beer_lambert = (
-        options = (use_ale = true, radiation_model = BEER_LAMBERT),
+    moving_radiative_transfer = (
+        options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
         law = nothing,
         reacting = true,
     ),
     cross_section = (options = (use_ale = true,), law = χ -> 1 - 0.3χ, reacting = true),
-    cross_section_beer_lambert = (
-        options = (use_ale = true, radiation_model = BEER_LAMBERT),
+    cross_section_radiative_transfer = (
+        options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
         law = χ -> 1 - 0.3χ,
         reacting = true,
     ),
@@ -146,10 +161,10 @@ const _color_cases = (
         law = nothing,
         reacting = true,
     ),
-    equidistribution_beer_lambert = (
+    equidistribution_radiative_transfer = (
         options = (
             use_ale = true,
-            radiation_model = BEER_LAMBERT,
+            radiation_model = RADIATIVE_TRANSFER,
             correction = EquidistributionCorrection(),
         ),
         law = nothing,
@@ -158,11 +173,39 @@ const _color_cases = (
     equidistribution_cross_section = (
         options = (
             use_ale = true,
-            radiation_model = BEER_LAMBERT,
+            radiation_model = RADIATIVE_TRANSFER,
             correction = EquidistributionCorrection(),
         ),
         law = χ -> 1 - 0.3χ,
         reacting = true,
+    ),
+    fixed_collimated = (
+        options = (radiation_model = RADIATIVE_TRANSFER,),
+        law = nothing,
+        reacting = true,
+        heater = :collimated,
+    ),
+    fixed_cone = (
+        options = (radiation_model = RADIATIVE_TRANSFER,),
+        law = nothing,
+        reacting = true,
+        heater = :cone,
+    ),
+    moving_cone = (
+        options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
+        law = nothing,
+        reacting = true,
+        heater = :cone,
+    ),
+    equidistribution_collimated = (
+        options = (
+            use_ale = true,
+            radiation_model = RADIATIVE_TRANSFER,
+            correction = EquidistributionCorrection(),
+        ),
+        law = nothing,
+        reacting = true,
+        heater = :collimated,
     ),
 )
 
@@ -174,7 +217,8 @@ _largest_row(S) = maximum(diff(sparse(transpose(S)).colptr))
     case = _color_cases[name]
     counts = Int[]
     for n in (6, 8, 12, 25)
-        cp = setup(_problem(NC, n; case.law, case.reacting); case.options...)
+        heater = get(case, :heater, :diffuse)
+        cp = setup(_problem(NC, n; case.law, case.reacting, heater); case.options...)
         cj = cp.jacobian
         layout = cp.def.layout
         reconstruction = find_kernel(RelativeFluxKernel, cp.def.kernels) !== nothing
@@ -187,7 +231,7 @@ _largest_row(S) = maximum(diff(sparse(transpose(S)).colptr))
         @test cj.n_colors == _expected(
             NC,
             is_moving(layout),
-            has_intensities(layout),
+            radiation_rows(layout),
             has_chi(layout),
             reconstruction,
             prescribed,
@@ -196,6 +240,64 @@ _largest_row(S) = maximum(diff(sparse(transpose(S)).colptr))
     end
     # Constant in the cell count.
     @test all(==(counts[1]), counts)
+end
+
+# Under radiative transfer each family reads itself at its own face and at the
+# face upstream of it in its direction of travel, q⁻ and the beams (toward the
+# back, node 1) at the face above, q⁺ at the face below; q⁻ and q⁺ read each
+# other at their face, and at the back q⁺ reads every beam, which it
+# reflects. The cell rows read every row of their two faces.
+@testset "radiation rows in their direction of travel: $(heater) heater, $(moving ? "moving" : "fixed")" for heater in
+                                                                                                             (
+        :diffuse,
+        :cone,
+    ),
+    moving in (false, true)
+
+    n = 6
+    cp = setup(
+        _problem(3, n; heater);
+        use_ale = moving,
+        radiation_model = RADIATIVE_TRANSFER,
+    )
+    layout, topo = cp.def.layout, cp.def.setup.topology
+    kernel = find_kernel(RadiativeTransferKernel, cp.def.kernels)
+    R = radiation_rows(layout)
+    beams = 3:R
+    @test R == (heater === :cone ? 5 : 2)
+    reach = radiation_reach(kernel)
+    @test reach.along == [1; -1; fill(1, length(beams))]
+    @test reach.same_node == [[[2], [1]]; [Int[] for _ in beams]]
+    @test reach.back_face == 1 && reach.back == [(2, k) for k in beams]
+    S = cp.jacobian.pattern
+    @test S == jacobian_pattern(cp.def)
+    q(f, k) = radiation_index(layout, f, k)
+    faces = 1:(n+1)
+    for f in faces
+        reached(k) = Set((g, j) for g in faces, j = 1:R if S[q(f, k), q(g, j)])
+        @test reached(1) == Set([(f, 1), (f, 2), (min(f + 1, n + 1), 1)])
+        @test reached(2) == union(
+            Set([(f, 2), (f, 1), (max(f - 1, 1), 2)]),
+            f == 1 ? Set((1, k) for k in beams) : Set{Tuple{Int,Int}}(),
+        )
+        for k in beams
+            @test reached(k) == Set([(f, k), (min(f + 1, n + 1), k)])
+        end
+        for k = 1:R
+            @test all(
+                S[q(f, k), c] for i = max(1, f-1):min(n, f) for c in cell_rows(layout, i)
+            )
+            moving && @test all(
+                S[q(f, k), position_index(layout, g)] for g = max(1, f-1):min(n+1, f+1)
+            )
+        end
+    end
+    for i = 1:n, r in cell_rows(layout, i)
+        reached = Set((g, j) for g in faces, j = 1:R if S[r, q(g, j)])
+        @test reached == Set((g, j) for g in (i, i + 1), j = 1:R)
+    end
+    # Radiation rows without the kernel's reach are refused.
+    @test_throws ArgumentError jacobian_pattern(layout, topo; closure = cp.def.closure)
 end
 
 # ============================================================================
@@ -216,7 +318,7 @@ function _bandwidth(pattern, layout)
     return w
 end
 
-# In-depth radiation is planar only: setup refuses it on a cylinder or a sphere.
+# Radiative transfer is planar only: setup refuses it on a cylinder or a sphere.
 @testset "radial meshes: the planar pattern, bandwidth and colors" begin
     for options in ((;), (use_ale = true,))
         widths = Int[]

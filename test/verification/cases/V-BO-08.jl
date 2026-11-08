@@ -45,7 +45,7 @@ function _verification_case_vbo08()
     return VerificationCase(
         id = id,
         title = "Localized burnout of a thin PMMA layer on a deep substrate",
-        tags = [:ale, :burnout, :depletion, :beer_lambert, :coupled],
+        tags = [:ale, :burnout, :depletion, :radiative_transfer, :coupled],
         references = ["MaCFP-2 PMMA gasification case (NIST), 50 kW/m², a 1 mm layer"],
         build = n -> _vbo_problem(n; l_pmma = VBO08_L_PMMA, t_end = VBO08_T_END),
         solve_fn = _vbo_solve_fn(id),

@@ -48,12 +48,12 @@ is active as front cells approach deactivation.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| steady energy balance: v vs Landau v_ss(measured T_s) | 0.001952 | 0.001951 | 0.0003337 | 0.0021 | yes | steady first law with stationary virgin solid and c_gas = c_solid |
-| regression consistency: thickness slope vs gas generation | 0.001952 | 0.001952 | 2.133e-05 | 0.0021 | yes | gas outside the strain ⇒ dL/dt = −ṁ‴_gas/ρ exactly |
-| mass ledger closure over plateau window | 0.7771 | 0.7807 | 0.00462 | 0.0049 | yes | total-mass drop vs ∫ ṁ″ dt; residual = holdup drift |
-| in-depth profile decay rate (surface-attached frame) | 0.001967 | 0.001952 | 0.007865 | 0.027 | yes | ln(T−T₀) slope over ζ/δ ∈ [0.75, 1.7], 12 cells |
-| design-locus regression rate (loose) | 0.001952 | 0.002 | 0.0242 | 0.1 | yes | leading-order Laplace locus only pins T_p to O(RT_p²/E); informational, tightens as E ↑ (see V-CPL-02b) |
-| back-face rise (semi-infinite validity) | 0.0003587 | 0 | 0.0003587 | 0.01 | yes | guards the semi-infinite assumption |
+| steady energy balance: v vs Landau v_ss(measured T_s) | 0.001954 | 0.001954 | 0.0002337 | 0.0021 | yes | steady first law with stationary virgin solid and c_gas = c_solid |
+| regression consistency: thickness slope vs gas generation | 0.001954 | 0.001954 | 0.0002491 | 0.0021 | yes | gas outside the strain ⇒ dL/dt = −ṁ‴_gas/ρ exactly |
+| mass ledger closure over plateau window | 0.778 | 0.7818 | 0.00484 | 0.016 | yes | total-mass drop vs ∫ ṁ″ dt; residual = holdup drift |
+| in-depth profile decay rate (surface-attached frame) | 0.001969 | 0.001954 | 0.007773 | 0.027 | yes | ln(T−T₀) slope over ζ/δ ∈ [0.75, 1.7], 12 cells |
+| design-locus regression rate (loose) | 0.001954 | 0.002 | 0.02306 | 0.1 | yes | leading-order Laplace locus only pins T_p to O(RT_p²/E); informational, tightens as E ↑ (see V-CPL-02b) |
+| back-face rise (semi-infinite validity) | 0.0003584 | 0 | 0.0003584 | 0.01 | yes | guards the semi-infinite assumption |
 
 ![V-CPL-02 mlr_history](assets/V-CPL-02/V-CPL-02_mlr_history.png)
 
@@ -75,14 +75,14 @@ is active as front cells approach deactivation.
 
 | n_cells | h | wall (s) | balance | consistency |
 | --- | --- | --- | --- | --- |
-| 60 | 0.01667 | 0.5679 | 0.0006181 | 0.001283 |
-| 100 | 0.01 | 0.7717 | 0.00116 | 0.0005099 |
-| 160 | 0.00625 | 1.532 | 0.0003602 | 0.0001159 |
-| 240 | 0.004167 | 2.686 | 0.0003337 | 2.133e-05 |
+| 60 | 0.01667 | 0.1804 | 0.0002449 | 0.0001098 |
+| 100 | 0.01 | 0.4438 | 0.0001066 | 0.0005932 |
+| 160 | 0.00625 | 1.069 | 0.0002021 | 0.0006322 |
+| 240 | 0.004167 | 2.371 | 0.0002337 | 0.0002491 |
 
 Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
-Observed order 0.6363 (balance).
+Observed order -0.08591 (balance).
 
 ### Solver configuration
 
@@ -101,9 +101,9 @@ Observed order 0.6363 (balance).
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| steady energy balance: v vs Landau v_ss(measured T_s) | 0.001911 | 0.00191 | 0.0003182 | 0.002 | yes | identity must close at E = 50 kJ/mol as at 100 (locus check) |
-| regression consistency: thickness slope vs gas generation | 0.001911 | 0.00191 | 0.0004004 | 0.0017 | yes | gas outside the strain ⇒ dL/dt = −ṁ‴_gas/ρ exactly |
-| stationary far-field temperature | 3.48e-07 | 0 | 3.48e-07 | 0.0001 | yes | cold reaction gate and domain length qualify the steady reference |
+| steady energy balance: v vs Landau v_ss(measured T_s) | 0.001914 | 0.001913 | 0.000466 | 0.002 | yes | identity must close at E = 50 kJ/mol as at 100 (locus check) |
+| regression consistency: thickness slope vs gas generation | 0.001914 | 0.001914 | 3.559e-05 | 0.0017 | yes | gas outside the strain ⇒ dL/dt = −ṁ‴_gas/ρ exactly |
+| stationary far-field temperature | 3.481e-07 | 0 | 3.481e-07 | 0.0001 | yes | cold reaction gate and domain length qualify the steady reference |
 
 ![V-CPL-02b mlr_history](assets/V-CPL-02b/V-CPL-02b_mlr_history.png)
 
@@ -115,13 +115,13 @@ Observed order 0.6363 (balance).
 
 | n_cells | h | wall (s) | balance | consistency |
 | --- | --- | --- | --- | --- |
-| 120 | 0.008333 | 1.06 | 0.004637 | 0.0002128 |
-| 200 | 0.005 | 2.25 | 0.0006218 | 0.0001949 |
-| 320 | 0.003125 | 4.605 | 0.0003182 | 0.0004004 |
+| 120 | 0.008333 | 0.762 | 0.0004264 | 6.497e-05 |
+| 200 | 0.005 | 1.999 | 0.000453 | 7.265e-05 |
+| 320 | 0.003125 | 5.208 | 0.000466 | 3.559e-05 |
 
 Wall time: median of up to five warm runs of problem construction and solve on one pinned core, after a discarded compiling run.
 
-Observed order 2.749 (balance).
+Observed order -0.09103 (balance).
 
 ### Solver configuration
 

@@ -1,5 +1,5 @@
 "qoi","value","exact","error","tol","within_tol","comment"
 "clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true,"boundary temperature solve converged inside the property bracket at every accepted step"
-"transmitted flux reported (series peak above 1 % of the entering flux)",0.7769736664527814,1.0,0.0,0.5,true,"largest share of the entering flux that leaves through the transparent back face"
-"peak transmitted fraction of the incident flux",0.7769736664527815,1.0,0.22302633354721846,0.3,true,"asymptote 1 once the PMMA is gone; the transmitted flux does not heat the substrate, so a residual PMMA layer remains at t_end and absorbs about 20 %"
-"mass loss (informational)",68.87858838631887,69.9147977671139,1.0362093807950288,10.0,true,"percent; the transmitted flux does not heat the substrate"
+"radiation leaving through the back reported (series peak above 1 % of the radiation entering)",0.8892991329189012,1.0,0.0,0.5,true,"largest share of the radiation entering the exposed face that leaves through the transparent back face"
+"peak share of the radiation entering that leaves through the back",0.8892991329189012,1.0,0.11070086708109883,0.3,true,"asymptote 1 once the PMMA is gone, since the substrate neither absorbs nor emits; at t_end the PMMA cells next to the substrate still hold about 1 % of their mass and absorb 8 % of it, and 3 % leaves through the exposed face (observed 0.889)"
+"mass loss (informational)",69.5439958572881,69.9147977671139,0.37080190982580064,10.0,true,"percent; the radiation crossing the substrate does not heat it"

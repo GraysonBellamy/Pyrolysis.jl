@@ -94,7 +94,12 @@ function _verification_case_vbo02()
         title = "PMMA-on-Kaowool burnout on a fixed mesh under surface absorption (top-cell deactivation)",
         tags = [:eulerian, :burnout, :depletion, :surface_absorption, :coupled],
         references = ["MaCFP-2 PMMA gasification case (NIST), 50 kW/m²"],
-        build = n -> _vbo_problem(n; substrate_alpha = 0.0, pmma_alpha = 0.0),
+        build = n -> _vbo_problem(
+            n;
+            substrate_alpha = 0.0,
+            pmma_alpha = 0.0,
+            radiation_model = SURFACE_ABSORPTION,
+        ),
         solve_fn = _vbo_solve_fn(id),
         solve_kwargs = (
             use_ale = false,

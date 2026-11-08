@@ -45,7 +45,8 @@ in more dimensions each cell's block follows those of its nodes not yet
 placed. A node block holds, in order, the `D` coordinates of the node
 position `x` (moving mesh, `Mov`), the `D` components of its velocity `w`
 when the closure's unknowns are the node velocities (`U = :velocities`), and
-the intensity `I` of the face at that node (Beer–Lambert, `Rad`, 1D). A cell
+the `Rad` radiation rows of the face at that node (in-depth radiation, 1D),
+whose meaning the radiation kernel owns. A cell
 block holds the component masses `m₁ … m_NC`, the energy state, the fields
 the solid carries (`Car`, in order: `:history`, the conversion-history pair
 `G`, `M`, which the variable cross section `Chi` needs; `:deformation`, the
@@ -104,7 +105,7 @@ _line_order(n::Int) =
     push!([b for i = 1:n for b in ((:node, i), (:cell, i))], (:node, n + 1))
 
 """
-	StateLayout(NC, n_cells, energy; moving = false, intensities = false, chi = false)
+	StateLayout(NC, n_cells, energy; moving = false, radiation_rows = 0, chi = false)
 
 The layout for `n_cells` cells of a line with every row live.
 """
@@ -113,7 +114,7 @@ StateLayout(
     n_cells::Int,
     energy::EnergyState;
     moving::Bool = false,
-    intensities::Bool = false,
+    radiation_rows::Int = 0,
     chi::Bool = false,
 ) = _layout(
     NC,
@@ -124,14 +125,14 @@ StateLayout(
     1,
     :velocities;
     moving,
-    intensities,
+    radiation_rows,
     chi,
     history = chi,
     deformation = false,
 )
 
 """
-	StateLayout(NC, topology, energy; moving = false, intensities = false, chi = false,
+	StateLayout(NC, topology, energy; moving = false, radiation_rows = 0, chi = false,
 	            history = chi, deformation = false, unknowns = :velocities)
 
 The layout for the cells and nodes of `topology` with every row live, its
@@ -139,22 +140,23 @@ blocks in [`block_order`](@ref). `unknowns` names the closure's algebraic
 unknowns on a moving mesh: `:velocities`, `D` per node, or `:multipliers`,
 one per cell. `history` carries the conversion-history pair, which the
 variable cross section needs, and `deformation` the deformation gradient of
-a moving mesh. Face intensities and the variable cross section are 1D only.
+a moving mesh. `radiation_rows` is the number of radiation rows per node.
+Radiation rows and the variable cross section are 1D only.
 """
 function StateLayout(
     NC::Int,
     topo::MeshTopology{D},
     energy::EnergyState;
     moving::Bool = false,
-    intensities::Bool = false,
+    radiation_rows::Int = 0,
     chi::Bool = false,
     history::Bool = chi,
     deformation::Bool = false,
     unknowns::Symbol = :velocities,
 ) where {D}
     D == 1 ||
-        !(intensities || chi) ||
-        throw(ArgumentError("face intensities and the variable cross section are 1D only"))
+        !(radiation_rows > 0 || chi) ||
+        throw(ArgumentError("radiation rows and the variable cross section are 1D only"))
     return _layout(
         NC,
         n_cells(topo),
@@ -164,7 +166,7 @@ function StateLayout(
         D,
         unknowns;
         moving,
-        intensities,
+        radiation_rows,
         chi,
         history,
         deformation,
@@ -180,13 +182,15 @@ function _layout(
     D::Int,
     unknowns::Symbol;
     moving::Bool,
-    intensities::Bool,
+    radiation_rows::Int,
     chi::Bool,
     history::Bool,
     deformation::Bool,
 )
     NC >= 1 || throw(ArgumentError("a layout needs at least one component"))
     n_cells >= 1 || throw(ArgumentError("a layout needs at least one cell"))
+    radiation_rows >= 0 ||
+        throw(ArgumentError("the radiation row count must be non-negative"))
     chi && !moving && throw(ArgumentError("the variable cross section needs a moving mesh"))
     chi &&
         !history &&
@@ -197,7 +201,7 @@ function _layout(
     unknowns in (:velocities, :multipliers) ||
         throw(ArgumentError("unknowns must be :velocities or :multipliers, got :$unknowns"))
     carried = ((history ? (:history,) : ())..., (deformation ? (:deformation,) : ())...)
-    L = StateLayout{NC,typeof(energy),moving,intensities,chi,D,unknowns,carried}
+    L = StateLayout{NC,typeof(energy),moving,radiation_rows,chi,D,unknowns,carried}
     nw, cw = _node_width(L), _cell_width(L)
     node_offset = zeros(Int, n_nodes)
     cell_offset = zeros(Int, n_cells)
@@ -220,7 +224,16 @@ end
 @inline n_components(::StateLayout{NC}) where {NC} = NC
 @inline energy_state(::StateLayout{NC,E}) where {NC,E} = E()
 @inline is_moving(::StateLayout{NC,E,Mov}) where {NC,E,Mov} = Mov
-@inline has_intensities(::StateLayout{NC,E,Mov,Rad}) where {NC,E,Mov,Rad} = Rad
+
+"""
+	radiation_rows(layout) -> Int
+	has_radiation(layout) -> Bool
+
+The number of radiation rows per node, zero without in-depth radiation, and
+whether there are any.
+"""
+@inline radiation_rows(::StateLayout{NC,E,Mov,Rad}) where {NC,E,Mov,Rad} = Rad
+@inline has_radiation(l::StateLayout) = radiation_rows(l) > 0
 @inline has_chi(::StateLayout{NC,E,Mov,Rad,Chi}) where {NC,E,Mov,Rad,Chi} = Chi
 @inline n_cells(l::StateLayout) = l.n_cells
 @inline n_nodes(l::StateLayout) = l.n_nodes
@@ -305,7 +318,7 @@ Every row of the cell block of cell `i`.
 	node_rows(layout, n) -> UnitRange
 
 Every row of the node block of node `n` (empty on a fixed mesh without
-intensities).
+radiation rows).
 """
 @inline node_rows(l::StateLayout, n::Int) =
     (_node_offset(l, n)+1):(_node_offset(l, n)+node_width(l))
@@ -394,14 +407,16 @@ velocities).
 end
 
 """
-	intensity_index(layout, f)
+	radiation_index(layout, f, k)
 
-Row of the radiant intensity of face `f` (Beer–Lambert). In 1D face `f` sits at
+Row of radiation row `k` of face `f`, `1 ≤ k ≤ radiation_rows(layout)`: the
+radiation rows are the last rows of the node block. In 1D face `f` sits at
 node `f`.
 """
-@inline function intensity_index(l::StateLayout, f::Int)
-    @boundscheck has_intensities(l) || throw(ArgumentError("layout carries no intensities"))
-    return _node_offset(l, f) + node_width(l)
+@inline function radiation_index(l::StateLayout, f::Int, k::Int)
+    @boundscheck 1 <= k <= radiation_rows(l) ||
+                 throw(ArgumentError("layout carries no radiation row $k"))
+    return _node_offset(l, f) + node_width(l) - radiation_rows(l) + k
 end
 
 """
@@ -424,7 +439,7 @@ end
 
 `true` on the rows with a time derivative (masses, energy, node positions,
 carried fields), `false` on the algebraic rows (node velocities,
-multipliers, intensities, cross-section rows).
+multipliers, radiation rows, cross-section rows).
 """
 is_differential(l::StateLayout) = l.differential
 
@@ -441,10 +456,8 @@ function _differential_rows(l::StateLayout)
             end
         end
     end
-    if has_intensities(l)
-        for f = 1:n_nodes(l)
-            d[intensity_index(l, f)] = false
-        end
+    for f = 1:n_nodes(l), k = 1:radiation_rows(l)
+        d[radiation_index(l, f, k)] = false
     end
     if has_chi(l)
         d[area_index(l)] = false

@@ -7,10 +7,10 @@ using Pyrolysis.States: StateLayout, state_length
 
 # The line layout's indices in closed form: node n's block at (n − 1) s, cell
 # i's at (i − 1) s + w_node, the globals after the last node, with the stride
-# s = w_node + w_cell; a node block holds x, w and I, a cell block the masses,
-# the energy state and the history pair.
-function _line_indices(NC, n, moving, intensities, chi)
-    wn = 2moving + intensities
+# s = w_node + w_cell; a node block holds x, w and the R radiation rows, a cell
+# block the masses, the energy state and the history pair.
+function _line_indices(NC, n, moving, R, chi)
+    wn = 2moving + R
     wc = NC + 1 + 2chi
     s = wn + wc
     node(nd) = (nd - 1) * s
@@ -25,13 +25,15 @@ function _line_indices(NC, n, moving, intensities, chi)
     end
     for nd = 1:(n+1)
         moving && (rows[(:x, nd)] = node(nd) + 1; rows[(:w, nd)] = node(nd) + 2)
-        intensities && (rows[(:I, nd)] = node(nd) + 2moving + 1)
+        for k = 1:R
+            rows[(:q, nd, k)] = node(nd) + 2moving + k
+        end
     end
     chi && (rows[(:A,)] = n * s + wn + 1; rows[(:θ,)] = n * s + wn + 2)
     return rows, n * s + wn + 2chi
 end
 
-function _indices(l::StateLayout, NC, n, moving, intensities, chi)
+function _indices(l::StateLayout, NC, n, moving, R, chi)
     rows = Dict{Any,Int}()
     for i = 1:n
         for j = 1:NC
@@ -44,7 +46,9 @@ function _indices(l::StateLayout, NC, n, moving, intensities, chi)
     for nd = 1:(n+1)
         moving &&
             (rows[(:x, nd)] = position_index(l, nd); rows[(:w, nd)] = velocity_index(l, nd))
-        intensities && (rows[(:I, nd)] = intensity_index(l, nd))
+        for k = 1:R
+            rows[(:q, nd, k)] = radiation_index(l, nd, k)
+        end
     end
     chi && (rows[(:A,)] = area_index(l); rows[(:θ,)] = lateral_rate_index(l))
     return rows
@@ -54,22 +58,24 @@ end
     for NC in (1, 3),
         n in (1, 4),
         energy in (TemperatureState(), EnthalpyState()),
-        (moving, intensities, chi) in (
-            (false, false, false),
-            (true, false, false),
-            (false, true, false),
-            (true, true, false),
-            (true, true, true),
-            (true, false, true),
+        (moving, R, chi) in (
+            (false, 0, false),
+            (true, 0, false),
+            (false, 1, false),
+            (true, 1, false),
+            (true, 1, true),
+            (true, 0, true),
+            (false, 3, false),
+            (true, 3, true),
         )
 
-        expected, len = _line_indices(NC, n, moving, intensities, chi)
+        expected, len = _line_indices(NC, n, moving, R, chi)
         topo = line_mesh(collect(range(0.0, 1.0; length = n + 1))).topology
         for l in (
-            StateLayout(NC, n, energy; moving, intensities, chi),
-            StateLayout(NC, topo, energy; moving, intensities, chi),
+            StateLayout(NC, n, energy; moving, radiation_rows = R, chi),
+            StateLayout(NC, topo, energy; moving, radiation_rows = R, chi),
         )
-            @test _indices(l, NC, n, moving, intensities, chi) == expected
+            @test _indices(l, NC, n, moving, R, chi) == expected
             @test state_length(l) == len
             @test dimension(l) == 1
             @test closure_unknowns(l) === :velocities
@@ -134,7 +140,7 @@ end
             @test !d[velocity_index(l, 1, D)] && d[position_index(l, 1, D)]
         end
     end
-    @test_throws ArgumentError StateLayout(NC, topo, TemperatureState(); intensities = true)
+    @test_throws ArgumentError StateLayout(NC, topo, TemperatureState(); radiation_rows = 1)
     @test_throws ArgumentError StateLayout(
         NC,
         topo,

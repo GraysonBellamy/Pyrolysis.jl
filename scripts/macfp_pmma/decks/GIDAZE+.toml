@@ -1,0 +1,33 @@
+# MaCFP-2 PMMA property set GIDAZE+ (2021). Source: PMMA/Material_Properties/2021/MaCFP_PMMA_GIDAZE+.json
+id = "GIDAZE+"
+year = 2021
+json = "PMMA/Material_Properties/2021/MaCFP_PMMA_GIDAZE+.json"
+calibration_code = "Gpyro"
+predictions = "GIDAZE+"
+tga_predictions = { 10 = "GIDAZE+_TGA_10K.csv", 100 = "GIDAZE+_TGA_100K.csv" }
+absorption = "in-depth"
+kappa_kernel = "beer-lambert"    # Gpyro one-way Beer-Lambert, m^-1
+notes = [
+  "Gpyro default gas cp 1000 J/kgK enters only its gas-solid exchange (<= 0.8 % effect); gas cp 0 here.",
+  "k falls as T^-1.2 (0.087 W/mK at 600 K), about half the other sets; kept as written.",
+  "Gpyro's dH is per kg of volatiles; with no residue that equals per kg of reactant.",
+]
+
+[gas]
+cp = 0.0
+
+[[components]]
+id = "PMMA"
+rho = 1210.0
+y0 = 1.0
+emissivity = 0.96
+kappa = 2870.0
+k = { form = "power", c0 = 0.2, Tr = 300.0, n = -1.2 }
+cp = { form = "power", c0 = 1200.0, Tr = 300.0, n = 1.2 }
+
+[[reactions]]
+reactant = "PMMA"
+A = 2.00e8
+E = 1.3e5
+n = 1.0
+dH = 5.4e5

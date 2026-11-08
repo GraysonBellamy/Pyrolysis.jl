@@ -41,7 +41,7 @@ Conventions used in this chapter (binding, from §2, Nomenclature):
 
 ![Interleaved node and cell state strip and three actual six-cell Jacobian patterns, distinguishing algebraic rows, local coupling, wider correction reach and global area coupling.](../../assets/figures/15_state_jacobian.svg)
 
-**Figure 15. State layout and Jacobian structure.** The schematic strip shows the interleaved ordering of a six-cell, two-component, variable-area setup. The matrices are actual stored patterns, with Beer–Lambert intensity unknowns. Grey entries are allocated dependencies; blue entries are nonzero initial-state AD derivatives. Correction reserves a wider stencil even while initially inactive. Variable area adds history and the two global algebraic rows outlined in purple. Deactivation preserves this allocation. The CSV records each stored entry and its initial derivative.
+**Figure 15. State layout and Jacobian structure.** The schematic strip shows the interleaved ordering of a six-cell, two-component, variable-area setup. The matrices are actual stored patterns, with the radiative transfer fluxes as unknowns. Grey entries are allocated dependencies; blue entries are nonzero initial-state AD derivatives. Correction reserves a wider stencil even while initially inactive. Variable area adds history and the two global algebraic rows outlined in purple. Deactivation preserves this allocation. The CSV records each stored entry and its initial derivative.
 
 ### 15.1.1 Interleaved blocks
 
@@ -60,37 +60,38 @@ cell's block follows the blocks of its nodes not yet placed, cell by cell
 
 | Block | Unknowns, in order | Present |
 |---|---|---|
-| node $n$ | position $z_n$; velocity $w_n$; intensity $I_n$ of the face at node $n$ | position and velocity on a moving mesh (`use_ale`, the velocities when the closure's unknowns are the node velocities); intensity under `BEER_LAMBERT` (a line) |
+| node $n$ | position $z_n$; velocity $w_n$; the radiation rows of the face at node $n$ ($I^-_n$, $I^+_n$, then one per beam direction) | position and velocity on a moving mesh (`use_ale`, the velocities when the closure's unknowns are the node velocities); the radiation rows under `RADIATIVE_TRANSFER` (a line) |
 | cell $i$ | masses $m_{1,i},\dots,m_{N_C,i}$ [kg]; the energy state; the carried fields; the closure's multiplier | always; the energy state is $T_i$ [K] (`energy_state = :temperature`) or the enthalpy inventory $H_i$ [J] (`:enthalpy`); carried fields: the conversion-history pair (under a variable cross section) and, in more dimensions, the deformation gradient; the multiplier under the potential closure of more dimensions |
 | globals | cross-section area $A$; its lateral strain rate $\theta_A$ | under a variable cross section (a line) |
 
-With $N_{\rm node}=2\delta_{\rm mov}+\delta_{\rm BL}$ the width of a node block and
+With $N_{\rm node}=2\delta_{\rm mov}+N_{\rm rad}$ the width of a node block and
 $N_{\rm cell}=N_C+1+2\delta_\chi$ that of a cell block on a line ($\delta_{\rm mov}$,
-$\delta_{\rm BL}$, $\delta_\chi$ equal to one on a moving mesh, under in-depth
-radiation and under a variable cross section, zero otherwise, as in §3.1.2), and $N_{\rm blk}=N_{\rm node}+N_{\rm cell}$ the stride, the indices are
+$\delta_\chi$ equal to one on a moving mesh and under a variable cross section, zero
+otherwise, and $N_{\rm rad}$ the radiation rows per face, as in §3.1.2), and $N_{\rm blk}=N_{\rm node}+N_{\rm cell}$ the stride, the indices are
 
 $$
 \begin{aligned}
-z_n&: (n-1)N_{\rm blk}+1, & w_n&: (n-1)N_{\rm blk}+2, & I_n&: (n-1)N_{\rm blk}+2\delta_{\rm mov}+1,\\
+z_n&: (n-1)N_{\rm blk}+1, & w_n&: (n-1)N_{\rm blk}+2, & \text{rad}_{k,n}&: (n-1)N_{\rm blk}+2\delta_{\rm mov}+k,\\
 m_{j,i}&: (i-1)N_{\rm blk}+N_{\rm node}+j, & \text{energy}_i&: (i-1)N_{\rm blk}+N_{\rm node}+N_C+1, & \text{history}_{i,1..2}&: (i-1)N_{\rm blk}+N_{\rm node}+N_C+1+(1,2),\\
 A&: nN_{\rm blk}+N_{\rm node}+1, & \theta_A&: nN_{\rm blk}+N_{\rm node}+2, & N_{\rm state}&=nN_{\rm blk}+N_{\rm node}+2\delta_\chi,
 \end{aligned}
 $$
 
-which `test/multid/test_layout.jl` checks against every index function. Code
+with $\text{rad}_{k,n}$ radiation row $k$ of the face at node $n$ (`radiation_index`), which
+`test/multid/test_layout.jl` checks against every index function. Code
 never computes an index: kernels, the closure, the deactivation and the outputs
 go through `mass_index`, `energy_index`, `history_index`, `position_index`,
-`velocity_index`, `intensity_index`, `area_index`, `lateral_rate_index`,
+`velocity_index`, `radiation_index`, `area_index`, `lateral_rate_index`,
 `cell_rows` and `node_rows`.
 
-For two components on 12 cells the state has 36 rows on a fixed mesh, 49 under
-in-depth radiation, 62 on a moving mesh and 75 on a moving mesh under in-depth
-radiation (measured with the script of §15.13).
+For two components on 12 cells the state has 36 rows on a fixed mesh, 62 under radiative
+transfer with a diffuse heater ($N_{\rm rad}=2$), 62 on a moving mesh and 88 on a
+moving mesh under radiative transfer (measured with the script of §15.13).
 
 ### 15.1.2 Row kinds and the mask
 
 Every row is **differential** (masses, energy state, node positions, carried
-fields) or **algebraic** (node velocities, multipliers, face intensities, the
+fields) or **algebraic** (node velocities, multipliers, radiation rows, the
 area and the lateral rate); `is_differential(layout)` flags them and
 `mass_matrix(layout)` is the diagonal matrix with one on the differential rows
 and zero on the algebraic ones (§15.5.1).
@@ -165,7 +166,7 @@ and the deactivation state (§14.3; `nothing` without deactivation). `solve` is
    the live cells from the mask; on a moving mesh the geometry from the node
    positions, with the node velocities (or the multipliers) and, under a
    variable cross section, the area and its lateral rate; the carried fields;
-   the face intensities; the masses, volumes and concentrations; the
+   the radiative face fluxes; the masses, volumes and concentrations; the
    temperatures (the stored temperature, or the inversion of the enthalpy
    inventory); their trial clamp; the heat-capacity sum; the sensible
    enthalpies; the cell properties; the pore-gas properties the gas transport
@@ -176,7 +177,7 @@ and the deactivation state (§14.3; `nothing` without deactivation). `solve` is
    (§11).
 3. **The kernels**, in assembler order (`_kernels`, `src/Integration/setup.jl`):
    the reactions (if the material has any); the gas transport (if gas can
-   move); the in-depth radiation (`BEER_LAMBERT`); conduction; the thermal
+   move); the radiative transfer (`RADIATIVE_TRANSFER`); conduction; the thermal
    boundary; and, under a correction, the inventory fluxes relative to the mesh.
    Each adds its face fluxes and cell sources to the contributions.
 4. **The mesh closure** (`closure_rows!`): the cells' strain rates $\theta_i$
@@ -218,8 +219,8 @@ external temperature-rate source $S_T$ adds $S_T$ to the temperature row and
 $C_iS_T$ to the enthalpy row.
 
 On a moving mesh the position rows are $dz_n/dt=w_n$ and the velocity rows
-carry the closure's residuals; the face-intensity rows carry the residuals of
-their attenuation equations; the history rows take their sources and face
+carry the closure's residuals; the radiation rows carry the residuals of
+their transfer equations (8.5); the history rows take their sources and face
 fluxes; the area and lateral-rate rows take the residuals of the lateral rows
 at the column sums of the live cells' history pairs and their rates; the
 deformation-gradient rows (more dimensions) are $dF_i/dt=(\nabla v_s)_iF_i$.
@@ -259,11 +260,11 @@ equation (§15.9):
   the solid velocity $w-c$ satisfying the cell's volume balance. The rows are
   bidiagonal from the pinned node. Under a prescribed mesh velocity every row
   is $0=w_n-w(z_n,t)$.
-- **The face-intensity rows** (`BeerLambertKernel`, §8.3): at the exposed face
-  $0=I_e-a\,q_{\rm inc}(t)$, and at every other face, the face of its cell
-  farther from the exposed one, $0=I_{\rm down}-I_{\rm up}\exp(-\alpha_i\Delta_i)$,
-  with $\alpha_i$ the cell's absorption coefficient and $\Delta_i$ its thickness
-  along the beam (§8.3.3).
+- **The radiation rows** (`RadiativeTransferKernel`, §8.3.3): per face the two
+  hemispherical fluxes and one row per beam direction, each the exact transfer across
+  one cell, $0=I^-_d-[\mathcal B_i+(I^-_u-\mathcal B_i)e^{-\tau_i/\bar\mu}]$ and its
+  upward and beam counterparts, with the exposed face a gray interface and the back a
+  mirror or an open interface (8.5).
 - **The cross-section rows** (`LateralShrinkage`, §10):
   $0=A-A_0\,\mathrm{law}(\bar\chi_c)$ and
   $0=\theta_A-\frac{d}{dt}\log\mathrm{law}(\bar\chi_c)$, with $\bar\chi_c$ the
@@ -272,17 +273,18 @@ equation (§15.9):
   one per cell (residual level, §14.5).
 
 Each block is solvable for its own unknowns given the differential ones: the
-balance rows by one sweep from the pinned node, the intensity rows by the
-attenuation recurrence from the exposed face, the cross-section rows
+balance rows by one sweep from the pinned node, the radiation rows by the
+closed-form sweep of §8.7.2 (two passes for the affine coefficients, two for the
+values), the cross-section rows
 explicitly, the multipliers by one symmetric positive-definite solve. The
 system is therefore a semi-explicit DAE of index one.
 
 `consistent_state!(u, def, ws, t)` overwrites the algebraic unknowns of
 $\boldsymbol u$ with the values that satisfy their rows at $t$, given its
-differential unknowns: the face intensities by the recurrence; under a variable
-cross section, one residual pass for the strain and history rates, the area and
-lateral rate from the column sums, and a second pass at the consistent lateral
-rate; then the node velocities by one sweep (one pass is exact, since the
+differential unknowns: under a variable cross section, one residual pass for the
+strain and history rates, the area and lateral rate from the column sums, and a
+second pass at the consistent lateral rate; the radiative face fluxes by their sweep,
+at that area; then the node velocities by one sweep (one pass is exact, since the
 corrections read positions only) or the multipliers by one solve. A
 closure row left above $10^{-10}$ of its scale is an error. `setup` calls it at
 $t_0$, and the deactivation event calls its parts after every transfer
@@ -441,7 +443,7 @@ controller's smallest factor, when
   |---|---|---|
   | balance row of cell $k$ | $(\lvert\theta_k\rvert+\lvert\theta_A\rvert)V_k+\sum_f A_f\lvert w_f\rvert+\sum_f A_f\lvert c_f\rvert$ | the node's velocity tolerance times its face area |
   | pinned or prescribed velocity | $\lvert w_n\rvert$ | the node's velocity tolerance |
-  | face intensity | the incident-intensity scale | its tolerance |
+  | radiation row | $\lvert I\rvert$, the row's own flux | its tolerance |
   | area | $\lvert A\rvert$ | its tolerance |
   | lateral rate | $\lvert\theta_A\rvert$ plus the volume-weighted mean $\lvert\theta\rvert$ | its tolerance |
 
@@ -495,7 +497,7 @@ the deactivation threshold $\varepsilon_m$ (`threshold`), `reltol` and `abstol`:
 | gas component mass in cell $i$ | $p_{tol}M_j\phi_i(0)V_i(0)/(N_gRT_i(0))$; supplemented by the proposed-state pressure norm |
 | temperature | `abstol` [K] |
 | enthalpy inventory | $\varepsilon_m\,m^{\rm s}_i(0)\,c_{p,\rm ref}\,$`abstol`, $c_{p,\rm ref}$ the cell's mass-weighted heat capacity at its initial temperature, so a cell at the threshold resolves its temperature to `abstol` as the temperature form does |
-| face intensity | $\mathrm{rtol}\,I_{\rm scale}$, $I_{\rm scale}$ the largest incident intensity over the solve window (at least 1 W m⁻²) |
+| radiation row | $\mathrm{rtol}\,q_{\rm scale}$, $q_{\rm scale}$ the largest radiation arriving from outside over the solve window or $\sigma T_{\rm rad}^4$, whichever is larger, and at least 1 W m⁻² (§8.7.3) |
 | node position | $\mathrm{rtol}\,\varepsilon_m\,\Delta z_n^{\min}$, $\Delta z_n^{\min}$ the smallest initial size of the cells around node $n$ |
 | node velocity | $\mathrm{rtol}\,\varepsilon_m\,\Delta z_n^{\min}/\Delta t_0$, $\Delta t_0$ the first step `dt` |
 | multiplier (more dimensions) | $\mathrm{rtol}\,\varepsilon_m\,\Delta z_i(0)^2/\Delta t_0$, $\Delta z_i(0)=V_i(0)^{1/D}$ the cell's initial size |
@@ -543,9 +545,9 @@ configuration (`test/integration/test_policies.jl`). A problem with other
 material or boundary-condition types compiles only the Pyrolysis kernels, the
 state mapping, the colored Jacobian and the solution's reconstruction. The
 precompile workloads (`src/precompile.jl`) cache the integrator for the fixed
-and moving meshes under surface absorption and Beer–Lambert absorption, lumped wall
-and gas transport, with and without deactivation, and the enthalpy form
-once.
+and moving meshes under surface absorption and radiative transfer, a moving mesh
+under a collimated heater, lumped wall and gas transport, with and without
+deactivation, and the enthalpy form once.
 
 ---
 
@@ -553,7 +555,7 @@ once.
 
 The Jacobian $J=\partial\boldsymbol f/\partial\boldsymbol u$ is the forward-mode
 derivative of the whole residual, evaluated on a sparsity pattern built from
-the mesh connectivity (§15.11) with its columns colored (§15.7). There is one
+the mesh connectivity (§15.11) with its columns colored. There is one
 Jacobian and no option that selects another: every solve uses it, and the dense
 forward-mode Jacobian of §15.13 is the reference it is tested against.
 
@@ -635,12 +637,13 @@ derivative of the code is also the derivative of the function it computes.
 Figure 15 in §15.1 compares the actual sparsity patterns with and without correction and variable cross section. Its purple outlines identify the two global algebraic rows; pale entries separate structural dependencies from the derivatives that are nonzero at the initial state.
 
 A moving mesh's node velocity is the swept integral of the strain rates of every
-cell between it and the pinned node, and the intensity reaching a cell is the
-incident flux attenuated by every cell above it. Eliminated, either would couple
+cell between it and the pinned node, and the radiation reaching a cell is what
+every other cell emits and transmits toward it. Eliminated, either would couple
 every node or cell to every other one, filling the Jacobian. Both are instead
 algebraic unknowns of the state whose rows are local (§15.4): a balance row
 reads one cell and its two nodes, besides what the corrections of those nodes
-read, and an intensity row reads one cell and its two faces. The pattern stays
+read, and a radiation row reads one cell, its own face and the next face along its
+direction (§8.7.4). The pattern stays
 banded on a line, and the coloring stays bounded independently of the cell
 count.
 
@@ -758,12 +761,16 @@ conductivities of the neighbours' neighbours), one otherwise.
   cell centres, the concentrations the neighbours' volumes, the relative fluxes
   everything the corrections of the cell's nodes read; under a prescribed mesh
   velocity with relative fluxes, also the velocities of its nodes. On a line it
-  reads the intensities of its two faces and, under a variable cross section,
+  reads every radiation row of its two faces and, under a variable cross section,
   the area.
-- **A face-intensity row** reaches the intensities of nodes $f-1$ to $f+1$, the
-  unknowns of the cells on either side of its face (the attenuation of the cell
-  it leaves, the absorptivity of the exposed cell), on a moving mesh the
-  positions of those nodes, and the area.
+- **A radiation row** of face $f$ reaches its own family at $f$ and at the next face
+  upstream along its direction (toward the exposed face for $I^-$ and the beams,
+  toward the back for $I^+$), the other thermal family at $f$, and at the back face,
+  for $I^+$, every beam arriving there (`radiation_reach`, §8.7.4); the unknowns of
+  the cells on either side of its face (their temperatures and masses, through the
+  emissive power, the absorption coefficient, the exposed cell's emissivity and the
+  absorptivity a beam enters at); on a moving mesh the positions of nodes $f-1$ to
+  $f+1$; and the area.
 - **A node-position row** reaches its node's velocity, or, when the closure's
   unknowns are the cells' multipliers, the multipliers of the cells around the
   node and the positions of their nodes.
@@ -784,10 +791,10 @@ conductivities of the neighbours' neighbours), one otherwise.
 Every row holds its diagonal. The pattern is fixed for a solve: dead rows keep
 their entries and take zero values (§15.12). Radial meshes (cylindrical and
 spherical coordinates) share the planar mesh's pattern, colors and bandwidth.
-For two components on 12 cells the half-bandwidth is 5 on a fixed mesh, 6 under
-in-depth radiation, 9 on a moving mesh, 11 on a moving mesh under in-depth
-radiation and 14 with the equidistribution correction (measured with the script
-of §15.13); it is constant in the cell count.
+For two components on 12 cells the half-bandwidth is 5 on a fixed mesh, 7 under
+radiative transfer with a diffuse heater, 9 on a moving mesh, 13 on a moving mesh
+under radiative transfer and 14 with the equidistribution correction (measured with
+the script of §15.13); it is constant in the cell count.
 
 ---
 
@@ -842,13 +849,15 @@ state they visit, a finite residual and reference, a pattern that contains the
 reference, a colored Jacobian with the pattern's structure, and per-entry
 agreement to $10^{-12}$. They cover fixed and moving columns of a PMMA-like and a
 permeable wood-like material without radiation, with surface absorption and with
-in-depth absorption, in both energy forms, at uniform hot, hot and gas-heavy,
+radiative transfer, in both energy forms, at uniform hot, hot and gas-heavy,
 partially decomposed and mixed reacting states and at trial states outside the
 physical domain; the chain-rule regimes of the smooth reaction gates and of
 permeability mixing; the cross section's back-reaction; radial meshes and a
 prescribed mesh velocity; the states after a deactivation; the boundary mass
 flux on the energy row; and a surface absorptivity and an emissivity that depend
-on temperature. The dense reference itself equals central differences
+on temperature. `test/jacobian/test_radiative_containment.jl` adds the radiation
+rows with diffuse, collimated and cone heaters, mirror and open backs, on fixed and
+moving meshes, and their allocations. The dense reference itself equals central differences
 (§15.8). The pattern tests (`test/jacobian/test_pattern.jl`) check the color
 counts and the per-entry comparison's behaviour on a stiff row above a small
 one.
@@ -886,9 +895,9 @@ problem = PyrolysisProblem(
 
 for (name, kw) in (
     ("fixed", (;)),
-    ("fixed, Beer-Lambert", (radiation_model = BEER_LAMBERT,)),
+    ("fixed, transfer", (radiation_model = RADIATIVE_TRANSFER,)),
     ("moving", (use_ale = true,)),
-    ("moving, Beer-Lambert", (use_ale = true, radiation_model = BEER_LAMBERT)),
+    ("moving, transfer", (use_ale = true, radiation_model = RADIATIVE_TRANSFER)),
     ("moving, deactivation", (use_ale = true, deactivation = true)),
 )
     cp = setup(problem; kw...)
@@ -909,9 +918,9 @@ It prints
 
 ```
 fixed                 36 rows (0 algebraic), half-bandwidth 5, 9 colors, 0 missing, passed = true
-fixed, Beer-Lambert   49 rows (13 algebraic), half-bandwidth 6, 11 colors, 0 missing, passed = true
+fixed, transfer       62 rows (26 algebraic), half-bandwidth 7, 13 colors, 0 missing, passed = true
 moving                62 rows (13 algebraic), half-bandwidth 9, 13 colors, 0 missing, passed = true
-moving, Beer-Lambert  75 rows (26 algebraic), half-bandwidth 11, 15 colors, 0 missing, passed = true
+moving, transfer      88 rows (39 algebraic), half-bandwidth 13, 17 colors, 0 missing, passed = true
 moving, deactivation  62 rows (13 algebraic), half-bandwidth 14, 21 colors, 0 missing, passed = true
 ```
 
@@ -997,11 +1006,12 @@ $$
 $$
 \frac{dz_n}{dt}=w_n,\qquad
 0=A_{i+1}(w-c)_{i+1}-A_i(w-c)_i-(\theta_i-\theta_A)V_i,\qquad
-0=I_{\rm down}-I_{\rm up}e^{-\alpha_i\Delta_i},
+0=I^-_d-\big[\mathcal B_i+(I^-_u-\mathcal B_i)\,e^{-\tau_i/\bar\mu}\big],
 $$
 
-with the cross-section rows under a variable cross section and identity rows on
-the dead rows, as $\mathsf M\,d\boldsymbol u/dt=\boldsymbol f(\boldsymbol u,t)$.
+with, under radiative transfer, the upward and beam counterparts of that radiation row
+and its boundary rows (8.5), the cross-section rows under a variable cross section and
+identity rows on the dead rows, as $\mathsf M\,d\boldsymbol u/dt=\boldsymbol f(\boldsymbol u,t)$.
 Its Jacobian $J=\partial\boldsymbol f/\partial\boldsymbol u$ is the colored
 forward-mode derivative of the whole residual on the connectivity pattern, with
 the two dense rows of a variable cross section assembled from six column sums;

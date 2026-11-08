@@ -227,14 +227,6 @@
 "V-HC-05","",80,1,2,"bulk_concentrations_kg_m3",1.1368683772161603e-13,240
 "V-HC-05","",80,1,2,"surface_temperature_K",0.0,3
 "V-HC-05","",80,1,2,"thickness_m",0.0,3
-"V-RAD-01","",400,0,1,"temperature_K",2.9491502573364414e-9,2000
-"V-RAD-01","",400,0,1,"bulk_concentrations_kg_m3",0.0,2000
-"V-RAD-01","",400,0,1,"surface_temperature_K",2.9094735509715974e-9,5
-"V-RAD-01","",400,0,1,"thickness_m",0.0,5
-"V-RAD-01","",400,1,2,"temperature_K",4.249613994034007e-10,2000
-"V-RAD-01","",400,1,2,"bulk_concentrations_kg_m3",0.0,2000
-"V-RAD-01","",400,1,2,"surface_temperature_K",4.19845491705928e-10,5
-"V-RAD-01","",400,1,2,"thickness_m",0.0,5
 "V-RX-01","",1,0,1,"temperature_K",0.0,7
 "V-RX-01","",1,0,1,"bulk_concentrations_kg_m3",1.2708483154710848e-9,21
 "V-RX-01","",1,0,1,"surface_temperature_K",0.0,7

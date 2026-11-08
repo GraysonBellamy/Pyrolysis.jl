@@ -289,7 +289,7 @@ The `+` operator on thermal conditions builds a `CombinedThermalBC` (Chapter 5).
 Each grid point therefore gets its own combined condition with the swept incident
 flux while re-radiation and convection stay fixed. The incident flux of a
 `RadiativeFluxBC` enters the surface balance under `SURFACE_ABSORPTION` and is
-absorbed in depth under `BEER_LAMBERT`; pass the `radiation_model` you want in
+carried through the solid under `RADIATIVE_TRANSFER`; pass the `radiation_model` you want in
 `solve_kwargs` (Chapter 8, Technical Reference §8).
 
 > **Caveat: keep `modify` self-contained for parallel runs.** When you run with

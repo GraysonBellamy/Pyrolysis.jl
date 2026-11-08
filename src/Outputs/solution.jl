@@ -48,8 +48,8 @@ area of the faces they name unless noted.
 - `surface_mass_flux`: the outward mass flux of the `:top` faces [kg/(m²·s)]
 - `surface_heat_flux_net`: the heat flux the `:top` condition applies at the
   face, positive into the domain (under a prescribed temperature, the
-  conducted flux) [W/m²]; under `BEER_LAMBERT` the incident flux enters in
-  depth and is not part of it (`volumetric_absorption`)
+  conducted flux) [W/m²]; under `RADIATIVE_TRANSFER` no radiation is part of
+  it (`radiation_absorbed`)
 - `surface_heat_flux_absorbed`, `surface_heat_flux_reradiation`,
   `surface_heat_flux_convection`: its incident radiation absorbed at the face
   and its re-radiative and convective losses (positive leaving) [W/m²]
@@ -59,11 +59,18 @@ area of the faces they name unless noted.
   `surface_face_buoyancy`: the blowing diagnostics of the `:top` surface
   balance (1, 1, 0 and 1 without outflow, without a blowing model, or on a
   face its condition fixes in closed form)
-- `volumetric_absorption`, `radiation_transmitted`: the intensity the cells
-  absorbed and the intensity leaving through the last face of the in-depth
-  beam, per unit exposed area [W/m²] (zero without in-depth radiation)
+- `radiation_absorbed`, `radiation_emitted`, `radiation_back`: under
+  `RADIATIVE_TRANSFER`, the radiation crossing the exposed face inward (the
+  diffuse radiation arriving there at the face's transmissivity and every
+  beam entering) and outward, and the net radiation leaving through the back
+  face, zero at a mirror [W/m²] ([`radiation_crossing`](@ref)); the
+  radiation the live cells absorb, per unit area, is `radiation_absorbed −
+  radiation_emitted − radiation_back` at every saved state (zero under the
+  other models)
 - `surface_emissivity`, `surface_conductivity`: the emissivity of the cell
-  under the first `:top` face and the conductivity normal to that face
+  under the first `:top` face (under `RADIATIVE_TRANSFER` the transmissivity
+  of the exposed face both ways, which the rows floor at
+  [`INTERFACE_FLOOR`](@ref)) and the conductivity normal to that face
   [W/(m·K)] with which the face conducts into it
   ([`boundary_conductivity`](@ref))
 - `back_heat_flux`: the heat flux the `:bottom` condition applies, positive
@@ -100,8 +107,9 @@ const SolutionExtras = @NamedTuple{
     surface_pooling_factor::Vector{Float64},
     surface_face_fraction::Vector{Float64},
     surface_face_buoyancy::Vector{Float64},
-    volumetric_absorption::Vector{Float64},
-    radiation_transmitted::Vector{Float64},
+    radiation_absorbed::Vector{Float64},
+    radiation_emitted::Vector{Float64},
+    radiation_back::Vector{Float64},
     surface_emissivity::Vector{Float64},
     surface_conductivity::Vector{Float64},
     back_heat_flux::Vector{Float64},
@@ -207,6 +215,7 @@ _extras(nt::Int) = SolutionExtras((
     ones(nt),
     zeros(nt),
     ones(nt),
+    zeros(nt),
     zeros(nt),
     zeros(nt),
     zeros(nt),
@@ -329,7 +338,7 @@ function PyrolysisSolution(
     gas = map(is_gas, material.components)
     thermal = find_kernel(ThermalBoundaryKernel, def.kernels)
     conduction = find_kernel(ConductionKernel, def.kernels)
-    beam = find_kernel(BeerLambertKernel, def.kernels)
+    transfer = find_kernel(RadiativeTransferKernel, def.kernels)
     ds, c = buffers(ws, def, Float64)
     du = zeros(state_length(layout))
     ref = def.setup.reference
@@ -463,11 +472,11 @@ function PyrolysisSolution(
                 t[k],
             ).net
         end
-        if beam !== nothing
-            e, b = max(exposed_face(beam, ds), 1), transmitted_face(beam)
-            A_e = ds.geometry.face_area[e]
-            x.radiation_transmitted[k] = ds.I[b] * ds.geometry.face_area[b] / A_e
-            x.volumetric_absorption[k] = ds.I[e] - x.radiation_transmitted[k]
+        if transfer !== nothing
+            crossing = radiation_crossing(transfer, ds, t[k])
+            x.radiation_absorbed[k] = crossing.absorbed
+            x.radiation_emitted[k] = crossing.emitted
+            x.radiation_back[k] = crossing.back
         end
     end
     deactivation === nothing || replay_events!(deactivation, layout, Inf)

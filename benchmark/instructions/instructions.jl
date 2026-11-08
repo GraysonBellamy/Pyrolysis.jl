@@ -46,9 +46,9 @@ function rows()
             options = burnout,
         ),
         (
-            name = "wood_moving_beer_lambert_darcy",
+            name = "wood_moving_radiative_transfer_darcy",
             problem = () -> _column(_wood(); darcy = true, t_final = 5.0),
-            options = _CONFIGURATIONS.wood_moving_beer_lambert_darcy.options,
+            options = _CONFIGURATIONS.wood_moving_radiative_transfer_darcy.options,
         ),
         (
             name = "polymer_moving_lumped",

@@ -1,11 +1,11 @@
 using Test
 using Pyrolysis
-using Pyrolysis.Materials: BEER_LAMBERT, SURFACE_ABSORPTION
+using Pyrolysis.Materials: SURFACE_ABSORPTION
 using Pyrolysis.States
 using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!
 using Pyrolysis.ColoredJacobian
-using Pyrolysis.Closures: EquidistributionCorrection
+using Pyrolysis.Closures: EquidistributionCorrection, EQUIDISTRIBUTION_TIME, slot_gains!
 using Pyrolysis.Integration: setup, DomainCheck
 
 # The colored Jacobian evaluates the residual at one dual-number type in
@@ -110,7 +110,8 @@ _column(mat; top, stretch = nothing) = PyrolysisProblem(
 
 # The configurations of `test/perf/perf_helpers.jl`, a variable cross section,
 # inventory fluxes relative to a prescribed mesh velocity, and the
-# equidistribution correction active at every node of a stretched mesh. The wood's
+# equidistribution correction active at every node of a stretched mesh, with a
+# second estimate's shift (set in the testset). The wood's
 # heat capacity depends on the temperature, so the per-component tuples mix
 # constants and functions of it under automatic differentiation.
 const _incident = RadiativeFluxBC(50e3)
@@ -131,10 +132,6 @@ const _configurations = (
         problem = () -> _column(_pmma(); top = HeatFluxBC(50e3)),
         options = (use_ale = true,),
     ),
-    ale_beer_lambert_darcy = (
-        problem = () -> _column(_wood(α = 0.5); top = _incident),
-        options = (use_ale = true, radiation_model = BEER_LAMBERT),
-    ),
     ale_cross_section = (
         problem = () -> _column(_wood(law = χ -> 1 - 0.2χ); top = HeatFluxBC(50e3)),
         options = (use_ale = true,),
@@ -154,7 +151,10 @@ const _configurations = (
         problem = () -> _column(_pmma(); top = HeatFluxBC(50e3), stretch = 1.01),
         options = (
             use_ale = true,
-            correction = EquidistributionCorrection(activation = (2.0, 0.5)),
+            correction = EquidistributionCorrection(
+                τ = EQUIDISTRIBUTION_TIME,
+                activation = (2.0, 0.5),
+            ),
         ),
     ),
 )
@@ -181,6 +181,11 @@ end
 
     config = _configurations[name]
     cp = setup(config.problem(); energy_state = energy, config.options...)
+    if name === :equidistribution
+        corr = cp.def.closure.correction
+        corr.initial_shift .= 0.5 .* corr.initial_gain
+        slot_gains!(corr)
+    end
     r, j, d = _allocations(cp)
     @test r == 0
     @test j <= JACOBIAN_BUDGET

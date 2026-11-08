@@ -653,15 +653,17 @@ Reading the examples together, a few idioms recur and are worth internalizing:
   efflux and the production coincide only at quasi-steady state.
 - **Use the boundary-flux extras for energy accounting.** `surface_heat_flux_*` and
   `surface_emissivity`/`surface_conductivity` in `extras` give the surface energy
-  balance without re-deriving it; under `BEER_LAMBERT` add
-  `extras.volumetric_absorption`, the in-depth deposit the face fluxes exclude.
+  balance without re-deriving it; under `RADIATIVE_TRANSFER` add
+  `extras.radiation_absorbed − radiation_emitted − radiation_back`, the radiation the
+  cells take in, which the face fluxes exclude.
 
 ### Caveats to keep in mind
 
 - **Radiation models.** The radiation models are `SURFACE_ABSORPTION` and
-  `BEER_LAMBERT`. The shipped examples use `SURFACE_ABSORPTION` (flux via the BC,
-  applied in the surface balance); `BEER_LAMBERT` is one keyword away in
-  `06_cone_calorimeter.jl`.
+  `RADIATIVE_TRANSFER`. The shipped examples use `SURFACE_ABSORPTION` (flux via the BC,
+  applied in the surface balance). `06_cone_calorimeter.jl` runs under
+  `RADIATIVE_TRANSFER` once its `RadiativeFluxBC` drops `absorptivity` and its
+  `RadiativeBC` members drop `ε` (§2.6.2).
 - **Boundary energy.** Incoming gas carries reservoir enthalpy and outgoing
   gas carries surface enthalpy. The coupled LTE film converts heat to the
   reservoir control surface; adiabatic and prescribed-heat boundaries use the

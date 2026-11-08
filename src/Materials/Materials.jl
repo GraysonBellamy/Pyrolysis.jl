@@ -100,6 +100,6 @@ export LumpedTransfer, DustyGas, LumpedEndpoint, DustyEndpoint, has_gas
 export smooth_clamp, trial_temperature, positive_part, smooth_floor
 
 # Radiation model enum
-export RadiationModel, SURFACE_ABSORPTION, BEER_LAMBERT
+export RadiationModel, SURFACE_ABSORPTION, RADIATIVE_TRANSFER
 
 end # module Materials

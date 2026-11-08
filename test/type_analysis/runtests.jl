@@ -4,15 +4,17 @@ process (`test/runtests.jl`), so no other test file's definitions enter the
 analysis.
 
 JET's `@test_call` analyses `residual!` and the colored `jacobian!` at the
-concrete types `setup` builds, on a fixed mesh, a moving mesh with in-depth
-radiation and lumped wall and Darcy transport, and a moving mesh under the
+concrete types `setup` builds, on a fixed mesh with and without a collimated
+heater under radiative transfer, a moving mesh with radiative transfer (an
+open back, and a cone heater) and lumped wall and Darcy transport, and a
+moving mesh under the
 equidistribution correction, in both energy forms. Reports are limited to the
 package's own modules.
 """
 
 using Test
 using Pyrolysis
-using Pyrolysis.Materials: BEER_LAMBERT
+using Pyrolysis.Materials: RADIATIVE_TRANSFER
 using Pyrolysis.Assembly: residual!
 using Pyrolysis.ColoredJacobian: jac_prototype, jacobian!
 using Pyrolysis.Closures: EquidistributionCorrection
@@ -74,15 +76,53 @@ _column(mat; top, stretch = nothing) = PyrolysisProblem(
 
 const _configurations = (
     fixed = (problem = () -> _column(_pmma(); top = HeatFluxBC(50e3)), options = (;)),
-    moving_beer_lambert_darcy = (
-        problem = () -> _column(_wood(); top = RadiativeFluxBC(50e3)),
-        options = (use_ale = true, radiation_model = BEER_LAMBERT),
+    moving_radiative_transfer_darcy = (
+        problem = () -> PyrolysisProblem(
+            mesh = uniform_mesh(0.01, 8),
+            material = _wood(),
+            bc_set = BoundaryConditionSet(
+                thermal = (
+                    top = RadiativeFluxBC(50e3) + RadiativeBC(T_inf = 300.0),
+                    bottom = RadiativeBC(T_inf = 300.0),
+                ),
+            ),
+            tspan = (0.0, 100.0),
+        ),
+        options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
+    ),
+    moving_radiative_transfer_cone = (
+        problem = () -> PyrolysisProblem(
+            mesh = uniform_mesh(0.01, 8),
+            material = _wood(),
+            bc_set = BoundaryConditionSet(
+                thermal = (
+                    top = RadiativeFluxBC(4e4; distribution = Cone(0.35, 1.27)) +
+                          RadiativeFluxBC(
+                              t -> 1e4 * (1 + 0.1t);
+                              absorptivity = 0.9,
+                              distribution = Collimated(),
+                          ) +
+                          RadiativeBC(T_inf = 300.0),
+                    bottom = AdiabaticBC(),
+                ),
+            ),
+            tspan = (0.0, 100.0),
+        ),
+        options = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
+    ),
+    fixed_radiative_transfer_collimated = (
+        problem = () -> _column(
+            _pmma();
+            top = RadiativeFluxBC(5e4; distribution = Collimated()) +
+                  RadiativeBC(T_inf = 300.0),
+        ),
+        options = (radiation_model = RADIATIVE_TRANSFER,),
     ),
     equidistribution = (
         problem = () -> _column(_pmma(); top = HeatFluxBC(50e3), stretch = 1.01),
         options = (
             use_ale = true,
-            correction = EquidistributionCorrection(activation = (2.0, 0.5)),
+            correction = EquidistributionCorrection(activation = (0.99, 0.5)),
         ),
     ),
 )

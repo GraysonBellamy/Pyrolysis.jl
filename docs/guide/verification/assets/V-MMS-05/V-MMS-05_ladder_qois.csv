@@ -1,0 +1,13 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+16,"L∞ T error on moving mesh, t=10.0 s",0.10657379796521127,NaN,0.10657379796521127,0.011,false
+16,"relative L∞ ξ_solid (uniform) error, t=10.0 s",5.455073430008875e-13,NaN,5.455073430008875e-13,1.0e-10,true
+32,"L∞ T error on moving mesh, t=10.0 s",0.013047551284557812,NaN,0.013047551284557812,0.011,false
+32,"relative L∞ ξ_solid (uniform) error, t=10.0 s",3.675874419665585e-13,NaN,3.675874419665585e-13,1.0e-10,true
+64,"L∞ T error on moving mesh, t=10.0 s",0.003561514413831901,NaN,0.003561514413831901,0.011,true
+64,"relative L∞ ξ_solid (uniform) error, t=10.0 s",2.5143738942764076e-13,NaN,2.5143738942764076e-13,1.0e-10,true
+128,"L∞ T error on moving mesh, t=10.0 s",0.0009795924549962365,NaN,0.0009795924549962365,0.011,true
+128,"relative L∞ ξ_solid (uniform) error, t=10.0 s",2.8402761624117074e-13,NaN,2.8402761624117074e-13,1.0e-10,true
+256,"L∞ T error on moving mesh, t=10.0 s",0.0002593394592622644,NaN,0.0002593394592622644,0.011,true
+256,"relative L∞ ξ_solid (uniform) error, t=10.0 s",2.955857780762017e-13,NaN,2.955857780762017e-13,1.0e-10,true
+512,"L∞ T error on moving mesh, t=10.0 s",6.682765535970248e-5,NaN,6.682765535970248e-5,0.011,true
+512,"relative L∞ ξ_solid (uniform) error, t=10.0 s",6.862895437128221e-13,NaN,6.862895437128221e-13,1.0e-10,true

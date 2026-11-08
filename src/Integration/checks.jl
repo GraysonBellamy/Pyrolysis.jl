@@ -141,7 +141,6 @@ struct DomainCheck{D<:ResidualDefinition,W<:ResidualWorkspace}
     time::Base.RefValue{Float64}
     abstol::Vector{Float64}
     reltol::Float64
-    intensity_scale::Float64
     balance_cell::Vector{Int}
     max_consecutive::Int
     monitor::ConstraintMonitor
@@ -170,8 +169,6 @@ function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
             balance[cl.row_node[k]] = k
         end
     end
-    I_scale =
-        has_intensities(layout) ? cp.abstol[intensity_index(layout, 1)] / cp.reltol : 1.0
     gas, gas_masses = _gas_data(def.setup.material)
     return DomainCheck(
         def,
@@ -181,7 +178,6 @@ function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
         Ref(NaN),
         cp.abstol,
         cp.reltol,
-        I_scale,
         balance,
         max_consecutive,
         ConstraintMonitor(),
@@ -454,7 +450,7 @@ evaluated into `check.du`:
   its node times its face area;
 - the pinned node's row and a prescribed-velocity row: `S = |wₙ|`, `a` the
   node's velocity tolerance;
-- a face-intensity row: `S` the incident-intensity scale, `a` its tolerance;
+- a radiation row: `S` its own flux; `a` its tolerance;
 - the area row: `S = |A|`; the lateral-rate row: `S = |θ_A|` plus the
   volume-weighted mean `|θ|`; `a` their tolerances.
 
@@ -488,12 +484,10 @@ function constraint_residual(check::DomainCheck, ds, c, t)
             worst = max(worst, abs(du[row]) / (rtol * S + a))
         end
     end
-    if has_intensities(layout)
-        @inbounds for f = 1:n_nodes(layout)
-            row = intensity_index(layout, f)
-            mask[row] || continue
-            worst = max(worst, abs(du[row]) / (rtol * check.intensity_scale + tol[row]))
-        end
+    @inbounds for f = 1:n_nodes(layout), k = 1:radiation_rows(layout)
+        row = radiation_index(layout, f, k)
+        mask[row] || continue
+        worst = max(worst, abs(du[row]) / (rtol * abs(ds.q[k, f]) + tol[row]))
     end
     if has_chi(layout)
         A = area_index(layout)

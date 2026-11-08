@@ -65,7 +65,7 @@ _sizes(topo::MeshTopology{D}, x, V0) where {D} = V0 .^ (1 / D)
 
 """
 	abstol_vector(layout, setup, m0, T0; reltol, abstol, threshold,
-	              intensity_scale = 1.0, time_scale = 1.0) -> Vector{Float64}
+	              radiation_scale = 1.0, time_scale = 1.0) -> Vector{Float64}
 
 Absolute tolerance per row. Condensed mass rows use `reltol · threshold · mˢᵢ(0)`, with
 `mˢᵢ(0)` the cell's total initial condensed mass (never a per-species
@@ -75,8 +75,8 @@ at initialization. The integrator also checks proposed-state pressure errors
 as temperature and pore volume evolve. Temperature rows use `abstol` [K];
 enthalpy rows `threshold · mˢᵢ(0) · c_p,ref · abstol`, so a cell at the
 deactivation threshold resolves its temperature to `abstol` as the
-temperature form does; face-intensity rows `reltol · intensity_scale`, the
-scale being the largest incident intensity [W/m²].
+temperature form does; radiation rows `reltol · radiation_scale`, the
+scale of the radiative fluxes [W/m²].
 
 On a moving mesh: node positions `reltol · threshold · hₙ`, with `hₙ` the
 smallest initial size of the cells around node `n`, so a position error moves
@@ -96,14 +96,12 @@ function abstol_vector(
     reltol::Float64,
     abstol::Float64,
     threshold::Float64,
-    intensity_scale::Float64 = 1.0,
+    radiation_scale::Float64 = 1.0,
     time_scale::Float64 = 1.0,
 ) where {NC}
     tol = fill(abstol, state_length(layout))
-    if has_intensities(layout)
-        for f = 1:n_nodes(layout)
-            tol[intensity_index(layout, f)] = reltol * intensity_scale
-        end
+    for f = 1:n_nodes(layout), k = 1:radiation_rows(layout)
+        tol[radiation_index(layout, f, k)] = reltol * radiation_scale
     end
     ref = setup.reference
     if is_moving(layout)

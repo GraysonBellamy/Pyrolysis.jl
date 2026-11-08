@@ -6,8 +6,11 @@
 # the PMMA cells thin to the deactivation threshold, the layer is deactivated
 # and the run ends on the bare substrate. The deck is the MaCFP PMMA
 # gasification case with the Gpyro V2 property fits (power-law k(T), c(T)
-# above 394 K — positive on the whole property bracket) and in-depth
-# (Beer–Lambert) absorption.
+# above 394 K — positive on the whole property bracket) under radiative
+# transfer through the solid: the heater's diffuse flux and the surroundings'
+# radiation cross the exposed face at the surface cell's emissivity, every
+# cell absorbs and emits, and the back of the Kaowool radiates to the
+# surroundings.
 #
 # The run must burn out completely, lose exactly the mass of the PMMA layer,
 # close the mass ledger, and converge the surface temperature at every
@@ -16,7 +19,8 @@
 #
 # The mesh moves by the equidistribution correction, the PMMA–Kaowool
 # interface a Lagrangian node, so the PMMA cells thin together and the layer
-# deactivates in one invocation into the Kaowool cell beneath. The surface
+# deactivates in two invocations into the Kaowool cell beneath: the cells
+# next to the Kaowool lag the rest by about 40 s. The surface
 # QoI counts accepted states whose surface balance did not converge or sits
 # on the trial clamp, since that Newton never warns.
 
@@ -100,13 +104,33 @@ function _vbo_nodes(n_pmma, l_pmma, r)
 end
 
 # The deck's conditions on `mesh` with `material` and initial concentrations
-# `ξ0`, saved every `save_every` seconds.
-function _vbo_deck(mesh, material, ξ0; flux = 50e3, t_end = 500.0, save_every = 0.5)
-    top =
-        RadiativeFluxBC(flux; absorptivity = 0.96) +
-        RadiativeBC(ε = 0.96, T_inf = VBO_T_INF) +
-        ConvectiveBC(h = 8.2, T_inf = VBO_T_INF)
-    bottom = RadiativeBC(ε = 1.0, T_inf = VBO_T_INF)
+# `ξ0`, saved every `save_every` seconds. Under radiative transfer the faces
+# cross radiation at the emissivity of their cells; under surface absorption
+# the exposed face absorbs and emits at the PMMA's 0.96 and the back at the
+# Kaowool's 1.
+function _vbo_deck(
+    mesh,
+    material,
+    ξ0;
+    flux = 50e3,
+    t_end = 500.0,
+    save_every = 0.5,
+    radiation_model = RADIATIVE_TRANSFER,
+)
+    top, bottom =
+        radiation_model == RADIATIVE_TRANSFER ?
+        (
+            RadiativeFluxBC(flux) +
+            RadiativeBC(T_inf = VBO_T_INF) +
+            ConvectiveBC(h = 8.2, T_inf = VBO_T_INF),
+            RadiativeBC(T_inf = VBO_T_INF),
+        ) :
+        (
+            RadiativeFluxBC(flux; absorptivity = 0.96) +
+            RadiativeBC(ε = 0.96, T_inf = VBO_T_INF) +
+            ConvectiveBC(h = 8.2, T_inf = VBO_T_INF),
+            RadiativeBC(ε = 1.0, T_inf = VBO_T_INF),
+        )
     bcs = BoundaryConditionSet(
         thermal = (top = top, bottom = bottom),
         mass = (
@@ -129,8 +153,9 @@ end
 # `n_pmma` cells across the PMMA layer of thickness `l_pmma`, uniform or graded
 # toward the surface by `grading` (`_vbo_nodes`); the Kaowool takes the pitch
 # of the PMMA beside it. Surface-absorption runs pass zero absorption
-# coefficients (unused there); the gradient gate perturbs the absorption
-# coefficient, the incident flux and the pre-exponential factor `A`.
+# coefficients (unused there) and `radiation_model`; the gradient gate
+# perturbs the absorption coefficient, the incident flux and the
+# pre-exponential factor `A`.
 function _vbo_problem(
     n_pmma::Int;
     substrate_alpha = 8.0e6 / VBO_RHO_KW,
@@ -142,6 +167,7 @@ function _vbo_problem(
     l_pmma = VBO_L_PMMA,
     grading = 1.0,
     porosity = 0.01,
+    radiation_model = RADIATIVE_TRANSFER,
 )
     mat = _vbo_material(; substrate_alpha, pmma_alpha, A, porosity)
     if grading == 1
@@ -157,7 +183,7 @@ function _vbo_problem(
     end
     ξ0 =
         [z -> (z > z_if ? VBO_RHO_PMMA : 0.0), z -> (z > z_if ? 0.0 : VBO_RHO_KW), z -> 0.0]
-    return _vbo_deck(mesh, mat, ξ0; flux, t_end, save_every)
+    return _vbo_deck(mesh, mat, ξ0; flux, t_end, save_every, radiation_model)
 end
 
 # What the step recorder saw over the accepted steps of a solve: the smallest
@@ -429,7 +455,7 @@ const VBO_LEDGER_COMMENT = "total-mass drop vs ∫ ṁ″ dt over the accepted s
 
 # The exact and conservation QoIs shared by the burnout cases.
 # The ledger closes to the integrator's tolerance: on the moving-mesh cases
-# at their CI resolution at most 5.2e-7 in the temperature form and 3.2e-6 in
+# at their CI resolution at most 2.9e-7 in the temperature form and 8.2e-7 in
 # the enthalpy form (V-BO-08's).
 function _vbo_common_qois(
     m;
@@ -557,7 +583,7 @@ const VBO_SOLVE_KWARGS = (
     use_ale = true,
     deactivation = true,
     min_thickness = 1e-3,
-    radiation_model = BEER_LAMBERT,
+    radiation_model = RADIATIVE_TRANSFER,
     abstol = 1e-8,
     reltol = 1e-6,
 )
@@ -574,7 +600,7 @@ function _verification_case_vbo01()
     return VerificationCase(
         id = id,
         title = "PMMA-on-Kaowool burnout under ALE (layer deactivation)",
-        tags = [:ale, :burnout, :depletion, :beer_lambert, :coupled, :performance],
+        tags = [:ale, :burnout, :depletion, :radiative_transfer, :coupled, :performance],
         references = [
             "MaCFP-2 PMMA gasification case (NIST), 50 kW/m²",
             "Gpyro V2 PMMA deck property fits",

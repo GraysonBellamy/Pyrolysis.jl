@@ -134,8 +134,8 @@ flux, $\sum_j h_j J_j$ the sensible enthalpy the mass fluxes carry,
 $Q_\mathrm{rxn}=-\sum_r h_r r_r$ the reaction heat with each $h_r$ quoted at
 the local temperature (§6.6.3), $\sum_j \omega_j\,h_j(T)$ the **formation
 term** (the sensible enthalpy a reaction moves from its reactant to its
-products at the local temperature), and $Q_\mathrm{rad}$ the in-depth
-radiation the cells absorb (nonzero under `BEER_LAMBERT` only; under
+products at the local temperature), and $Q_\mathrm{rad}$ the radiation the cells
+absorb less what they emit (nonzero under `RADIATIVE_TRANSFER` only; under
 `SURFACE_ABSORPTION` the absorbed flux is part of the boundary condition's
 flux). At a boundary the signed donor sum $H_r$ uses the surface temperature
 for outflow and the specified incoming temperature for inflow. The boundary
@@ -341,7 +341,7 @@ between cells, the limited upwind face value for the relative flux of a moving
 mesh, and the surface temperature $T_s$ on a boundary face. On a boundary face
 $q_f$ is minus the heat conducted from the face into its cell (§16.6). With
 $S_{E,i}$ [W] the cell's energy sources (the reaction heat
-$Q_{\mathrm{rxn},i}\tilde V_i$ and the absorbed in-depth radiation, §13.3.4), the
+$Q_{\mathrm{rxn},i}\tilde V_i$ and the radiative source, §13.3.4), the
 cell's energy right-hand side is
 $E_i=S_{E,i}-\sum_{f\in\partial i}s_{if}F^E_fA_f$. The energy row is (§7, §13)
 
@@ -366,7 +366,7 @@ $$
 
 positive when energy enters: the heat conducted in through the live boundary
 faces less the enthalpy carried out through them, plus the reaction heat, the
-absorbed in-depth radiation and the formation terms of the live cells. It is
+radiative sources and the formation terms of the live cells. It is
 the discrete form of the law of §16.2.2 term by term.
 
 > **Implementation note.** `ledger_rates(def, c, ds)` accumulates
@@ -537,14 +537,15 @@ into the domain; the conducted flux under a prescribed temperature),
 `surface_heat_flux_absorbed`, `surface_heat_flux_reradiation` and
 `surface_heat_flux_convection` (its members), `surface_heat_flux_conduction`
 ($k(T_s-T_\mathrm{cell})/d$), and `back_heat_flux` for the `:bottom` condition.
-Under `BEER_LAMBERT` the incident flux enters in depth and is not part of the
-net surface flux; the intensity the cells absorb, $\sum_i Q_{\mathrm{rad},i}V_i$ per
-unit exposed area, is `volumetric_absorption`, and the intensity leaving
-through the last face of the beam is `radiation_transmitted`. The ledger counts
-the absorbed part as a volumetric source of the live cells; the transmitted
-part leaves the column without entering the inventory, and the incident flux
-itself is in neither. Under `SURFACE_ABSORPTION` the absorbed incident flux is
-part of the condition's applied flux at the face.
+Under `RADIATIVE_TRANSFER` radiation is not part of the net surface flux: it
+crosses the exposed face and the back through the radiation rows, reported per unit
+face area as `radiation_absorbed` (inward through the exposed face),
+`radiation_emitted` (outward through it) and `radiation_back` (net, out through the
+back), whose balance equals the cells' radiative sources, $\sum_i S^{\rm rad}_i/A$,
+at every saved state (§8.5.2). The ledger counts those sources as volumetric sources
+of the live cells; the rows store no energy, so the ledger needs no radiative term
+of its own. Under `SURFACE_ABSORPTION` the absorbed incident flux is part of the
+condition's applied flux at the face.
 
 ---
 

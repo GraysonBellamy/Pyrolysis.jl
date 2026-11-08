@@ -274,7 +274,7 @@ $\xi_{j,i}=m_{j,i}/\tilde V_i$ the kernels read.
 > **Implementation note.** `assemble_rows!` (`src/Assembly/residual.jl`) is the
 > only writer of `du`. It scatters `F_energy` into the energy rows and `F_mass`
 > into the face-flux part of the mass rates (`M_flux`), writes the mass, energy,
-> intensity, position, velocity, history, cross-section and deformation rows, and
+> radiation, position, velocity, history, cross-section and deformation rows, and
 > writes the dead rows last.
 
 ### 13.3.2 The mass rows
@@ -314,7 +314,7 @@ terms within $10^{-12}$ relative, the conduction fluxes cancelling pairwise.
 ### 13.3.4 The energy row
 
 With $S_{E,i}$ [W] the cell's energy sources (the reaction heat
-$Q_{\mathrm{rxn},i}\tilde V_i$ and the absorbed in-depth radiation, §13.5) and $F_f$ the face energy flux (the
+$Q_{\mathrm{rxn},i}\tilde V_i$ and the radiative source under radiative transfer, §13.5) and $F_f$ the face energy flux (the
 conduction, the enthalpy the mass fluxes carry, and on a boundary face the flux of
 the condition, §13.7), the cell's energy right-hand side is
 
@@ -390,11 +390,11 @@ fields:
 | `F_mass` | $N_C\times n_\text{faces}$ | kg m⁻² s⁻¹ | gas transport, relative fluxes |
 | `F_energy` | $n_\text{faces}$ | W m⁻² | conduction, gas transport (carried enthalpy), thermal boundary, relative fluxes |
 | `S_mass` | $N_C\times n$ | kg s⁻¹ | reactions, external sources |
-| `S_energy` | $n$ | W | reactions, in-depth radiation |
+| `S_energy` | $n$ | W | reactions, radiative transfer |
 | $\theta$ | $n$ | s⁻¹ | mesh closure (strain rates) |
 | `M_flux` | $N_C\times n$ | kg s⁻¹ | assembler ($\dot M_{j,i}$) |
 | `T_face` | $n_\text{faces}$ | K | thermal boundary (surface temperatures) |
-| `r_intensity` | $n_\text{faces}$ | W m⁻² | in-depth radiation (algebraic residuals) |
+| `r_radiation` | $N_\text{rad}\times n_\text{faces}$ | W m⁻² | radiative transfer (algebraic residuals) |
 | `r_velocity`, `r_multiplier` | $D\,n_\text{nodes}$, $n$ | — | mesh closure (algebraic residuals) |
 | `F_carried`, `S_carried` | $2\times n_\text{faces}$, $2\times n$ | kg m⁻² s⁻¹, kg s⁻¹ | relative fluxes, mesh closure (conversion-history pair) |
 | `gradient` | $D\times n$ | K m⁻¹ | conduction ($D\ge2$) |
@@ -411,7 +411,7 @@ kernels run; the assembler zeroes `M_flux`; `T_face` and `gradient` are overwrit
 2. `GasTransportKernel{M}`, for mobile gas, with the declared `LumpedTransfer`
    or `DustyGas`. Gas-bearing sealed materials still evaluate their EOS;
    `NoGasTransport` is reserved for materials without gas components.
-3. `BeerLambertKernel`, under `BEER_LAMBERT` (§13.5.2).
+3. `RadiativeTransferKernel`, under `RADIATIVE_TRANSFER` (§13.5.2).
 4. `ConductionKernel`, always (§13.7.1).
 5. `ThermalBoundaryKernel`, always (§13.7.5).
 6. `RelativeFluxKernel`, when the correction is not `NoCorrection`: the
@@ -473,38 +473,43 @@ below zero concentration is skipped: its rates and every derivative of them are
 exactly zero. The mass sources are also what the mesh closure reads for the strain
 rates (§11.3.1).
 
-### 13.5.2 In-depth radiation: the face intensities
+### 13.5.2 Radiative transfer: the face fluxes
 
-Under `BEER_LAMBERT` the intensity of every face is an algebraic unknown of the
-state. `BeerLambertKernel` orders the cells from the exposed face (the single
-`:top` face) into the depth and, for each cell $i$, records its upstream face
-(toward the exposed face) and its downstream face. Its rows are
-
-$$
-0=I_e-a\,q_\mathrm{inc}(t)\quad\text{(the face the beam enters)},\qquad
-0=I_\text{down}-I_\text{up}\,e^{-\alpha_i\Delta_i}\quad\text{(the downstream face of each live cell)},
-$$
-
-with $q_\mathrm{inc}$ the incident flux of the `RadiativeFluxBC`, $a$ its explicit
-absorptivity or else the effective absorptivity of the first live cell (§5.8.2),
-$\alpha_i$ the cell's absorption coefficient at the positive-part concentrations
-and $\Delta_i$ its thickness (the sum of its two floored centre-to-face distances).
-The cell absorbs
+Under `RADIATIVE_TRANSFER` the radiation field is carried as algebraic unknowns of the state:
+the two hemispherical fluxes $I^-_f$, $I^+_f$ of every face and one beam $I_{h,f}$ per
+direction of a collimated or cone heater (§8.7.1). `RadiativeTransferKernel` orders the
+cells from the exposed face (the single `:top` face) into the depth and, for each cell
+$i$, records its upstream face $u$ (toward the exposed face) and its downstream face $d$.
+Its rows (8.5) are, for each live cell,
 
 $$
-S_{E,i}\mathrel{+}=I_\text{up}A_\text{up}-I_\text{down}A_\text{down},
+0=I^-_d-\big[\mathcal B_i+(I^-_u-\mathcal B_i)\,e^{-\tau_i/\bar\mu}\big],\qquad
+0=I^+_u-\big[\mathcal B_i+(I^+_d-\mathcal B_i)\,e^{-\tau_i/\bar\mu}\big],\qquad
+0=I_{h,d}-I_{h,u}\,e^{-\tau_i/\mu_h},
 $$
 
-the exact cell average of the attenuated beam, so the absorbed energy telescopes
-to the entering intensity minus the transmitted one
-(`test/kernels/test_radiation.jl`, "the beam's energy telescopes"). Each row reads
-one cell and its two faces, so the Jacobian stays banded where the eliminated
-recurrence would couple every cell to every cell above it. After cells are
-deactivated the beam enters the first live cell's upstream face, and the faces upstream of it carry identity rows. Under `BEER_LAMBERT` the
-incident flux contributes nothing to the surface balance; the condition's other
-members (re-radiation, convection) stay at the surface. `setup` refuses in-depth
-radiation off planar coordinates, where the attenuated intensity and the face
-areas would disagree. The model and its limits are §8.3.
+with $\mathcal B_i=\sigma\tilde T_i^4$, $\tau_i=\alpha_i\Delta z_i$, $\alpha_i$ the
+cell's absorption coefficient at the positive-part concentrations and $\Delta z_i$ the sum
+of its two floored centre-to-face distances, and the boundary rows of the exposed face
+(a gray interface at the first live cell's $\varepsilon$, §8.4.1), of each beam where it
+enters (§8.4.2) and of the back (a mirror or an open interface, §8.4.3). The cell
+absorbs what enters through its two faces less what leaves,
+
+$$
+S_{E,i}\mathrel{+}=A_u\big(I^-_u-I^+_u\big)-A_d\big(I^-_d-I^+_d\big)+\sum_h\big(A_uI_{h,u}-A_dI_{h,d}\big),
+$$
+
+the exact cell average of (8.2) for its constant emission, so the sources telescope to
+the net radiation entering through the exposed face less the net radiation leaving
+through the back (`test/kernels/test_radiative_transfer.jl`, "the cell sources
+telescope"). Each row reads one cell, its own face and the next face along its
+direction, so the Jacobian stays banded where the eliminated recurrence would couple
+every cell to every other. After cells are deactivated the exposed face is the first
+live cell's upstream face, and the faces upstream of it carry identity rows. Under
+`RADIATIVE_TRANSFER` the radiative members of the boundary conditions contribute
+nothing to the surface balance; convection and prescribed fluxes stay at the surface.
+`setup` refuses radiative transfer off planar coordinates, where the fluxes per unit
+face area and the face areas would disagree. The model and its limits are §8.
 
 ### 13.5.3 External sources
 
@@ -880,15 +885,15 @@ by `StateLayout` (`src/States/layout.jl`; the full layout and its index formulas
   `energy_state = :enthalpy`), and under a variable cross section the
   conversion-history pair $(G_i, m_{\mathrm{dry},i})$;
 - **node block** $n$: on a moving mesh the position $z_n$ (differential) and the
-  velocity $w_n$ (algebraic); under `BEER_LAMBERT` the intensity of the face at
-  node $n$ (algebraic);
+  velocity $w_n$ (algebraic); under `RADIATIVE_TRANSFER` the $N_{\text{rad}}$ radiative
+  fluxes of the face at node $n$ (algebraic);
 - **globals**, under a variable cross section: the area $A$ and its lateral strain
   rate $\theta_A$ (algebraic).
 
 On a line the order is node 1, cell 1, node 2, …, cell $n$, node $n+1$, so every row's
 unknowns and its neighbours' lie within a fixed distance and the Jacobian is banded.
 No kernel computes an index: every access goes through `mass_index`,
-`energy_index`, `position_index`, `velocity_index`, `intensity_index`,
+`energy_index`, `position_index`, `velocity_index`, `radiation_index`,
 `history_index`, `area_index` and `lateral_rate_index`. `setup` fills the initial
 state from the problem: $m_{j,i}=\xi_j(z_i^c)\,V_i(0)$ and the energy state from
 $T(z_i^c)$ at the cell centres of the reference mesh, then makes the algebraic
@@ -907,7 +912,7 @@ order:
    geometry from the positions (`geometry!`, §13.2); a fixed mesh keeps the
    reference geometry computed when its buffers are built;
 3. the carried fields (the history pair; in more dimensions the deformation
-   gradient) and the face intensities;
+   gradient) and the radiative face fluxes (`ds.q`);
 4. per cell, the signed volume $V_i$ and $\tilde V_i=\mathrm{smooth\_floor}(V_i,10^{-8}V_i(0))$,
    the masses, the concentrations $\xi_{j,i}=m_{j,i}/\tilde V_i$ and the positive-part
    concentrations $\xi^+_{j,i}=(m_{j,i})^+/\tilde V_i$ at the cell's scale $\delta_i$;
@@ -917,8 +922,8 @@ order:
    the sensible enthalpies $h_j(T_i)$, the conductivity $k_i$ with and without its floor, the surface
    emissivity $\varepsilon_i$ and absorptivity $a_i$, the pore-gas properties the gas
    transport needs (the wall coefficients, molecular resistance, porosity,
-   partial pressures and mobility), and under in-depth
-   radiation the absorption coefficient $\alpha_i$.
+   partial pressures and mobility), and under radiative
+   transfer the absorption coefficient $\alpha_i$.
 
 The node corrections $c_n$ are written next, by the closure (`correction!`, §11.7).
 Which value of each field a kernel reads is fixed:
@@ -1204,10 +1209,9 @@ describes resolution studies; time-integration differences follow in §15.14.
    1.64 % in flux and 1.47 K in the profile at $\Delta z=0.5$ mm, is the quantization.
    Put a node on every interface (§13.9.4).
 
-4. **In-depth radiation on planar lines only.** `setup` refuses `BEER_LAMBERT` off
-   planar coordinates and on meshes of more dimensions. Only the first
-   `RadiativeFluxBC` member of a combined `:top` condition feeds the beam; a second
-   radiative member is dropped without a warning (§8).
+4. **Radiative transfer on planar lines only.** `setup` refuses `RADIATIVE_TRANSFER`
+   off planar coordinates and on meshes of more dimensions, where the two-stream rows
+   do not generalize; beams enter through the single `:top` face (§8.4, §8.10).
 
 5. **More dimensions at the residual level.** Meshes of quadrilaterals and
    hexahedra are assembled and differentiated (§13.2.5, §13.6.4) but are not a
