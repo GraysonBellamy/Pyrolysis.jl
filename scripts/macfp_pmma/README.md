@@ -3,7 +3,8 @@
 Runs the MaCFP condensed-phase PMMA property sets in Pyrolysis.jl, FDS,
 Gpyro and ThermaKin2Ds, and compares each run with the institution's own
 submission, with the other codes' runs of the same deck, and with the NIST
-gasification apparatus experiments.
+gasification apparatus experiments. `report.jl` writes the validation page,
+`docs/guide/validation/macfp_pmma.md`.
 
 - **MaCFP-2 targets**: TGA at 10 and 100 K/min; 1D anaerobic gasification
   at 10, 25 and 65 kW/m² on 6 and 12 mm slabs, no convection, perfectly
@@ -27,6 +28,7 @@ Data come from a checkout of [MaCFP/matl-db](https://github.com/MaCFP/matl-db)
 | `run_apparatus.jl` | Pyrolysis.jl on every deck × apparatus test, and the inert tests |
 | `external/` | deck writers, runners and extractors for FDS, Gpyro and ThermaKin2Ds |
 | `compare.jl` | figures and metrics of the runs against the submissions and the apparatus experiments (`results/figures/`, `results/metrics.csv`, `results/apparatus_scores.csv`) |
+| `report.jl` | the validation page and its figures |
 | `time_pyrolysis.jl`, `run_timing.py`, `timing_report.jl` | cost at matched accuracy on a quiet machine |
 | `results/` | generated (ignored): `results/<code>/<set>/<variant>/*.csv`, `results/timing/` |
 
@@ -35,6 +37,7 @@ julia --project=scripts/macfp_pmma scripts/macfp_pmma/run_pyrolysis.jl [SET ...]
 julia --project=scripts/macfp_pmma scripts/macfp_pmma/run_apparatus.jl [SET ...] [--inert]
 python3 scripts/macfp_pmma/run_timing.py scripts/macfp_pmma/results/timing --steps pyrolysis --sets NIST,Aalto_I,UMD,GIDAZE+
 julia --project=scripts/macfp_pmma scripts/macfp_pmma/compare.jl
+julia --project=scripts/macfp_pmma scripts/macfp_pmma/report.jl
 ```
 
 The external codes' runs are described beside their runners

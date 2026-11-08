@@ -185,7 +185,8 @@ for these decks (0.72κ for BUW-FZJ_C's residue). Pyrolysis.jl's diffuse two-str
 and integrates each cell exactly; its `fds_closure` variant takes
 κ × ln(1 + 2κΔx)/(1.5κΔx) at Δx = 50 µm, which makes the two codes' cells
 agree in transmission and emission, and `fds_matched` also aligns the items
-below that FDS cannot express.
+below that FDS cannot express. The comparison is on the validation page
+(`docs/guide/validation/macfp_pmma.md`).
 
 ### Per-set notes
 
