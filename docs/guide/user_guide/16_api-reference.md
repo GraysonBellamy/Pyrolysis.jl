@@ -995,6 +995,7 @@ How a solve ends:
 | `:Failure` | `:none` | the domain test gave up, a fixed step left the physical domain, or a deactivation event left the state inadmissible or the node velocities inconsistent; `solve` warns with the reason |
 | `:MaxIters` | `:none` | `maxiters` steps before the end |
 | `:DtLessThanMin` | `:none` | the step fell below `dtmin` |
+| `:DtLessThanMin` | `:pore_closure`, `:matrix_exhausted`, `:unsupported_endpoint_occupancy`, `:negative_gas_pressure`, `:negative_surface_pressure` | the step fell below `dtmin` while the domain test rejected a cell under gas transport; `solve` warns naming the cell (§8.3, §10.7) |
 
 A solve that stops early ends on the last state it accepted, which is saved.
 `succeeded` and `completed` combine the two fields (§16.5.3). Chapter 15

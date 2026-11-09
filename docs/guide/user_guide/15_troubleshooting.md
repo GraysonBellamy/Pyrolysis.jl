@@ -225,8 +225,11 @@ the trajectory itself is heading out of the domain.
 ### 15.3.2 `:DtLessThanMin` and the absolute-zero warning
 
 The step falls below `dtmin` when the integrator cannot find a proposal that
-both tests accept. When the last rejection was a cell at or below absolute
-zero, `solve` names it:
+both tests accept. Read `sol.outcome` first: a gas-transport domain outcome
+(`:matrix_exhausted`, `:pore_closure` and the others of §10.7) comes with a
+warning naming the cell and the quantity that left the domain, and a smaller
+`dtmin` does not help it. When the last rejection was a cell at or below
+absolute zero, `solve` names it:
 
 ```text
 solve(): stopped at t = …: the last proposed state, at t = …, takes cell i to or below absolute zero

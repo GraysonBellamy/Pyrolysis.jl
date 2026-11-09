@@ -271,6 +271,12 @@ function integrate(
     SciMLBase.successful_retcode(raw.retcode) ||
         !(monitor.transport_t >= accepted.t) ||
         @warn "solve(): stopped at t = $(raw.t[end]): a proposal after the last accepted state, at t = $(monitor.transport_t), raised $(monitor.transport_message)"
+    # A domain outcome the integrator ran into without the test giving up (the
+    # step reached `dtmin` first) is the reason the solve stopped: name it.
+    SciMLBase.successful_retcode(raw.retcode) ||
+        monitor.failed ||
+        monitor.outcome === :none ||
+        @warn "solve(): stopped at t = $(raw.t[end]): the domain test rejected the proposals after the last accepted state, $(monitor.outcome): $(monitor.message)"
     # A solve its controller stopped saves its last proposal, which it
     # rejected, at the last accepted time: report the accepted state there.
     SciMLBase.successful_retcode(raw.retcode) ||

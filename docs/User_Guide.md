@@ -5597,7 +5597,12 @@ rejected, and the step cut by the controller's smallest factor, when
   crossed nodes (a non-positive cell volume) or a non-positive cross-section
   area;
 - under gas transport a live cell's porosity leaves `[0, 1]` by more
-  than the skeletal volume of its mass tolerances;
+  than the skeletal volume of its mass tolerances (outcome `:pore_closure`), a
+  pore gas is more negative than its pressure tolerance
+  (`:negative_gas_pressure`), a cell's matrix occupancy leaves the transport
+  model's supported domain (`:matrix_exhausted` without an `endpoint`,
+  `:unsupported_endpoint_occupancy` with one), or a reconstructed boundary
+  pressure is negative (`:negative_surface_pressure`);
 - an algebraic row (a node velocity, a radiative face flux, the cross-section area
   or its lateral rate) misses its own equation by more than `reltol` times the
   equation's scale plus the unknown's absolute tolerance.
@@ -5616,7 +5621,16 @@ solve(): stopped at t = …: the last proposed state, at t = …, takes cell 12 
 ```
 
 which names the cell whose energy balance the step could not keep positive;
-Chapter 15 discusses the causes.
+Chapter 15 discusses the causes. When it stops while the gas-transport tests
+above were rejecting its proposals, the outcome is recorded in `sol.outcome`
+and `solve` warns with the cell:
+
+```
+solve(): stopped at t = …: the domain test rejected the proposals after the last accepted state, matrix_exhausted: cell 8: matrix_exhausted at matrix occupancy … and skeletal occupancy …
+```
+
+The integrator's own `dt <= dtmin` warning, printed with it, does not know the
+domain test and points at the model or its stability.
 
 ### The Newton-failure step cap
 
@@ -7568,6 +7582,8 @@ the strict test, `:Success` only.
 | `:Terminated` | `:min_thickness` | `true` | The live thickness of a moving mesh fell below `min_thickness` (§10.3). |
 | `:Terminated` | `:interior` | `false` | A cell below the threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one; the solve warns and ends. |
 | `:DtLessThanMin` | `:pore_closure` | `false` | The domain test kept rejecting a cell whose porosity left the resolved pore domain until the step fell below `dtmin`: its pore volume closed, or fell to its own mass, thermal and geometry uncertainty. Tighter tolerances resolve the second. |
+| `:DtLessThanMin` | `:matrix_exhausted` | `false` | A cell's matrix occupancy fell below the transport model's supported domain (`blend[2]` of a model without an `endpoint`): a material that leaves no residue has burned through it. Give the transport an `endpoint`, deactivate cells as they burn out, or keep a residue. |
+| `:DtLessThanMin` | `:unsupported_endpoint_occupancy`, `:negative_gas_pressure`, `:negative_surface_pressure` | `false` | The domain test kept rejecting a cell beyond its endpoint's skeletal occupancy, a pore gas below its pressure tolerance, or a negative reconstructed boundary pressure. |
 | `:Failure` | `:none` | `false` | The state after an event was inadmissible (a receiver outside its own mass tolerances, crossed nodes, a cell at or below absolute zero, under gas transport a porosity outside `[0, 1]`), or no consistent node velocities exist after it; the solve warns naming the event's time. |
 
 The state a solve ends on is always saved, whether or not `saveat` names its
@@ -10667,8 +10683,11 @@ the trajectory itself is heading out of the domain.
 ### 15.3.2 `:DtLessThanMin` and the absolute-zero warning
 
 The step falls below `dtmin` when the integrator cannot find a proposal that
-both tests accept. When the last rejection was a cell at or below absolute
-zero, `solve` names it:
+both tests accept. Read `sol.outcome` first: a gas-transport domain outcome
+(`:matrix_exhausted`, `:pore_closure` and the others of §10.7) comes with a
+warning naming the cell and the quantity that left the domain, and a smaller
+`dtmin` does not help it. When the last rejection was a cell at or below
+absolute zero, `solve` names it:
 
 ```text
 solve(): stopped at t = …: the last proposed state, at t = …, takes cell i to or below absolute zero
@@ -12185,6 +12204,7 @@ How a solve ends:
 | `:Failure` | `:none` | the domain test gave up, a fixed step left the physical domain, or a deactivation event left the state inadmissible or the node velocities inconsistent; `solve` warns with the reason |
 | `:MaxIters` | `:none` | `maxiters` steps before the end |
 | `:DtLessThanMin` | `:none` | the step fell below `dtmin` |
+| `:DtLessThanMin` | `:pore_closure`, `:matrix_exhausted`, `:unsupported_endpoint_occupancy`, `:negative_gas_pressure`, `:negative_surface_pressure` | the step fell below `dtmin` while the domain test rejected a cell under gas transport; `solve` warns naming the cell (§8.3, §10.7) |
 
 A solve that stops early ends on the last state it accepted, which is saved.
 `succeeded` and `completed` combine the two fields (§16.5.3). Chapter 15
