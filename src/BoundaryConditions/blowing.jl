@@ -339,8 +339,8 @@ end
 
 # Diffusivity ratio s = D_∞/α∞ of the lumped volatiles, and of gas component
 # `name` of molar mass `M`, at the surface-temperature iterate.
-@inline function _lumped_ratio(m::PoolingFilm, T_s)
-    fs, vol = m.free_stream, m.volatiles
+@inline function _lumped_ratio(m::PoolingFilm, vol::GasSpecies, T_s)
+    fs = m.free_stream
     T = _ratio_temperature(fs, vol, T_s)
     return _lumped_diffusivity(vol, fs, T) / _free_stream_thermal_diffusivity(fs, T)
 end
@@ -362,10 +362,11 @@ end
     fs = m.free_stream
     return map(material.components) do c
         !is_gas(c) ? 1.0 :
-        c.name === fs.name ? fs.molar_mass :
-        m.volatiles === nothing ? Float64(molar_mass(c)) : m.volatiles.molar_mass
+        c.name === fs.name ? fs.molar_mass : _volatile_molar_mass(m.volatiles, c)
     end
 end
+@inline _volatile_molar_mass(::Nothing, c) = Float64(molar_mass(c))
+@inline _volatile_molar_mass(vol::GasSpecies, c) = vol.molar_mass
 
 """
 	pooling_factor(model::PoolingFilm, Y, material, T_s, T_inf) -> (; ψ, Λ, Y)
@@ -398,8 +399,11 @@ end
 
 # Diffusivity ratio s = D_v,∞/α_∞ of the one volatile a solved film carries:
 # the lumped volatiles, or the material's only gas besides the free stream.
-@inline function _film_diffusivity_ratio(m::PoolingFilm, material::Material, T_s)
-    m.volatiles === nothing || return _lumped_ratio(m, T_s)
+@inline _film_diffusivity_ratio(m::PoolingFilm, material::Material, T_s) =
+    _film_diffusivity_ratio(m, m.volatiles, material, T_s)
+@inline _film_diffusivity_ratio(m::PoolingFilm, vol::GasSpecies, material::Material, T_s) =
+    _lumped_ratio(m, vol, T_s)
+@inline function _film_diffusivity_ratio(m::PoolingFilm, ::Nothing, material::Material, T_s)
     props = _gas_props(material, T_s)
     n = 0
     s = zero(T_s)
@@ -440,7 +444,7 @@ molar conductance is `g_face/M_∞`.
 # component otherwise, with z = 0 for components that are condensed,
 # free-stream gas or not leaving.
 @inline function _face_species(m::PoolingFilm, vol::GasSpecies, face::BlowingFace, ṁ)
-    s = _lumped_ratio(m, face.T_s)
+    s = _lumped_ratio(m, vol, face.T_s)
     b = ṁ / (m.g * s^m.n_D) * (m.free_stream.molar_mass / vol.molar_mass)
     return ((z = one(b), M = vol.molar_mass, b = b),)
 end
