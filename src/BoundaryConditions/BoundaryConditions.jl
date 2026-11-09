@@ -37,7 +37,7 @@ export AngularDistribution, Diffuse, Collimated, Cone
 
 # Mass boundary conditions
 export ImpermeableBC, MassFluxBC, GasReservoir, AmbientGasBC, MassTransferFilm, AnalogyFilm
-export validate_gas_boundary, mass_film_flux
+export validate_gas_boundary, mass_film_flux, molar_film_flux
 
 # Pressure boundary conditions (Darcy flow)
 export NeumannPressureBC, ConvectivePressureBC

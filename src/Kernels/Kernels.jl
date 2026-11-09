@@ -51,7 +51,7 @@ export BeamSource
 export DIFFUSIVITY, INTERFACE_FLOOR
 export exposed_face
 export BoundaryPatch, ThermalBoundaryKernel, boundary_energy_flux, boundary_condition
-export conducted_flux, boundary_conductivity
+export conducted_flux, boundary_conductivity, solved_surface_fractions
 export RelativeFluxKernel, van_albada
 
 end # module Kernels

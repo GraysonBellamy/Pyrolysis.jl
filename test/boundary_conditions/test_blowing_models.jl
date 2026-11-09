@@ -4,19 +4,20 @@ Blowing models against their reference values.
 The property-ratio and pooling forms were fitted to resolved simulations of
 the CAPA chamber and are implemented independently in the Python calculator
 `blowing_factor.py` of the oxidative_pyrolysis repository.
-The reference numbers below come from that calculator with the same gas data
-(NASA-7 heat capacities, CFD-case conductivity and viscosity polynomials,
-Fuller diffusion volumes). The one deliberate difference is the mean free-
-stream heat capacity between the gas and the surface temperature, which the
-calculator takes as the mean of 41 equally spaced samples and this package
-integrates exactly (5-point Gauss–Legendre), so the comparison is to 1e-4.
+The reference numbers below come from that calculator (`solve`, molar face gas,
+g = 10.9e-3 kg/(m² s)) with the same gas data (NASA-7 heat capacities, CFD-case
+conductivity and viscosity polynomials, Fuller diffusion volumes) and the same
+form of the Fuller correlation, so the comparison is to the calculator's
+printed digits.
 
 1. Gas data: `GasSpecies`, `NITROGEN`, `nasa7_heat_capacity`, Eucken and
    Fuller helpers against tabulated values.
 2. `PropertyRatioFilm`: limits, reduction to the Couette film, reference ratios.
 3. `PoolingFilm`: reference ratios, pooling factor, face fraction and buoyancy
    for a light gas (surrogate volatiles), water vapour, nitrogen and methyl
-   methacrylate on both sides of the switch; limits; AD through the face solve.
+   methacrylate on both sides of the switch; the paper's table for the
+   surrogate; the solved molar film against the face-gas equation; limits; AD
+   through the face solve.
 4. Per-species mixture path: a single component reproduces the lumped
    description; Wilke mixing lies between the pure-species conductivities.
 """
@@ -32,7 +33,11 @@ using Pyrolysis.BoundaryConditions:
     blowing_ratio,
     blowing_factor,
     solve_boundary_temperature!,
-    BoundaryState
+    BoundaryState,
+    pooling_factor,
+    pooling_film_conductance,
+    film_molar_masses,
+    molar_film_flux
 using Pyrolysis.States: trial_temperature
 
 # ----------------------------------------------------------------------------
@@ -40,17 +45,6 @@ using Pyrolysis.States: trial_temperature
 # conductivity and viscosity polynomials in SI, Fuller diffusion volumes.
 # ----------------------------------------------------------------------------
 _poly(c) = PolynomialProperty(c)
-
-# The calculator's binary diffusivity into nitrogen (its Fuller constant is
-# 1e-7 with M in g/mol and no pressure factor; the package's helper carries the
-# textbook 0.00143/P), given explicitly so the comparison isolates the model.
-function _calc_diffusivity(M, V)
-    Mg, Mn = 1e3 * M, 28.014
-    Vn = 18.5
-    return CallableProperty(
-        T -> 1e-7 * T^1.75 * sqrt(1 / Mg + 1 / Mn) / (cbrt(V) + cbrt(Vn))^2,
-    )
-end
 
 const SURROGATE = GasSpecies(
     :pyrolysate;
@@ -80,7 +74,6 @@ const SURROGATE = GasSpecies(
         2.3401486488e-18,
     )),
     V_D = 65.4,
-    D = _calc_diffusivity(0.042, 65.4),
     T_range = (200.0, 1250.0),
 )
 const MMA = GasSpecies(
@@ -111,7 +104,6 @@ const MMA = GasSpecies(
         5.0658457784e-19,
     )),
     V_D = 110.2,
-    D = _calc_diffusivity(0.1001158, 110.2),
     T_range = (200.0, 1250.0),
 )
 const WATER = GasSpecies(
@@ -142,7 +134,6 @@ const WATER = GasSpecies(
         2.6753982374e-17,
     )),
     V_D = 13.1,
-    D = _calc_diffusivity(0.0180153, 13.1),
     T_range = (200.0, 1250.0),
 )
 # Nitrogen blown into nitrogen: the free stream itself, with the calculator's D.
@@ -153,7 +144,6 @@ const N2_BLOWN = GasSpecies(
     k = NITROGEN.thermal_conductivity,
     μ = NITROGEN.viscosity,
     V_D = 18.5,
-    D = _calc_diffusivity(0.028014, 18.5),
     T_range = (200.0, 1250.0),
 )
 
@@ -183,12 +173,12 @@ const REFERENCE = (
         870.0,
         360.0,
         11.2,
-        0.5948057161,
+        0.5935708905,
         0.5986304188,
         0.9513589228,
-        0.9958767108,
-        0.6396778633,
-        0.8089398248,
+        0.9945449400,
+        0.5953311038,
+        0.8254605536,
     ),
     (
         SURROGATE,
@@ -196,12 +186,12 @@ const REFERENCE = (
         650.0,
         336.0,
         11.2,
-        0.8311061527,
+        0.8299606939,
         0.8332662806,
         0.3543512404,
-        0.9978171245,
-        0.3185579802,
-        0.8730175786,
+        0.9966595625,
+        0.3118510204,
+        0.8760008884,
     ),
     (
         MMA,
@@ -209,12 +199,12 @@ const REFERENCE = (
         870.0,
         360.0,
         11.2,
-        0.1752582883,
+        0.2383769507,
         0.5068607936,
         1.2337616673,
-        0.5919057109,
-        0.8706383645,
-        -0.1866643156,
+        0.6776608382,
+        0.7086330604,
+        0.2642875591,
     ),
     (
         MMA,
@@ -222,12 +212,12 @@ const REFERENCE = (
         650.0,
         336.0,
         9.591,
-        0.0215950821,
+        0.0193205723,
         0.1695576891,
         2.8942062748,
-        0.5900000007,
-        0.9918584978,
-        -1.6756172004,
+        0.5770007205,
+        0.9000858421,
+        -0.9718555318,
     ),
     (
         MMA,
@@ -235,12 +225,12 @@ const REFERENCE = (
         870.0,
         360.0,
         11.2,
-        0.7789335449,
+        0.7776079417,
         0.7864442763,
         0.4626606252,
-        0.9923532860,
-        0.3671029426,
-        0.7463054509,
+        0.9910034632,
+        0.3372417529,
+        0.7735615333,
     ),
     (
         WATER,
@@ -248,12 +238,12 @@ const REFERENCE = (
         870.0,
         360.0,
         11.2,
-        0.5760944066,
+        0.5760231784,
         0.5762177221,
         1.0170682035,
-        0.9998656795,
-        0.4958439603,
-        1.1523355910,
+        0.9997880933,
+        0.5197889746,
+        1.1580449950,
     ),
     (
         N2_BLOWN,
@@ -261,13 +251,21 @@ const REFERENCE = (
         870.0,
         360.0,
         11.2,
-        0.6470656999,
+        0.6467055416,
         0.6476482841,
         0.8139121718,
-        0.9993845153,
-        0.5371363753,
+        0.9990039968,
+        0.5186001358,
         1.0000000000,
     ),
+)
+
+# The paper's table: the surrogate at three conditions, h₀ = 11.2 W/(m² K),
+# outflow 2, 5, 8 and 15 g/(m² s) → ratio (calculator output, 10 digits).
+const PAPER_TABLE = (
+    (650.0, 360.0, (0.8838971987, 0.7252639524, 0.5811387303, 0.3006246704)),
+    (705.0, 391.0, (0.8837826823, 0.7250452173, 0.5808937246, 0.3002756393)),
+    (870.0, 360.0, (0.8840897591, 0.7287990767, 0.5935708905, 0.3510471082)),
 )
 
 # Measure the specialized evaluator after warming both wrapper and model.
@@ -300,9 +298,17 @@ _blowing_bytes(model::M, face::F, h, T) where {M,F} =
         )
         @test μ_e ≈ NITROGEN.viscosity(500.0) rtol = 0.15
 
-        # Fuller: CO₂ in N₂ at 298 K, measured 0.165 cm²/s (Marrero and Mason).
+        # Fuller: CO₂ in N₂ at 298 K, measured 0.165 cm²/s (Marrero and Mason),
+        # and the surrogate in nitrogen as the calculator evaluates it.
         D = fuller_diffusivity(298.15, 0.04401, 26.9, 0.028014, 18.5)
-        @test D ≈ 1.62e-5 rtol = 0.02
+        @test D ≈ 1.624845582497e-5 rtol = 1e-12
+        for (T, D_calc) in (
+            (298.15, 1.171661701051e-5),
+            (650.0, 4.582892648104e-5),
+            (870.0, 7.633083305712e-5),
+        )
+            @test fuller_diffusivity(T, 0.042, 65.4, 0.028014, 18.5) ≈ D_calc rtol = 1e-12
+        end
         @test D ≈ 1.65e-5 rtol = 0.10
         # Inverse in pressure, T^1.75.
         @test fuller_diffusivity(298.15, 0.04401, 26.9, 0.028014, 18.5; P = 2 * 101325.0) ≈
@@ -384,8 +390,10 @@ _blowing_bytes(model::M, face::F, h, T) where {M,F} =
         @test_throws ArgumentError PoolingFilm(NITROGEN; ψ0 = 1.0)
         @test_throws ArgumentError PoolingFilm(NITROGEN; Λw = 0.0)
         @test_throws ArgumentError PoolingFilm(NITROGEN; diffusion_volume = (gas = -1.0,))
+        @test_throws ArgumentError PoolingFilm(NITROGEN; g = 0.0)
         d = PoolingFilm(NITROGEN)
-        @test (d.n_Γ, d.n_D, d.ψ0, d.Λc, d.Λw) == (0.6, 0.5, 0.59, 0.35, 0.10)
+        @test (d.n_Γ, d.n_D, d.g, d.ψ0, d.Λc, d.Λw) ==
+              (0.6, 0.6, 10.9e-3, 0.577, 0.383, 0.102)
 
         for (gas, ṁ, T_s, T_in, h0, ratio, _, φ0, ψ, Y, Λ) in REFERENCE
             s = blowing_state(
@@ -394,11 +402,11 @@ _blowing_bytes(model::M, face::F, h, T) where {M,F} =
                 h0,
                 T_in,
             )
-            @test s.φ ≈ φ0 rtol = 1e-7
-            @test s.χ ≈ ratio rtol = 1e-4
-            @test s.ψ ≈ ψ rtol = 1e-4
-            @test s.Y ≈ Y rtol = 5e-4      # the face balance carries the c̄_p quadrature difference
-            @test s.Λ ≈ Λ atol = 5e-4      # and Λ amplifies it by ∂Λ/∂Y ≈ −4 for a heavy gas
+            @test s.φ ≈ φ0 rtol = 1e-9
+            @test s.χ ≈ ratio atol = 1e-10    # the calculator's 10 printed decimals
+            @test s.ψ ≈ ψ rtol = 1e-9
+            @test s.Y ≈ Y rtol = 1e-9
+            @test s.Λ ≈ Λ atol = 1e-9
             @test s.states == 1
             # The ratio is the film factor at φ/ψ, scaled by ψ.
             @test s.χ ≈ s.ψ * blowing_factor(s.φ / s.ψ) rtol = 1e-12
@@ -425,7 +433,173 @@ _blowing_bytes(model::M, face::F, h, T) where {M,F} =
         # and the floor is approached for a heavy gas at high outflow.
         s_pool = blowing_state(m, _face(mat, 16.0, 650.0), 9.591, 336.0)
         @test s_pool.χ < blowing_factor(s_pool.φ)
-        @test s_pool.ψ ≈ 0.59 atol = 1e-6
+        @test s_pool.ψ ≈ m.ψ0 atol = 1e-5
+
+        # The paper's table for the surrogate.
+        for (T_s, T_in, ratios) in PAPER_TABLE,
+            (ṁ, ratio) in zip((2.0, 5.0, 8.0, 15.0), ratios)
+
+            s = blowing_state(
+                PoolingFilm(NITROGEN; volatiles = SURROGATE),
+                _face(mat, ṁ, T_s),
+                11.2,
+                T_in,
+            )
+            @test s.χ ≈ ratio rtol = 1e-9
+        end
+    end
+
+    # ========================================================================
+    @testset "PoolingFilm: the solved molar film is the face-gas equation" begin
+        # One lumped volatile against nitrogen with no net nitrogen flux: the
+        # molar film of conductance ψ g s^{n_D} gives eq. face_gas, and with it
+        # the calculator's ratio. The material's pore-transport molar mass
+        # (70 g/mol) differs from the surrogate's: the film counts moles as
+        # the model does.
+        solid = SolidComponent(:solid; λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9)
+        n2 = GaseousComponent(
+            :N2;
+            M = 0.028014,
+            c = NITROGEN.heat_capacity,
+            k = NITROGEN.thermal_conductivity,
+            validate_properties = false,
+        )
+        mat = Material(
+            name = :binary,
+            components = (
+                solid,
+                GaseousComponent(:volatiles; M = 0.070, c = 2000.0, k = 0.05),
+                n2,
+            ),
+            reactions = (Reaction(:d, 1 => 2, A = 1e5, E = 5e4, h = 1e5),),
+        )
+        m = PoolingFilm(NITROGEN; volatiles = SURROGATE)
+        Mv, Mn = SURROGATE.molar_mass, NITROGEN.molar_mass
+        @test film_molar_masses(m, mat) == (1.0, Mv, Mn)
+        Yof(x) =
+            (0.0, x * Mv / (x * Mv + (1 - x) * Mn), (1 - x) * Mn / (x * Mv + (1 - x) * Mn))
+        for (T_s, T_in, ratios) in PAPER_TABLE,
+            (ṁ, ratio) in zip((2e-3, 5e-3, 8e-3, 15e-3), ratios)
+
+            Nt = ṁ / Mv
+            G(x) = pooling_film_conductance(m, Yof(x), mat, T_s, T_in) / Mn
+            flux(x) = molar_film_flux([x, 1 - x], [0.0, 1.0], Nt, G(x), [Mv, Mn])
+            # Zero net nitrogen flux fixes the face fraction.
+            lo, hi = 0.0, 1.0
+            for _ = 1:200
+                mid = (lo + hi) / 2
+                flux(mid)[2] > 0 ? (lo = mid) : (hi = mid)
+            end
+            x = (lo + hi) / 2
+            F = flux(x)
+            @test abs(F[2]) < 1e-12 * ṁ
+            @test sum(F) ≈ ṁ rtol = 1e-12                  # mass
+            @test F[1] / Mv + F[2] / Mn ≈ Nt rtol = 1e-12  # moles
+            p = pooling_factor(m, Yof(x), mat, T_s, T_in)
+            s = Pyrolysis.BoundaryConditions._film_diffusivity_ratio(m, mat, T_s)
+            @test x ≈ 1 - exp(-(ṁ / (p.ψ * m.g * s^m.n_D)) * (Mn / Mv)) atol = 1e-12
+            state = blowing_state(
+                m,
+                BlowingFace((0.0, ṁ, 0.0), T_s, mat; surface_mass_fractions = Yof(x)),
+                11.2,
+                T_in,
+            )
+            @test state.χ ≈ ratio rtol = 1e-9
+            @test state.ψ == p.ψ && state.Λ == p.Λ && state.Y == p.Y
+        end
+
+        # Free-stream gas alone on the face: Λ = 1 and the switch's own value
+        # there, ψ0 + (1 − ψ0)/(1 + e^{−(1 − Λc)/Λw}), not 1.
+        p1 = pooling_factor(m, (0.0, 0.0, 1.0), mat, 870.0, 360.0)
+        @test p1.Λ ≈ 1 atol = 1e-14
+        @test p1.ψ ≈ 0.999003997 atol = 1e-9
+        # A face no hotter than the free stream keeps ψ = 1.
+        @test pooling_factor(m, Yof(0.5), mat, 350.0, 360.0).ψ == 1
+
+        # On a solved face the ratio is continuous through zero net outflow
+        # (ψ follows the face composition at either sign); the property ratio
+        # changes the slope there.
+        Y = Yof(0.9)
+        χ(ṁ) = blowing_ratio(
+            m,
+            BlowingFace(
+                (zero(ṁ), 2e-3 + ṁ, -2e-3 + zero(ṁ)),
+                650.0 + zero(ṁ),
+                mat;
+                surface_mass_fractions = Y,
+            ),
+            11.2,
+            360.0,
+        )
+        ψ = pooling_factor(m, Y, mat, 650.0, 360.0).ψ
+        @test ψ < 0.9
+        @test χ(0.0) ≈ ψ rtol = 1e-14
+        @test χ(1e-12) ≈ χ(-1e-12) atol = 1e-9
+        for ṁ in (1e-3, -1e-3)
+            δ = 1e-8
+            @test ForwardDiff.derivative(χ, ṁ) ≈ (χ(ṁ + δ) - χ(ṁ - δ)) / (2δ) rtol = 1e-6
+        end
+        # Counterflow on a solved face is not the closure's to refuse.
+        @test blowing_state(
+            m,
+            BlowingFace((0.0, 8e-3, -1e-3), 870.0, mat; surface_mass_fractions = Y),
+            11.2,
+            360.0,
+        ).χ < 1
+
+        # One diffusivity per film: a single gas besides the free stream
+        # supplies its own; two need lumped volatiles.
+        mono = PoolingFilm(NITROGEN; diffusion_volume = (volatiles = 65.4,))
+        @test Pyrolysis.BoundaryConditions._film_diffusivity_ratio(mono, mat, 870.0) > 0
+        mat3 = Material(
+            name = :three,
+            components = (
+                solid,
+                GaseousComponent(:volatiles; M = 0.070, c = 2000.0, k = 0.05),
+                GaseousComponent(:water; M = 0.018, c = 2000.0, k = 0.05),
+                n2,
+            ),
+            reactions = (Reaction(:d, 1 => 2, A = 1e5, E = 5e4, h = 1e5),),
+        )
+        @test_throws ArgumentError pooling_film_conductance(
+            mono,
+            (0.0, 0.5, 0.0, 0.5),
+            mat3,
+            870.0,
+            360.0,
+        )
+        @test pooling_film_conductance(m, (0.0, 0.5, 0.0, 0.5), mat3, 870.0, 360.0) > 0
+
+        # The diffusivity and the thermal diffusivity it is divided by share
+        # one temperature, held inside every property range they read: above
+        # the ranges the ratio stops changing, inside them it follows T_s.
+        ratio(model, T) =
+            Pyrolysis.BoundaryConditions._film_diffusivity_ratio(model, mat, T)
+        @test ratio(m, 1400.0) == ratio(m, 1250.0)
+        @test ratio(mono, 1400.0) == ratio(mono, 1250.0)
+        narrow = GasSpecies(
+            :pyrolysate;
+            M = 0.042,
+            c = 2000.0,
+            k = 0.05,
+            V_D = 65.4,
+            T_range = (300.0, 1000.0),
+        )
+        mn = PoolingFilm(NITROGEN; volatiles = narrow)
+        @test ratio(mn, 1100.0) == ratio(mn, 1000.0)
+        @test ratio(mn, 900.0) != ratio(mn, 1000.0)
+        @test ratio(mn, 900.0) ≈ ratio(PoolingFilm(NITROGEN; volatiles = SURROGATE), 900.0) rtol =
+            1e-12
+        @test_throws ArgumentError PoolingFilm(
+            NITROGEN;
+            volatiles = GasSpecies(
+                :hot;
+                M = 0.042,
+                c = 2000.0,
+                k = 0.05,
+                T_range = (1300.0, 2000.0),
+            ),
+        )
     end
 
     # ========================================================================
@@ -483,8 +657,7 @@ _blowing_bytes(model::M, face::F, h, T) where {M,F} =
         T_s = 870.0
         # One gas component with the surrogate's properties reproduces the
         # lumped description: same Γ ratio, same molar mass, same diffusivity
-        # (its Fuller volume on the model, the calculator's D on the lumped gas
-        # differ by the Fuller constant only).
+        # (its Fuller volume on the model, the same volume on the lumped gas).
         solid = SolidComponent(:solid; λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9)
         g1 = GaseousComponent(
             :pyro;
@@ -514,8 +687,8 @@ _blowing_bytes(model::M, face::F, h, T) where {M,F} =
         )
         p_lump =
             blowing_state(PoolingFilm(NITROGEN; volatiles = SURROGATE), face1, h, T_inf)
-        @test p_mix.χ ≈ p_lump.χ rtol = 2e-3
-        @test p_mix.Y ≈ p_lump.Y rtol = 2e-3
+        @test p_mix.χ ≈ p_lump.χ rtol = 1e-12
+        @test p_mix.Y ≈ p_lump.Y rtol = 1e-12
 
         # Pooling uses the physical surface composition when the free-stream
         # species participates in outward flow.
@@ -546,16 +719,16 @@ _blowing_bytes(model::M, face::F, h, T) where {M,F} =
                 (0.0, 0.0, 8e-3),
                 T_s,
                 mat2;
-                surface_mole_fractions = (0.0, 0.0, 1.0),
+                surface_mass_fractions = (0.0, 0.0, 1.0),
             ),
             h,
             T_inf,
         )
         @test s_n2only.Y == 0
         @test s_n2only.Λ ≈ 1 atol = 1e-12
-        # The logistic switch does not reach 1 at Λ = 1: ψ(1) = ψ0 + (1 − ψ0)/(1 + e^{−6.5}),
+        # The logistic switch does not reach 1 at Λ = 1: ψ(1) = ψ0 + (1 − ψ0)/(1 + e^{−(1 − Λc)/Λw}),
         # the equation's own value for pure purge at the face.
-        ψ1 = 0.59 + 0.41 / (1 + exp(-(1 - 0.35) / 0.10))
+        ψ1 = 0.577 + 0.423 / (1 + exp(-(1 - 0.383) / 0.102))
         @test s_n2only.ψ ≈ ψ1 rtol = 1e-10
         φ_n2 = 8e-3 * NITROGEN.heat_capacity(T_s) / h
         @test s_n2only.φ ≈ φ_n2 rtol = 1e-12
@@ -566,7 +739,7 @@ _blowing_bytes(model::M, face::F, h, T) where {M,F} =
                 (0.0, 8e-3, 2e-3),
                 T_s,
                 mat2;
-                surface_mole_fractions = (0.0, 0.1, 0.9),
+                surface_mass_fractions = (0.0, 0.15, 0.85),
             ),
             h,
             T_inf,
@@ -582,7 +755,7 @@ _blowing_bytes(model::M, face::F, h, T) where {M,F} =
                 (0.0, 8e-3, 2e-3),
                 T_s,
                 mat2;
-                surface_mole_fractions = (0.0, 0.1, 0.9),
+                surface_mass_fractions = (0.0, 0.15, 0.85),
             ),
         )
             blowing_state(m2, face, h, T_inf)

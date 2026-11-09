@@ -3,6 +3,10 @@ using Pyrolysis.Materials: R_GAS
 using Pyrolysis.Assembly: residual!, buffers
 using Pyrolysis.States: mass_index, energy_index
 using Pyrolysis.Meshes: n_faces
+using Pyrolysis.Kernels: find_kernel
+using Pyrolysis.BoundaryConditions: molar_film_flux
+using Pyrolysis.ColoredJacobian:
+    dense_jacobian, missing_entries, compare_entries, jac_prototype, jacobian!
 
 function gas_problem(;
     model = LumpedTransfer(),
@@ -305,5 +309,174 @@ end
         @test cA.p_surface[:, f]==cN.p_surface[:, f]
         @test cA.F_energy[f]==cN.F_energy[f]
         @test cA.T_face[f]==cN.T_face[f]
+    end
+end
+
+# A purged face carrying the pooling model: matrix, one volatile and nitrogen,
+# the volatile at a pore-transport molar mass `Mpore` the model need not share.
+function pool_problem(;
+    volatiles = GasSpecies(:pyrolysate; M = 0.042, c = 2000.0, k = 0.05, V_D = 65.4),
+    Mpore = 0.070,
+    P = 1.002e5,
+    xv = 0.9,
+    T = 870.0,
+    κ = 2e-12,
+    film = AnalogyFilm(),
+    blowing = PoolingFilm(NITROGEN; volatiles),
+    thermal = HeatFluxBC(5e3)+ConvectiveBC(h = 11.2, T_inf = 360.0, blowing = blowing),
+    reservoir = (N2 = 1.0,),
+    cells = 2,
+)
+    solid=SolidComponent(
+        :matrix;
+        ρ = 500.0,
+        ρ_intrinsic = 1000.0,
+        c = 1000.0,
+        k = 0.2,
+        λ = 1e-5,
+        κ = κ,
+    )
+    vol=GaseousComponent(:volatiles; M = Mpore, c = 2000.0, k = 0.05)
+    n2=GaseousComponent(:N2; M = 0.028014, c = 1100.0, k = 0.05)
+    mat=Material(name = :pooled_face, components = (solid, vol, n2))
+    ξ=(500.0, 0.5*P*xv*Mpore/(R_GAS*T), 0.5*P*(1-xv)*0.028014/(R_GAS*T))
+    PyrolysisProblem(
+        mesh = uniform_mesh(0.01, cells),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = thermal, bottom = AdiabaticBC()),
+            mass = (
+                top = AmbientGasBC(
+                    GasReservoir(P = 1e5, T = 360.0, mole_fractions = reservoir);
+                    film = film,
+                ),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z->T,
+        ξ_initial = [z->ξ[j] for j = 1:3],
+        tspan = (0.0, 0.01),
+    )
+end
+
+@testset "a pooling face exchanges gas through the model's own molar film" begin
+    BC=Pyrolysis.BoundaryConditions
+    surrogate=GasSpecies(:pyrolysate; M = 0.042, c = 2000.0, k = 0.05, V_D = 65.4)
+    mma=GasSpecies(:MMA; M = 0.100, c = 2000.0, k = 0.03, V_D = 110.2)
+    ψs=Float64[]
+    ingress=false
+    for (volatiles, Mpore) in ((surrogate, 0.070), (mma, 0.100)),
+        P in (1.0005e5, 1.002e5, 1.005e5, 1.01e5)
+
+        model=PoolingFilm(NITROGEN; volatiles)
+        cp, ds, c, du=exchange_snapshot(
+            pool_problem(; volatiles, Mpore, P, blowing = model),
+        )
+        f=n_faces(cp.def.setup.topology)
+        mat=cp.def.setup.material
+        @test c.surface_residual[f]<3e-12
+        @test all(isfinite, du)
+        N=c.F_mass[2:3, f]
+        @test N[1]>0
+        ingress|=N[2]<0                 # nitrogen diffusing in against the outflow
+        # The solved surface state, in the material's basis.
+        w=c.p_surface[2:3, f] .* [Mpore, 0.028014]
+        Ys=w/sum(w)
+        Y=(0.0, Ys[1], Ys[2])
+        Ts=c.T_face[f]
+        # The film the model states, with moles counted at its molar masses,
+        # carries exactly the pore fluxes: mass and moles balance.
+        Mf=collect(BC.film_molar_masses(model, mat)[2:3])
+        @test Mf==[volatiles.molar_mass, NITROGEN.molar_mass]
+        n=Ys ./ Mf
+        g=BC.pooling_film_conductance(model, Y, mat, Ts, 360.0)
+        F=molar_film_flux(n/sum(n), [0.0, 1.0], sum(N ./ Mf), g/NITROGEN.molar_mass, Mf)
+        @test F≈N rtol=1e-9 atol=1e-15
+        @test sum(F)≈sum(N) rtol=1e-9
+        @test sum(F ./ Mf)≈sum(N ./ Mf) rtol=1e-9
+        # Heat and gas exchange share one ψ.
+        p=BC.pooling_factor(model, Y, mat, Ts, 360.0)
+        st=find_kernel(Pyrolysis.Kernels.ThermalBoundaryKernel, cp.def.kernels).states[f]
+        @test st.pooling_factor≈p.ψ rtol=1e-12
+        @test st.face_fraction≈p.Y rtol=1e-12
+        volatiles===mma && push!(ψs, p.ψ)
+    end
+    # The heavy gas crosses the switch over the sweep and the Newton holds,
+    # with nitrogen entering against the outflow at the low end.
+    @test minimum(ψs)<0.8<0.95<maximum(ψs)
+    @test ingress
+
+    # Nitrogen alone at the reservoir state: nothing crosses the face, and ψ
+    # is the switch's value at Λ = 1.
+    cp, ds, c, du=exchange_snapshot(pool_problem(; P = 1e5, xv = 0.0, T = 360.0))
+    f=n_faces(cp.def.setup.topology)
+    @test maximum(abs, c.F_mass[:, f])<1e-14
+    st=find_kernel(Pyrolysis.Kernels.ThermalBoundaryKernel, cp.def.kernels).states[f]
+    @test c.T_face[f]>360.0
+    @test st.pooling_factor≈0.999003997 atol=1e-9
+
+    # The face's own film is the default; everything that would leave its gas
+    # exchange without the model's ψ, or ambiguous, is refused.
+    conv=ConvectiveBC(
+        h = 11.2,
+        T_inf = 360.0,
+        blowing = PoolingFilm(NITROGEN; volatiles = surrogate),
+    )
+    @test_throws ArgumentError exchange_snapshot(
+        pool_problem(; film = MassTransferFilm(9.41e-3)),
+    )
+    @test_throws ArgumentError exchange_snapshot(
+        pool_problem(; film = AnalogyFilm(Le = 1.3)),
+    )
+    @test_throws ArgumentError exchange_snapshot(
+        pool_problem(; thermal = conv+ConvectiveBC(h = 2.0, T_inf = 360.0)),
+    )
+    @test_throws ArgumentError exchange_snapshot(
+        pool_problem(; reservoir = (volatiles = 0.1, N2 = 0.9)),
+    )
+
+    # The resolved film is inferred through combined conditions.
+    K=Pyrolysis.Kernels
+    th=HeatFluxBC(1e4)+conv+RadiativeBC(T_inf = 360.0)
+    @test @inferred(K._resolve_film(AnalogyFilm(), th)) isa K.PoolingGasFilm
+    @test @inferred(
+        K._resolve_film(
+            AnalogyFilm(),
+            HeatFluxBC(1e4)+ConvectiveBC(h = 11.2, T_inf = 360.0),
+        )
+    ) isa AnalogyFilm
+    @test @inferred(K._resolve_film(AnalogyFilm(), HeatFluxBC(1e4))) === nothing
+end
+
+@testset "the pooling film's Jacobian" begin
+    for P in (1.002e5, 1.01e5), energy in (:temperature, :enthalpy)
+        mma=GasSpecies(:MMA; M = 0.100, c = 2000.0, k = 0.03, V_D = 110.2)
+        cp=setup(
+            pool_problem(; volatiles = mma, Mpore = 0.100, P, cells = 3);
+            energy_state = energy,
+        )
+        def, ws, cj=cp.def, cp.ws, cp.jacobian
+        u=copy(cp.u0)
+        Jd=dense_jacobian(def, ws, u, 0.0)
+        @test all(isfinite, Jd)
+        @test isempty(missing_entries(Jd, cj.pattern))
+        J=jac_prototype(cj)
+        jacobian!(J, cj, u, 0.0)
+        @test compare_entries(Matrix(J), Jd; rtol = 1e-12).passed
+        # Automatic derivatives through the implicit surface root against
+        # central differences of the residual.
+        du⁺=zero(u)
+        du⁻=zero(u)
+        Jf=similar(Jd)
+        for j in eachindex(u)
+            h=1e-6*max(abs(u[j]), 1e-6)
+            v=copy(u)
+            v[j]+=h
+            residual!(du⁺, v, def, 0.0, ws)
+            v[j]-=2h
+            residual!(du⁻, v, def, 0.0, ws)
+            Jf[:, j]=(du⁺-du⁻)/(2h)
+        end
+        @test compare_entries(Jf, Jd; rtol = 1e-5).passed
     end
 end

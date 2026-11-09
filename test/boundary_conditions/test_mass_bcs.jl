@@ -1,5 +1,6 @@
 using Test, Pyrolysis, StaticArrays, ForwardDiff
-using Pyrolysis.BoundaryConditions: validate_gas_boundary, _reservoir_values, mass_film_flux
+using Pyrolysis.BoundaryConditions:
+    validate_gas_boundary, _reservoir_values, mass_film_flux, molar_film_flux
 
 const material=Material(
     name = :boundary_validation,
@@ -87,6 +88,31 @@ end
     @test mass_film_flux(ys, ya, -2.0, 0.0) == -2ya
     @test mass_film_flux(ys, ya, 0.0, 0.1)≈0.1*(ys-ya)
     @test all(isfinite, ForwardDiff.jacobian(x->mass_film_flux(ys, ya, x[1], 0.1), [0.0]))
+end
+
+@testset "molar film of one conductance" begin
+    xs=SVector(0.2, 0.3, 0.5)
+    xa=SVector(0.0, 0.0, 1.0)
+    M=SVector(0.042, 0.100, 0.028)
+    for N in (-10.0, -1e-3, 0.0, 1e-3, 10.0), G in (1e-6, 0.4, 1e6)
+        F=molar_film_flux(xs, xa, N, G, M)
+        expected=setprecision(256) do
+            n=BigFloat(N)
+            g=BigFloat(G)
+            rate=n==0 ? g : n/expm1(n/g)
+            Float64.(BigFloat.(M) .* (BigFloat.(xs)*n+rate*(BigFloat.(xs)-BigFloat.(xa))))
+        end
+        @test F≈expected rtol=4e-14 atol=2e-14*max(abs(N), G)*maximum(M)
+        # Moles balance: the molar fluxes sum to the net molar flux.
+        @test sum(F ./ M)≈N atol=1e-14*max(abs(N), G)
+    end
+    # With every molar mass equal it is the mass film in those fractions.
+    Meq=SVector(0.03, 0.03, 0.03)
+    @test molar_film_flux(xs, xa, 2.0, 0.5, Meq)≈0.03*mass_film_flux(xs, xa, 2.0, 0.5) rtol=1e-15
+    # A species absent from the reservoir leaves at any net flux.
+    for N in (-5.0, 0.0, 5.0)
+        @test all(molar_film_flux(xs, xa, N, 0.4, M)[1:2] .> 0)
+    end
 end
 
 @testset "analogy film and hydraulic flow basis" begin

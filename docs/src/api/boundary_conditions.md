@@ -30,6 +30,8 @@ GasReservoir
 AmbientGasBC
 MassTransferFilm
 AnalogyFilm
+BoundaryConditions.mass_film_flux
+BoundaryConditions.molar_film_flux
 ```
 
 ## Blowing
@@ -55,6 +57,8 @@ BlowingFace
 blowing_state
 blowing_ratio
 blowing_factor
+BoundaryConditions.pooling_factor
+BoundaryConditions.pooling_film_conductance
 ```
 
 ## Pressure gradient and hydraulic resistance

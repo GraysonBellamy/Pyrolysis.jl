@@ -268,8 +268,13 @@ function _face_heat_fluxes(thermal, tag, faces, c, ds, topo, material, t)
                 J,
                 T_s,
                 material;
-                surface_mole_fractions = sum(c.p_surface[:, f])>0 ?
-                                         Tuple(c.p_surface[:, f]/sum(c.p_surface[:, f])) : nothing,
+                surface_mass_fractions = solved_surface_fractions(
+                    thermal,
+                    tag,
+                    c,
+                    f,
+                    material,
+                ),
             );
             a_eff = ds.a[i],
         )

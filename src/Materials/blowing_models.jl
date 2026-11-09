@@ -148,17 +148,17 @@ its own; the mixing rule for the outflow conductivity is the only consumer.
 """
 	fuller_diffusivity(T, M_a, V_a, M_b, V_b; P = P_REF) -> D
 
-Binary diffusion coefficient [m²/s] of gases `a` and `b` by the Fuller,
-Schettler and Giddings correlation (Poling, Prausnitz and O'Connell, Eq.
-11-4.4): `D = 0.00143 T^1.75 / (P √M_ab (V_a^⅓ + V_b^⅓)²)` in cm²/s with `P`
-in bar, molar masses in g/mol and `M_ab = 2/(1/M_a + 1/M_b)`. Here `M` is in
-kg/mol and `P` in Pa.
+Binary diffusion coefficient [m²/s] of gases `a` and `b` by the correlation of
+Fuller, Schettler and Giddings (1966) in its original form,
+`D = 10⁻³ T^1.75 √(1/M_a + 1/M_b) / (P (V_a^⅓ + V_b^⅓)²)` in cm²/s with `P` in
+atm and molar masses in g/mol: the form the chamber CFD and its blowing
+calculator use. Poling, Prausnitz and O'Connell's Eq. 11-4.4 restates it with
+the constant 0.00143 and `P` in bar, 0.2 % lower. Here `M` is in kg/mol and `P`
+in Pa.
 """
 @inline function fuller_diffusivity(T, M_a, V_a, M_b, V_b; P = P_REF)
     Ma, Mb = 1e3 * M_a, 1e3 * M_b
-    M_ab = 2 / (1 / Ma + 1 / Mb)
-    D_cm2 = 0.00143 * T^1.75 / ((P * 1e-5) * sqrt(M_ab) * (cbrt(V_a) + cbrt(V_b))^2)
-    return 1e-4 * D_cm2
+    return 1e-7 * T^1.75 * sqrt(1 / Ma + 1 / Mb) / ((P / P_REF) * (cbrt(V_a) + cbrt(V_b))^2)
 end
 
 """
@@ -238,9 +238,11 @@ Film law for any light gas, anchored on the Couette film of the free stream:
 the leaving mixture's, its heat capacity weighted by mass fraction and its
 conductivity by Wilke's rule over the species with outward flux. The gas
 enters only through the property ratio, so no constant is refitted for a new
-gas; `n_Γ = 0.6` is Kays's turbulent exponent on the heat-capacity ratio,
-reproduced by the chamber CFD. With `n_Γ = 0` this is the Couette film in
-the free-stream heat capacity.
+gas; `n_Γ = 0.6` is the exponent the chamber CFD gives on the ratio of `k/c_p`
+(fitted 0.56 on the light gases and rounded), an empirical interpolation
+between the free-stream film (`n_Γ = 0`) and a film of the volatiles alone
+(`n_Γ = 1`). With `n_Γ = 0` this is the Couette film in the free-stream heat
+capacity.
 
 `volatiles` replaces the per-species mixture by one `GasSpecies` (a surrogate
 with its own `c_p`, `k`, `M`), which is how a model whose gas components are
@@ -261,42 +263,80 @@ function PropertyRatioFilm(free_stream::GasSpecies; n_Γ::Real = 0.6, volatiles 
 end
 
 """
-	PoolingFilm(free_stream; n_Γ = 0.6, n_D = 0.5, ψ0 = 0.59, Λc = 0.35, Λw = 0.10,
-	            volatiles = nothing, diffusion_volume = (;))
+	PoolingFilm(free_stream; n_Γ = 0.6, n_D = 0.6, g = 10.9e-3, ψ0 = 0.577, Λc = 0.383,
+	            Λw = 0.102, volatiles = nothing, diffusion_volume = (;))
 
 The film law of [`PropertyRatioFilm`](@ref) with a pooling factor `ψ` for gas
 that is denser than the free stream at the face:
 
 	h = h₀ φ/(e^{φ/ψ} − 1)
 
-`ψ` is the share of the no-outflow exchange the face keeps. It is 1 while the
-plume lifts the gas off the face and falls to the floor `ψ0` when the gas
-pools, switching over a logistic in the face buoyancy `Λ`:
+`ψ` is the share of the no-outflow exchange, of heat and of gas alike, that the
+face keeps. It is close to 1 while the plume lifts the gas off the face and
+falls to the floor `ψ0` when the gas pools, over a logistic in the face
+buoyancy `Λ`:
 
 	ψ = ψ0 + (1 − ψ0) / (1 + exp(−(Λ − Λc)/Λw))
 	Λ = [1 − (M_face/T_s)(T_∞/M_∞)] / (1 − T_∞/T_s)
 
-`M_face` is the molar mass of the gas at the face, from the face mass fractions
-of the leaving species by the same film balance applied species by species:
+`Λ` is 1 for free-stream gas alone on the face, where the default constants
+give `ψ = 0.999`, and 0 for face gas as dense as the incoming free stream.
+`M_face` is the molar mass of the gas on the face. A face no hotter than the
+free stream has no buoyancy to lose and keeps `ψ = 1`.
 
-	Y_i = ω_i [1 − exp(−ṁ″/(ψ g s_i^{n_D}))],  g = h₀/c̄_p,∞,  s_i = D_i,∞/α_∞
+The face composition comes from a molar film balance (the molar concentration
+times the binary diffusivity, `cD`, is fixed in an ideal gas at one
+temperature and pressure). Where the face exchanges gas through a solved mass
+film (an `AmbientGasBC` or `ConvectivePressureBC` with the default
+`AnalogyFilm`), that film becomes this model's: one molar conductance
 
-with `ω_i` the species' share of the outflow, `g` the gas-exchange conductance
-without outflow (heat-transfer coefficient over the free-stream heat capacity
-averaged between the free-stream and the surface temperature), `D_i,∞` the
-binary diffusivity into the free stream, `α_∞` its thermal diffusivity and
-`n_D = 1/2` the penetration-theory exponent. `ψ` and the face fractions are
-solved together; where two states are self-consistent the mean of the two is
-taken. A face no hotter than the free stream has no buoyancy to lose and keeps
-`ψ = 1`.
+	G = ψ g s_v^{n_D} / M_∞,  N_j = x_j,s N_t + G β(N_t/G)(x_j,s − x_j,∞),  β(B) = B/(e^B − 1)
 
-The three switch constants belong to the apparatus flow, as `h₀` does; the
-defaults are the CAPA chamber's (nitrogen purge, 185 SLPM). `diffusion_volume`
-is a NamedTuple of Fuller diffusion volumes keyed by component name, for the
-binary diffusivity of each gas component into the free stream
-([`fuller_diffusivity`](@ref)); a component without an entry uses the
+for every species, with `N_t` the net molar outflow, so the face composition,
+and `ψ` from it, are solved with the surface balance. Otherwise each leaving
+species is taken to cross the film on its own, through stagnant free-stream gas:
+
+	x_i = z_i [1 − exp(−(ṁ″/(ψ g s_i^{n_D})) (M_∞/M_g))]
+
+with `z_i = ω_i M_g/M_i` its molar share of the outflow, `ω_i` its mass share,
+`M_g = 1/Σ ω_i/M_i` and `M_face = Σ x_i M_i + (1 − Σ x_i) M_∞`; `ψ` and the
+face fractions are then solved together, and where two states are
+self-consistent the mean of the two ratios is taken. For one volatile against
+the free stream with no net free-stream flux the two forms are the same
+equation.
+
+- `g`: the gas-exchange conductance without outflow [kg/(m² s)], for a gas that
+  diffuses as fast as heat and has the free stream's molar mass. It is a
+  constant of the apparatus, as `h₀` is. The heat–mass analogy gives
+  `h₀/c̄_p,∞`; the default 10.9 g/(m² s) was measured in the chamber CFD,
+  where the insulation ring warms the purge gas at the face edge and so lowers
+  the heat exchange without changing the gas exchange.
+- `s_i = D_i,∞ (ρ c_p)_∞ / k_∞`: the binary diffusivity of the species into the
+  free stream over the free stream's thermal diffusivity, both at `T_s` held
+  inside the property ranges of the gases they read.
+- `n_D = 0.6`: the exponent the chamber CFD measured on `s` (0.58, between the
+  surface-renewal limit 1/2 and the Chilton–Colburn 2/3).
+- `ψ0`, `Λc`, `Λw`: the switch, fitted to the chamber CFD; they belong to the
+  apparatus flow, as `h₀` does. The defaults are the CAPA chamber's (nitrogen
+  purge, 185 SLPM).
+
+`volatiles` describes the outflow by one lumped `GasSpecies`: its properties
+give `Γ_g`, its molar mass and diffusivity enter the face balance and `M_face`
+for every gas component other than the free stream, whatever molar masses the
+material carries for pore transport. Without it the gas components are the
+species: `diffusion_volume` is a NamedTuple of Fuller diffusion volumes keyed by
+component name, for the binary diffusivity of each component into the free
+stream ([`fuller_diffusivity`](@ref)); a component without an entry uses the
 package's Chapman–Enskog estimate from its molar mass. Lumped `volatiles` use
 their own `D`, else their diffusion volume, else the same estimate.
+
+On a solved film the one conductance is exact for a single volatile, lumped or
+the material's only gas besides the free stream; several species with their
+own diffusivities would each need their own conductance, which the film does
+not carry, and are rejected there. The film also requires a reservoir of the
+free-stream gas alone and a face whose only convective condition carries this
+model: air is accepted as one tracked component with its own `GasSpecies` as
+the free stream, not yet as separate nitrogen and oxygen.
 """
 struct PoolingFilm{
     G<:GasSpecies,
@@ -307,6 +347,7 @@ struct PoolingFilm{
     volatiles::V
     n_Γ::Float64
     n_D::Float64
+    g::Float64
     ψ0::Float64
     Λc::Float64
     Λw::Float64
@@ -316,10 +357,11 @@ end
 function PoolingFilm(
     free_stream::GasSpecies;
     n_Γ::Real = 0.6,
-    n_D::Real = 0.5,
-    ψ0::Real = 0.59,
-    Λc::Real = 0.35,
-    Λw::Real = 0.10,
+    n_D::Real = 0.6,
+    g::Real = 10.9e-3,
+    ψ0::Real = 0.577,
+    Λc::Real = 0.383,
+    Λw::Real = 0.102,
     volatiles = nothing,
     diffusion_volume = (;),
 )
@@ -327,6 +369,8 @@ function PoolingFilm(
         throw(ArgumentError("PoolingFilm: n_Γ must be finite and ≥ 0, got $n_Γ"))
     isfinite(n_D) && n_D >= 0 ||
         throw(ArgumentError("PoolingFilm: n_D must be finite and ≥ 0, got $n_D"))
+    isfinite(g) && g > 0 ||
+        throw(ArgumentError("PoolingFilm: g must be finite and > 0 [kg/(m² s)], got $g"))
     isfinite(ψ0) && 0 < ψ0 < 1 ||
         throw(ArgumentError("PoolingFilm: ψ0 must lie in (0, 1), got $ψ0"))
     isfinite(Λc) || throw(ArgumentError("PoolingFilm: Λc must be finite, got $Λc"))
@@ -334,12 +378,21 @@ function PoolingFilm(
         throw(ArgumentError("PoolingFilm: Λw must be finite and > 0, got $Λw"))
     all(v -> isfinite(v) && v > 0, values(diffusion_volume)) ||
         throw(ArgumentError("PoolingFilm: diffusion volumes must be finite and > 0"))
+    volatiles === nothing ||
+        max(free_stream.T_range[1], volatiles.T_range[1]) <
+        min(free_stream.T_range[2], volatiles.T_range[2]) ||
+        throw(
+            ArgumentError(
+                "PoolingFilm: the property ranges of the free stream and the volatiles must overlap",
+            ),
+        )
     Vnt = NamedTuple{keys(diffusion_volume)}(map(Float64, values(diffusion_volume)))
     return PoolingFilm(
         free_stream,
         volatiles,
         Float64(n_Γ),
         Float64(n_D),
+        Float64(g),
         Float64(ψ0),
         Float64(Λc),
         Float64(Λw),

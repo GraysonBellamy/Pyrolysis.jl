@@ -52,23 +52,78 @@ end
 @inline _primal_boundary(x::NamedTuple) = map(_primal_boundary, x)
 @inline _primal_boundary(x::StaticVector) = map(primal, x)
 
+# The gas film a `PoolingFilm` states for its face: the molar film of one
+# conductance ψ g s_v^{n_D}, with ψ from the solved surface composition and the
+# incoming temperature of the convective condition that carries the model.
+struct PoolingGasFilm{C<:ConvectiveBC}
+    convective::C
+end
+
+# The convective member carrying a `PoolingFilm`, `nothing` without one, found
+# through the concrete member types so the resolved film stays inferred.
+@inline _pooling_member(::AbstractThermalBC) = nothing
+@inline _pooling_member(bc::ConvectiveBC{<:Any,<:Any,<:PoolingFilm}) = bc
+@inline _pooling_member(bc::CombinedThermalBC) = _first_pooling_member(bc.bcs...)
+@inline _first_pooling_member() = nothing
+@inline function _first_pooling_member(b, rest...)
+    p=_pooling_member(b)
+    return p===nothing ? _first_pooling_member(rest...) : p
+end
+@inline _n_convective(::AbstractThermalBC) = 0
+@inline _n_convective(::ConvectiveBC) = 1
+@inline _n_convective(bc::CombinedThermalBC) = sum(_n_convective, bc.bcs)
+
 # The film a face carries. An `AnalogyFilm` is the twin of the convective heat
-# film: without one the reservoir is in direct contact with the pore gas.
+# film: without one the reservoir is in direct contact with the pore gas, and
+# where the convective film is a `PoolingFilm` the twin is that model's film.
+# An explicit conductance on such a face would leave its gas exchange without
+# the pooling factor its heat exchange applies, so it is rejected.
 @inline _resolve_film(film, thermal) = film
-@inline _resolve_film(film::AnalogyFilm, thermal) =
-    _has_thermal_film(thermal) ? film : nothing
+@inline function _resolve_film(film::MassTransferFilm, thermal)
+    _pooling_member(thermal)===nothing || throw(
+        ArgumentError(
+            "a face whose convective condition carries a PoolingFilm takes its gas exchange from that model; give film = AnalogyFilm() (the default), not an explicit MassTransferFilm",
+        ),
+    )
+    return film
+end
+@inline function _resolve_film(film::AnalogyFilm, thermal)
+    _has_thermal_film(thermal) || return nothing
+    member=_pooling_member(thermal)
+    member===nothing && return film
+    film.Le==1 || throw(
+        ArgumentError(
+            "PoolingFilm sets the gas conductance of its face through g and n_D; AnalogyFilm(Le = $(film.Le)) has no role there",
+        ),
+    )
+    _n_convective(thermal)==1 || throw(
+        ArgumentError(
+            "a face whose convective condition carries a PoolingFilm must have no other convective condition",
+        ),
+    )
+    return PoolingGasFilm(member)
+end
 # Bare convective coefficient of a face: the sum over its convective members.
 @inline _bare_convective_h(::AbstractThermalBC, t) = 0.0
 @inline _bare_convective_h(bc::ConvectiveBC, t) = evaluate_param(bc.h, t)
 @inline _bare_convective_h(bc::CombinedThermalBC, t) =
     sum(b->_bare_convective_h(b, t), bc.bcs)
-@inline _film_conductance(film::MassTransferFilm, Tt, data, bound, material, thermal, t) =
-    evaluate_param_T(film.conductance, Tt)
+@inline _film_conductance(
+    film::MassTransferFilm,
+    Tt,
+    Ys,
+    data,
+    bound,
+    material,
+    thermal,
+    t,
+) = evaluate_param_T(film.conductance, Tt)
 # Heat–mass transfer analogy at the film temperature: g = h/(c_p,∞ Le^{2/3})
 # with c_p,∞ the mass-weighted heat capacity of the reservoir gas.
 @inline function _film_conductance(
     film::AnalogyFilm,
     Tt,
+    Ys,
     data,
     bound::GasBoundaryBinding{B,I,<:StaticVector{NG}},
     material,
@@ -84,6 +139,70 @@ end
     primal(cp)>0 ||
         throw(ArgumentError("the analogy film needs a reservoir gas with a heat capacity"))
     return _bare_convective_h(thermal, t)/(cp*film.Le^(2/3))
+end
+# The pooling model's conductance at the surface composition of this iterate,
+# so the gas exchange carries the ψ the heat exchange applies.
+@inline _film_conductance(film::PoolingGasFilm, Tt, Ys, data, bound, material, thermal, t) =
+    BoundaryConditions.pooling_film_conductance(
+        film.convective.blowing,
+        _component_fractions(Ys, bound, material),
+        material,
+        Tt,
+        evaluate_param(film.convective.T_inf, t),
+    )
+
+# Gas-component values spread over every material component (zero for the
+# condensed ones).
+@inline _component_fractions(Y, bound, material::Material{NC}) where {NC} =
+    ntuple(Val(NC)) do j
+        k=findfirst(==(j), bound.indices)
+        k===nothing ? zero(eltype(Y)) : Y[k]
+    end
+
+# Integrated film flux of every gas component: the mass-fraction film of one
+# conductance, or for a pooling film the molar film of one conductance, with
+# moles counted as the model counts them.
+@inline _film_flux(film, s, data, bound, material, m) =
+    mass_film_flux(s.Ys, data.Y∞, m, s.g)
+@inline function _film_flux(
+    film::PoolingGasFilm,
+    s,
+    data,
+    bound::GasBoundaryBinding{B,I,<:StaticVector{NG}},
+    material,
+    m,
+) where {B,I,NG}
+    Mm=BoundaryConditions.film_molar_masses(film.convective.blowing, material)
+    M=SVector{NG}(ntuple(k->Mm[bound.indices[k]], Val(NG)))
+    ns=s.Ys ./ M
+    n∞=data.Y∞ ./ M
+    # G = g/M_∞ with 1/M_∞ = Σ Y_∞/M.
+    return molar_film_flux(ns/sum(ns), n∞/sum(n∞), sum(s.N ./ M), s.g*sum(n∞), M)
+end
+
+# The empirical blowing closures take the incoming gas to be their free
+# stream. On a solved film that is a condition on the reservoir: one of the
+# free-stream gas alone admits no product ingress at the root.
+@inline _check_blowing_reservoir(::AbstractThermalBC, bound, x∞) = nothing
+@inline _check_blowing_reservoir(bc::CombinedThermalBC, bound, x∞) =
+    foreach(b->_check_blowing_reservoir(b, bound, x∞), bc.bcs)
+@inline function _check_blowing_reservoir(
+    bc::ConvectiveBC{<:Any,<:Any,<:Union{PropertyRatioFilm,PoolingFilm}},
+    bound,
+    x∞,
+)
+    fs=bc.blowing.free_stream.name
+    for k in eachindex(x∞)
+        name=bound.names[bound.indices[k]]
+        primal(x∞[k])>0 &&
+            name!==fs &&
+            throw(
+                ArgumentError(
+                    "$(nameof(typeof(bc.blowing))) on a solved mass film needs a reservoir of its free-stream gas :$fs alone; it holds :$name",
+                ),
+            )
+    end
+    return nothing
 end
 @inline _hydraulic(::AbstractMassBC) = false
 @inline _hydraulic(::ConvectivePressureBC) = true
@@ -151,15 +270,12 @@ end
         k=findfirst(==(j), bound.indices)
         k===nothing ? zero(Ts+sum(N)) : N[k]
     end, Val(NC))
-    xs=ntuple(j->begin
-        k=findfirst(==(j), bound.indices)
-        k===nothing ? zero(Ts+sum(N)) : x[k]+zero(Ts+sum(N))
-    end, Val(NC))
+    Yface=_component_fractions(Ys .+ zero(Ts+sum(N)), bound, material)
     face=BlowingFace(
         J,
         Tt,
         material;
-        surface_mole_fractions = film===nothing ? nothing : xs,
+        surface_mass_fractions = film===nothing ? nothing : Yface,
     )
     qsurf=_surface_heat(thermal, Ts, data, t, rad, face)
     h=component_enthalpies(laws, Ts)
@@ -170,10 +286,10 @@ end
     # control surface. A prescribed flux or adiabatic boundary has no such film.
     qres=qsurf+(_has_thermal_film(thermal) ? Hr-Hs : zero(Hr))
     g=film===nothing ? zero(Ts) :
-      _film_conductance(film, Tt, data, bound, material, thermal, t)
+      _film_conductance(film, Tt, Ys, data, bound, material, thermal, t)
     g>=0 && !isnan(g) ||
         throw(ArgumentError("mass-film conductance must remain nonnegative"))
-    return (; Ts, N, J, xs, Ys, ps, rawPs, v = half.v, qsurf, qres, Hs, Hr, g, face)
+    return (; Ts, N, J, Ys, ps, rawPs, v = half.v, qsurf, qres, Hs, Hr, g, face)
 end
 
 @inline _surface_heat(::AdiabaticBC, Ts, data, t, rad, face) = zero(Ts)
@@ -229,7 +345,7 @@ end
     )
     m=sum(s.N)
     F=film===nothing || isinf(primal(s.g)) ? zero(s.N) :
-      mass_film_flux(s.Ys, data.Y∞, m, s.g)
+      _film_flux(film, s, data, bound, material, m)
     S=typeof(s.Ts+m+s.rawPs)
     return SVector{length(z),S}(
         ntuple(Val(length(z))) do k
@@ -285,6 +401,7 @@ function _coupled_gas_boundary(
     hydraulic=_hydraulic(bc)
     nunknown=nf+Int(hydraulic)+1
     data.Pr>0 && _stream_temperature_check(thermal, data.Tin, t)
+    film===nothing || _check_blowing_reservoir(thermal, bound, data.x∞)
     film!==nothing &&
         data.Pr==0 &&
         throw(
@@ -516,4 +633,30 @@ function _exchange_patch!(
     c.boundary_heat[f]=qres
     c.boundary_enthalpy[f]=Hr
     return nothing
+end
+
+"""
+	solved_surface_fractions(kernel::ThermalBoundaryKernel, tag, c, f, material)
+
+The surface mass fractions the gas exchange solved at face `f` of patch `tag`,
+one per material component (zero for condensed ones), as the face's blowing
+model saw them; `nothing` where the face exchanges gas without a mass film, in
+which case the model saw none either. Recovered from the surface partial
+pressures `c.p_surface` with the material's molar masses, the basis they
+were written in.
+"""
+function solved_surface_fractions(
+    kernel::ThermalBoundaryKernel,
+    tag::Symbol,
+    c,
+    f,
+    material,
+)
+    kernel.exchange===nothing && return nothing
+    i=findfirst(p->p.tag===tag, kernel.patches)
+    i===nothing && return nothing
+    bound=kernel.exchange[i]
+    _resolve_film(bound.film, kernel.patches[i].bc)===nothing && return nothing
+    w=[c.p_surface[j, f] for j in bound.indices] .* bound.masses
+    return _component_fractions(w/sum(w), bound, material)
 end
