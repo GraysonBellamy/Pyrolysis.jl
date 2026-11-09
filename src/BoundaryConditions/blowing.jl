@@ -16,30 +16,33 @@ using ..Properties: chapman_enskog_diffusivity
 
 What a blowing model sees at a boundary face: the outward mass flux of every
 component `ṁ` [kg/(m²·s), positive = leaving, zero for condensed components],
-the surface-temperature iterate `T_s` [K] and the `material` whose gas
-components supply the species properties. Built by the surface Newton at
-every iterate; `T` is `Float64` in the residual and `ForwardDiff.Dual` under
-AD.
+the surface-temperature iterate `T_s` [K], the `material` whose gas
+components supply the species properties and, where the face exchanges gas
+through a solved mass film, the surface mass fractions of every component
+(`surface_mass_fractions`, zero for condensed components; `nothing` without a
+film). Mass fractions leave each model free to count moles with its own molar
+masses. Built by the surface Newton at every iterate; `T` is `Float64` in the
+residual and `ForwardDiff.Dual` under AD.
 """
 struct BlowingFace{NC,T<:Real,M<:Material,X}
     ṁ::NTuple{NC,T}
     T_s::T
     material::M
-    surface_mole_fractions::X
+    surface_mass_fractions::X
 end
 
 @inline function BlowingFace(
     ṁ::NTuple{NC,<:Real},
     T_s::Real,
     material::Material{NC};
-    surface_mole_fractions = nothing,
+    surface_mass_fractions = nothing,
 ) where {NC}
     Tu = promote_type(eltype(ṁ), typeof(T_s))
-    return BlowingFace{NC,Tu,typeof(material),typeof(surface_mole_fractions)}(
+    return BlowingFace{NC,Tu,typeof(material),typeof(surface_mass_fractions)}(
         ntuple(j -> Tu(ṁ[j]), Val(NC)),
         Tu(T_s),
         material,
-        surface_mole_fractions,
+        surface_mass_fractions,
     )
 end
 
@@ -274,26 +277,23 @@ The ratio `h_eff/h` of [`blowing_state`](@ref).
 # Pooling model
 # ----------------------------------------------------------------------------
 
-# Five-point Gauss–Legendre mean of a property over [T_a, T_b]: exact for the
-# polynomial heat capacities the gas data carry.
-const _GL5_X =
-    (-0.9061798459386640, -0.5384693101056831, 0.0, 0.5384693101056831, 0.9061798459386640)
-const _GL5_W = (
-    0.2369268850561891,
-    0.4786286704993665,
-    0.5688888888888889,
-    0.4786286704993665,
-    0.2369268850561891,
-)
-@inline function _mean_property(p, T_a, T_b)
-    Tm = (T_a + T_b) / 2
-    dT = (T_b - T_a) / 2
-    s = zero(Tm)
-    @inbounds for i = 1:5
-        s += _GL5_W[i] * p(Tm + dT * _GL5_X[i])
-    end
-    return s / 2
+# Thermal diffusivity of the free stream at the reference pressure [m²/s], at a
+# temperature already inside its property range.
+@inline function _free_stream_thermal_diffusivity(fs::GasSpecies, T)
+    ρ = P_REF * fs.molar_mass / (R_GAS * T)
+    return fs.thermal_conductivity(T) / (ρ * fs.heat_capacity(T))
 end
+
+# The temperature the diffusivity ratio s = D/α∞ is evaluated at: the surface
+# temperature held inside the property range of the free stream and, for
+# lumped volatiles, of theirs, so the diffusivity and the thermal diffusivity
+# it is divided by share one state.
+@inline _ratio_temperature(fs::GasSpecies, ::Nothing, T) = gas_property_temperature(fs, T)
+@inline _ratio_temperature(fs::GasSpecies, vol::GasSpecies, T) = clamp(
+    T,
+    max(fs.T_range[1], vol.T_range[1]) + zero(T),
+    min(fs.T_range[2], vol.T_range[2]) + zero(T),
+)
 
 # The Fuller diffusion volume of component `name`, NaN without an entry: a
 # search over the names, since a field read by a runtime name boxes its value.
@@ -321,8 +321,10 @@ end
     return chapman_enskog_diffusivity(T, M)
 end
 
+# Binary diffusivity of the lumped volatiles into the free stream [m²/s], at a
+# temperature already inside both property ranges.
 @inline function _lumped_diffusivity(vol::GasSpecies, fs::GasSpecies, T)
-    vol.diffusivity === nothing || return vol.diffusivity(gas_property_temperature(vol, T))
+    vol.diffusivity === nothing || return vol.diffusivity(T)
     if !isnan(vol.diffusion_volume) && !isnan(fs.diffusion_volume)
         return fuller_diffusivity(
             T,
@@ -335,65 +337,171 @@ end
     return chapman_enskog_diffusivity(T, vol.molar_mass)
 end
 
-# The species the face balance tracks: (ω, 1/M, a) with ω the share of the
-# outflow, and a = ṁ″/(g s^{n_D}) the film parameter without the pooling
-# factor. One entry for lumped volatiles; one per component otherwise, with
-# ω = 0 for components that are condensed, free-stream gas or not leaving.
-@inline function _face_species(m::PoolingFilm, vol::GasSpecies, face::BlowingFace, ṁ, g, α∞)
-    s = _lumped_diffusivity(vol, m.free_stream, face.T_s) / α∞
-    return ((ω = one(ṁ), Minv = 1 / vol.molar_mass, a = ṁ / (g * s^m.n_D)),)
+# Diffusivity ratio s = D_∞/α∞ of the lumped volatiles, and of gas component
+# `name` of molar mass `M`, at the surface-temperature iterate.
+@inline function _lumped_ratio(m::PoolingFilm, vol::GasSpecies, T_s)
+    fs = m.free_stream
+    T = _ratio_temperature(fs, vol, T_s)
+    return _lumped_diffusivity(vol, fs, T) / _free_stream_thermal_diffusivity(fs, T)
+end
+@inline function _component_ratio(m::PoolingFilm, name::Symbol, M, T_s)
+    T = _ratio_temperature(m.free_stream, nothing, T_s)
+    return _component_diffusivity(m, name, M, T) /
+           _free_stream_thermal_diffusivity(m.free_stream, T)
 end
 
-function _face_species(
-    m::PoolingFilm,
-    ::Nothing,
-    face::BlowingFace{NC},
-    ṁ,
-    g,
-    α∞,
-) where {NC}
+# ----------------------------------------------------------------------------
+# The face composition the model sees
+# ----------------------------------------------------------------------------
+
+# Molar masses of the components as the pooling model counts them: the free
+# stream's own, the lumped volatiles' for every other gas component when the
+# model lumps them (whatever the material carries for pore transport), else
+# the component's. Condensed components get a unit mass they never weigh.
+@inline function film_molar_masses(m::PoolingFilm, material::Material)
+    fs = m.free_stream
+    return map(material.components) do c
+        !is_gas(c) ? 1.0 :
+        c.name === fs.name ? fs.molar_mass : _volatile_molar_mass(m.volatiles, c)
+    end
+end
+@inline _volatile_molar_mass(::Nothing, c) = Float64(molar_mass(c))
+@inline _volatile_molar_mass(vol::GasSpecies, c) = vol.molar_mass
+
+"""
+	pooling_factor(model::PoolingFilm, Y, material, T_s, T_inf) -> (; ψ, Λ, Y)
+
+The pooling factor `ψ`, the face buoyancy `Λ` and the face mass fraction `Y`
+of everything but the free stream, for a face holding gas of mass fractions
+`Y` (one per material component, zero for condensed components) at surface
+temperature `T_s` under a free stream arriving at `T_inf`. The face molar mass
+counts the lumped `volatiles` at their own molar mass. A face no hotter than
+the free stream keeps `ψ = 1`. Heat and gas exchange on a solved film both
+take `ψ` from here.
+"""
+@inline function pooling_factor(m::PoolingFilm, Y, material::Material, T_s, T_inf)
+    fs = m.free_stream
+    M = film_molar_masses(m, material)
+    vol = map(c -> is_gas(c) && c.name !== fs.name, material.components)
+    o = one(promote_type(eltype(Y), typeof(T_s), typeof(T_inf)))
+    S = zero(o)
+    Yv = zero(o)
+    for j in eachindex(M)
+        S += Y[j] / M[j]
+        vol[j] && (Yv += Y[j])
+    end
+    d = 1 - T_inf / T_s
+    ForwardDiff.value(d) <= 1e-6 && return (ψ = o, Λ = o, Y = Yv)
+    Λ = (1 - T_inf / (S * fs.molar_mass * T_s)) / d
+    z = clamp((Λ - m.Λc) / m.Λw, -60.0, 60.0)
+    return (ψ = m.ψ0 + (1 - m.ψ0) / (1 + exp(-z)), Λ = Λ, Y = Yv)
+end
+
+# Diffusivity ratio s = D_v,∞/α_∞ of the one volatile a solved film carries:
+# the lumped volatiles, or the material's only gas besides the free stream.
+@inline _film_diffusivity_ratio(m::PoolingFilm, material::Material, T_s) =
+    _film_diffusivity_ratio(m, m.volatiles, material, T_s)
+@inline _film_diffusivity_ratio(m::PoolingFilm, vol::GasSpecies, material::Material, T_s) =
+    _lumped_ratio(m, vol, T_s)
+@inline function _film_diffusivity_ratio(m::PoolingFilm, ::Nothing, material::Material, T_s)
+    props = _gas_props(material, T_s)
+    n = 0
+    s = zero(T_s)
+    for p in props
+        if p.gas && p.name !== m.free_stream.name
+            n += 1
+            s = _component_ratio(m, p.name, p.M, T_s) + zero(T_s)
+        end
+    end
+    n == 1 || throw(
+        ArgumentError(
+            "PoolingFilm on a solved mass film carries one diffusivity: give lumped `volatiles` for a material with $n gases besides the free stream",
+        ),
+    )
+    return s
+end
+
+"""
+	pooling_film_conductance(model::PoolingFilm, Y, material, T_s, T_inf) -> g_face
+
+The mass-film conductance of a face whose gas exchange the pooling model
+states, `ψ g s_v^{n_D}` [kg/(m² s)], with `ψ` from [`pooling_factor`](@ref) at
+the face mass fractions `Y` and `s_v` the volatile's diffusivity ratio. The
+molar conductance is `g_face/M_∞`.
+"""
+@inline pooling_film_conductance(m::PoolingFilm, Y, material::Material, T_s, T_inf) =
+    pooling_factor(m, Y, material, T_s, T_inf).ψ *
+    m.g *
+    _film_diffusivity_ratio(m, material, T_s)^m.n_D
+
+# ----------------------------------------------------------------------------
+# Pooling model without a solved film
+# ----------------------------------------------------------------------------
+
+# The species the face balance tracks: (z, M, b) with z the molar share of the
+# outflow, M the molar mass and b = (ṁ″/(g s^{n_D}))(M_∞/M_g) the film
+# exponent without the pooling factor. One entry for lumped volatiles; one per
+# component otherwise, with z = 0 for components that are condensed,
+# free-stream gas or not leaving.
+@inline function _face_species(m::PoolingFilm, vol::GasSpecies, face::BlowingFace, ṁ)
+    s = _lumped_ratio(m, vol, face.T_s)
+    b = ṁ / (m.g * s^m.n_D) * (m.free_stream.molar_mass / vol.molar_mass)
+    return ((z = one(b), M = vol.molar_mass, b = b),)
+end
+
+function _face_species(m::PoolingFilm, ::Nothing, face::BlowingFace{NC}, ṁ) where {NC}
     props = _gas_props(face.material, face.T_s)
-    fs_name = m.free_stream.name
-    T_s = face.T_s
+    fs = m.free_stream
+    blown = ntuple(
+        j ->
+            props[j].gas && props[j].name !== fs.name && ForwardDiff.value(face.ṁ[j]) > 0,
+        Val(NC),
+    )
+    acc = zero(ṁ)
+    for j = 1:NC
+        blown[j] && (acc += face.ṁ[j] / (ṁ * props[j].M))
+    end
+    Minv_g = acc                              # Σ ω_i/M_i = 1/M_g, bound once for the closure
     return ntuple(Val(NC)) do j
         p = props[j]
-        blown = p.gas && p.name !== fs_name && ForwardDiff.value(face.ṁ[j]) > 0
-        if blown
-            s = _component_diffusivity(m, p.name, p.M, T_s) / α∞
-            (ω = face.ṁ[j] / ṁ, Minv = 1 / p.M, a = ṁ / (g * s^m.n_D))
+        if blown[j]
+            s = _component_ratio(m, p.name, p.M, face.T_s)
+            (
+                z = face.ṁ[j] / (ṁ * p.M * Minv_g),
+                M = p.M,
+                b = ṁ / (m.g * s^m.n_D) * fs.molar_mass * Minv_g,
+            )
         else
-            (ω = zero(ṁ), Minv = 1 / p.M, a = zero(ṁ))
+            (z = zero(ṁ), M = p.M, b = zero(ṁ))
         end
     end
 end
 
-# G(ψ) = Ψ(Λ(ψ)) − ψ with its derivative, the face fraction and the buoyancy
-# at ψ. Face fractions Y_i = ω_i (1 − e^{−a_i/ψ}); M_face from them and the
-# free stream; Λ = [1 − (M_face/T_s)(T_∞/M_∞)]/(1 − T_∞/T_s); Ψ the logistic
-# switch between the floor and 1.
-@inline function _pool_residual(ψ, species, Minv∞, T_s, T_inf, ψ0, Λc, Λw)
-    S = Minv∞ + zero(ψ)
-    dS = zero(S)
-    Ysum = zero(S)
+# G(ψ) = Ψ(Λ(ψ)) − ψ with its derivative, the face mass fraction and the
+# buoyancy at ψ. Face mole fractions x_i = z_i (1 − e^{−b_i/ψ});
+# M_face = M_∞ + Σ x_i (M_i − M_∞); Λ = [1 − (M_face/T_s)(T_∞/M_∞)]/(1 − T_∞/T_s);
+# Ψ the logistic switch between the floor and 1.
+@inline function _pool_residual(ψ, species, M∞, T_s, T_inf, ψ0, Λc, Λw)
+    X = zero(ψ)
+    dX = zero(ψ)
+    XM = zero(ψ)
     for sp in species
-        e = exp(-sp.a / ψ)
-        Y = sp.ω * (1 - e)
-        dY = -sp.ω * e * sp.a / ψ^2
-        S += Y * (sp.Minv - Minv∞)
-        dS += dY * (sp.Minv - Minv∞)
-        Ysum += Y
+        e = exp(-sp.b / ψ)
+        x = sp.z * (1 - e)
+        X += x * (sp.M - M∞)
+        dX -= sp.z * e * sp.b / ψ^2 * (sp.M - M∞)
+        XM += x * sp.M
     end
-    M_face = 1 / S
-    dM = -dS / S^2
+    M_face = M∞ + X
     d = 1 - T_inf / T_s
-    c = T_inf * Minv∞ / T_s
+    c = T_inf / (M∞ * T_s)
     Λ = (1 - c * M_face) / d
-    dΛ = -c * dM / d
+    dΛ = -c * dX / d
     z = clamp((Λ - Λc) / Λw, -60.0, 60.0)
     σ = 1 / (1 + exp(-z))
     Ψ = ψ0 + (1 - ψ0) * σ
     dΨ = (1 - ψ0) * σ * (1 - σ) / Λw * dΛ
-    return Ψ - ψ, dΨ - 1, Ysum, Λ
+    return Ψ - ψ, dΨ - 1, XM / M_face, Λ
 end
 
 # Newton with a bisection safeguard inside a sign-change bracket [a, b].
@@ -419,12 +527,12 @@ end
 # Primal roots of G on [ψ0, 1]: the lowest and highest self-consistent
 # pooling factors (equal when there is one), and their count. G(ψ0) > 0 and
 # G(1) < 0 by construction, so at least one root exists.
-function _pool_roots(species, Minv∞, T_s, T_inf, ψ0, Λc, Λw)
+function _pool_roots(species, M∞, T_s, T_inf, ψ0, Λc, Λw)
     v = ForwardDiff.value
-    sp = map(s -> (ω = v(s.ω), Minv = s.Minv, a = v(s.a)), species)
+    sp = map(s -> (z = v(s.z), M = s.M, b = v(s.b)), species)
     Tsv, Tiv = v(T_s), v(T_inf)
     G = ψ -> begin
-        g, dg, _, _ = _pool_residual(ψ, sp, Minv∞, Tsv, Tiv, ψ0, Λc, Λw)
+        g, dg, _, _ = _pool_residual(ψ, sp, M∞, Tsv, Tiv, ψ0, Λc, Λw)
         (g, dg)
     end
     N = 16
@@ -454,33 +562,35 @@ end
 
 function blowing_state(m::PoolingFilm, face::BlowingFace, h, T_inf)
     _empirical_signed_domain(m, face)
-    names=map(c->c.name, face.material.components)
     fs = m.free_stream
     T_s = face.T_s
-    T_p = gas_property_temperature(fs, T_s)      # property evaluations stay inside the fit range
     ṁ = _gas_outflow(face.material, face.ṁ)
-    cp∞ = fs.heat_capacity(T_p)
+    cp∞ = fs.heat_capacity(gas_property_temperature(fs, T_s))
     φ = _property_ratio_phi(m.volatiles, face, fs, ṁ, cp∞, h, m.n_Γ)
     o = one(φ)
-    d = 1 - T_inf / T_s
+    # A solved face composition sets ψ directly, at either sign of the net
+    # flux, so the ratio stays continuous through zero outflow.
+    if face.surface_mass_fractions !== nothing
+        p = pooling_factor(m, face.surface_mass_fractions, face.material, T_s, T_inf)
+        ψ = p.ψ * o
+        return (
+            χ = ψ * blowing_factor(φ / ψ),
+            φ = φ,
+            ψ = ψ,
+            Y = p.Y * o,
+            Λ = p.Λ * o,
+            states = 1,
+        )
+    end
     # No outflow, or a face no hotter than the free stream: nothing pools.
-    if ForwardDiff.value(ṁ) <= 0 || ForwardDiff.value(d) <= 1e-6
+    if ForwardDiff.value(ṁ) <= 0 || ForwardDiff.value(1 - T_inf / T_s) <= 1e-6
         return (χ = blowing_factor(φ), φ = φ, ψ = o, Y = zero(o), Λ = o, states = 1)
     end
-    if face.surface_mole_fractions !== nothing
-        x=face.surface_mole_fractions
-        masses=map(molar_mass, face.material.components)
-        Mface=sum(j->x[j]*masses[j], eachindex(x))
-        Λ=(1-Mface*T_inf/(fs.molar_mass*T_s))/d
-        z=clamp((Λ-m.Λc)/m.Λw, -60.0, 60.0)
-        ψ=m.ψ0+(1-m.ψ0)/(1+exp(-z))
-        Y=sum(j->names[j]===fs.name ? zero(φ) : x[j]*masses[j]/Mface, eachindex(x))
-        return (χ = ψ*blowing_factor(φ/ψ), φ = φ, ψ = ψ, Y = Y, Λ = Λ, states = 1)
-    end
-    # Without a solved mass film, this empirical closure assumes zero free-
-    # stream species flux. Product shares then sum to one by species balance.
+    # Without a solved mass film, this closure assumes zero free-stream species
+    # flux. Product shares then sum to one by species balance.
+    names = map(c -> c.name, face.material.components)
     for j in eachindex(face.ṁ)
-        if names[j]===fs.name && ForwardDiff.value(face.ṁ[j])!=0
+        if names[j] === fs.name && ForwardDiff.value(face.ṁ[j]) != 0
             throw(
                 ArgumentError(
                     "PoolingFilm without a solved surface composition requires zero free-stream species flux",
@@ -488,18 +598,14 @@ function blowing_state(m::PoolingFilm, face::BlowingFace, h, T_inf)
             )
         end
     end
-    # Gas exchange without outflow, and the film parameter of each species.
-    g = h / _mean_property(fs.heat_capacity, gas_property_temperature(fs, T_inf), T_p)
-    ρ∞ = P_REF * fs.molar_mass / (R_GAS * T_p)
-    α∞ = fs.thermal_conductivity(T_p) / (ρ∞ * cp∞)
-    species = _face_species(m, m.volatiles, face, ṁ, g, α∞)
-    Minv∞ = 1 / fs.molar_mass
+    species = _face_species(m, m.volatiles, face, ṁ)
+    M∞ = fs.molar_mass
     # Self-consistent ψ on the primal values, then one implicit-function step in
     # the working scalar type so AD partials ride through the root.
-    lo, hi, n = _pool_roots(species, Minv∞, T_s, T_inf, m.ψ0, m.Λc, m.Λw)
+    lo, hi, n = _pool_roots(species, M∞, T_s, T_inf, m.ψ0, m.Λc, m.Λw)
     lift(r) = begin
         g_r, dg_r, _, _ =
-            _pool_residual(r + zero(φ), species, Minv∞, T_s, T_inf, m.ψ0, m.Λc, m.Λw)
+            _pool_residual(r + zero(φ), species, M∞, T_s, T_inf, m.ψ0, m.Λc, m.Λw)
         r - g_r / dg_r
     end
     ψ_hi = lift(hi)
@@ -513,7 +619,7 @@ function blowing_state(m::PoolingFilm, face::BlowingFace, h, T_inf)
         χ = χ_hi
         ψ = ψ_hi
     end
-    _, _, Y, Λ = _pool_residual(ψ_hi, species, Minv∞, T_s, T_inf, m.ψ0, m.Λc, m.Λw)
+    _, _, Y, Λ = _pool_residual(ψ_hi, species, M∞, T_s, T_inf, m.ψ0, m.Λc, m.Λw)
     return (χ = χ, φ = φ, ψ = ψ, Y = Y, Λ = Λ, states = n)
 end
 
@@ -568,7 +674,12 @@ end
 # Empirical property-ratio/pooling data support product outflow and pure
 # free-stream suction. Mixed counterflow has no derived empirical extension;
 # the signed Couette film supplies a separately derived closure for that regime.
+# A face with a solved mass film is exempt: its composition comes from the
+# film rather than from this closure, the surface Newton passes through mixed
+# trial fluxes on its way to a root, and the gas boundary admits only a
+# free-stream reservoir, against which no product can enter at the root.
 function _empirical_signed_domain(model, face)
+    face.surface_mass_fractions === nothing || return nothing
     names=map(c->c.name, face.material.components)
     incoming=false
     outgoing=false

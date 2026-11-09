@@ -569,7 +569,7 @@ Notes:
 | `ImpermeableBC` | `ImpermeableBC()` | zero species flow |
 | `GasReservoir` | `GasReservoir(P=...,T=...,mole_fractions=(air=1.,))` | complete external ideal-gas state |
 | `AmbientGasBC` | `AmbientGasBC(reservoir;film=AnalogyFilm())` | pore/reservoir exchange in either direction through a mass film |
-| `AnalogyFilm` | `AnalogyFilm(;Le=1.)` | the default film: conductance from the face's `ConvectiveBC` by the heat–mass analogy |
+| `AnalogyFilm` | `AnalogyFilm(;Le=1.)` | the default film: conductance from the face's `ConvectiveBC` by the heat–mass analogy, or on a `PoolingFilm` face that model's molar film |
 | `MassTransferFilm` | `MassTransferFilm(g)` | explicit isobaric common-diffusivity conductance [kg/(m² s)] |
 | `MassFluxBC` | `MassFluxBC(fluxes=(air=-1e-4,),inflow_temperature=(air=300.,))` | prescribed outward species flux and incoming energy |
 
@@ -664,11 +664,13 @@ the blowing ratio `R_b = h_eff/h` (Chapter 5, §5.2.3):
 | `NoBlowing` | `NoBlowing()` (the default) | `R_b = 1` |
 | `CouetteFilm` | `CouetteFilm(λ = 0.5)` or `CouetteFilm(; λ)` | `B_λ/(e^{B_λ} − 1)`, `B_λ = 2λ Σ_j N_j c_p,j(T_s)/h`, including signed counterflow |
 | `PropertyRatioFilm` | `PropertyRatioFilm(free_stream; n_Γ = 0.6, volatiles = nothing)` | `B_Γ/(e^{B_Γ} − 1)` with `B_Γ = (ṁ″ c_p,∞/h)(Γ_∞/Γ_g)^n_Γ`, `Γ = k/c_p` |
-| `PoolingFilm` | `PoolingFilm(free_stream; n_Γ = 0.6, n_D = 0.5, ψ0 = 0.59, Λc = 0.35, Λw = 0.10, volatiles = nothing, diffusion_volume = (;))` | `B_Γ/(e^{B_Γ/ψ} − 1)` with a pooling factor `ψ` falling from 1 to `ψ_0` (keyword `ψ0`) when the gas at the face is denser than the free stream |
+| `PoolingFilm` | `PoolingFilm(free_stream; n_Γ = 0.6, n_D = 0.6, g = 10.9e-3, ψ0 = 0.577, Λc = 0.383, Λw = 0.102, volatiles = nothing, diffusion_volume = (;))` | `B_Γ/(e^{B_Γ/ψ} − 1)` with a pooling factor `ψ` falling from about 1 to `ψ_0` (keyword `ψ0`) when the gas at the face is denser than the free stream; on a face with a solved mass film it also sets that film (§5.3.3) |
 | `FunctionBlowing` | `FunctionBlowing(f)` | `R_b = f(face, h, T_inf)`; `f` returns 1 at zero species fluxes, is smooth and accepts dual numbers |
 
-`CouetteFilm` supports signed fluxes. `PropertyRatioFilm` and `PoolingFilm`
-require their declared outward-flow domain and reject unsupported counterflow.
+`CouetteFilm` supports signed fluxes. Without a solved mass film
+`PropertyRatioFilm` and `PoolingFilm` require their declared outward-flow
+domain and reject unsupported counterflow; on a solved film they require a
+reservoir of their free-stream gas alone instead.
 The gas data the models read:
 
 | Name | Signature and meaning |
@@ -677,8 +679,8 @@ The gas data the models read:
 | `NITROGEN` | nitrogen as a free stream: NASA-7 heat capacity, polynomial conductivity and viscosity, `V_D = 18.5`, range 200–1250 K |
 | `nasa7_heat_capacity` | `nasa7_heat_capacity(a, M)` or `nasa7_heat_capacity(a_low, a_high, M; T_common = 1000.0)`: `c_p` [J/(kg·K)] from five NASA-7 coefficients per range |
 | `eucken_viscosity` | `eucken_viscosity(k, cp, M)`: `μ = k/(c_p + 5R/(4M))` [Pa·s] |
-| `fuller_diffusivity` | `fuller_diffusivity(T, M_a, V_a, M_b, V_b; P = P_REF)`: the Fuller binary diffusivity [m²/s], molar masses in kg/mol, `P` in Pa |
-| `BlowingFace` | `BlowingFace(ṁ, T_s, material)`: what a model sees, the outward flux of every component `ṁ` (an `NTuple`, positive leaving), the surface temperature and the material |
+| `fuller_diffusivity` | `fuller_diffusivity(T, M_a, V_a, M_b, V_b; P = P_REF)`: the Fuller binary diffusivity [m²/s] in the correlation's original form, `10⁻³ T^1.75 √(1/M_a + 1/M_b)/(P (V_a^⅓ + V_b^⅓)²)` cm²/s with `P` in atm and `M` in g/mol (0.2 % above Poling's Eq. 11-4.4); arguments in kg/mol and Pa |
+| `BlowingFace` | `BlowingFace(ṁ, T_s, material; surface_mass_fractions = nothing)`: what a model sees, the outward flux of every component `ṁ` (an `NTuple`, positive leaving), the surface temperature, the material and, on a face with a solved mass film, the surface mass fraction of every component |
 | `blowing_state` | `blowing_state(model, face, h, T_inf) -> (; χ, φ, ψ, Y, Λ, states)`: the field `χ` is the ratio `R_b`, `φ` the film parameter `B_λ` or `B_Γ`, `ψ` the pooling factor, `Y` the face mass fraction of the volatiles, `Λ` the face buoyancy, `states` the number of self-consistent states (1 or 2) |
 | `blowing_ratio` | `blowing_ratio(model, face, h, T_inf) -> R_b` |
 | `blowing_factor` | `blowing_factor(x) = x/(e^x − 1)`, the film factor `F_b`, smooth for every real `x`, one at `x = 0` |
@@ -1446,11 +1448,11 @@ Technical Reference chapter.
 | `Cone` `directions` | `3` |
 | `BoundaryConditionSet` `thermal` / `mass` | `(top = AdiabaticBC(), bottom = AdiabaticBC())` / `(top = ImpermeableBC(), bottom = ImpermeableBC())` |
 | `background_gas_concentration` `P` | `101325.0` Pa |
-| `AmbientGasBC` `film` | `nothing` |
+| `AmbientGasBC` `film` | `AnalogyFilm()` |
 | `LumpedTransfer` `endpoint`, `blend` | `nothing`, `(1e-4,1e-3)` |
 | `CouetteFilm` `λ` | `0.5` |
 | `PropertyRatioFilm` `n_Γ` | `0.6` |
-| `PoolingFilm` `n_Γ`, `n_D`, `ψ0`, `Λc`, `Λw` | `0.6`, `0.5`, `0.59`, `0.35`, `0.10` |
+| `PoolingFilm` `n_Γ`, `n_D`, `g`, `ψ0`, `Λc`, `Λw` | `0.6`, `0.6`, `10.9e-3` kg/(m² s), `0.577`, `0.383`, `0.102` |
 | `GasSpecies` `μ`, `V_D`, `D`, `T_range` | `nothing` (Eucken), `NaN`, `nothing` (Fuller), `(200.0, 3000.0)` K |
 
 ### 16.13.4 Problem and mesh

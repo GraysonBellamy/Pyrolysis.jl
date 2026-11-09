@@ -61,6 +61,10 @@ the species fluxes sum to the total flux. Zero conductance retains donor bulk
 flow; infinity is the direct-contact limit. [`AnalogyFilm`](@ref) takes the
 conductance from the face's convective condition instead. Thermal exchange is
 specified by the thermal condition and the complete reservoir temperature.
+
+A face whose convective condition carries a [`PoolingFilm`](@ref) states its
+own gas exchange, so an explicit conductance there is rejected: give the
+default [`AnalogyFilm`](@ref).
 """
 struct MassTransferFilm{G}
     conductance::G
@@ -87,6 +91,13 @@ facing a constant vacuum reservoir, has no external film: the reservoir is
 then in direct contact with the pore gas, as with `film = nothing`. A
 reservoir whose pressure falls to zero in time must declare `film = nothing`
 itself.
+
+On a face whose convective condition carries a [`PoolingFilm`](@ref), the
+twin is that model's film: the molar law of [`molar_film_flux`](@ref) with
+the conductance `ψ g s_v^{n_D}` the model states, `ψ` taken from the solved
+surface composition, so heat and gas exchange share the pooling factor. `Le`
+then has no role and must stay 1; the face's convective condition must be its
+only one, and the reservoir must hold the model's free-stream gas alone.
 """
 struct AnalogyFilm
     Le::Float64
@@ -237,7 +248,14 @@ end
     return (P = P, T = T, x = fractions)
 end
 
-"""Integrated mass-film flux, outward, with exact signed zero-conductance limits."""
+"""
+    mass_film_flux(Ys, Y∞, m, g)
+
+Integrated mass-film flux of every species, outward, for surface and reservoir
+mass fractions `Ys`, `Y∞`, net mass flux `m` and conductance `g`:
+`Ys m + g β(m/g)(Ys − Y∞)` with `β(B) = B/(e^B − 1)`, the film with `ρD` fixed.
+Exact signed zero-conductance limits.
+"""
 @inline function mass_film_flux(Ys, Y∞, m, g)
     if g==0
         return (ForwardDiff.value(m)>=0 ? Ys : Y∞) .* m
@@ -246,3 +264,15 @@ end
         throw(ArgumentError("infinite conductance fixes surface composition directly"))
     return Ys .* m+(g*blowing_factor(m/g)) .* (Ys-Y∞)
 end
+
+"""
+    molar_film_flux(xs, x∞, N, G, M)
+
+Integrated molar film of one conductance, `N_j = x_j,s N + G β(N/G)(x_j,s − x_j,∞)`,
+for surface and reservoir mole fractions `xs`, `x∞`, net molar flux `N`
+[mol/(m² s)] and molar conductance `G = cD/δ` [mol/(m² s)]: the film with
+`cD` fixed, which an ideal gas at one temperature and pressure satisfies. The
+fluxes are returned as mass fluxes `M_j N_j` [kg/(m² s)], `M` the molar masses
+the mole fractions were counted with. The molar fluxes sum to `N`.
+"""
+@inline molar_film_flux(xs, x∞, N, G, M) = M .* mass_film_flux(xs, x∞, N, G)

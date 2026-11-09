@@ -264,15 +264,62 @@ heating of gas drawn in (§9.5.1).
 `PropertyRatioFilm(free_stream; n_Γ)` modifies the free-stream Couette
 parameter using $(\Gamma_\infty/\Gamma_g)^{n_\Gamma}$, where $\Gamma=k/c_p$.
 The outgoing mixture uses mass-weighted heat capacity and Wilke conductivity.
-`PoolingFilm(free_stream; n_Γ,n_D,ψ0,Λc,Λw)` additionally applies a retention
-factor $\psi$, returning $\psi\beta(B_\Gamma/\psi)$. It computes buoyancy from
-the solved surface composition when one is supplied. Without that state it
-uses its empirical outflow/exchange composition closure and requires zero
-free-stream species flux. Both empirical models support outward products or
-pure free-stream suction; they diagnose unsupported mixed counterflow.
-Their fitted parameters describe the external apparatus, not pore transport.
-The signed Couette model supplies the counterflow closure without those
-empirical composition assumptions.
+`PoolingFilm(free_stream; n_Γ,n_D,g,ψ0,Λc,Λw)` additionally applies a pooling
+factor $\psi$, the share of the no-outflow exchange the face keeps, and returns
+$R_b=\psi\beta(B_\Gamma/\psi)$:
+
+$$
+\psi=\psi_0+\frac{1-\psi_0}{1+\exp[-(\Lambda-\Lambda_c)/\Lambda_w]},
+\qquad
+\Lambda=\frac{1-(M_{\text{face}}/T_s)(T_\infty/M_\infty)}{1-T_\infty/T_s},
+$$
+
+with $M_{\text{face}}$ the molar mass of the gas on the face. $\Lambda$ is 1
+for the free stream alone on the face, where the default constants give
+$\psi=0.999$, and 0 for face gas as dense as the incoming free stream; a face
+no hotter than the free stream keeps $\psi=1$. On a face with a solved mass
+film the composition, and $\psi$ from it, come from the model's own molar film
+(§9.4.2): heat and gas exchange share $\psi$, and $R_b$ is continuous through
+zero net outflow, where it equals $\psi$, while the property ratio in
+$B_\Gamma$ changes its slope there. Without a solved film each leaving species
+is taken to cross the film on its own, through stagnant free-stream gas:
+
+$$
+x_k=\frac{J_k/M_k}{n_t}\left[1-\exp\!\left(-\frac{M_\infty n_t}{\psi\,\mathcal{G}\,s_k^{\,n_D}}\right)\right],
+\qquad
+n_t=\sum_l\frac{J_l}{M_l},
+\qquad
+s_k=\frac{D_{k,\infty}\,(\rho c_p)_\infty}{k_\infty},
+$$
+
+with $M_{\text{face}}=\sum_kx_kM_k+(1-\sum_kx_k)M_\infty$ and every property at
+$T_s$, held inside the ranges of the gas data, $D_{k,\infty}$ and
+$\alpha_{\text{th},\infty}$ at one common temperature; $D_{k,\infty}$ is the
+species' own or the Fuller correlation in its original form (Fuller, Schettler
+and Giddings 1966), the form of the chamber CFD. $\psi$ and the face fractions
+are solved together, the mean of the
+ratios at the extreme roots is taken where two are self-consistent, and the
+free-stream species must not cross the face. For one volatile with no net
+free-stream flux the two forms are the same equation. The defaults are the
+CAPA chamber's, from its CFD: $\mathcal{G}=0.0109$ kg·m⁻²·s⁻¹, measured with
+tracers at 1.13–1.22 times the analogy value $h/\bar c_{p,\infty}$ because the
+insulation ring warms the purge gas at the face edge and lowers the heat
+exchange there without changing the gas exchange; $n_D=0.6$, measured 0.58,
+between the surface-renewal exponent 1/2 and the Chilton–Colburn 2/3; and
+$\psi_0=0.577$, $\Lambda_c=0.383$, $\Lambda_w=0.102$, fitted to 43 runs.
+$\mathcal{G}$ and the switch belong to the apparatus, as $h$ does. `volatiles`
+gives the outflow as one lumped `GasSpecies`, whose molar mass and diffusivity
+stand for every gas component other than the free stream in $M_{\text{face}}$
+and in the film. The empirical extensions of the film balances are the
+property-ratio interpolation in $B_\Gamma$, each species diffusing through the
+free stream alone, one $\psi$ for heat and gas, and the logistic switch.
+
+Without a solved film both empirical models support outward products or pure
+free-stream suction and diagnose unsupported mixed counterflow; on a solved
+film they accept any flux pattern against a reservoir of their free-stream gas
+alone (§9.5.2). Their fitted parameters describe the external apparatus, not
+pore transport. The signed Couette model supplies the counterflow closure
+without those empirical composition assumptions.
 
 `FunctionBlowing(f)` evaluates `f(face,h,T_inf)` with signed species fluxes,
 surface temperature, material properties and the available surface composition.

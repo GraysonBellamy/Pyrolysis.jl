@@ -15,7 +15,8 @@ Newton, and the `CouetteFilm` model end to end.
    blowing mass flux match central finite differences.
 6. Integration — the finite-volume core's `solve` with a film model raises
    the surface temperature under convective cooling, and the saved flux
-   decomposition stays consistent with the boundary ledger.
+   decomposition stays consistent with the boundary ledger, for the pooling
+   model on its own solved mass film and on a direct-contact face.
 
 The property-ratio and pooling models are checked against their reference
 values in `test_blowing_models.jl`.
@@ -387,8 +388,109 @@ end
         sol_pool = _solve(PoolingFilm(NITROGEN; diffusion_volume = (gas = 60.0,)))
         @test sol_pool.retcode == :Success
         ψ = sol_pool.extras.surface_pooling_factor[end]
-        @test 0.59 <= ψ <= 1.0
+        @test 0.577 <= ψ <= 1.0
         @test 0.0 <= sol_pool.extras.surface_face_fraction[end] <= 1.0
         @test sol_pool.extras.surface_blowing_ratio[end] < 1.0
+    end
+
+    # ========================================================================
+    @testset "integration: the pooling model on a solved mass film" begin
+        # Wood-like slab under a nitrogen purge: the pores start with nitrogen
+        # at the reservoir state, the volatiles leave through the pooling
+        # model's own molar film, and nitrogen diffuses in against them.
+        R = Pyrolysis.Materials.R_GAS
+        solid = SolidComponent(
+            :solid;
+            φ = 0.3,
+            λ = 1e-5,
+            κ = 1e-12,
+            ρ = 1000.0,
+            c = 1000.0,
+            k = 0.2,
+            ε = 0.9,
+        )
+        vol = GaseousComponent(:volatiles; M = 0.070, c = 2000.0, k = 0.03)
+        n2 = GaseousComponent(:N2; M = 0.028014, c = 1100.0, k = 0.04)
+        mat = Material(
+            name = :purged,
+            components = (solid, vol, n2),
+            reactions = (Reaction(:decomp, 1 => 2, A = 1e4, E = 5e4, h = 1e5),),
+        )
+        surrogate = GasSpecies(:pyrolysate; M = 0.042, c = 2000.0, k = 0.05, V_D = 65.4)
+        model = PoolingFilm(NITROGEN; volatiles = surrogate)
+        reservoir = GasReservoir(P = 101325.0, T = 360.0, mole_fractions = (N2 = 1.0,))
+        problem = PyrolysisProblem(
+            mesh = uniform_mesh(0.005, 8),
+            material = mat,
+            bc_set = BoundaryConditionSet(
+                thermal = (
+                    top = HeatFluxBC(5e4) +
+                          ConvectiveBC(h = 11.2, T_inf = 360.0, blowing = model),
+                    bottom = AdiabaticBC(),
+                ),
+                mass = (top = AmbientGasBC(reservoir), bottom = ImpermeableBC()),
+            ),
+            T_initial = z -> 360.0,
+            ξ_initial = [
+                z -> 1000.0,
+                z -> 0.0,
+                z -> 0.3 * 101325.0 * 0.028014 / (R * 360.0),
+            ],
+            tspan = (0.0, 10.0),
+        )
+        sol = Pyrolysis.Integration.solve(problem; saveat = 0.0:1.0:10.0)
+        @test sol.retcode == :Success
+        x = sol.extras
+        @test sol.mass_loss_rate[end] > 0
+        @test x.surface_face_fraction[end] > 0
+        # Nitrogen alone on the face at the start, then volatiles heavy
+        # enough at 600–700 K to pool.
+        @test x.surface_pooling_factor[1] ≈ 0.999003997 atol = 1e-8
+        @test model.ψ0 <= minimum(x.surface_pooling_factor) < 0.7
+        # The saved decomposition re-evaluates the face with the composition
+        # the gas exchange solved, so it closes on the conducted flux.
+        for k in eachindex(sol.t)
+            @test x.surface_heat_flux_net[k] ≈ x.surface_heat_flux_conduction[k] rtol = 1e-6
+        end
+    end
+
+    # ========================================================================
+    @testset "integration: a direct-contact face reports the flux it solved" begin
+        # Direct contact with a pressurized reservoir has no solved film: the
+        # pooling model takes its own face balance in the solve, and the saved
+        # decomposition must evaluate the same closure, not the reservoir
+        # composition.
+        R = Pyrolysis.Materials.R_GAS
+        mat = _blowing_material(darcy = true)
+        reservoir = GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (gas = 1.0,))
+        problem = PyrolysisProblem(
+            mesh = uniform_mesh(0.005, 8),
+            material = mat,
+            bc_set = BoundaryConditionSet(
+                thermal = (
+                    top = HeatFluxBC(50e3) + ConvectiveBC(
+                        h = 15.0,
+                        T_inf = 300.0,
+                        blowing = PoolingFilm(NITROGEN; diffusion_volume = (gas = 60.0,)),
+                    ),
+                    bottom = AdiabaticBC(),
+                ),
+                mass = (
+                    top = AmbientGasBC(reservoir; film = nothing),
+                    bottom = ImpermeableBC(),
+                ),
+            ),
+            T_initial = z -> 300.0,
+            ξ_initial = [z -> 1000.0, z -> 0.3 * 101325.0 * 0.050 / (R * 300.0)],
+            tspan = (0.0, 5.0),
+        )
+        sol = Pyrolysis.Integration.solve(problem; saveat = [0.0, 2.5, 5.0])
+        @test sol.retcode == :Success
+        @test sol.mass_loss_rate[end] > 0
+        @test sol.extras.surface_blowing_ratio[end] < 1
+        for k in eachindex(sol.t)
+            @test sol.extras.surface_heat_flux_net[k] ≈
+                  sol.extras.surface_heat_flux_conduction[k] rtol = 1e-6
+        end
     end
 end

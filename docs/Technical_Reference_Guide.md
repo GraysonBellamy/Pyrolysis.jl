@@ -610,7 +610,8 @@ Conventions:
 | $\mathcal{F}_{\text{live}}$ | Set of live boundary faces: for each boundary face of the mesh, the face that bounds the live cells on its side (§16.3.2) | – |
 | $f$ | Generic field, or Newton-residual function $f(T_s)$ ($\Phi$ where the face index $f$ is in the same formula) | varies |
 | $G_i$ | Cumulative dry pyrolysis gas produced by cell *i*: first member of the conversion-history pair (variable cross section) | kg |
-| $\mathcal{G}$ | Gas-exchange conductance of the pooling film without outflow, $h/\bar c_{p,\infty}$ (§12.3.3) | kg·m⁻²·s⁻¹ |
+| $\mathcal{G}$ | Gas-exchange conductance of the pooling film without outflow, for a gas with the free stream's molar mass that diffuses as fast as heat (`PoolingFilm` keyword `g`, default 0.0109; the heat–mass analogy gives $h/\bar c_{p,\infty}$) (§12.3.3) | kg·m⁻²·s⁻¹ |
+| $g_{\psi}$ | Mass-film conductance of a face under the pooling model, $\psi\,\mathcal{G}\,s_v^{n_D}$ (§9.4.2) | kg·m⁻²·s⁻¹ |
 | $g$ | Gravitational acceleration (Darcy buoyancy, comparison only) | m·s⁻² |
 | $g(x)$ | One-sided onset of the depletion limiter, $x = \xi/\xi_{\text{th}}$ (§6.3) | – |
 | $H(\cdot)$ | Heaviside step (implemented as smooth tanh ramp; overload H2) | – |
@@ -640,7 +641,7 @@ Conventions:
 | $L$ | Domain thickness (total material length); also characteristic length in convection correlations | m |
 | $L_{\text{layer}}$, $\dot L_{\text{layer}}$ | Thickness of a layer of the equidistribution correction, from its inner bounding node to its outermost live node, and its rate of change (§11.7.5) | m; m·s⁻¹ |
 | $M$, $M_j$ | Molar mass (of component *j*) (overload M1) | kg·mol⁻¹ |
-| $M_{\text{face}}$, $M_{\infty}$ | Molar mass of the gas at the face (from the pooling film's mass fractions) / of the free stream (§12.3.3) | kg·mol⁻¹ |
+| $M_{\text{face}}$, $M_{\infty}$ | Molar mass of the gas at the face (lumped volatiles counted at their own molar mass) / of the free stream or reservoir (§9.4.2, §12.3.3) | kg·mol⁻¹ |
 | $M$ (linear algebra) | The integrator's diagonal mass matrix: one on the differential rows, zero on the algebraic rows ($\mathsf{M}$ in §3 and §15) | – |
 | $M_{\text{ref}}$ | Reference molar mass in the Chapman–Enskog combining rules (= 0.029, air; §5.10) | kg·mol⁻¹ |
 | $M_{\text{dry}}$ | Total initial dry-solid mass in the column, $\sum_i m_{\text{dry},i}$ | kg |
@@ -668,7 +669,7 @@ Conventions:
 | $n_{\text{layer}}$ | Number of cells across a layer of the equidistribution correction; its gain is $n_{\text{layer}}^{2}/\tau_{\text{eq}}$ (§11.7.2; overload N1) | – |
 | $n_{\text{nodes}}$, $n_{\text{faces}}$ | Number of mesh nodes / faces (= n+1 in 1D) | – |
 | $n_{i,j}$, $n_s$ | Reaction order of reaction *i* w.r.t. reactant *j*, an order on the conversion for $n \ne 1$ | – |
-| $n_{\Gamma}$, $n_D$ | Exponents of the property-ratio film ($n_{\Gamma}$ on $\Gamma_{\infty}/\Gamma_g$, default 0.6) and of the pooling film's face fractions ($n_D$, default 1/2) (§12.3.3) | – |
+| $n_{\Gamma}$, $n_D$ | Exponents of the property-ratio film ($n_{\Gamma}$ on $\Gamma_{\infty}/\Gamma_g$, default 0.6) and of the pooling film's diffusivity ratio ($n_D$, default 0.6) (§12.3.3) | – |
 | $P$ | Gas pressure in the porous medium | Pa |
 | $P_{\text{ref}}$ | Reference pressure (= 101325) | Pa |
 | $Q_{\text{rxn}}$ | Volumetric reaction heat source, $-\sum h_r r_r$ | W·m⁻³ |
@@ -689,7 +690,7 @@ Conventions:
 | $S_T$, $S_{T,i}$ | External temperature-rate source (manufactured solutions): $S_T$ on the temperature row, $C_i S_T$ on the enthalpy row (§7.3.3, §13.5.3) | K·s⁻¹ |
 | $S^{\text{rad}}_i$ | Radiation absorbed by cell *i* less what it emits, under radiative transfer, (8.6) (§8.3.3) | W |
 | $s_{if}$ | Orientation of face *f* relative to cell *i* (written $s_{if}$ or $s_{i,f}$; $s_f$ in §6, where *i* is the reaction index and the cell carries no index): +1 when its normal points out of *i* (*i* its owner), −1 otherwise | – |
-| $s_k$ | Diffusivity ratio $D_{k,\infty}/\alpha_{\text{th},\infty}$ of species *k* in the pooling film (§12.3.3) | – |
+| $s_k$, $s_v$ | Diffusivity ratio $D_{k,\infty}/\alpha_{\text{th},\infty}$ of species *k* in the pooling film; $s_v$ that of the one volatile a solved film carries (§9.4.2, §12.3.3) | – |
 | $T$ | Absolute temperature | K |
 | $T_s$ | Surface (boundary face) temperature | K |
 | $T_{\text{cell}}$ | Temperature at the cell center adjacent to a boundary | K |
@@ -723,6 +724,7 @@ Conventions:
 | $x$, $y$ | Transverse/lateral coordinates (multi-dimensional meshes and comparison text) | m |
 | $x_a$ | Conversion of reactant $a$ against its reference, $\xi_a/\xi_{\text{ref}}$ (§6.4) | – |
 | $x_J$ | Join of the depletion limiter's onset, in units of its threshold (`join`, default 1; §6.3.2) | – |
+| $x_j$, $x_{j,s}$, $x_{j,\infty}$ | Mole fraction of gas component *j* in the pooling film, at the face and in the reservoir (§9.4.2, §12.3.3) | – |
 | $x_{\text{th}}$, $\delta_x$ | Conversion scales of the depletion limiter's onset and finite base (`conversion_threshold`, `conversion_base`; §6.3.2) | – |
 | $Y_j$ | Mass fraction of component *j*, $\xi_j/\rho$ ($Y_k$ of species *k* at the face in the pooling film, §12.3.3) | – |
 | $Z$ | Pre-exponential factor (Gpyro V2 notation; FDS uses $A_{\alpha\beta}$; internally $A$) | varies |
@@ -767,7 +769,7 @@ Conventions:
 | $\kappa$ ($\kappa_j$, $\kappa_{\text{eff}}$) | Permeability (Darcy) of component *j* / of the cell's mixture | m² |
 | $\kappa_s$ | Solid absorption coefficient (FDS; compare effective $\alpha_{\text{eff}}$, not mass-specific $\alpha_j$) | m⁻¹ |
 | $\Lambda$ | Face buoyancy of the pooling film relative to the hot free stream, $[1 - (M_{\text{face}}/T_s)(T_{\infty}/M_{\infty})]/(1 - T_{\infty}/T_s)$ (§12.3.3; overload B1) | – |
-| $\Lambda_c$, $\Lambda_w$ | Centre and width of the pooling factor's logistic switch in $\Lambda$ (`PoolingFilm` keywords `Λc`, `Λw`, defaults 0.35, 0.10; §12.3.3) | – |
+| $\Lambda_c$, $\Lambda_w$ | Centre and width of the pooling factor's logistic switch in $\Lambda$ (`PoolingFilm` keywords `Λc`, `Λw`, defaults 0.383, 0.102; §12.3.3) | – |
 | $\lambda$ ($\lambda_j$, $\lambda_{\text{face}}$, $\lambda_{\text{eff}}$) | Gas transfer (diffusion) coefficient | m²·s⁻¹ |
 | $\lambda_{\tau}$ | Factor of the layer equidistribution time, $\tau_{\text{eq},k} = \lambda_{\tau} L_{\text{layer}}/\vert \dot L_{\text{layer}}\vert $ at each estimate (`ActivationTime`, default 1.8; overload A6) | – |
 | $\ell$ | Characteristic particle/pore diameter (Carman–Kozeny); in §17 the scalar loss | m |
@@ -801,7 +803,7 @@ Conventions:
 | $\chi$, $\chi_i$ | **Pyrolysis progress** in cell *i*, $G_i/m_{\text{dry},i}$ (cumulative dry-gas mass released per unit initial dry-solid mass) | – |
 | $\bar{\chi}$ | Column conversion, $\sum_i G_i / \sum_i m_{\text{dry},i}$ (the $m_{\text{dry}}$-weighted mean of $\chi_i$) | – |
 | $\bar{\chi}_c$ | Column conversion smoothly clamped into $[-10^{-3}, 1 + 10^{-3}]$ (`LATERAL_CLAMP_WIDTH`), the argument of the lateral-shrinkage law (§10.4) | – |
-| $\psi$, $\psi_0$ | Pooling factor of the pooling film, the share of the no-outflow exchange the face keeps, and its floor (`PoolingFilm` keyword `ψ0`, default 0.59; §12.3.3; overload B1) | – |
+| $\psi$, $\psi_0$ | Pooling factor of the pooling film, the share of the no-outflow exchange the face keeps, and its floor (`PoolingFilm` keyword `ψ0`, default 0.577; §12.3.3; overload B1) | – |
 | $\psi_{\text{VA}}(a, b; \epsilon)$ | Smooth van Albada slope of the relative-flux reconstruction (§11.6.2) | (field units)·m⁻¹ |
 | $\Phi$ | Generic cell field in the two-point gradient, where the face index $f$ shares the formula (§13.6.1); $\Phi_a(v)$ the reach of reactant *a* from node *v* of a reaction network, the mass of *a* one unit of *v*'s inventory can become (§6.5.5); in §17 the terminal part of a loss | varies |
 | $\Omega(t)$, $\Omega_i(t)$ | Live region of the column (§16.2); region of cell *i* (§7.2, §11.2.1) | – |
@@ -7801,6 +7803,68 @@ the reservoir is then in direct contact with the pore gas and the surface
 composition is the reservoir's, which `film=nothing` also selects explicitly.
 An explicit `MassTransferFilm(g)` overrides the analogy.
 
+A face whose convective condition carries `PoolingFilm` (§12.3.3) states its
+own gas exchange, and its default film is that model's. The film is written in
+moles, since in an ideal gas at one temperature and pressure it is the molar
+concentration times the binary diffusivity, $cD$, that does not depend on
+composition (Taylor and Krishna 1993):
+
+$$
+n_j=x_{j,s}\,n_t+\frac{g_{\psi}}{M_\infty}\,\beta\!\left(\frac{M_\infty n_t}{g_{\psi}}\right)(x_{j,s}-x_{j,\infty}),
+\qquad
+g_{\psi}=\psi\,\mathcal{G}\,s_v^{\,n_D},
+\qquad
+J_j=M_jn_j,
+$$
+
+with $n_j$ the molar flux of species $j$, $n_t=\sum_jn_j$ the net molar
+outflow, $x_j$ the mole fractions and $M_\infty$ the reservoir's molar mass.
+The conductance is the model's: $\mathcal{G}$ for a gas with the free stream's
+molar mass that diffuses as fast as heat, $s_v^{n_D}$ for the volatile's own
+diffusivity, and the pooling factor $\psi$ of the solved surface composition,
+the same $\psi$ the heat exchange applies. The surface Newton solves the
+composition and $\psi$ together, and its Jacobian carries
+$\partial\psi/\partial x_{j,s}$. One molar conductance is what the molar
+balance $\sum_jn_j=n_t$ requires, as one mass conductance is for the
+mass-fraction film; with the moles balanced, the mass fluxes $J_j=M_jn_j$ sum
+to the outflow too. For one volatile with no net free-stream flux, $n_v=n_t$
+gives $x_{v,s}=1-\exp(-M_\infty n_t/g_{\psi})$, the face-gas equation of
+§12.3.3; nitrogen expelled from the pores, or diffusing in against the
+outflow, is the same law at nonzero free-stream flux. With lumped `volatiles`
+the film counts moles with the surrogate's molar mass for every gas component
+other than the free stream, so it is the model's binary whatever molar masses
+the material carries for pore transport; the surface partial pressures of the
+pore path keep the material's.
+
+The pooling film is exact for one volatile. Several volatiles with
+diffusivities of their own would each need a conductance of their own, with
+the free-stream species closing the balance, and species data that lumped
+materials do not have; the film rejects a material with more than one gas
+besides the free stream unless `volatiles` lumps them. It also requires a
+reservoir of the free-stream gas alone, a face whose only convective
+condition carries the model, and $\mathrm{Le}=1$ on the `AnalogyFilm`. An
+explicit `MassTransferFilm` is rejected on such a face, since it would leave
+the gas exchange without the $\psi$ the heat exchange applies.
+
+The free stream is one gas. Air tracked as one component, with a `GasSpecies`
+of its own as the free stream, is accepted; air written as nitrogen and
+oxygen is refused by the reservoir check. Supporting a free stream of several
+species, as oxidative tests with oxygen-dependent kinetics need, would take a
+free stream described as a mixture (its species and reservoir fractions) with
+mixture properties wherever the model now reads one gas: $c_{p,\infty}$ by
+mass fraction and $k_\infty$ by Wilke's rule in $B_\Gamma$ and
+$\alpha_{\text{th},\infty}$, the reservoir's mean molar mass as $M_\infty$ in
+$\Lambda$ (the film's molar conductance already uses it), each free-stream
+species at its own molar mass in the film's mole count, and the volatile's
+diffusivity into the mixture by Blanc's law. The reservoir check and the
+closure without a solved film would then admit the whole set. The
+one-conductance film already carries several reservoir species, with oxygen
+and nitrogen at one diffusivity, and oxygen consumed at or below the face
+enters against the outflow as nitrogen does now. The constants $\mathcal{G}$,
+$n_D$ and the switch were measured under a nitrogen purge; air's molar mass
+differs from nitrogen's by 3 %, and whether they carry over is for the chamber
+CFD to establish.
+
 Whether the composition condition is felt depends on two ratios of the last
 half-cell, of width $d$, to the film. Below a face Péclet number
 $m\,d/(\rho_g\lambda)$ of one the wall term dominates the half-cell flux, so
@@ -7940,9 +8004,13 @@ separate from the matrix transfer coefficient $\lambda$.
 
 Temperature-dependent properties are evaluated at the surface as a
 frozen-property approximation. `PoolingFilm` uses the solved surface
-composition when available. The empirical pooling and property-ratio closures
-support outward products or pure freestream suction and diagnose unsupported
-mixed counterflow. A custom `FunctionBlowing` receives the signed species
+composition when available. Without a solved film the empirical pooling and
+property-ratio closures support outward products or pure free-stream suction
+and diagnose unsupported mixed counterflow. On a solved film the face
+composition comes from the film, the surface Newton passes through mixed trial
+fluxes on its way to a root, and the closures accept any flux pattern; they
+require instead a reservoir of their free-stream gas alone, against which no
+product can enter at the root. A custom `FunctionBlowing` receives the signed species
 fluxes and surface state. Both supported energy states retain the package's
 sensible-enthalpy convention (§7); these transport laws do not introduce a
 separate pressure-work/internal-energy-storage formulation.
@@ -10555,15 +10623,62 @@ heating of gas drawn in (§9.5.1).
 `PropertyRatioFilm(free_stream; n_Γ)` modifies the free-stream Couette
 parameter using $(\Gamma_\infty/\Gamma_g)^{n_\Gamma}$, where $\Gamma=k/c_p$.
 The outgoing mixture uses mass-weighted heat capacity and Wilke conductivity.
-`PoolingFilm(free_stream; n_Γ,n_D,ψ0,Λc,Λw)` additionally applies a retention
-factor $\psi$, returning $\psi\beta(B_\Gamma/\psi)$. It computes buoyancy from
-the solved surface composition when one is supplied. Without that state it
-uses its empirical outflow/exchange composition closure and requires zero
-free-stream species flux. Both empirical models support outward products or
-pure free-stream suction; they diagnose unsupported mixed counterflow.
-Their fitted parameters describe the external apparatus, not pore transport.
-The signed Couette model supplies the counterflow closure without those
-empirical composition assumptions.
+`PoolingFilm(free_stream; n_Γ,n_D,g,ψ0,Λc,Λw)` additionally applies a pooling
+factor $\psi$, the share of the no-outflow exchange the face keeps, and returns
+$R_b=\psi\beta(B_\Gamma/\psi)$:
+
+$$
+\psi=\psi_0+\frac{1-\psi_0}{1+\exp[-(\Lambda-\Lambda_c)/\Lambda_w]},
+\qquad
+\Lambda=\frac{1-(M_{\text{face}}/T_s)(T_\infty/M_\infty)}{1-T_\infty/T_s},
+$$
+
+with $M_{\text{face}}$ the molar mass of the gas on the face. $\Lambda$ is 1
+for the free stream alone on the face, where the default constants give
+$\psi=0.999$, and 0 for face gas as dense as the incoming free stream; a face
+no hotter than the free stream keeps $\psi=1$. On a face with a solved mass
+film the composition, and $\psi$ from it, come from the model's own molar film
+(§9.4.2): heat and gas exchange share $\psi$, and $R_b$ is continuous through
+zero net outflow, where it equals $\psi$, while the property ratio in
+$B_\Gamma$ changes its slope there. Without a solved film each leaving species
+is taken to cross the film on its own, through stagnant free-stream gas:
+
+$$
+x_k=\frac{J_k/M_k}{n_t}\left[1-\exp\!\left(-\frac{M_\infty n_t}{\psi\,\mathcal{G}\,s_k^{\,n_D}}\right)\right],
+\qquad
+n_t=\sum_l\frac{J_l}{M_l},
+\qquad
+s_k=\frac{D_{k,\infty}\,(\rho c_p)_\infty}{k_\infty},
+$$
+
+with $M_{\text{face}}=\sum_kx_kM_k+(1-\sum_kx_k)M_\infty$ and every property at
+$T_s$, held inside the ranges of the gas data, $D_{k,\infty}$ and
+$\alpha_{\text{th},\infty}$ at one common temperature; $D_{k,\infty}$ is the
+species' own or the Fuller correlation in its original form (Fuller, Schettler
+and Giddings 1966), the form of the chamber CFD. $\psi$ and the face fractions
+are solved together, the mean of the
+ratios at the extreme roots is taken where two are self-consistent, and the
+free-stream species must not cross the face. For one volatile with no net
+free-stream flux the two forms are the same equation. The defaults are the
+CAPA chamber's, from its CFD: $\mathcal{G}=0.0109$ kg·m⁻²·s⁻¹, measured with
+tracers at 1.13–1.22 times the analogy value $h/\bar c_{p,\infty}$ because the
+insulation ring warms the purge gas at the face edge and lowers the heat
+exchange there without changing the gas exchange; $n_D=0.6$, measured 0.58,
+between the surface-renewal exponent 1/2 and the Chilton–Colburn 2/3; and
+$\psi_0=0.577$, $\Lambda_c=0.383$, $\Lambda_w=0.102$, fitted to 43 runs.
+$\mathcal{G}$ and the switch belong to the apparatus, as $h$ does. `volatiles`
+gives the outflow as one lumped `GasSpecies`, whose molar mass and diffusivity
+stand for every gas component other than the free stream in $M_{\text{face}}$
+and in the film. The empirical extensions of the film balances are the
+property-ratio interpolation in $B_\Gamma$, each species diffusing through the
+free stream alone, one $\psi$ for heat and gas, and the logistic switch.
+
+Without a solved film both empirical models support outward products or pure
+free-stream suction and diagnose unsupported mixed counterflow; on a solved
+film they accept any flux pattern against a reservoir of their free-stream gas
+alone (§9.5.2). Their fitted parameters describe the external apparatus, not
+pore transport. The signed Couette model supplies the counterflow closure
+without those empirical composition assumptions.
 
 `FunctionBlowing(f)` evaluates `f(face,h,T_inf)` with signed species fluxes,
 surface temperature, material properties and the available surface composition.

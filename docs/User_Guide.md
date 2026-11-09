@@ -3273,27 +3273,36 @@ ConvectiveBC(h = 11.2, T_inf = 360.0,
   `B_Γ = (ṁ″·c_p,∞/h)·(Γ_∞/Γ_g)^n_Γ`, `Γ = k/c_p` of the free stream
   and of the leaving mixture (heat capacity by mass fraction, conductivity by
   Wilke's rule). No constant is refitted for a new gas.
-- `PoolingFilm(free_stream; n_Γ, n_D, ψ0, Λc, Λw)`: the same `B_Γ` with a
-  pooling factor `ψ`, `R_b = B_Γ/(e^{B_Γ/ψ} − 1)`, that falls from 1 to the
-  floor `ψ_0` (keyword `ψ0`) when the gas at the face is denser than the free
-  stream, switching over a logistic in the face buoyancy `Λ` centred at `Λ_c`
-  with width `Λ_w` (keywords `Λc`, `Λw`). The face
-  composition uses the solved mass-film state when available; otherwise it
-  follows the empirical species film balance with binary diffusivities and
-  requires zero free-stream species flux. The three switch constants belong to
-  the apparatus flow (the defaults are the CAPA chamber's); the gas enters
-  through its properties. Describe the volatiles either through the
-  material's gas components, with Fuller diffusion volumes
-  `diffusion_volume = (name = V, ...)`, or as one lumped `GasSpecies`
-  (`volatiles = ...`).
+- `PoolingFilm(free_stream; n_Γ, n_D, g, ψ0, Λc, Λw)`: the same `B_Γ` with a
+  pooling factor `ψ`, `R_b = B_Γ/(e^{B_Γ/ψ} − 1)`, that falls from about 1 to
+  the floor `ψ_0` (keyword `ψ0`) when the gas at the face is denser than the
+  free stream, switching over a logistic in the face buoyancy `Λ` centred at
+  `Λ_c` with width `Λ_w` (keywords `Λc`, `Λw`). With nitrogen alone on the face
+  (`Λ = 1`) the default constants give `ψ = 0.999`. The face composition comes
+  from a molar film of conductance `ψ·g·s^n_D`, where `g` [kg/(m² s)] is the
+  face's gas exchange without outflow and `s` the volatile's diffusivity over
+  the free stream's thermal diffusivity. On a face whose mass condition solves a
+  film (an `AmbientGasBC` or `ConvectivePressureBC` with the default film),
+  that film becomes the model's and heat and gas share `ψ` (§5.3.3); otherwise
+  each leaving species crosses the film on its own and the free-stream species
+  must not cross the face. `g`, `n_D` and the three switch constants belong to
+  the apparatus flow, as `h` does: the defaults (`g = 10.9e-3`, `n_D = 0.6`,
+  `ψ0 = 0.577`, `Λc = 0.383`, `Λw = 0.102`) are the CAPA chamber's, measured
+  and fitted in its CFD; the gas enters through its properties. Describe the
+  volatiles either as one lumped `GasSpecies` (`volatiles = ...`), whose molar
+  mass and diffusivity then stand for every gas component other than the free
+  stream, or through the material's gas components, with Fuller diffusion
+  volumes `diffusion_volume = (name = V, ...)`.
 - `FunctionBlowing(f)`: your own blowing ratio `R_b = f(face, h, T_inf)` from the
   `BlowingFace` (outward species fluxes `face.ṁ`, surface temperature
   `face.T_s`, `face.material`). `f` must return 1 at zero species fluxes, be smooth and
   accept dual numbers (branch only on `ForwardDiff.value`).
 
-The empirical property-ratio and pooling closures support outward products
-or pure free-stream suction and reject mixed counterflow. Use the signed
-Couette closure for counterflow.
+Without a solved mass film the empirical property-ratio and pooling closures
+support outward products or pure free-stream suction and reject mixed
+counterflow; use the signed Couette closure for counterflow there. On a face
+with a solved film they accept nitrogen diffusing in against the outflow,
+provided the reservoir holds their free-stream gas alone.
 
 The free stream is a `GasSpecies` (molar mass, `c_p(T)`, `k(T)`, Fuller
 diffusion volume, optional viscosity); `NITROGEN` ships, and
@@ -3517,6 +3526,36 @@ thermal balance; zero conductance permits only donor bulk flow. The model, the
 signed blowing/reversal limits and the criteria for when the film matters are
 in Technical Reference §9.4.
 
+When the face's `ConvectiveBC` carries a `PoolingFilm`, the default film is
+that model's own: a molar film (the form an ideal gas obeys, since `c·D` does
+not depend on composition) whose conductance `ψ·g·s^n_D` takes `ψ` from the
+solved surface composition, so the heat and gas exchange of the face pool
+together:
+
+```julia
+purge = GasReservoir(P = 101325.0, T = 360.0, mole_fractions = (N2 = 1.0,))
+pyrolysate = GasSpecies(:pyrolysate; M = 0.042, c = 2000.0, k = 0.05, V_D = 65.4)
+thermal = HeatFluxBC(5e4) + ConvectiveBC(h = 11.2, T_inf = 360.0,
+                                         blowing = PoolingFilm(NITROGEN; volatiles = pyrolysate))
+mass = AmbientGasBC(purge)   # the PoolingFilm's own film
+```
+
+For one volatile with no net nitrogen flux this is exactly the model's
+face-gas equation, and it extends it to nitrogen expelled from the pores or
+diffusing in against the outflow. It needs one volatile: a lumped `volatiles`,
+or a material with one gas besides the free stream. It also needs a reservoir
+of the free-stream gas alone and a face with no other convective condition. An
+explicit `MassTransferFilm` there is rejected, since it would leave the gas
+exchange without the `ψ` the heat exchange applies, and `AnalogyFilm(Le = ...)`
+must keep `Le = 1`. Lumped volatiles are counted at the surrogate's molar mass
+in this film, whatever the material's gas components carry for pore transport.
+
+The reservoir must be the model's free-stream gas alone. A purge of air works
+when air is one tracked component with a `GasSpecies` of its own as the free
+stream; air written as separate nitrogen and oxygen components, which
+oxygen-dependent kinetics need, is not supported on a `PoolingFilm` face yet.
+Technical Reference §9.4.2 lists what supporting it would take.
+
 The reservoir composition is the gas at the edge of the boundary layer. Under
 a flame that gas is oxygen-free, so a deck with oxygen-dependent kinetics
 should give `mole_fractions` as a function of time that removes the oxygen
@@ -3539,10 +3578,12 @@ energy is `H_reservoir-q_reservoir=H_surface-q_surface`. An adiabatic boundary
 has no hidden incoming-gas heating. A convective film and its reservoir must use
 the same incoming stream temperature; radiative surroundings can differ.
 
-`CouetteFilm` uses the signed sum of species heat-capacity fluxes. Empirical
-pooling/property-ratio models support outward products or pure freestream
-suction and diagnose unsupported mixed counterflow. See Technical Reference
-§9.5 for the control surface, approximation and supported domains.
+`CouetteFilm` uses the signed sum of species heat-capacity fluxes. Without a
+solved mass film, empirical pooling/property-ratio models support outward
+products or pure free-stream suction and diagnose unsupported mixed
+counterflow; on a solved film they accept any flux pattern against a reservoir
+of their free-stream gas alone. See Technical Reference §9.5 for the control
+surface, approximation and supported domains.
 
 ---
 
@@ -11778,7 +11819,7 @@ Notes:
 | `ImpermeableBC` | `ImpermeableBC()` | zero species flow |
 | `GasReservoir` | `GasReservoir(P=...,T=...,mole_fractions=(air=1.,))` | complete external ideal-gas state |
 | `AmbientGasBC` | `AmbientGasBC(reservoir;film=AnalogyFilm())` | pore/reservoir exchange in either direction through a mass film |
-| `AnalogyFilm` | `AnalogyFilm(;Le=1.)` | the default film: conductance from the face's `ConvectiveBC` by the heat–mass analogy |
+| `AnalogyFilm` | `AnalogyFilm(;Le=1.)` | the default film: conductance from the face's `ConvectiveBC` by the heat–mass analogy, or on a `PoolingFilm` face that model's molar film |
 | `MassTransferFilm` | `MassTransferFilm(g)` | explicit isobaric common-diffusivity conductance [kg/(m² s)] |
 | `MassFluxBC` | `MassFluxBC(fluxes=(air=-1e-4,),inflow_temperature=(air=300.,))` | prescribed outward species flux and incoming energy |
 
@@ -11873,11 +11914,13 @@ the blowing ratio `R_b = h_eff/h` (Chapter 5, §5.2.3):
 | `NoBlowing` | `NoBlowing()` (the default) | `R_b = 1` |
 | `CouetteFilm` | `CouetteFilm(λ = 0.5)` or `CouetteFilm(; λ)` | `B_λ/(e^{B_λ} − 1)`, `B_λ = 2λ Σ_j N_j c_p,j(T_s)/h`, including signed counterflow |
 | `PropertyRatioFilm` | `PropertyRatioFilm(free_stream; n_Γ = 0.6, volatiles = nothing)` | `B_Γ/(e^{B_Γ} − 1)` with `B_Γ = (ṁ″ c_p,∞/h)(Γ_∞/Γ_g)^n_Γ`, `Γ = k/c_p` |
-| `PoolingFilm` | `PoolingFilm(free_stream; n_Γ = 0.6, n_D = 0.5, ψ0 = 0.59, Λc = 0.35, Λw = 0.10, volatiles = nothing, diffusion_volume = (;))` | `B_Γ/(e^{B_Γ/ψ} − 1)` with a pooling factor `ψ` falling from 1 to `ψ_0` (keyword `ψ0`) when the gas at the face is denser than the free stream |
+| `PoolingFilm` | `PoolingFilm(free_stream; n_Γ = 0.6, n_D = 0.6, g = 10.9e-3, ψ0 = 0.577, Λc = 0.383, Λw = 0.102, volatiles = nothing, diffusion_volume = (;))` | `B_Γ/(e^{B_Γ/ψ} − 1)` with a pooling factor `ψ` falling from about 1 to `ψ_0` (keyword `ψ0`) when the gas at the face is denser than the free stream; on a face with a solved mass film it also sets that film (§5.3.3) |
 | `FunctionBlowing` | `FunctionBlowing(f)` | `R_b = f(face, h, T_inf)`; `f` returns 1 at zero species fluxes, is smooth and accepts dual numbers |
 
-`CouetteFilm` supports signed fluxes. `PropertyRatioFilm` and `PoolingFilm`
-require their declared outward-flow domain and reject unsupported counterflow.
+`CouetteFilm` supports signed fluxes. Without a solved mass film
+`PropertyRatioFilm` and `PoolingFilm` require their declared outward-flow
+domain and reject unsupported counterflow; on a solved film they require a
+reservoir of their free-stream gas alone instead.
 The gas data the models read:
 
 | Name | Signature and meaning |
@@ -11886,8 +11929,8 @@ The gas data the models read:
 | `NITROGEN` | nitrogen as a free stream: NASA-7 heat capacity, polynomial conductivity and viscosity, `V_D = 18.5`, range 200–1250 K |
 | `nasa7_heat_capacity` | `nasa7_heat_capacity(a, M)` or `nasa7_heat_capacity(a_low, a_high, M; T_common = 1000.0)`: `c_p` [J/(kg·K)] from five NASA-7 coefficients per range |
 | `eucken_viscosity` | `eucken_viscosity(k, cp, M)`: `μ = k/(c_p + 5R/(4M))` [Pa·s] |
-| `fuller_diffusivity` | `fuller_diffusivity(T, M_a, V_a, M_b, V_b; P = P_REF)`: the Fuller binary diffusivity [m²/s], molar masses in kg/mol, `P` in Pa |
-| `BlowingFace` | `BlowingFace(ṁ, T_s, material)`: what a model sees, the outward flux of every component `ṁ` (an `NTuple`, positive leaving), the surface temperature and the material |
+| `fuller_diffusivity` | `fuller_diffusivity(T, M_a, V_a, M_b, V_b; P = P_REF)`: the Fuller binary diffusivity [m²/s] in the correlation's original form, `10⁻³ T^1.75 √(1/M_a + 1/M_b)/(P (V_a^⅓ + V_b^⅓)²)` cm²/s with `P` in atm and `M` in g/mol (0.2 % above Poling's Eq. 11-4.4); arguments in kg/mol and Pa |
+| `BlowingFace` | `BlowingFace(ṁ, T_s, material; surface_mass_fractions = nothing)`: what a model sees, the outward flux of every component `ṁ` (an `NTuple`, positive leaving), the surface temperature, the material and, on a face with a solved mass film, the surface mass fraction of every component |
 | `blowing_state` | `blowing_state(model, face, h, T_inf) -> (; χ, φ, ψ, Y, Λ, states)`: the field `χ` is the ratio `R_b`, `φ` the film parameter `B_λ` or `B_Γ`, `ψ` the pooling factor, `Y` the face mass fraction of the volatiles, `Λ` the face buoyancy, `states` the number of self-consistent states (1 or 2) |
 | `blowing_ratio` | `blowing_ratio(model, face, h, T_inf) -> R_b` |
 | `blowing_factor` | `blowing_factor(x) = x/(e^x − 1)`, the film factor `F_b`, smooth for every real `x`, one at `x = 0` |
@@ -12655,11 +12698,11 @@ Technical Reference chapter.
 | `Cone` `directions` | `3` |
 | `BoundaryConditionSet` `thermal` / `mass` | `(top = AdiabaticBC(), bottom = AdiabaticBC())` / `(top = ImpermeableBC(), bottom = ImpermeableBC())` |
 | `background_gas_concentration` `P` | `101325.0` Pa |
-| `AmbientGasBC` `film` | `nothing` |
+| `AmbientGasBC` `film` | `AnalogyFilm()` |
 | `LumpedTransfer` `endpoint`, `blend` | `nothing`, `(1e-4,1e-3)` |
 | `CouetteFilm` `λ` | `0.5` |
 | `PropertyRatioFilm` `n_Γ` | `0.6` |
-| `PoolingFilm` `n_Γ`, `n_D`, `ψ0`, `Λc`, `Λw` | `0.6`, `0.5`, `0.59`, `0.35`, `0.10` |
+| `PoolingFilm` `n_Γ`, `n_D`, `g`, `ψ0`, `Λc`, `Λw` | `0.6`, `0.6`, `10.9e-3` kg/(m² s), `0.577`, `0.383`, `0.102` |
 | `GasSpecies` `μ`, `V_D`, `D`, `T_range` | `nothing` (Eucken), `NaN`, `nothing` (Fuller), `(200.0, 3000.0)` K |
 
 ### 16.13.4 Problem and mesh

@@ -410,6 +410,68 @@ the reservoir is then in direct contact with the pore gas and the surface
 composition is the reservoir's, which `film=nothing` also selects explicitly.
 An explicit `MassTransferFilm(g)` overrides the analogy.
 
+A face whose convective condition carries `PoolingFilm` (§12.3.3) states its
+own gas exchange, and its default film is that model's. The film is written in
+moles, since in an ideal gas at one temperature and pressure it is the molar
+concentration times the binary diffusivity, $cD$, that does not depend on
+composition (Taylor and Krishna 1993):
+
+$$
+n_j=x_{j,s}\,n_t+\frac{g_{\psi}}{M_\infty}\,\beta\!\left(\frac{M_\infty n_t}{g_{\psi}}\right)(x_{j,s}-x_{j,\infty}),
+\qquad
+g_{\psi}=\psi\,\mathcal{G}\,s_v^{\,n_D},
+\qquad
+J_j=M_jn_j,
+$$
+
+with $n_j$ the molar flux of species $j$, $n_t=\sum_jn_j$ the net molar
+outflow, $x_j$ the mole fractions and $M_\infty$ the reservoir's molar mass.
+The conductance is the model's: $\mathcal{G}$ for a gas with the free stream's
+molar mass that diffuses as fast as heat, $s_v^{n_D}$ for the volatile's own
+diffusivity, and the pooling factor $\psi$ of the solved surface composition,
+the same $\psi$ the heat exchange applies. The surface Newton solves the
+composition and $\psi$ together, and its Jacobian carries
+$\partial\psi/\partial x_{j,s}$. One molar conductance is what the molar
+balance $\sum_jn_j=n_t$ requires, as one mass conductance is for the
+mass-fraction film; with the moles balanced, the mass fluxes $J_j=M_jn_j$ sum
+to the outflow too. For one volatile with no net free-stream flux, $n_v=n_t$
+gives $x_{v,s}=1-\exp(-M_\infty n_t/g_{\psi})$, the face-gas equation of
+§12.3.3; nitrogen expelled from the pores, or diffusing in against the
+outflow, is the same law at nonzero free-stream flux. With lumped `volatiles`
+the film counts moles with the surrogate's molar mass for every gas component
+other than the free stream, so it is the model's binary whatever molar masses
+the material carries for pore transport; the surface partial pressures of the
+pore path keep the material's.
+
+The pooling film is exact for one volatile. Several volatiles with
+diffusivities of their own would each need a conductance of their own, with
+the free-stream species closing the balance, and species data that lumped
+materials do not have; the film rejects a material with more than one gas
+besides the free stream unless `volatiles` lumps them. It also requires a
+reservoir of the free-stream gas alone, a face whose only convective
+condition carries the model, and $\mathrm{Le}=1$ on the `AnalogyFilm`. An
+explicit `MassTransferFilm` is rejected on such a face, since it would leave
+the gas exchange without the $\psi$ the heat exchange applies.
+
+The free stream is one gas. Air tracked as one component, with a `GasSpecies`
+of its own as the free stream, is accepted; air written as nitrogen and
+oxygen is refused by the reservoir check. Supporting a free stream of several
+species, as oxidative tests with oxygen-dependent kinetics need, would take a
+free stream described as a mixture (its species and reservoir fractions) with
+mixture properties wherever the model now reads one gas: $c_{p,\infty}$ by
+mass fraction and $k_\infty$ by Wilke's rule in $B_\Gamma$ and
+$\alpha_{\text{th},\infty}$, the reservoir's mean molar mass as $M_\infty$ in
+$\Lambda$ (the film's molar conductance already uses it), each free-stream
+species at its own molar mass in the film's mole count, and the volatile's
+diffusivity into the mixture by Blanc's law. The reservoir check and the
+closure without a solved film would then admit the whole set. The
+one-conductance film already carries several reservoir species, with oxygen
+and nitrogen at one diffusivity, and oxygen consumed at or below the face
+enters against the outflow as nitrogen does now. The constants $\mathcal{G}$,
+$n_D$ and the switch were measured under a nitrogen purge; air's molar mass
+differs from nitrogen's by 3 %, and whether they carry over is for the chamber
+CFD to establish.
+
 Whether the composition condition is felt depends on two ratios of the last
 half-cell, of width $d$, to the film. Below a face Péclet number
 $m\,d/(\rho_g\lambda)$ of one the wall term dominates the half-cell flux, so
@@ -549,9 +611,13 @@ separate from the matrix transfer coefficient $\lambda$.
 
 Temperature-dependent properties are evaluated at the surface as a
 frozen-property approximation. `PoolingFilm` uses the solved surface
-composition when available. The empirical pooling and property-ratio closures
-support outward products or pure freestream suction and diagnose unsupported
-mixed counterflow. A custom `FunctionBlowing` receives the signed species
+composition when available. Without a solved film the empirical pooling and
+property-ratio closures support outward products or pure free-stream suction
+and diagnose unsupported mixed counterflow. On a solved film the face
+composition comes from the film, the surface Newton passes through mixed trial
+fluxes on its way to a root, and the closures accept any flux pattern; they
+require instead a reservoir of their free-stream gas alone, against which no
+product can enter at the root. A custom `FunctionBlowing` receives the signed species
 fluxes and surface state. Both supported energy states retain the package's
 sensible-enthalpy convention (§7); these transport laws do not introduce a
 separate pressure-work/internal-energy-storage formulation.
