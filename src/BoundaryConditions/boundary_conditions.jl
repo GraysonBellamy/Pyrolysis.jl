@@ -469,8 +469,8 @@ _any_function(parameters...) = any(x -> x isa Function, parameters)
 
 Whether a boundary condition, or a [`BoundaryConditionSet`](@ref), can read the
 time: whether a parameter the residual evaluates at the time is a function. A
-function of the temperature, as `RadiativeBC`'s `ε` and a film's conductance are,
-does not count. A condition with no method of its own is taken to read it.
+function of the temperature, as `RadiativeBC`'s `ε`, a film's conductance and a
+hydraulic resistance are, does not count. A condition with no method of its own is taken to read it.
 """
 reads_time(::Union{AbstractThermalBC,AbstractMassBC}) = true
 reads_time(::Union{AdiabaticBC,ImpermeableBC}) = false
@@ -482,8 +482,7 @@ reads_time(bc::RadiativeFluxBC) = _any_function(bc.flux, bc.absorptivity)
 reads_time(bc::CombinedThermalBC) = any(reads_time, bc.bcs)
 reads_time(res::GasReservoir) = _any_function(res.P, res.T, res.mole_fractions)
 reads_time(bc::AmbientGasBC) = reads_time(bc.reservoir)
-reads_time(bc::ConvectivePressureBC) =
-    reads_time(bc.reservoir) || _any_function(bc.resistance)
+reads_time(bc::ConvectivePressureBC) = reads_time(bc.reservoir)
 reads_time(bc::NeumannPressureBC) = _any_function(bc.gradient, bc.T, bc.mole_fractions)
 reads_time(bc::MassFluxBC) =
     _any_function(bc.fluxes...) || _any_function(bc.inflow_temperature...)

@@ -29,6 +29,7 @@ MassFluxBC
 GasReservoir
 AmbientGasBC
 MassTransferFilm
+AnalogyFilm
 ```
 
 ## Blowing

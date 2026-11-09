@@ -88,3 +88,14 @@ end
     @test mass_film_flux(ys, ya, 0.0, 0.1)≈0.1*(ys-ya)
     @test all(isfinite, ForwardDiff.jacobian(x->mass_film_flux(ys, ya, x[1], 0.1), [0.0]))
 end
+
+@testset "analogy film and hydraulic flow basis" begin
+    res=GasReservoir(P = 1e5, T = 300.0, mole_fractions = (a = 1.0,))
+    @test AmbientGasBC(res).film isa AnalogyFilm
+    @test ConvectivePressureBC(res; resistance = 1.0, flow = :mass).film isa AnalogyFilm
+    @test AnalogyFilm(Le = 2.0).Le==2.0
+    @test_throws ArgumentError AnalogyFilm(Le = 0.0)
+    @test_throws ArgumentError AnalogyFilm(Le = Inf)
+    @test_throws ArgumentError ConvectivePressureBC(res; resistance = 1.0, flow = :molar)
+    @test ConvectivePressureBC(res; resistance = T->T, flow = :mass).resistance(2.0)==2.0
+end

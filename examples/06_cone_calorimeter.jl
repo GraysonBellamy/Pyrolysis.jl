@@ -190,11 +190,11 @@ top_thermal_bc =
     RadiativeBC(ε = 0.96, T_inf = 330) +                 # Re-radiation at the boundary; TK deposition may differ
     ConvectiveBC(h = h_conv, T_inf = 330)                # Convective losses
 
-# Air at the thermal stream temperature; g is a mass-film conductance [kg/(m² s)].
-top_mass_bc = AmbientGasBC(
-    GasReservoir(P = 101325.0, T = 330.0, mole_fractions = (AIR = 1.0,));
-    film = MassTransferFilm(0.05*101325.0*0.02897/(8.31446261815324*330.0)),
-)
+# Air at the thermal stream temperature. The mass film is the twin of the
+# convective film above: its conductance follows from h_conv by the heat–mass
+# transfer analogy (the default AnalogyFilm).
+top_mass_bc =
+    AmbientGasBC(GasReservoir(P = 101325.0, T = 330.0, mole_fractions = (AIR = 1.0,)))
 
 # Bottom surface (:bottom): back face with heat losses
 # - Re-radiation losses to ambient (back face radiates to surroundings)

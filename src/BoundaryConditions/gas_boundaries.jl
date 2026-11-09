@@ -53,11 +53,14 @@ end
 """
     MassTransferFilm(conductance)
 
-Isobaric, common-diffusivity, nonreacting mass film. Conductance `g=ρD/δ`
-[kg/(m² s)] is constant or a function of surface temperature. Its integrated
-law is `N_j=Y_j,s*m + g*β(m/g)*(Y_j,s-Y_j,∞)`. Zero conductance retains donor
-bulk flow; infinity is the no-film limit. Thermal exchange is specified by
-the thermal condition and the complete reservoir temperature.
+Isobaric, common-diffusivity, nonreacting mass film with an explicit
+conductance `g=ρD/δ` [kg/(m² s)], constant or a function of surface
+temperature. Its integrated law is `N_j=Y_j,s*m + g*β(m/g)*(Y_j,s-Y_j,∞)`
+with `β(B)=B/(e^B-1)`. The same conductance for every species is what makes
+the species fluxes sum to the total flux. Zero conductance retains donor bulk
+flow; infinity is the direct-contact limit. [`AnalogyFilm`](@ref) takes the
+conductance from the face's convective condition instead. Thermal exchange is
+specified by the thermal condition and the complete reservoir temperature.
 """
 struct MassTransferFilm{G}
     conductance::G
@@ -69,12 +72,46 @@ struct MassTransferFilm{G}
     end
 end
 
-"""Open pore exchange with a complete reservoir and optional mass-transfer film."""
-struct AmbientGasBC{R<:GasReservoir,F<:Union{Nothing,MassTransferFilm}} <: AbstractMassBC
+"""
+    AnalogyFilm(; Le = 1.0)
+
+The twin of the face's convective heat film: the film of
+[`MassTransferFilm`](@ref) with its conductance from the heat–mass transfer
+analogy, `g = h/(c_p,∞ Le^(2/3))`, where `h` is the bare coefficient of the
+`ConvectiveBC` on the same face (summed over the convective members of a
+combined condition), `c_p,∞` the heat capacity of the reservoir gas at the
+film temperature and `Le` the Lewis number of the exchanged species in that
+gas. This is the default film of [`AmbientGasBC`](@ref) and
+[`ConvectivePressureBC`](@ref). A face without a convective condition, or
+facing a constant vacuum reservoir, has no external film: the reservoir is
+then in direct contact with the pore gas, as with `film = nothing`. A
+reservoir whose pressure falls to zero in time must declare `film = nothing`
+itself.
+"""
+struct AnalogyFilm
+    Le::Float64
+    function AnalogyFilm(; Le::Real = 1.0)
+        isfinite(Le) && Le>0 ||
+            throw(ArgumentError("Lewis number must be finite and positive"))
+        new(Float64(Le))
+    end
+end
+
+const MassFilm = Union{Nothing,MassTransferFilm,AnalogyFilm}
+
+"""
+    AmbientGasBC(reservoir; film = AnalogyFilm())
+
+Open pore exchange with a complete reservoir through a mass-transfer film:
+by default the [`AnalogyFilm`](@ref) twin of the face's convective condition,
+an explicit [`MassTransferFilm`](@ref), or `nothing` for direct contact, which
+pins the surface composition to the reservoir's.
+"""
+struct AmbientGasBC{R<:GasReservoir,F<:MassFilm} <: AbstractMassBC
     reservoir::R
     film::F
 end
-AmbientGasBC(reservoir::GasReservoir; film::Union{Nothing,MassTransferFilm} = nothing) =
+AmbientGasBC(reservoir::GasReservoir; film::MassFilm = AnalogyFilm()) =
     AmbientGasBC(reservoir, film)
 
 """
@@ -130,17 +167,17 @@ function NeumannPressureBC(; gradient, T, mole_fractions)
 end
 
 """
-    ConvectivePressureBC(reservoir; resistance, flow, film=nothing)
+    ConvectivePressureBC(reservoir; resistance, flow, film=AnalogyFilm())
 
 Solve `P_surface-P_reservoir=resistance*flow_rate`. Select `flow` explicitly:
-`:darcy_velocity` uses m/s (resistance Pa s/m), `:molar` uses mol/(m² s)
-(resistance Pa m² s/mol), or `:mass` uses kg/(m² s) (Pa m² s/kg).
-Resistance is nonnegative, constant or a function of time. The reservoir
-supplies composition and incoming temperature; an optional film solves
-surface composition by species-flux continuity.
+`:darcy_velocity` uses m/s (resistance Pa s/m) or `:mass` uses kg/(m² s)
+(resistance Pa m² s/kg). Resistance is nonnegative, a constant or a function
+of surface temperature like a film conductance: a Darcy skin of thickness `δ`
+and permeability `K` has `R_h = μ(T) δ/(ρ_g K)`. The reservoir supplies
+composition and incoming temperature; the film solves surface composition by
+species-flux continuity.
 """
-struct ConvectivePressureBC{R<:GasReservoir,H,F<:Union{Nothing,MassTransferFilm}} <:
-       AbstractMassBC
+struct ConvectivePressureBC{R<:GasReservoir,H,F<:MassFilm} <: AbstractMassBC
     reservoir::R
     resistance::H
     flow::Symbol
@@ -150,10 +187,10 @@ function ConvectivePressureBC(
     reservoir::GasReservoir;
     resistance,
     flow::Symbol,
-    film::Union{Nothing,MassTransferFilm} = nothing,
+    film::MassFilm = AnalogyFilm(),
 )
-    flow in (:darcy_velocity, :molar, :mass) ||
-        throw(ArgumentError("flow must be :darcy_velocity, :molar, or :mass"))
+    flow in (:darcy_velocity, :mass) ||
+        throw(ArgumentError("flow must be :darcy_velocity or :mass"))
     resistance isa Real &&
         (!isfinite(resistance) || resistance<0) &&
         throw(ArgumentError("hydraulic resistance must be finite and nonnegative"))

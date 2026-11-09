@@ -491,7 +491,7 @@ The physics below is absent from the model. It is ordered by its expected effect
 
 3. **Oxidative pyrolysis and char oxidation with O₂ ingress** (about 32.8 MJ per kg of carbon). It dominates at sub-critical fluxes, after flameout, and in smoldering, and it controls the late-time MLR tail and the residue mass of the Douglas-fir case. It needs multi-reactant kinetics (item 2) and an explicit reservoir composition supplied by `GasReservoir`. The upwind Darcy outflow suppresses ingress at high MLR.
 4. **Equilibrium (pressure-dependent) moisture evaporation and recondensation.** Drying is a pressure-independent Arrhenius reaction; no saturation pressure $P_{\text{sat}}(T)$ appears anywhere. Vapor recondensation ahead of the drying front (which raises the local moisture content by 30–50 %) is absent, and at the 1.5–2 atm pore pressure of pressure-treated wood the boiling point shifts to 112–121 °C, which Arrhenius drying cannot represent. An Arrhenius drying step is also only admissible while its rate at ambient temperature is negligible over the test; the wood examples' parameters are not (§6.10 item 11). It needs item 2 and a smooth $r \propto (P_v - P_{\text{sat}}(T))$ closure; the pressure is evaluated for all gas-bearing materials.
-5. **Backing layer and contact resistance at the back face.** There is no contact-resistance or substrate model. An adiabatic back face over-predicts late-time back-half temperatures (the missing loss is about 0.7–3 kW·m⁻² for 25 mm of wood over 10–20 min); a lumped Robin condition on the bottom face (radiative + convective, as in example `06_cone_calorimeter.jl`) is the available approximation. A contact conductance plus a semi-infinite-substrate $h(t)$ would close the gap.
+5. **Backing layer and contact resistance at the back face.** There is no contact-resistance or substrate model. An adiabatic back face over-predicts late-time back-half temperatures (the missing loss is about 0.7–3 kW·m⁻² for 25 mm of wood over 10–20 min); a lumped Robin condition on the bottom face (radiative + convective, as in example `06_cone_calorimeter.jl`) is the available approximation. A contact conductance plus a semi-infinite-substrate $h(t)$ would close the gap. The back face is also taken gas-tight (`ImpermeableBC`), which the standard foil wrap is not at the pore pressures pyrolysis generates; a leaky back is represented by `ConvectivePressureBC` with a board or leak resistance, and a predicted pore pressure is a mean over a cracked char, credible to about 1–1.5 bar overpressure (§9.4.3).
 6. **Kinetics expressiveness.** A $T^n$ pre-factor and DAEM-style stacking are absent. Any real order $n \ge 0$ acts on the conversion of the reactant against its lineage inventory, on fixed and moving meshes alike (§6.4); a lineage fed through the gas is refused, and a lineage whose reference would depend on the rates needs an explicit `basis` (§6.5.5).
 7. **Transport-closure accuracy** (item 5 above). The gas viscosity is a material curve without composition-dependent mixing. Binary diffusivity and pore geometry must be supplied for the dusty-gas model. Both closures exclude thermal diffusion and gravity; donor advection is first order. A matrix endpoint supplies finite porous resistance, not a free-flow momentum model (§9).
 
@@ -7735,7 +7735,9 @@ Interior transport redistributes gas; boundary transport determines what
 enters or leaves the specimen. An open boundary therefore needs an external
 pressure, composition and incoming temperature. Pressure sets the mechanical
 drive, composition sets the species available for exchange, and temperature
-sets the enthalpy carried by incoming gas.
+is the state of the incoming stream: on a face without a thermal film it is
+the enthalpy the incoming gas carries; with one, the gas arrives at the
+surface temperature and the film accounts for its heating (§9.5.1).
 
 `GasReservoir` packages these data. For a material that tracks a gas named
 `:air`, an atmospheric reservoir can be written as
@@ -7745,19 +7747,31 @@ reservoir = GasReservoir(P=101325.0, T=300.0, mole_fractions=(air=1.0,))
 open_surface = AmbientGasBC(reservoir)
 ```
 
-`AmbientGasBC` connects the adjacent pore half-cell to this reservoir.
-Pressure, temperature and composition may depend on time. Mole fractions are
-named, nonnegative and must sum to one; unknown species with nonzero fractions
-are rejected. An explicit vacuum, `GasReservoir(P=0.0, T=300.0)`, may omit
-composition. Chapter 12 gives the full boundary-condition setup.
+`AmbientGasBC` connects the adjacent pore half-cell to this reservoir through
+the mass film of §9.4.2, by default the twin of the face's convective
+condition. Pressure, temperature and composition may depend on time. Mole
+fractions are named, nonnegative and must sum to one; unknown species with
+nonzero fractions are rejected. An explicit vacuum,
+`GasReservoir(P=0.0, T=300.0)`, may omit composition. Chapter 12 gives the
+full boundary-condition setup.
 
-### 9.4.2 An external mass-transfer film
+The reservoir is the gas at the outer edge of the boundary layer, which is
+the ambient only while nothing burns above the face. Under a diffusion flame
+the gas at the surface is oxygen-free: 0.65 vol % or less was measured over
+burning PMMA (McCoy and Stoliarov 2021), and the oxygen-free zone adjacent to
+the surface coincides with the flame's dark zone (Korobeinichev et al. 2018).
+A deck whose kinetics depend on oxygen should therefore give
+`mole_fractions` as a function of time that removes the oxygen after
+ignition; for inert kinetics the composition at the surface reaches nothing
+the test measures.
+
+### 9.4.2 The external mass-transfer film
 
 A finite external resistance allows the gas composition at the specimen
-surface to differ from the far-field reservoir. Adding
-`film=MassTransferFilm(g)` introduces an isobaric, common-diffusivity film
-with conductance $g=\rho D/\delta$ [kg/(m² s)], where $\delta$ is film
-thickness. For outward total mass flux $m=\sum_jJ_j$, its integrated law is
+surface to differ from the reservoir. The film is isobaric and has one
+conductance $g=\rho D/\delta$ [kg/(m² s)] for every species, where $\delta$
+is the film thickness. For outward total mass flux $m=\sum_jJ_j$, its
+integrated law is
 
 $$
 J_j=Y_{j,s}m+g\,\beta(m/g)(Y_{j,s}-Y_{j,\infty}),
@@ -7770,7 +7784,41 @@ accounts for diffusion through the film, modified by that flow. At $m=0$ the
 law reduces to $J_j=g(Y_{j,s}-Y_{j,\infty})$. The signed argument also covers
 inward bulk flow. At zero conductance, the limiting law retains donor bulk
 flow; at infinite conductance, the surface composition is fixed to the
-reservoir.
+reservoir. One conductance for every species is not a simplification but what
+the total mass balance requires: $\sum_jJ_j=m$ follows from
+$\sum_j(Y_{j,s}-Y_{j,\infty})=0$ only when the coefficient of the diffusive
+term is the same for every species.
+
+By default the film is the twin of the face's convective condition
+(`AnalogyFilm`): the heat–mass transfer analogy gives
+$g=h/(c_{p,\infty}\,\mathrm{Le}^{2/3})$, with $h$ the bare coefficient of the
+`ConvectiveBC` on the same tag (summed over the convective members of a
+combined condition), $c_{p,\infty}$ the mass-weighted heat capacity of the
+reservoir gas at the film temperature $(T_s+T_\infty)/2$, and a Lewis number
+of one unless given. For the cone decks this is $0.004$–$0.008$ kg/(m² s). A
+face without a convective condition, or facing a vacuum, has no external film:
+the reservoir is then in direct contact with the pore gas and the surface
+composition is the reservoir's, which `film=nothing` also selects explicitly.
+An explicit `MassTransferFilm(g)` overrides the analogy.
+
+Whether the composition condition is felt depends on two ratios of the last
+half-cell, of width $d$, to the film. Below a face Péclet number
+$m\,d/(\rho_g\lambda)$ of one the wall term dominates the half-cell flux, so
+the surface composition sets the species split of the exit flux; and the
+ratio of the interior conductance $\rho_g\lambda/d$ to the film conductance
+$g$ decides whether the surface composition follows the reservoir (ratio
+small) or the pore gas (ratio large). On a char-like matrix at cone fluxes the
+first is $0.03$–$0.14$ and the second $3$–$120$: direct contact would let the
+half-cell pass many times the mass-loss rate down to a zero surface partial
+pressure, with an exit path that depends on the mesh spacing, whereas the
+film keeps the surface composition close to the pore gas, as the physical
+resistance does. A thin thermal-analysis sample has the second ratio near
+$0.1$ and is indifferent to the choice.
+
+The species film applies $\beta$ at every blowing rate. The thermal film of
+the same face applies it only under a blowing model (§12.3.3), so under the
+default `NoBlowing` the two films are not the same film; the caveat stated
+there for heavy volatiles pooling over a horizontal face applies to both.
 
 For a finite film, the surface fractions are unknowns chosen so that each
 species flux through the pore path matches its film flux. Only $N_g-1$
@@ -7790,15 +7838,36 @@ problem:
 | `ImpermeableBC()` | Zero flux of every gas species. |
 | `MassFluxBC(fluxes=(...), inflow_temperature=(...))` | Named outward species mass fluxes; negative values prescribe inflow and require incoming temperatures. Omitted species have zero flux. |
 | `NeumannPressureBC(gradient=..., T=..., mole_fractions=...)` | An outward total-pressure gradient, with composition and incoming temperature completing the species and energy closure. |
-| `ConvectivePressureBC(reservoir; resistance=..., flow=...)` | A hydraulic resistance relating the surface-to-reservoir pressure drop to a selected flow rate, with an optional mass film. |
+| `ConvectivePressureBC(reservoir; resistance=..., flow=...)` | A hydraulic resistance relating the surface-to-reservoir pressure drop to a selected flow rate, with the mass film of §9.4.2. |
 
 For the hydraulic condition, $P_s-P_\infty=R_h f$. The required `flow` choice
-is `:darcy_velocity`, `:mass` or `:molar`, with respective resistance units
-Pa s/m, Pa m² s/kg or Pa m² s/mol. Darcy velocity and total mass or molar flux
-are distinct quantities because the latter include the wall/molecular
-contribution. Likewise, a zero total-pressure gradient can still permit
-counterdiffusion; it does not impose impermeability. Mass conditions select
-one closure per boundary and do not add with `+`.
+is `:darcy_velocity` or `:mass`, with respective resistance units Pa s/m or
+Pa m² s/kg. Darcy velocity and total mass flux are distinct quantities because
+the latter includes the wall/molecular contribution. The resistance is a
+constant or a law of the surface temperature, like a film conductance: a
+Darcy skin of thickness $\delta_s$ and permeability $K_s$ has
+$R_h=\mu(T)\,\delta_s/(\rho_gK_s)$. A bare ceramic-fibre board under a cone
+sample ($K_s\approx10^{-10}$ m², $\delta_s\approx13$ mm) gives
+$R_h\approx3\times10^3$ Pa m² s/kg, about 30 Pa at 10 g m⁻² s⁻¹, so an
+unsealed back face is at ambient pressure for practical purposes. Likewise, a
+zero total-pressure gradient can still permit counterdiffusion; it does not
+impose impermeability. A nonzero prescribed gradient and a prescribed species
+flux have no counterpart in cone or thermal-analysis tests; they serve
+verification. Mass conditions select one closure per boundary and do not add
+with `+`.
+
+`ImpermeableBC` on the back face represents an intact foil. The standard foil
+wrap is not a gas seal at the pressures pyrolysis generates: pyrolysis gas
+leaking to the rear of the ISO 5660 holder and burning there is documented
+(Sandinge et al. 2022). Measured pore overpressures in burning wood range from
+0.3 kPa to 130 kPa with moisture, grain direction and cracking (Lee, Chaiken
+and Singer 1977; Fredlund 1993), and two transducers a few centimetres apart
+in one specimen differ by the whole signal when a crack reaches one of them.
+A predicted pore pressure is therefore a mean over a cracked char, credible up
+to about 1–1.5 bar overpressure and only while the matrix is intact. When
+pressure is compared with measurements, a leaky back is represented by
+`ConvectivePressureBC` with a board or leak resistance rather than by
+`ImpermeableBC`.
 
 ## 9.5 Energy carried by the gas
 
@@ -7837,7 +7906,15 @@ $$
 
 The identity makes the two descriptions of the energy balance agree. Heating
 incoming gas to the wall temperature is included once, through the conversion
-between $q_s$ and $q_r$. For an adiabatic, prescribed-flux or
+between $q_s$ and $q_r$, and only if the thermal film carries it: under
+`NoBlowing` the film factor is one and inflowing gas reaches $T_s$ at no
+energy cost. The term dropped is $h\,[\beta(B)-1]\,(T_\infty-T_s)$ with
+$B=C/h<0$, bounded by $f_{\mathrm{in}}c_p\lvert T_s-T_\infty\rvert$: a few
+W m⁻² for the inflow a cooling cone sample draws, 0.2–0.3 kW m⁻² at a forced
+suction of 1 g m⁻² s⁻¹. Forced-suction cases therefore use `CouetteFilm`,
+whose suction branch reproduces the similarity solutions for laminar free
+convection on a horizontal plate to within 1 % (Brouwers 1993, Table 1). For
+an adiabatic, prescribed-flux or
 prescribed-temperature boundary without a thermal film, the prescribed heat
 and donor enthalpy enter directly. A convective film and its gas reservoir
 must share the incoming stream temperature; radiative surroundings can have a
@@ -10266,8 +10343,9 @@ dependent blowing without evaluating the heat law at the cell center.
 Thermal conditions subtype `AbstractThermalBC` and may be combined additively.
 Mass conditions subtype `AbstractMassBC`: `ImpermeableBC`, `MassFluxBC`,
 `AmbientGasBC`, `NeumannPressureBC` and `ConvectivePressureBC`. Each mass
-condition supplies one complete closure and is not additive. `GasReservoir`
-and `MassTransferFilm` supply its thermodynamic state and optional film data.
+condition supplies one complete closure and is not additive. `GasReservoir`,
+`AnalogyFilm` and `MassTransferFilm` supply its thermodynamic state and film
+data.
 Typed boundary bindings retain gas indices, molar masses and species names.
 
 ---
@@ -10469,7 +10547,10 @@ a horizontal face in a quiescent chamber, the regime the pooling model
 approximates with constants fitted to a chamber CFD. `NoBlowing` is the
 default because no blowing law is validated for these faces; its error is the
 bounded quantity above, to be read with the uncertainty of $h$ itself
-(§12.12).
+(§12.12). The mass film of the same face (§9.4.2) applies $\beta$ regardless,
+so under `NoBlowing` the two films are not the same film; the suction branch
+of the Couette factor is validated (Brouwers 1993) and is what pays for the
+heating of gas drawn in (§9.5.1).
 
 `PropertyRatioFilm(free_stream; n_Γ)` modifies the free-stream Couette
 parameter using $(\Gamma_\infty/\Gamma_g)^{n_\Gamma}$, where $\Gamma=k/c_p$.
@@ -10671,14 +10752,19 @@ kg/(m² s); each negative flux needs its incoming temperature.
 `GasReservoir(P=...,T=...,mole_fractions=(gas=...,...))` defines pressure [Pa],
 incoming temperature [K] and normalized named gas mole fractions. Time-dependent
 values are permitted and checked when evaluated. Only an explicit vacuum
-`P=0` may omit composition. `AmbientGasBC(reservoir;film=nothing)` connects
-the complete state to the pore path and permits both ingress and escape.
+`P=0` may omit composition. `AmbientGasBC(reservoir;film=AnalogyFilm())`
+connects the complete state to the pore path through the mass film of §9.4.2
+and permits both ingress and escape.
 
-`MassTransferFilm(g)` adds the isobaric common-diffusivity film of §9.4, with
-conductance in kg/(m² s), a number or temperature law. Zero conductance permits
-only donor bulk flow; infinite conductance fixes composition. Pressure, species
-and thermal equations are solved consistently. These conditions do not combine
-with `+`; one closure is assigned to each tag.
+`AnalogyFilm(;Le=1.0)`, the default, takes the film conductance from the
+face's `ConvectiveBC` by the heat–mass transfer analogy; where the face has no
+convective condition, or the reservoir is a vacuum, it is absent and the
+reservoir is in direct contact. `MassTransferFilm(g)` gives the conductance
+explicitly in kg/(m² s), as a number or temperature law: zero conductance
+permits only donor bulk flow, infinite conductance fixes composition.
+`film=nothing` selects direct contact. Pressure, species and thermal equations
+are solved consistently. These conditions do not combine with `+`; one closure
+is assigned to each tag.
 
 ---
 
@@ -10690,13 +10776,13 @@ energy state. The surface pressure is the cell pressure plus gradient times
 the current half-cell distance, and physical accepted pressures must be
 nonnegative.
 
-`ConvectivePressureBC(reservoir;resistance=...,flow=:darcy_velocity,film=nothing)`
-solves $P_s-P_\infty=R_h f$. The flow is Darcy velocity [m/s], total mass flux
-[kg/(m² s)] for `:mass`, or total molar flux [mol/(m² s)] for `:molar`.
-Resistance is finite and nonnegative, with units pressure divided by the chosen
+`ConvectivePressureBC(reservoir;resistance=...,flow=:darcy_velocity,film=AnalogyFilm())`
+solves $P_s-P_\infty=R_h f$. The flow is Darcy velocity [m/s] or total mass
+flux [kg/(m² s)] for `:mass`. Resistance is finite and nonnegative, a constant
+or a law of the surface temperature, with units pressure divided by the chosen
 flow. A zero resistance fixes surface pressure. The complete reservoir and
-optional film provide species and energy closures in either direction.
-These pressure conditions are valid with either transport model.
+the film provide species and energy closures in either direction. These
+pressure conditions are valid with either transport model.
 
 ---
 
@@ -10946,12 +11032,13 @@ reservoir = GasReservoir(P=101325., T=300., mole_fractions=(air=1.,))
 bcs = BoundaryConditionSet(
     thermal=(top=HeatFluxBC(30e3) + ConvectiveBC(h=10., T_inf=300., blowing=CouetteFilm()),
              bottom=AdiabaticBC()),
-    mass=(top=AmbientGasBC(reservoir; film=MassTransferFilm(.06)),
+    mass=(top=AmbientGasBC(reservoir),
           bottom=ImpermeableBC()))
 ```
 
-The mass conductance is in kg/(m² s). The common incoming stream temperature
-is 300 K in both films. Other gases in the material have zero reservoir mole
+The mass film is the twin of the convective film, with its conductance from
+`h` by the analogy; an explicit `MassTransferFilm(g)` in kg/(m² s) overrides
+it. The common incoming stream temperature is 300 K in both films. Other gases in the material have zero reservoir mole
 fraction and can escape; air can enter. Initialize the pore gas inventories
 from the declared initial pressure, temperature and physical porosity.
 See the executable cone-calorimeter examples for complete material data.
@@ -11052,9 +11139,10 @@ choices.
 ## 12.12 Boundary-model domain and numerical qualification
 
 Mass films assume isobaric transport with one common diffusivity. Their
-conductance is explicit data, supplied as a constant or temperature law.
-A hydraulic resistance specifies which of Darcy velocity, mass flux or molar
-flux it relates to pressure drop. A single surface temperature represents
+conductance follows from the face's convective coefficient by the heat–mass
+analogy, or is explicit data, a constant or temperature law. A hydraulic
+resistance specifies whether it relates Darcy velocity or mass flux to the
+pressure drop. A single surface temperature represents
 LTE at the wall; incoming enthalpy uses the complete reservoir state.
 
 The local nonlinear solve requires a physical, nonsingular root. Its

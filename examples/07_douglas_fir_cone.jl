@@ -554,13 +554,12 @@ top_thermal_bc =
     ConvectiveBC(h = h_conv, T_inf = 300)                     # Convective losses
 
 # Top surface mass BC: diffusive gas escape with Darcy flow to atmosphere
-# The air reservoir supplies ingress composition and temperature. The common
-# film uses g=ρ_air h_m with the declared h_m=0.05 m/s. Interior wall and
-# Darcy transport share the species-flux continuity closure.
-top_mass_bc = AmbientGasBC(
-    GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (AIR = 1.0,));
-    film = MassTransferFilm(0.05*101325.0*0.02897/(8.31446261815324*300.0)),
-)
+# The air reservoir supplies ingress composition and temperature. The mass
+# film is the twin of the convective film above, with its conductance from
+# h_conv by the heat–mass transfer analogy (the default AnalogyFilm). Interior
+# wall and Darcy transport share the species-flux continuity closure.
+top_mass_bc =
+    AmbientGasBC(GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (AIR = 1.0,)))
 
 # Bottom surface (:bottom): back face
 bottom_thermal_bc = AdiabaticBC()    # Adiabatic (no heat loss through substrate)

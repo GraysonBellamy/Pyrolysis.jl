@@ -438,11 +438,10 @@ top_thermal_bc =
     ConvectiveBC(h = h_conv, T_inf = 300)                     # Convective losses
 
 # Top surface mass BC: diffusive gas escape with Darcy flow to atmosphere
-# h_m = 0.05 m/s matches ThermaKin typical boundary condition
-top_mass_bc = AmbientGasBC(
-    GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (AIR = 1.0,));
-    film = MassTransferFilm(0.05*101325.0*0.02897/(8.31446261815324*300.0)),
-)
+# through the twin of the convective film (the default AnalogyFilm takes its
+# conductance from h_conv by the heat–mass transfer analogy).
+top_mass_bc =
+    AmbientGasBC(GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (AIR = 1.0,)))
 
 # Bottom surface (:bottom): back face
 bottom_thermal_bc = AdiabaticBC()    # Adiabatic (no heat loss through substrate)

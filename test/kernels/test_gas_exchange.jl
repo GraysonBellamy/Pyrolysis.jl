@@ -160,15 +160,31 @@ end
             qsurf=ds.k[end]*(c.T_face[f]-ds.T[end])/(0.01/4)
             @test c.F_energy[f]≈Hs-qsurf rtol=1e-10 atol=1e-9
         end
-        for flow in (:darcy_velocity, :molar, :mass), P in (8e4, 1.2e5)
+        for flow in (:darcy_velocity, :mass), P in (8e4, 1.2e5)
             R=flow===:darcy_velocity ? 1e6 : 1e4
             bc=ConvectivePressureBC(res; resistance = R, flow = flow)
             cp, ds, c, du=exchange_snapshot(gas_problem(; model, P, mass = bc, κ = 1e-12))
             f=n_faces(cp.def.setup.topology)
-            rate=flow===:darcy_velocity ? c.darcy_velocity[f] :
-                 flow===:mass ? sum(c.F_mass[:, f]) :
-                 sum(c.F_mass[2:3, f] ./ [0.028, 0.044])
+            rate=flow===:darcy_velocity ? c.darcy_velocity[f] : sum(c.F_mass[:, f])
             @test sum(c.p_surface[:, f])-1e5≈R*rate rtol=1e-8 atol=1e-6
+        end
+        # The resistance may be a law of the surface temperature, like a conductance.
+        for P in (8e4, 1.2e5)
+            Rlaw=T->1e4*(T/300.0)^1.7
+            bc=ConvectivePressureBC(res; resistance = Rlaw, flow = :mass)
+            cp, ds, c, du=exchange_snapshot(
+                gas_problem(;
+                    model,
+                    P,
+                    T = 600.0,
+                    mass = bc,
+                    κ = 1e-12,
+                    thermal = ConvectiveBC(h = 20.0, T_inf = 300.0),
+                ),
+            )
+            f=n_faces(cp.def.setup.topology)
+            @test c.T_face[f]!=300.0
+            @test sum(c.p_surface[:, f])-1e5≈Rlaw(c.T_face[f])*sum(c.F_mass[:, f]) rtol=1e-8 atol=1e-6
         end
     end
 end
@@ -222,4 +238,72 @@ end
     @test reference>0
     @test c.F_mass[3, 2]≈reference rtol=1e-13
     @test du[mass_index(cp.def.layout, 1, 3)]≈-du[mass_index(cp.def.layout, 2, 3)] rtol=1e-14
+end
+
+@testset "the analogy film is the twin of the convective film" begin
+    res=GasReservoir(P = 1e5, T = 300.0, mole_fractions = (a = 0.4, b = 0.6))
+    Y∞=[0.4*0.028, 0.6*0.044]
+    Y∞./=sum(Y∞)
+    h=20.0
+    # Constant heat capacities, so c_p,∞ does not depend on the film temperature.
+    cp∞=Y∞[1]*1000.0+Y∞[2]*1200.0
+    for P in (8e4, 1.2e5), Le in (1.0, 2.5), combined in (false, true)
+        conv=ConvectiveBC(h = h, T_inf = 300.0, blowing = CouetteFilm())
+        thermal=combined ? HeatFluxBC(1e4)+conv : conv
+        g=h/(cp∞*Le^(2/3))
+        cpA, _, cA, _=exchange_snapshot(
+            gas_problem(;
+                P,
+                mass = AmbientGasBC(res; film = AnalogyFilm(Le = Le)),
+                thermal,
+            ),
+        )
+        cpE, _, cE, _=exchange_snapshot(
+            gas_problem(; P, mass = AmbientGasBC(res; film = MassTransferFilm(g)), thermal),
+        )
+        f=n_faces(cpA.def.setup.topology)
+        @test cA.F_mass[:, f]≈cE.F_mass[:, f] rtol=1e-12
+        @test cA.p_surface[:, f]≈cE.p_surface[:, f] rtol=1e-12
+        @test cA.F_energy[f]≈cE.F_energy[f] rtol=1e-12
+        @test cA.T_face[f]≈cE.T_face[f] rtol=1e-12
+        @test cA.surface_residual[f]<3e-12
+    end
+    # The default of AmbientGasBC is the analogy film.
+    @test AmbientGasBC(res).film isa AnalogyFilm
+    cpD, _, cD, _=exchange_snapshot(
+        gas_problem(;
+            P = 8e4,
+            mass = AmbientGasBC(res),
+            thermal = ConvectiveBC(h = h, T_inf = 300.0),
+        ),
+    )
+    cpA, _, cA, _=exchange_snapshot(
+        gas_problem(;
+            P = 8e4,
+            mass = AmbientGasBC(res; film = AnalogyFilm()),
+            thermal = ConvectiveBC(h = h, T_inf = 300.0),
+        ),
+    )
+    f=n_faces(cpD.def.setup.topology)
+    @test cD.F_mass[:, f]==cA.F_mass[:, f]
+    # Without a convective condition, or against a vacuum, the twin film is
+    # absent and the reservoir is in direct contact, exactly as `film = nothing`.
+    for (P, Pr, thermal) in (
+        (8e4, 1e5, AdiabaticBC()),
+        (1.2e5, 1e5, HeatFluxBC(1e4)),
+        (8e4, 0.0, ConvectiveBC(h = h, T_inf = 300.0)),
+    )
+        r=GasReservoir(P = Pr, T = 300.0, mole_fractions = (a = 0.4, b = 0.6))
+        cpA, _, cA, _=exchange_snapshot(
+            gas_problem(; P, mass = AmbientGasBC(r; film = AnalogyFilm()), thermal),
+        )
+        cpN, _, cN, _=exchange_snapshot(
+            gas_problem(; P, mass = AmbientGasBC(r; film = nothing), thermal),
+        )
+        f=n_faces(cpA.def.setup.topology)
+        @test cA.F_mass[:, f]==cN.F_mass[:, f]
+        @test cA.p_surface[:, f]==cN.p_surface[:, f]
+        @test cA.F_energy[f]==cN.F_energy[f]
+        @test cA.T_face[f]==cN.T_face[f]
+    end
 end
