@@ -248,7 +248,12 @@ rejected, and the step cut by the controller's smallest factor, when
   crossed nodes (a non-positive cell volume) or a non-positive cross-section
   area;
 - under gas transport a live cell's porosity leaves `[0, 1]` by more
-  than the skeletal volume of its mass tolerances;
+  than the skeletal volume of its mass tolerances (outcome `:pore_closure`), a
+  pore gas is more negative than its pressure tolerance
+  (`:negative_gas_pressure`), a cell's matrix occupancy leaves the transport
+  model's supported domain (`:matrix_exhausted` without an `endpoint`,
+  `:unsupported_endpoint_occupancy` with one), or a reconstructed boundary
+  pressure is negative (`:negative_surface_pressure`);
 - an algebraic row (a node velocity, a radiative face flux, the cross-section area
   or its lateral rate) misses its own equation by more than `reltol` times the
   equation's scale plus the unknown's absolute tolerance.
@@ -267,7 +272,16 @@ solve(): stopped at t = …: the last proposed state, at t = …, takes cell 12 
 ```
 
 which names the cell whose energy balance the step could not keep positive;
-Chapter 15 discusses the causes.
+Chapter 15 discusses the causes. When it stops while the gas-transport tests
+above were rejecting its proposals, the outcome is recorded in `sol.outcome`
+and `solve` warns with the cell:
+
+```
+solve(): stopped at t = …: the domain test rejected the proposals after the last accepted state, matrix_exhausted: cell 8: matrix_exhausted at matrix occupancy … and skeletal occupancy …
+```
+
+The integrator's own `dt <= dtmin` warning, printed with it, does not know the
+domain test and points at the model or its stability.
 
 ### The Newton-failure step cap
 

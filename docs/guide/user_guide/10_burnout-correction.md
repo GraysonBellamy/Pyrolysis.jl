@@ -608,6 +608,8 @@ the strict test, `:Success` only.
 | `:Terminated` | `:min_thickness` | `true` | The live thickness of a moving mesh fell below `min_thickness` (§10.3). |
 | `:Terminated` | `:interior` | `false` | A cell below the threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one; the solve warns and ends. |
 | `:DtLessThanMin` | `:pore_closure` | `false` | The domain test kept rejecting a cell whose porosity left the resolved pore domain until the step fell below `dtmin`: its pore volume closed, or fell to its own mass, thermal and geometry uncertainty. Tighter tolerances resolve the second. |
+| `:DtLessThanMin` | `:matrix_exhausted` | `false` | A cell's matrix occupancy fell below the transport model's supported domain (`blend[2]` of a model without an `endpoint`): a material that leaves no residue has burned through it. Give the transport an `endpoint`, deactivate cells as they burn out, or keep a residue. |
+| `:DtLessThanMin` | `:unsupported_endpoint_occupancy`, `:negative_gas_pressure`, `:negative_surface_pressure` | `false` | The domain test kept rejecting a cell beyond its endpoint's skeletal occupancy, a pore gas below its pressure tolerance, or a negative reconstructed boundary pressure. |
 | `:Failure` | `:none` | `false` | The state after an event was inadmissible (a receiver outside its own mass tolerances, crossed nodes, a cell at or below absolute zero, under gas transport a porosity outside `[0, 1]`), or no consistent node velocities exist after it; the solve warns naming the event's time. |
 
 The state a solve ends on is always saved, whether or not `saveat` names its
