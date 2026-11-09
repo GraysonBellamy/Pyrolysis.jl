@@ -61,7 +61,7 @@ The 107 top-level exports, by group:
 | Property functions | `ConstantProperty`, `LinearProperty`, `PolynomialProperty`, `SutherlandProperty`, `ArrheniusProperty`, `TableProperty`, `CallableProperty`, `StateDependentProperty` | 16.2.2 |
 | Radiation models | `RadiationModel`, `SURFACE_ABSORPTION`, `RADIATIVE_TRANSFER`, `AngularDistribution`, `Diffuse`, `Collimated`, `Cone` | 16.2.6 |
 | Thermal conditions | `AdiabaticBC`, `HeatFluxBC`, `ConvectiveBC`, `RadiativeBC`, `RadiativeFluxBC`, `DirichletThermalBC`, `CombinedThermalBC` | 16.4.1 |
-| Mass conditions | `ImpermeableBC`, `MassFluxBC`, `AmbientGasBC`, `GasReservoir`, `MassTransferFilm` | 16.4.2 |
+| Mass conditions | `ImpermeableBC`, `MassFluxBC`, `AmbientGasBC`, `GasReservoir`, `MassTransferFilm`, `AnalogyFilm` | 16.4.2 |
 | Pressure conditions | `NeumannPressureBC`, `ConvectivePressureBC` | 16.4.3 |
 | Condition set and pore air | `BoundaryConditionSet`, `background_gas_concentration` | 16.4.5, 16.4.6 |
 | Blowing models and gas data | `AbstractBlowingModel`, `NoBlowing`, `CouetteFilm`, `PropertyRatioFilm`, `PoolingFilm`, `FunctionBlowing`, `GasSpecies`, `NITROGEN`, `nasa7_heat_capacity`, `eucken_viscosity`, `fuller_diffusivity`, `BlowingFace`, `blowing_state`, `blowing_ratio`, `blowing_factor` | 16.4.7 |
@@ -568,8 +568,9 @@ Notes:
 |---|---|---|
 | `ImpermeableBC` | `ImpermeableBC()` | zero species flow |
 | `GasReservoir` | `GasReservoir(P=...,T=...,mole_fractions=(air=1.,))` | complete external ideal-gas state |
-| `AmbientGasBC` | `AmbientGasBC(reservoir;film=nothing)` | pore/reservoir exchange in either direction |
-| `MassTransferFilm` | `MassTransferFilm(g)` | isobaric common-diffusivity conductance [kg/(m² s)] |
+| `AmbientGasBC` | `AmbientGasBC(reservoir;film=AnalogyFilm())` | pore/reservoir exchange in either direction through a mass film |
+| `AnalogyFilm` | `AnalogyFilm(;Le=1.)` | the default film: conductance from the face's `ConvectiveBC` by the heat–mass analogy |
+| `MassTransferFilm` | `MassTransferFilm(g)` | explicit isobaric common-diffusivity conductance [kg/(m² s)] |
 | `MassFluxBC` | `MassFluxBC(fluxes=(air=-1e-4,),inflow_temperature=(air=300.,))` | prescribed outward species flux and incoming energy |
 
 Mass conditions are complete closures and do not add with `+`. Reservoir
@@ -581,11 +582,12 @@ fractions are normalized named gas fractions; explicit vacuum may omit them.
 
 | Type | Construction | Meaning |
 |---|---|---|
-| `ConvectivePressureBC` | `ConvectivePressureBC(reservoir;resistance=...,flow=:mass,film=nothing)` | pressure drop proportional to selected flow |
+| `ConvectivePressureBC` | `ConvectivePressureBC(reservoir;resistance=...,flow=:mass,film=AnalogyFilm())` | pressure drop proportional to selected flow |
 
-The hydraulic flow selector is `:darcy_velocity`, `:mass` or `:molar`.
-Resistance units match that selector and values must be finite/nonnegative.
-These conditions work with either material gas model.
+The hydraulic flow selector is `:darcy_velocity` or `:mass`. Resistance units
+match that selector; the resistance is finite, nonnegative, and a constant or
+a law of the surface temperature. These conditions work with either material
+gas model.
 
 ---
 

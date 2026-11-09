@@ -1,11 +1,12 @@
 # Coupled surface species/thermal evaluation. q is positive into the material;
 # all species and assembled energy fluxes are positive outward.
-struct GasBoundaryBinding{B,I,M,N}
+struct GasBoundaryBinding{B,I,M,N,F}
     bc::B
     indices::I
     masses::M
     closed::Bool
     names::N
+    film::F
 end
 function GasBoundaryBinding(bc, material)
     idx=gas_component_indices(material.components)
@@ -16,7 +17,18 @@ function GasBoundaryBinding(bc, material)
         M,
         closed_transport_channel(material),
         map(c->c.name, material.components),
+        _binding_film(bc),
     )
+end
+
+# The film a face declares, resolved once at binding: an isobaric film has no
+# meaning against a vacuum, so an `AnalogyFilm` on a constant-vacuum reservoir
+# leaves the reservoir in direct contact. Resolving here keeps the surface
+# solve concretely typed.
+@inline _binding_film(::AbstractMassBC) = nothing
+@inline function _binding_film(bc::Union{AmbientGasBC,ConvectivePressureBC})
+    P=bc.reservoir.P
+    return bc.film isa AnalogyFilm && P isa Real && P==0 ? nothing : bc.film
 end
 
 @inline _has_thermal_film(::AbstractThermalBC) = false
@@ -40,8 +52,39 @@ end
 @inline _primal_boundary(x::NamedTuple) = map(_primal_boundary, x)
 @inline _primal_boundary(x::StaticVector) = map(primal, x)
 
-@inline _mass_film(::NeumannPressureBC) = nothing
-@inline _mass_film(bc::Union{AmbientGasBC,ConvectivePressureBC}) = bc.film
+# The film a face carries. An `AnalogyFilm` is the twin of the convective heat
+# film: without one the reservoir is in direct contact with the pore gas.
+@inline _resolve_film(film, thermal) = film
+@inline _resolve_film(film::AnalogyFilm, thermal) =
+    _has_thermal_film(thermal) ? film : nothing
+# Bare convective coefficient of a face: the sum over its convective members.
+@inline _bare_convective_h(::AbstractThermalBC, t) = 0.0
+@inline _bare_convective_h(bc::ConvectiveBC, t) = evaluate_param(bc.h, t)
+@inline _bare_convective_h(bc::CombinedThermalBC, t) =
+    sum(b->_bare_convective_h(b, t), bc.bcs)
+@inline _film_conductance(film::MassTransferFilm, Tt, data, bound, material, thermal, t) =
+    evaluate_param_T(film.conductance, Tt)
+# Heat–mass transfer analogy at the film temperature: g = h/(c_p,∞ Le^{2/3})
+# with c_p,∞ the mass-weighted heat capacity of the reservoir gas.
+@inline function _film_conductance(
+    film::AnalogyFilm,
+    Tt,
+    data,
+    bound::GasBoundaryBinding{B,I,<:StaticVector{NG}},
+    material,
+    thermal,
+    t,
+) where {B,I,NG}
+    Tf=(Tt+data.Tin)/2
+    props=BoundaryConditions._gas_props(material, Tf)
+    cp=zero(Tf)
+    for k = 1:NG
+        cp+=data.Y∞[k]*props[bound.indices[k]].cp
+    end
+    primal(cp)>0 ||
+        throw(ArgumentError("the analogy film needs a reservoir gas with a heat capacity"))
+    return _bare_convective_h(thermal, t)/(cp*film.Le^(2/3))
+end
 @inline _hydraulic(::AbstractMassBC) = false
 @inline _hydraulic(::ConvectivePressureBC) = true
 @inline _boundary_reservoir(bc::Union{AmbientGasBC,ConvectivePressureBC}, material, t) =
@@ -57,6 +100,7 @@ end
     sum(data.pl)+data.d*evaluate_param(bc.gradient, t)
 
 @inline function _surface_data(
+    film,
     z,
     data,
     bound::GasBoundaryBinding{B,I,<:StaticVector{NG}},
@@ -70,7 +114,6 @@ end
     Tscale,
 ) where {B,I,NG}
     bc=bound.bc
-    film=_mass_film(bc)
     nf=film===nothing ? 0 : NG-1
     hydraulic=_hydraulic(bc)
     Ts=z[end]*Tscale
@@ -126,7 +169,8 @@ end
     # Convert the thermal wall-film balance to the direct-reservoir energy
     # control surface. A prescribed flux or adiabatic boundary has no such film.
     qres=qsurf+(_has_thermal_film(thermal) ? Hr-Hs : zero(Hr))
-    g=film===nothing ? zero(Ts) : evaluate_param_T(film.conductance, Tt)
+    g=film===nothing ? zero(Ts) :
+      _film_conductance(film, Tt, data, bound, material, thermal, t)
     g>=0 && !isnan(g) ||
         throw(ArgumentError("mass-film conductance must remain nonnegative"))
     return (; Ts, N, J, xs, Ys, ps, rawPs, v = half.v, qsurf, qres, Hs, Hr, g, face)
@@ -151,6 +195,7 @@ end
 end
 
 @inline function _surface_residual(
+    film,
     z,
     data,
     bound::GasBoundaryBinding{B,I,<:StaticVector{NG}},
@@ -166,10 +211,22 @@ end
     heatscale,
 ) where {B,I,NG}
     bc=bound.bc
-    film=_mass_film(bc)
     nf=film===nothing ? 0 : NG-1
     hydraulic=_hydraulic(bc)
-    s=_surface_data(z, data, bound, thermal, material, laws, t, rad, pivot, pscale, Tscale)
+    s=_surface_data(
+        film,
+        z,
+        data,
+        bound,
+        thermal,
+        material,
+        laws,
+        t,
+        rad,
+        pivot,
+        pscale,
+        Tscale,
+    )
     m=sum(s.N)
     F=film===nothing || isinf(primal(s.g)) ? zero(s.N) :
       mass_film_flux(s.Ys, data.Y∞, m, s.g)
@@ -184,14 +241,13 @@ end
                 return (isinf(primal(s.g)) || (bound.closed && primal(s.g)==0)) ?
                        s.Ys[j]-data.Y∞[j]+zero(s.Ts+m+s.rawPs) : (s.N[j]-F[j])/massscale
             elseif hydraulic && k==nf+1
-                R=evaluate_param(bc.resistance, t)
-                isfinite(R) && R>=0 || throw(
+                R=evaluate_param_T(bc.resistance, trial_temperature(s.Ts))
+                isfinite(primal(R)) && primal(R)>=0 || throw(
                     ArgumentError(
                         "hydraulic resistance must remain finite and nonnegative",
                     ),
                 )
-                flow=bc.flow===:darcy_velocity ? s.v :
-                     bc.flow===:mass ? m : sum(s.N ./ bound.masses)
+                flow=bc.flow===:darcy_velocity ? s.v : m
                 return (s.rawPs-data.Pr-R*flow)/pscale
             elseif thermal isa DirichletThermalBC
                 return (s.Ts-evaluate_param(thermal.T, t))/Tscale
@@ -202,7 +258,20 @@ end
     )
 end
 
-function coupled_gas_boundary(
+coupled_gas_boundary(bound::GasBoundaryBinding, thermal, data, material, laws, t, rad) =
+    _coupled_gas_boundary(
+        _resolve_film(bound.film, thermal),
+        bound,
+        thermal,
+        data,
+        material,
+        laws,
+        t,
+        rad,
+    )
+
+function _coupled_gas_boundary(
+    film,
     bound::GasBoundaryBinding{B,I,<:StaticVector{NG}},
     thermal,
     data,
@@ -212,14 +281,17 @@ function coupled_gas_boundary(
     rad,
 ) where {B,I,NG}
     bc=bound.bc
-    film=_mass_film(bc)
     nf=film===nothing ? 0 : NG-1
     hydraulic=_hydraulic(bc)
     nunknown=nf+Int(hydraulic)+1
     data.Pr>0 && _stream_temperature_check(thermal, data.Tin, t)
     film!==nothing &&
         data.Pr==0 &&
-        throw(ArgumentError("an isobaric mass film requires a positive reservoir pressure"))
+        throw(
+            ArgumentError(
+                "an isobaric mass film requires a positive reservoir pressure; give film = nothing for a vacuum",
+            ),
+        )
     pivot=argmax(data.Y∞)
     pscale=max(primal(sum(data.pl)), primal(data.Pr), data.pbudget)
     Tscale=max(primal(data.Ttrial), data.Tin, 1.0)
@@ -230,6 +302,7 @@ function coupled_gas_boundary(
     end)
     plain=_primal_boundary(data)
     s0=_surface_data(
+        film,
         z0,
         plain,
         bound,
@@ -250,6 +323,7 @@ function coupled_gas_boundary(
         64eps(Float64)*abs(plain.Tcell)*plain.k/plain.d/2e-12,
     )
     fp=z->_surface_residual(
+        film,
         z,
         plain,
         bound,
@@ -274,6 +348,7 @@ function coupled_gas_boundary(
         tolerance = 2e-12,
     )
     f=z->_surface_residual(
+        film,
         z,
         data,
         bound,
@@ -289,7 +364,20 @@ function coupled_gas_boundary(
         heatscale,
     )
     z=implicit_transport_root(f, root)
-    s=_surface_data(z, data, bound, thermal, material, laws, t, rad, pivot, pscale, Tscale)
+    s=_surface_data(
+        film,
+        z,
+        data,
+        bound,
+        thermal,
+        material,
+        laws,
+        t,
+        rad,
+        pivot,
+        pscale,
+        Tscale,
+    )
     return merge(s, (iterations = root.iterations, residual = root.residual))
 end
 

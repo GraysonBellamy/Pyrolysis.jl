@@ -393,7 +393,7 @@ transport coefficient; its carried energy is still assembled.
 
 ```julia
 reservoir = GasReservoir(P=101325., T=300., mole_fractions=(air=1.,))
-mass = (top=AmbientGasBC(reservoir; film=MassTransferFilm(0.02)),
+mass = (top=AmbientGasBC(reservoir),
         bottom=ImpermeableBC())
 ```
 
@@ -403,13 +403,27 @@ An explicit vacuum `GasReservoir(P=0.,T=300.)` may omit composition. Atmospheric
 exchange requires the atmosphere's tracked species and appropriate initial pore
 gas. Both escape and ingress follow the same constitutive path.
 
-### 5.3.3 Optional mass film
+### 5.3.3 The mass film
 
-`MassTransferFilm(g)` is an isobaric common-diffusivity film with conductance
-`g=ρD/δ` in kg/(m² s), supplied as a number or temperature law. A finite film
-solves surface fractions jointly with the thermal balance. Infinite conductance
-fixes composition to the reservoir. Zero conductance permits only donor bulk
-flow. The model and signed blowing/reversal limits are in Technical Reference §9.4.
+An open face exchanges gas with its reservoir through an isobaric
+common-diffusivity film. By default the film is the twin of the face's
+convective condition (`AnalogyFilm(;Le=1.)`): its conductance follows from
+the `ConvectiveBC`'s `h` by the heat–mass transfer analogy,
+`g=h/(c_p Le^(2/3))`, with the reservoir gas's heat capacity. A face without a
+convective condition, or facing a vacuum, has no external film and the
+reservoir is in direct contact. `MassTransferFilm(g)` sets the conductance
+`g=ρD/δ` in kg/(m² s) explicitly, as a number or temperature law; `film=nothing`
+selects direct contact, which fixes the surface composition to the reservoir
+and is the wrong limit for an outgassing face whose matrix passes gas faster
+than the film would. A finite film solves surface fractions jointly with the
+thermal balance; zero conductance permits only donor bulk flow. The model, the
+signed blowing/reversal limits and the criteria for when the film matters are
+in Technical Reference §9.4.
+
+The reservoir composition is the gas at the edge of the boundary layer. Under
+a flame that gas is oxygen-free, so a deck with oxygen-dependent kinetics
+should give `mole_fractions` as a function of time that removes the oxygen
+after ignition.
 
 ---
 
@@ -446,10 +460,20 @@ resistive = ConvectivePressureBC(reservoir;resistance=1e6,flow=:darcy_velocity)
 The pressure gradient is outward [Pa/m]. It determines surface pressure through
 the current half-cell distance; accepted surface pressure must be nonnegative.
 The resistance law is `P_surface-P_reservoir=resistance*flow`. Choose
-`:darcy_velocity` [m/s], `:mass` [kg/(m² s)] or `:molar` [mol/(m² s)]; resistance
-units are pressure divided by that quantity. A zero resistance fixes pressure.
-`ConvectivePressureBC` also accepts `film=MassTransferFilm(...)`. Both variants
-supply complete composition and incoming energy data and support either gas model.
+`:darcy_velocity` [m/s] or `:mass` [kg/(m² s)]; resistance units are pressure
+divided by that quantity, and the resistance is a constant or a law of the
+surface temperature (a Darcy skin has `R=μ(T)δ/(ρ_g K)`). A zero resistance
+fixes pressure. `ConvectivePressureBC` carries the same mass film as
+`AmbientGasBC` (`film=`, default `AnalogyFilm()`). Both variants supply
+complete composition and incoming energy data and support either gas model.
+
+`ImpermeableBC` on the back face means an intact foil. A foil wrap is not a
+gas seal at the pore pressures pyrolysis generates, so when pore pressure is
+compared with measurements represent a leaky back by `ConvectivePressureBC`
+with the resistance of the backing board (about `3e3` Pa m² s/kg for a
+ceramic-fibre board, i.e. effectively ambient pressure); predicted pore
+pressures are means over a cracked char and are credible to about 1–1.5 bar
+overpressure (Technical Reference §9.4.3).
 
 ---
 
@@ -786,9 +810,10 @@ bcs = BoundaryConditionSet(
     mass=(top=AmbientGasBC(reservoir), bottom=ImpermeableBC()))
 ```
 
-This permits both ingress and escape. Add `film=MassTransferFilm(g)` for
-finite external composition transfer. Use `ConvectivePressureBC` with a
-named flow measure when the exterior instead has a hydraulic resistance.
+This permits both ingress and escape through the twin of the convective film;
+`film=MassTransferFilm(g)` sets the conductance explicitly and `film=nothing`
+puts the reservoir in direct contact. Use `ConvectivePressureBC` with a named
+flow measure when the exterior instead has a hydraulic resistance.
 
 ---
 
@@ -797,9 +822,13 @@ named flow measure when the exterior instead has a hydraulic resistance.
 - **Incoming energy needs complete gas data.** Outflow carries enthalpy at the
   surface temperature; inflow carries its specified reservoir enthalpy. An LTE
   thermal film accounts for the adjustment between those control surfaces in
-  its coupled surface balance. Adiabatic and prescribed-heat boundaries use
-  reservoir carried enthalpy directly. Use the assembled boundary diagnostics
-  to avoid adding incoming energy twice (§5.4).
+  its coupled surface balance, but only through its blowing model: under the
+  default `NoBlowing` the heating of gas drawn in is dropped, a term bounded
+  by the inflow times its heat capacity times the temperature difference, so
+  forced-suction cases take `CouetteFilm` (Technical Reference §9.5.1).
+  Adiabatic and prescribed-heat boundaries use reservoir carried enthalpy
+  directly. Use the assembled boundary diagnostics to avoid adding incoming
+  energy twice (§5.4).
 
 - **`radiation_model` defaults to `SURFACE_ABSORPTION`.** A `RadiativeFluxBC` is
   always applied: under the default it is absorbed at the surface (the absorbed

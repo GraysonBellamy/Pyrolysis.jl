@@ -52,8 +52,9 @@ dependent blowing without evaluating the heat law at the cell center.
 Thermal conditions subtype `AbstractThermalBC` and may be combined additively.
 Mass conditions subtype `AbstractMassBC`: `ImpermeableBC`, `MassFluxBC`,
 `AmbientGasBC`, `NeumannPressureBC` and `ConvectivePressureBC`. Each mass
-condition supplies one complete closure and is not additive. `GasReservoir`
-and `MassTransferFilm` supply its thermodynamic state and optional film data.
+condition supplies one complete closure and is not additive. `GasReservoir`,
+`AnalogyFilm` and `MassTransferFilm` supply its thermodynamic state and film
+data.
 Typed boundary bindings retain gas indices, molar masses and species names.
 
 ---
@@ -255,7 +256,10 @@ a horizontal face in a quiescent chamber, the regime the pooling model
 approximates with constants fitted to a chamber CFD. `NoBlowing` is the
 default because no blowing law is validated for these faces; its error is the
 bounded quantity above, to be read with the uncertainty of $h$ itself
-(§12.12).
+(§12.12). The mass film of the same face (§9.4.2) applies $\beta$ regardless,
+so under `NoBlowing` the two films are not the same film; the suction branch
+of the Couette factor is validated (Brouwers 1993) and is what pays for the
+heating of gas drawn in (§9.5.1).
 
 `PropertyRatioFilm(free_stream; n_Γ)` modifies the free-stream Couette
 parameter using $(\Gamma_\infty/\Gamma_g)^{n_\Gamma}$, where $\Gamma=k/c_p$.
@@ -457,14 +461,19 @@ kg/(m² s); each negative flux needs its incoming temperature.
 `GasReservoir(P=...,T=...,mole_fractions=(gas=...,...))` defines pressure [Pa],
 incoming temperature [K] and normalized named gas mole fractions. Time-dependent
 values are permitted and checked when evaluated. Only an explicit vacuum
-`P=0` may omit composition. `AmbientGasBC(reservoir;film=nothing)` connects
-the complete state to the pore path and permits both ingress and escape.
+`P=0` may omit composition. `AmbientGasBC(reservoir;film=AnalogyFilm())`
+connects the complete state to the pore path through the mass film of §9.4.2
+and permits both ingress and escape.
 
-`MassTransferFilm(g)` adds the isobaric common-diffusivity film of §9.4, with
-conductance in kg/(m² s), a number or temperature law. Zero conductance permits
-only donor bulk flow; infinite conductance fixes composition. Pressure, species
-and thermal equations are solved consistently. These conditions do not combine
-with `+`; one closure is assigned to each tag.
+`AnalogyFilm(;Le=1.0)`, the default, takes the film conductance from the
+face's `ConvectiveBC` by the heat–mass transfer analogy; where the face has no
+convective condition, or the reservoir is a vacuum, it is absent and the
+reservoir is in direct contact. `MassTransferFilm(g)` gives the conductance
+explicitly in kg/(m² s), as a number or temperature law: zero conductance
+permits only donor bulk flow, infinite conductance fixes composition.
+`film=nothing` selects direct contact. Pressure, species and thermal equations
+are solved consistently. These conditions do not combine with `+`; one closure
+is assigned to each tag.
 
 ---
 
@@ -476,13 +485,13 @@ energy state. The surface pressure is the cell pressure plus gradient times
 the current half-cell distance, and physical accepted pressures must be
 nonnegative.
 
-`ConvectivePressureBC(reservoir;resistance=...,flow=:darcy_velocity,film=nothing)`
-solves $P_s-P_\infty=R_h f$. The flow is Darcy velocity [m/s], total mass flux
-[kg/(m² s)] for `:mass`, or total molar flux [mol/(m² s)] for `:molar`.
-Resistance is finite and nonnegative, with units pressure divided by the chosen
+`ConvectivePressureBC(reservoir;resistance=...,flow=:darcy_velocity,film=AnalogyFilm())`
+solves $P_s-P_\infty=R_h f$. The flow is Darcy velocity [m/s] or total mass
+flux [kg/(m² s)] for `:mass`. Resistance is finite and nonnegative, a constant
+or a law of the surface temperature, with units pressure divided by the chosen
 flow. A zero resistance fixes surface pressure. The complete reservoir and
-optional film provide species and energy closures in either direction.
-These pressure conditions are valid with either transport model.
+the film provide species and energy closures in either direction. These
+pressure conditions are valid with either transport model.
 
 ---
 
@@ -732,12 +741,13 @@ reservoir = GasReservoir(P=101325., T=300., mole_fractions=(air=1.,))
 bcs = BoundaryConditionSet(
     thermal=(top=HeatFluxBC(30e3) + ConvectiveBC(h=10., T_inf=300., blowing=CouetteFilm()),
              bottom=AdiabaticBC()),
-    mass=(top=AmbientGasBC(reservoir; film=MassTransferFilm(.06)),
+    mass=(top=AmbientGasBC(reservoir),
           bottom=ImpermeableBC()))
 ```
 
-The mass conductance is in kg/(m² s). The common incoming stream temperature
-is 300 K in both films. Other gases in the material have zero reservoir mole
+The mass film is the twin of the convective film, with its conductance from
+`h` by the analogy; an explicit `MassTransferFilm(g)` in kg/(m² s) overrides
+it. The common incoming stream temperature is 300 K in both films. Other gases in the material have zero reservoir mole
 fraction and can escape; air can enter. Initialize the pore gas inventories
 from the declared initial pressure, temperature and physical porosity.
 See the executable cone-calorimeter examples for complete material data.
@@ -838,9 +848,10 @@ choices.
 ## 12.12 Boundary-model domain and numerical qualification
 
 Mass films assume isobaric transport with one common diffusivity. Their
-conductance is explicit data, supplied as a constant or temperature law.
-A hydraulic resistance specifies which of Darcy velocity, mass flux or molar
-flux it relates to pressure drop. A single surface temperature represents
+conductance follows from the face's convective coefficient by the heat–mass
+analogy, or is explicit data, a constant or temperature law. A hydraulic
+resistance specifies whether it relates Darcy velocity or mass flux to the
+pressure drop. A single surface temperature represents
 LTE at the wall; incoming enthalpy uses the complete reservoir state.
 
 The local nonlinear solve requires a physical, nonsingular root. Its

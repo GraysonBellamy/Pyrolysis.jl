@@ -449,8 +449,10 @@ pore-volume admissibility throughout the evolution.
 Gas properties are specified by `GaseousComponent(;M,c,k,...)`; transport data
 belong to the matrix and its declared `LumpedTransfer` or `DustyGas` model.
 The default mass boundary is impermeable and the default thermal boundary is
-adiabatic. A finite external mass film is an optional `MassTransferFilm(g)`
-with conductance in kg/(m² s). See Chapters 3, 5 and 7 for the complete inputs.
+adiabatic. An open face exchanges gas through a mass film, by default the twin
+of its convective condition (`AnalogyFilm`), or an explicit
+`MassTransferFilm(g)` with conductance in kg/(m² s). See Chapters 3, 5 and 7
+for the complete inputs.
 
 ---
 
@@ -471,8 +473,8 @@ stable, user-facing API. The top-level exports cover:
 - **Boundary conditions:** the thermal conditions (`HeatFluxBC`, `ConvectiveBC`,
   `RadiativeBC`, `RadiativeFluxBC`, `CombinedThermalBC`, `DirichletThermalBC`,
   `AdiabaticBC`), the mass conditions (`ImpermeableBC`, `MassFluxBC`,
-  `AmbientGasBC`, `GasReservoir`, `MassTransferFilm`), the pressure
-  conditions (`NeumannPressureBC`, `ConvectivePressureBC`),
+  `AmbientGasBC`, `GasReservoir`, `MassTransferFilm`, `AnalogyFilm`), the
+  pressure conditions (`NeumannPressureBC`, `ConvectivePressureBC`),
   the container `BoundaryConditionSet`; the blowing models of `ConvectiveBC`
   (`AbstractBlowingModel`, `NoBlowing`, `CouetteFilm`, `PropertyRatioFilm`,
   `PoolingFilm`, `FunctionBlowing`) with the gas data and helpers they read
