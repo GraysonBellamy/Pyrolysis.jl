@@ -260,9 +260,10 @@ println("This may take a few minutes...\n")
 # Solve using implicit solver with ALE enabled
 # - use_ale=true: enables integrated ALE mesh motion (node positions in state vector)
 # - min_thickness: stops simulation when material becomes too thin
-# - deactivation: removes the surface cell once its condensed mass is below 1% of its
-#   initial mass (the default `threshold`); the mesh correction thins the layer so that
-#   it goes in one event
+# - deactivation: removes a cell once its reactant is below 1% of its initial mass
+#   (the default `threshold`); the mesh correction thins the layer so that most of
+#   it goes in one event. Without it the same answers come out of the guarded cells;
+#   deactivation buys the clean end state and the event ledger.
 # - dtmin: allows very small timesteps during rapid reaction fronts
 solution = solve(
     problem;

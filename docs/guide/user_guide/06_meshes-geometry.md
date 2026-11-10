@@ -499,11 +499,12 @@ sol = solve(problem)                         # fixed mesh (use_ale = false)
 ```
 
 A fixed mesh can deactivate burned-out cells (`deactivation = true`, Chapter 10): from the
-exposed side, each cell whose condensed mass falls below the threshold goes, its condensed
-inventories pass to the live cell beneath it, and the gas it held is vented and recorded in
-the deactivation event, since the receiver's pores could hold it only at a higher pressure.
-A cell below the threshold beneath a live cell ends the solve with outcome `:interior`. A
-material that regresses belongs on the moving mesh.
+exposed side, each cell whose reactive inventory falls below the threshold goes, with the
+spent cells above it when they reach the exposed face; its condensed inventories pass to
+the live cell beneath it, and the gas it held is vented and recorded in the deactivation
+event, since the receiver's pores could hold it only at a higher pressure. A cell below
+the threshold beneath a cell that still holds its material is a cavity and ends the solve
+with outcome `:interior`. A material that regresses belongs on the moving mesh.
 
 ### 6.7.2 Moving mesh: `use_ale = true`
 

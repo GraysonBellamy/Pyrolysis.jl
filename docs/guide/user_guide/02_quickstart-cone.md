@@ -567,7 +567,7 @@ combinations you can meet are:
 | `:Success` | `:none` | reached the end of `tspan` | true | true |
 | `:Terminated` | `:burned_out` | the last cell deactivated | true | false |
 | `:Terminated` | `:min_thickness` | the thickness fell below `min_thickness` | true | false |
-| `:Terminated` | `:interior` | a cell below the threshold lies inward of a live one on a fixed mesh, or beneath a skin on a moving one; the solve warns and ends | false | false |
+| `:Terminated` | `:interior` | a cell below the threshold lies beneath live cells it cannot leave through, a cavity; the solve warns and ends | false | false |
 | `:Failure` | — | the integrator gave up, or an event left an inadmissible state (with a warning) | false | false |
 
 `succeeded(solution)` and `completed(solution)` read these for you (UG 9). Run

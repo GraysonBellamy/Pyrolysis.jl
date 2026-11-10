@@ -285,14 +285,12 @@ function _retained_volume(material::Material{NC}, m0, T0) where {NC}
     end
 end
 
-# What the deactivation threshold of `material` reads at an order other than one:
-# the component of each reaction with a condensed reactant, and each cell's
-# reactive reference, the sum over those reactions of the reaction's lineage
-# reference or, at order one, where the lineage is not defined for every network,
-# its reactant's initial mass, zero in a cell that keeps `VANISHING_VOLUME` or more
-# of its volume, which is then never tested. Nothing at order one.
+# What the deactivation threshold of `material` reads: the component of each
+# reaction with a condensed reactant, and each cell's reactive reference, the sum
+# over those reactions of the reactant's initial mass for a first-order reaction
+# and of the reaction's lineage reference at any other order, zero in a cell that
+# keeps `VANISHING_VOLUME` or more of its volume, which is then never tested.
 function _reactive_references(material::Material, references::Matrix{Float64}, m0, T0)
-    needs_lineage(material) || return Int[], Float64[]
     reactants = Int[]
     reactive = zeros(size(m0, 2))
     for (r, reaction) in enumerate(material.reactions)
@@ -303,6 +301,17 @@ function _reactive_references(material::Material, references::Matrix{Float64}, m
     end
     reactive[_retained_volume(material, m0, T0) .>= VANISHING_VOLUME] .= 0.0
     return reactants, reactive
+end
+
+# The pore volume each cell starts with per unit of its skeletal volume,
+# `φ₀/(1 − φ₀)`: what its skeleton's own pores are, against which the gas a run
+# holds beyond them is a gap ([`VOID_VOLUME`](@ref)). Zero for a cell with no
+# skeleton. `volume` holds the cells' initial volumes.
+function _pore_ratios(material::Material{NC}, m0, T0, volume) where {NC}
+    return map(axes(m0, 2)) do i
+        skeletal = skeletal_volume_fraction(ntuple(j -> m0[j, i], Val(NC)), T0[i], material)
+        skeletal > 0 ? max(volume[i] - skeletal, 0.0) / skeletal : 0.0
+    end
 end
 
 # The deactivation threshold of a solve that names none: below order one the
@@ -352,10 +361,11 @@ end
 	CORRECTION_BAND
 
 The default near-threshold band `ε_band` of a solve whose bound
-[`EquidistributionCorrection`](@ref) moves some layer: cells beside a cell
-that crosses the threshold whose condensed mass is below this fraction of their
-reference go with it, so a layer that the correction carries to burnout together
-leaves in one invocation.
+[`EquidistributionCorrection`](@ref) moves some layer, and of a solve on a
+fixed mesh: cells beside a cell that crosses the threshold that hold less than
+this fraction of their reference go with it, so a layer that the correction
+carries to burnout together leaves in one invocation, and on a fixed mesh the
+spent cells above a crossing leave with it instead of holding it in.
 """
 const CORRECTION_BAND = 0.1
 
@@ -639,6 +649,7 @@ function _register_tables!(
         cells.reference,
     )
     isempty(cells.reactive) || register_tables!(t, :cell, cells.reactive)
+    register_tables!(t, :cell, cells.pore_ratio)
     register_tables!(t, :node, reference.positions)
     register_rows!(t, tol, reference.thickness; scale, time_scale)
     foreach(k -> _register_kernel!(t, k), def.kernels)
@@ -701,18 +712,21 @@ reactant against its lineage inventory, a constant of each cell
 is refused on a mesh of more than one dimension and with a correction, which
 would mix material at different conversions.
 
-`deactivation` deactivates, during the solve, every cell whose condensed mass
-falls below the fraction `threshold` (`ε_m`, 1e-2 by default) of its initial
-condensed mass, or, at a reaction order other than one, whose reactive inventory
-falls below that fraction of its reference ([`below_threshold`](@ref); the default
-is then a tenth of the limiter's `conversion_threshold`, 1e-4 with the default
-limiter) ([`CellDeactivation`](@ref)): on a moving
-mesh wherever it sits, together with the contiguous cells around it below the
-fraction `band` (`ε_band`, in `[threshold, 1)`; by default the larger of the
-threshold and [`CORRECTION_BAND`](@ref) when the bound equidistribution correction
-moves some layer, otherwise the threshold, so that only the cells below it go),
-the live cells above moving down into their slots; on a fixed mesh from the exposed
-`:top` side only ([`deactivate!`](@ref)).
+`deactivation` deactivates, during the solve, every cell whose reactive
+inventory, the mass of every reaction's condensed reactant, falls below the
+fraction `threshold` (`ε_m`, 1e-2 by default; at a reaction order other than
+one a tenth of the limiter's `conversion_threshold`, 1e-4 with the default
+limiter) of its reference, the reactants' initial mass or lineage reference
+([`below_threshold`](@ref), [`CellDeactivation`](@ref)); a cell that keeps a
+hundredth or more of its volume once converted is never tested. On a moving
+mesh a cell goes wherever it sits, together with the contiguous cells around it
+below the fraction `band` (`ε_band`, in `[threshold, 1)`; by default the larger
+of the threshold and [`CORRECTION_BAND`](@ref) when the bound equidistribution
+correction moves some layer, otherwise the threshold, so that only the cells
+below it go), the live cells above moving down into their slots; on a fixed mesh
+a run leaves from the exposed `:top` side only, the spent cells above a crossing,
+each below `band` (by default [`CORRECTION_BAND`](@ref) there), going with it
+([`deactivate!`](@ref)).
 `threshold` also scales the mass tolerances; `sources` is the external-source
 hook.
 
@@ -871,7 +885,10 @@ function setup(
                 history_scale = Float64(reltol * threshold),
             ),
         )
-    band = something(band, _moves(cl) ? max(threshold, CORRECTION_BAND) : threshold)
+    band = something(
+        band,
+        (_moves(cl) || !use_ale) ? max(threshold, CORRECTION_BAND) : threshold,
+    )
     reactants, reactive = _reactive_references(material, references, m0, T0)
     cells =
         deactivation ?
@@ -888,6 +905,7 @@ function setup(
             reactants,
             reactive,
             lineage = references,
+            pore_ratio = _pore_ratios(material, m0, T0, reference.volume),
         ) : nothing
     tensors = D == 1 ? nothing : _tensors(tensor, g0, n, Val(D))
     kernels = _kernels(

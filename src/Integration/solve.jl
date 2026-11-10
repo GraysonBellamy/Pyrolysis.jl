@@ -47,8 +47,8 @@ there, the threshold and the band widened by `reltol` (`deactivate!`'s
 crossing cell; at the end of every step the cells below the
 threshold go in one event, the safety net for a crossing the location does not
 see. The solve ends with `:Terminated` when the last cell goes or when a cell below the
-threshold lies inward of a live one on a fixed mesh or beneath a skin on a moving
-one (outcome `:interior`, with a warning naming the cell), and with `:Failure` when an event leaves
+threshold lies beneath live cells the pass cannot take it through, a cavity
+(outcome `:interior`, with a warning naming the cell), and with `:Failure` when an event leaves
 the state inadmissible (a merge's receiver held to its own mass tolerances,
 as the domain test holds every later proposal) or no consistent node
 velocities. The state a solve
@@ -611,7 +611,7 @@ function _deactivation_callback(cp::PreparedProblem, check::DomainCheck, policy)
             terminate!(integrator, ReturnCode.Failure)
         elseif status === :interior
             seen ||
-                @warn "solve(): cell $(void_cell(integrator.u, slack)) is below its threshold inward of a live cell at t = $(integrator.t); the solve ends with outcome :interior"
+                @warn "solve(): cell $(void_cell(integrator.u, slack)) is below its threshold beneath live cells it cannot leave through at t = $(integrator.t); the solve ends with outcome :interior"
             terminate!(integrator)
         elseif status !== :transferred
             terminate!(integrator)

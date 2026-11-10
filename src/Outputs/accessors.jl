@@ -123,11 +123,53 @@ end
 """
 	interior_events(sol::PyrolysisSolution) -> Vector{DeactivationEvent}
 
-The events of `sol` whose cell left from under live cells, which were spent: a
-void of the transfer's making that the pass closed ([`deactivate!`](@ref)). A void
-beneath a skin is never among them: it ends the solve with outcome `:interior`.
+The events of `sol` whose cell left from under live cells: a void the pass
+closed because the gas the run held beyond its own pores was below
+[`VOID_VOLUME`](@ref) of its initial volume ([`deactivate!`](@ref)). A cavity
+is never among them: it ends the solve with outcome `:interior`.
 """
 interior_events(sol::PyrolysisSolution) = filter(e -> e.interior, sol.events)
+
+"""
+	displaced_residue(sol::PyrolysisSolution) -> Vector{NamedTuple}
+
+What each invocation of the deactivation moved into a receiver: per invocation
+its number, its time `t` [s], the number of `cells` it took, the condensed
+`mass` [kg] they held when they went, the sum over them of the event's
+`fraction` times the cell's initial condensed mass, and that mass as a
+`fraction` of the column's initial condensed mass. A last cell that went with no
+receiver is not displaced but lost (its event's `lost_mass`) and is left out.
+The band widens what one invocation moves from `ε_m` of a cell to `ε_band` of
+every cell of a run, so this is the quantity to read when a merge was large.
+"""
+function displaced_residue(sol::PyrolysisSolution)
+    d = sol.deactivation
+    d === nothing && return NamedTuple{
+        (:invocation, :t, :cells, :mass, :fraction),
+        Tuple{Int,Float64,Int,Float64,Float64},
+    }[]
+    total = sum(d.reference; init = 0.0)
+    out = NamedTuple{
+        (:invocation, :t, :cells, :mass, :fraction),
+        Tuple{Int,Float64,Int,Float64,Float64},
+    }[]
+    for k in unique(e.invocation for e in sol.events)
+        events = [e for e in sol.events if e.invocation == k && e.receiver != 0]
+        isempty(events) && continue
+        mass = sum(e.fraction * d.reference[e.cell] for e in events)
+        push!(
+            out,
+            (;
+                invocation = k,
+                t = first(events).t,
+                cells = length(events),
+                mass,
+                fraction = total > 0 ? mass / total : 0.0,
+            ),
+        )
+    end
+    return out
+end
 
 function Base.show(io::IO, sol::PyrolysisSolution)
     print(
