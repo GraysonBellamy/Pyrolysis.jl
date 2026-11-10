@@ -248,8 +248,9 @@ transparent and requires the radiation leaving through the back
 (`extras.radiation_back`) to exceed 1 % of the radiation entering
 (`extras.radiation_absorbed`); its share peaks at 0.889. V-BO-05 runs the deck on a
 fixed mesh, where the PMMA beneath the surface empties nearly uniformly, the exposed
-cell slowest; it must stop with outcome `:interior` and return code `:Terminated`
-before any deactivation (§14.4). V-BO-06 grades the PMMA cells toward the surface (each
+cell slowest; the crossing cells leave with the spent cells above them, and the run
+must burn the layer out under V-BO-01's requirements in fewer invocations than cells,
+with no cavity (§14.4). V-BO-06 grades the PMMA cells toward the surface (each
 1/1.02 of the one beneath at 60 cells) under V-BO-01's requirements; V-BO-07 mixes in
 a second solid of half the density and a tenth of the pre-exponential factor, graded
 from none at the substrate to half at the surface, under the same requirements;
@@ -263,7 +264,7 @@ at orders 0, 0.5 and 1.2; at 0.5 the threshold pair and the mesh pair are saved 
 0.025 s over the window they compare, since each event is a step in the rate and their
 peak differences read the time between two runs' steps, and a further pair keeps the
 temperature and enthalpy forms' difference in sight (§14.10). V-BO-11 runs `examples/06`
-at order one on Lagrangian cells, where cells leave from under spent ones, against the
+at order one on Lagrangian cells, where cells leave from under live ones, against the
 corrected default. V-BO-12a holds what deactivation costs at order zero to what the mesh
 costs, between 40 and 80 cells of the same deck without deactivation, in the integrated
 rate and the mass; the gate `burnout_order_zero.jl` holds `examples/06` to the same rule at

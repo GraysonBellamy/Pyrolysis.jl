@@ -116,6 +116,18 @@ function _deplete!(u, cp, i, f)
     return u
 end
 
+# Shrink cell `i`'s thickness to the fraction `f` of its current one, the nodes
+# above it moving down: what the volume law does to a cell whose mass went.
+function _collapse!(u, cp, i, f)
+    layout = cp.def.layout
+    is_moving(layout) || return u
+    Δ = (1 - f) * (u[position_index(layout, i + 1)] - u[position_index(layout, i)])
+    for nd = (i+1):(n_cells(layout)+1)
+        u[position_index(layout, nd)] -= Δ
+    end
+    return u
+end
+
 # The ablating solid of `_ablator` in `n_top` cells on an inert substrate of
 # `n_bottom` cells, the layer interface at node `n_bottom + 1`.
 function _on_substrate(n_top, n_bottom; L_top = 2e-3, L_bottom = 1e-3)
@@ -280,7 +292,9 @@ _ledger(cp, u, events) =
     @test last(cells.events).invocation == 2
     @test (last(cells.events).cell, last(cells.events).receiver) == (5, 4)
 
-    # A cell below the threshold beneath a skin stays, and the pass says so.
+    # A cell below the threshold that keeps its volume beneath live cells is a
+    # cavity (its pores are nearly all of it, far above VOID_VOLUME): the pass
+    # stops and says so.
     reset_cells!(cells, layout)
     u = _deplete!(copy(cp.u0), cp, 4, 0.2 * cells.threshold)
     @test deactivate!(u, cells, def, 1.0) === :interior
@@ -538,6 +552,10 @@ end
     for (i, f) in fractions
         _deplete!(u, cp, i, f)
     end
+    # Cell 4 lies under live cells: with its volume following its mass it
+    # holds no gas beyond its own pores and goes; left at its full volume it
+    # would be a cavity.
+    _collapse!(u, cp, 4, 0.5ε_m)
     # Only the cells below the threshold go; the receiver, with their residue
     # added, stays; the cell below it inward of a live one goes into the cell
     # beneath it.
@@ -1497,24 +1515,40 @@ end
     @test all(r -> r.intensity <= 1e-12, results)
 end
 
-@testset "a void beneath a skin ends the solve: $(moving ? "moving" : "fixed") mesh" for moving in
-                                                                                         (
+@testset "a cell that empties beneath live cells: $(moving ? "moving" : "fixed") mesh" for moving in
+                                                                                           (
     true,
     false,
 )
-    sol =
-        @test_logs (:warn, r"cell 1 is below its threshold.*outcome :interior") Integration.solve(
-            _ablator(6; from_bottom = true, t_end = 5.0);
-            use_ale = moving,
-            deactivation = true,
-            abstol = 1e-8,
-            reltol = 1e-6,
-            pressure_tolerance = 1e-3,
-        )
-    @test sol.retcode === :Terminated
-    @test sol.outcome === :interior
-    @test isempty(sol.events)
-    @test sol.t[end] < 5.0
+    problem = _ablator(6; from_bottom = true, t_end = 5.0)
+    options =
+        (; deactivation = true, abstol = 1e-8, reltol = 1e-6, pressure_tolerance = 1e-3)
+    if moving
+        # Heated from the back, the bottom cell empties first. Its volume
+        # follows its mass, so the gap it leaves beneath the live cells is
+        # thermally thin (below VOID_VOLUME of its initial volume): it merges
+        # outward and the solve runs on.
+        sol = Integration.solve(problem; use_ale = true, options...)
+        @test sol.outcome !== :interior
+        @test !isempty(sol.events)
+        first_run = filter(e -> e.invocation == 1, sol.events)
+        @test 1 in (e.cell for e in first_run)
+        @test all(e -> e.receiver > e.cell, first_run)
+        @test all(e -> e.interior, first_run)
+    else
+        # A fixed cell keeps its volume: emptied beneath cells that hold their
+        # material it is a cavity, and the solve ends.
+        sol =
+            @test_logs (:warn, r"cell 1 is below its threshold.*outcome :interior") Integration.solve(
+                problem;
+                use_ale = false,
+                options...,
+            )
+        @test sol.retcode === :Terminated
+        @test sol.outcome === :interior
+        @test isempty(sol.events)
+        @test sol.t[end] < 5.0
+    end
 end
 
 @testset "deactivation under UMFPACK" begin
@@ -1544,7 +1578,8 @@ end
     energy in (:temperature, :enthalpy)
 
     # The outermost cell merges, then a cell below the threshold lies inward of
-    # live cells that hold their mass: the solve ends.
+    # live cells that hold their mass. The cell keeps its volume (the masses
+    # are set by hand), so on both meshes it is a cavity: the solve ends.
     solid = SolidComponent(:a; φ = 0.3, ρ = 500.0, c = 1000.0, k = 0.2, λ = 1e-6, α = 3.0)
     gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02)
     problem = PyrolysisProblem(
@@ -1886,6 +1921,28 @@ end
     @test cp.deactivation.tables.origin == 1:5
 end
 
+@testset "a fixed mesh takes the spent cells above a crossing with it" begin
+    # The cells above the crossing hold less than the band (CORRECTION_BAND on
+    # a fixed mesh): the run reaches the exposed face and leaves top down into
+    # the cell beneath the crossing, its gas vented.
+    cp = setup(_burning(5); deactivation = true, reltol = 1e-6, abstol = 1e-8)
+    @test cp.deactivation.band == 0.1
+    u = _prepared(cp, [0.8, 0.8, 0.005, 0.05, 0.04])
+    before = _total_masses(u, cp.def.layout)
+    @test deactivate!(u, cp.deactivation, cp.def, 0.5) === :transferred
+    events = cp.deactivation.events
+    @test [(e.cell, e.receiver) for e in events] == [(5, 2), (4, 2), (3, 2)]
+    @test all(e -> !e.interior, events)
+    @test top_live_cell(cp.def.layout) == 2
+    @test _total_masses(u, cp.def.layout) .+ sum(e.lost_mass for e in events) ≈ before rtol =
+        1e-14
+    # A cell above the crossing that holds its material is a cavity's roof.
+    cp2 = setup(_burning(5); deactivation = true, reltol = 1e-6, abstol = 1e-8)
+    w = _prepared(cp2, [0.8, 0.8, 0.005, 0.05, 0.4])
+    @test deactivate!(w, cp2.deactivation, cp2.def, 0.5) === :interior
+    @test isempty(cp2.deactivation.events)
+end
+
 @testset "a located interior crossing leaves in its pass" begin
     problem = _burning(6; t_end = 6.0)
     fractions = [0.8, 0.05, 0.07, 0.03, 0.06, 0.04]
@@ -2108,9 +2165,13 @@ end
     w[mass_index(layout, 4, 1)] = 0.005 * R
     w[mass_index(layout, 4, 2)] = 0.5 * R
     w[mass_index(layout, 5, 1)] = 0.009 * R
+    # The run lies under cell 5: its cells' volumes follow their masses.
+    _collapse!(w, cp2, 3, (0.5e-3 + 0.1) * R / cells.reference[3])
+    _collapse!(w, cp2, 4, (0.005 + 0.5) * R / cells.reference[4])
     @test deactivate!(w, cp2.deactivation, cp2.def, 0.5) === :transferred
     @test sort([e.cell for e in cp2.deactivation.events]) == [3, 4]
-    # At order one the measure is the total condensed mass.
+    # At order one the measure is the same, the reactant against its initial
+    # mass, so a residue holds no spent cell live there either.
     first_order = setup(
         problem(1.0);
         use_ale = true,
@@ -2118,9 +2179,10 @@ end
         threshold = 1e-3,
         correction = NoCorrection(),
     )
-    @test isempty(first_order.deactivation.reactants)
-    @test isempty(first_order.deactivation.reactive)
-    @test !below_threshold(first_order.deactivation, first_order.def.layout, u, 3)
+    @test first_order.deactivation.reactants == [1]
+    @test first_order.deactivation.reactive[3] == R
+    @test first_order.deactivation.reactive[1] == 0
+    @test below_threshold(first_order.deactivation, first_order.def.layout, u, 3)
     # The last live cell has no receiver and is read on its condensed mass.
     one_cell = setup(
         PyrolysisProblem(
@@ -2260,8 +2322,10 @@ _on_mesh(p, mesh) = PyrolysisProblem(
     @test _column_inventory(cp, u).H ≈ held.H rtol = 1e-12
 end
 
-@testset "a void beneath a skin ends a moving column's solve" begin
-    # Cell 3 empties under radiative transfer beneath cells that hold their mass.
+@testset "a thin void beneath cells that hold their material closes" begin
+    # Cell 3 empties under radiative transfer beneath cells that hold their
+    # mass. Its volume followed its mass, so the gap is thin: it merges into
+    # the cell beneath it, the cells above move down, and the solve runs on.
     problem = _burning(5; k = 2.0, radiating = true, t_end = 1.0)
     cp = setup(
         problem;
@@ -2273,12 +2337,11 @@ end
     u = _prepared(cp, [0.8, 0.8, 0.015, 0.7, 0.6])
     consistent_state!(u, cp.def, cp.ws, 0.0)
     cp.u0 .= u
-    sol =
-        @test_logs (:warn, r"cell 3 is below its threshold.*outcome :interior") match_mode =
-            :any integrate(cp; maxiters = 50_000, dtmin = 1e-14)
-    @test sol.outcome === :interior
-    @test !succeeded(sol)
-    @test isempty(sol.events)
+    sol = integrate(cp; maxiters = 50_000, dtmin = 1e-14)
+    @test sol.outcome !== :interior
+    @test !isempty(sol.events)
+    @test (first(sol.events).cell, first(sol.events).receiver) == (3, 2)
+    @test first(sol.events).interior
 end
 
 @testset "a void under spent cells closes and is reported: $(energy) form" for energy in (
@@ -2293,6 +2356,7 @@ end
         correction = NoCorrection(),
         energy_state = energy,
     )
+    reference = copy(cp.deactivation.reference)
     u = _prepared(cp, [0.8, 0.8, 0.015, 0.05, 0.06])
     consistent_state!(u, cp.def, cp.ws, 0.0)
     cp.u0 .= u
@@ -2305,22 +2369,76 @@ end
         "Interior events: $(length(reported))",
         sprint(show, MIME"text/plain"(), sol),
     )
+    # What each invocation moved into its receiver.
+    moved = displaced_residue(sol)
+    @test sum(x.cells for x in moved) == count(e -> e.receiver != 0, sol.events)
+    @test sum(x.mass for x in moved) ≈
+          sum(e.fraction * reference[e.cell] for e in sol.events if e.receiver != 0) rtol =
+        1e-14
+    @test all(0 <= x.fraction < 1 for x in moved)
+    @test all(
+        x.t == first(e.t for e in sol.events if e.invocation == x.invocation) for x in moved
+    )
 end
 
-@testset "the skin starts at VOID_SKIN thresholds" begin
+@testset "displaced_residue reads each dead cell's own reference" begin
+    # The cells differ in size, so their references differ. The interior event
+    # moves the live cells above it down a slot, and the slot a dead cell left
+    # holds another cell's reference by the end of the solve.
+    nodes = [0.0, 1e-3, 3e-3, 4e-3, 7.5e-3, 1e-2]
+    problem =
+        _on_mesh(_burning(5; k = 2.0, radiating = true, t_end = 0.4), line_mesh(nodes))
+    cp = setup(problem; use_ale = true, deactivation = true, correction = NoCorrection())
+    reference = copy(cp.deactivation.reference)
+    @test length(unique(reference)) == 4
+    u = _prepared(cp, [0.8, 0.8, 0.015, 0.05, 0.06])
+    consistent_state!(u, cp.def, cp.ws, 0.0)
+    cp.u0 .= u
+    sol = integrate(cp; maxiters = 50_000, dtmin = 1e-14)
+    @test completed(sol)
+    @test any(e -> e.interior, sol.events)
+    @test sol.deactivation.tables.origin != 1:5
+    moved = displaced_residue(sol)
+    expected = sum(e.fraction * reference[e.cell] for e in sol.events if e.receiver != 0)
+    @test sum(x.mass for x in moved) ≈ expected rtol = 1e-14
+    @test sum(x.fraction for x in moved) ≈ expected / sum(reference) rtol = 1e-14
+end
+
+@testset "the void rule reads the gas a run holds beyond its own pores" begin
+    # A cell under live cells that kept its volume while its mass went is
+    # nearly all gap: a cavity, and the pass stops. The same cell with its
+    # volume following its mass, at the porosity it started with (0.3 here),
+    # holds no gas beyond its own pores and goes, whatever the cells above hold.
+    @test VOID_VOLUME == 0.02
     ε = 1e-2
-    for (outward, status) in ((0.99, :transferred), (1.01, :interior))
+    for (collapsed, status) in ((false, :interior), (true, :transferred))
         cp = setup(
-            _burning(3; t_end = 0.2);
+            _burning(4; t_end = 0.2);
             use_ale = true,
             deactivation = true,
             correction = NoCorrection(),
-            threshold = ε,
         )
-        u = _prepared(cp, [0.8, 0.5ε, outward * VOID_SKIN * ε])
+        u = _deplete!(copy(cp.u0), cp, 2, 0.5ε)
+        collapsed && _collapse!(u, cp, 2, 0.5ε)
         @test deactivate!(u, cp.deactivation, cp.def, 0.0) === status
         @test length(cp.deactivation.events) == (status === :interior ? 0 : 1)
+        status === :interior && continue
+        @test [(e.cell, e.receiver) for e in cp.deactivation.events] == [(2, 1)]
+        @test only(cp.deactivation.events).interior
+        @test top_live_cell(cp.def.layout) == 3
     end
+    # A band run of material at its own porosity is no gap either: two cells
+    # holding 0.5 % and 9 % of their mass under a live one go together.
+    cp = setup(
+        _burning(4; t_end = 0.2);
+        use_ale = true,
+        deactivation = true,
+        correction = NoCorrection(),
+        band = 0.1,
+    )
+    u = _prepared(cp, [0.8, 0.5ε, 0.09, 0.8])
+    @test deactivate!(u, cp.deactivation, cp.def, 0.0) === :transferred
+    @test [(e.cell, e.receiver) for e in cp.deactivation.events] == [(3, 1), (2, 1)]
 end
 
 @testset "the tables follow a surface removal after an interior one" begin

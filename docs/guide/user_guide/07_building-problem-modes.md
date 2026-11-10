@@ -223,14 +223,14 @@ formulation.
 
 ### 7.3.3 Deactivation and the correction
 
-`deactivation = true` deactivates, during the solve, every cell whose condensed mass falls
-below `threshold` (default `1e-2`) of its initial condensed mass, in an event located inside
-the step; its inventories go to the live cell beneath it. At a reaction order other than one
-the test reads the cell's reactive inventory against its lineage reference, and `threshold`
-defaults to a tenth of the limiter's `conversion_threshold`, `1e-4` by default. On a moving
-mesh a cell can go from under spent cells, which move down a slot; on a fixed mesh from the
-exposed side only. Chapter 10 describes the burnout path, its parameters and the
-envelope in which it is verified.
+`deactivation = true` deactivates, during the solve, every cell whose reactive inventory,
+the mass of each reaction's condensed reactant, falls below `threshold` (default `1e-2`;
+at a reaction order other than one a tenth of the limiter's `conversion_threshold`,
+`1e-4` by default) of its reference, in an event located inside the step; its inventories
+go to the live cell beneath it, and the last live cell goes on its condensed mass. On a
+moving mesh a cell can go from under live cells, which move down a slot, while the gap it
+leaves is thin; on a fixed mesh from the exposed side only. Chapter 10 describes the
+burnout path, its parameters and the envelope in which it is verified.
 
 On a moving mesh with deactivation on, `setup` installs the **equidistribution correction**
 (`EquidistributionCorrection()`, its layer time estimated at each layer's first activation

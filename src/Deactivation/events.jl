@@ -19,7 +19,7 @@ and the enthalpy lost), the initial cell in each slot after the event
 ([`SlotTables`](@ref)), and the reference updates of the merge, each a
 reaction, an initial cell and that cell's new reference, and whether live cells
 lay outward of the dead cell (`interior`): the cell left from under them,
-through a void of the tail's making ([`deactivate!`](@ref)). A merge of several
+through a gap the pass closed ([`deactivate!`](@ref)). A merge of several
 cells into one receiver records one event per dead cell, the outermost first;
 the merge's created volume, losses, regularization and reference updates are
 written to that first event and the others carry zeros, so the sums over the
@@ -45,18 +45,21 @@ end
 	CellDeactivation{NC,E}
 
 The deactivation state of a solve: the threshold `ε_m`, the
-near-threshold band `ε_band` (a fraction of a cell's reference, read on a
-moving mesh only, see [`deactivate!`](@ref)), the cells' initial condensed
+near-threshold band `ε_band` (a fraction of a cell's reference, see
+[`deactivate!`](@ref)), the cells' initial condensed
 masses (`reference`; a receiver keeps its own, so a merged cell deactivates
 once its whole merged inventory is below `ε_m` of what it started with), the
 condensed component flags, the caloric extension merged temperatures are
 found with, the events so far, the outcome: `:none`; `:burned_out` once the last live cell
-went; `:interior` when a cell below the threshold lies inward of a live one on
-a fixed mesh, whose geometry stays with its slots, or beneath a skin on a moving
-one; the [`SlotTables`](@ref) of the solve; and, at a reaction order other than one,
-what the threshold reads there ([`below_threshold`](@ref)): the components
-`reactants`, one per reaction with a condensed reactant, the cells' `reactive`
-reference, and `lineage`, the reaction kernel's references by slot.
+went; `:interior` when a cell below the threshold lies beneath live cells the
+pass cannot take it through (a cavity on a fixed mesh, or a run whose pore
+volume is a gap on a moving one, see [`VOID_VOLUME`](@ref)); the
+[`SlotTables`](@ref) of the solve; what the threshold reads
+([`below_threshold`](@ref)): the components `reactants`, one per reaction with
+a condensed reactant, the cells' `reactive` reference, zero in a cell that keeps
+its volume, and `lineage`, the reaction kernel's references by slot; and
+`pore_ratio`, each cell's initial pore volume per unit of its skeletal volume,
+what its skeleton's own pores are ([`VOID_VOLUME`](@ref)).
 """
 struct CellDeactivation{NC,E<:CaloricExtension{NC}}
     threshold::Float64
@@ -70,12 +73,14 @@ struct CellDeactivation{NC,E<:CaloricExtension{NC}}
     reactants::Vector{Int}
     reactive::Vector{Float64}
     lineage::Matrix{Float64}
+    pore_ratio::Vector{Float64}
 end
 
 """
 	CellDeactivation(threshold, band, reference, solid, caloric;
 	                 origin = collect(eachindex(reference)), reactants = Int[],
-	                 reactive = Float64[], lineage = zeros(0, 0))
+	                 reactive = Float64[], lineage = zeros(0, 0),
+	                 pore_ratio = zeros(length(reference)))
 
 The deactivation state before a solve, `reference` the initial condensed
 masses; `threshold ≤ band < 1`. `origin` is the array of the
@@ -91,6 +96,7 @@ function CellDeactivation(
     reactants::Vector{Int} = Int[],
     reactive::Vector{Float64} = Float64[],
     lineage::Matrix{Float64} = zeros(0, 0),
+    pore_ratio::Vector{Float64} = zeros(length(reference)),
 ) where {NC}
     threshold <= band < 1 || throw(
         ArgumentError("the band must lie in [threshold, 1) = [$threshold, 1), got $band"),
@@ -107,6 +113,7 @@ function CellDeactivation(
         reactants,
         reactive,
         lineage,
+        pore_ratio,
     )
 end
 
@@ -186,16 +193,19 @@ end
 	below_threshold(d, layout, u, i; slack = 0) -> Bool
 
 Whether live cell `i` holds less than `ε_m` of its reference, or, with a positive
-`slack`, less than `(1 + slack) ε_m` of it. At order one the test reads the
-condensed mass against the initial condensed mass. At an order other than one
-it reads the reactive inventory ([`reactive_mass`](@ref)) against the cell's
-`reactive` reference, the sum over the reactions with a condensed reactant of the
-reaction's lineage reference, or for a first-order reaction its reactant's initial
-mass, so that a residue never holds a spent cell live; the last live cell has no
-receiver and goes only below the threshold on its condensed mass, so a column
-that leaves a residue ends with that residue. A cell whose reference is zero,
-which started with no condensed mass or with none of a reaction's lineage, never
-deactivates.
+`slack`, less than `(1 + slack) ε_m` of it. The test reads the reactive
+inventory ([`reactive_mass`](@ref)), the mass of every reaction's condensed
+reactant, against the cell's `reactive` reference: the sum over those reactions
+of the reactant's initial mass for a first-order reaction and of the reaction's
+lineage reference at any other order. A residue therefore never holds a spent
+cell live, and what a receiver took from a dead cell's residue does not count
+against it. The reference is zero, and the cell is never tested, where the cell
+started with no condensed mass or with none of a reaction's lineage, in an
+inert layer, and in a cell that keeps `VANISHING_VOLUME` or more of its volume
+once converted: such a cell is a layer the front burns beneath, not one that
+vanishes. The last live cell has no receiver and goes only below the threshold
+on its condensed mass, so a column that leaves a residue ends with that
+residue. A material without reactions is read on its condensed mass.
 """
 @inline below_threshold(
     d::CellDeactivation,
@@ -266,25 +276,57 @@ function _outermost_below(d::CellDeactivation, layout::StateLayout, u, top::Int,
 end
 
 """
-	VOID_SKIN
+	VOID_VOLUME
 
-How many times its threshold a live cell outward of a crossing must hold for
-the crossing to be a void beneath a skin. A tail delays its receiver past the
-cell inward of it, which then crosses first under a receiver that holds
-`ε (e^{kτ} + 1)`: a layer burning out that way holds up to six thresholds on the
-decks measured, a skin from 29 to thousands of them.
+The gas a run beneath live cells holds beyond its skeleton's own pores, as a
+fraction of the run's initial volume, at and above which the run is a cavity
+the model cannot close: the merge would lump a gas gap into a condensed cell. A
+cell's own pores are its skeletal volume times the pore ratio it started with,
+`φ₀/(1 − φ₀)`; the gas beyond them is a gap. A gap of width `δ` conducts
+`k_g/δ` through its gas, against a cell's own `k_s/Δz`, so it takes a tenth of
+one cell's resistance at `δ/Δz = 0.1 k_g/k_s`: 0.02–0.03 for a polymer
+(`k_g ≈ 0.05`, `k_s ≈ 0.15–0.2` W m⁻¹ K⁻¹) and 0.02–0.06 for a char. Below it
+the gap is thermally invisible and the pass closes it. A cell whose volume
+follows its mass at its own porosity holds no gas beyond its pores, however
+little of it is left; a cell that kept its volume while its mass went, as a
+fixed-mesh cell does, is nearly all gap.
 """
-const VOID_SKIN = 10.0
+const VOID_VOLUME = 0.02
 
-# Whether a live cell outward of slot `hi`, up to `top`, is a skin: it holds
-# `VOID_SKIN` thresholds of its reference, or has no reference, an inert layer or
-# one that keeps its volume.
-function _skin_above(d::CellDeactivation, layout::StateLayout, u, hi::Int, top::Int)
-    for i = (hi+1):top
-        held, reference = _measure(d, layout, u, i)
-        (reference > 0 && held < VOID_SKIN * d.threshold * reference) || return true
+# The gas the live run `run` holds beyond its skeleton's own pores, as a
+# fraction of its initial volume: the gap the merge would close beneath the live
+# cells above it.
+function _gap_fraction(u, d::CellDeactivation, def::ResidualDefinition, run::UnitRange{Int})
+    layout, setup = def.layout, def.setup
+    laws, topo, material = setup.laws, setup.topology, setup.material
+    energy = energy_state(layout)
+    gap, initial = 0.0, 0.0
+    for i in run
+        m = _masses(u, layout, i)
+        T = _temperature(energy, u, d, laws, layout, i, m)
+        skeletal = skeletal_volume_fraction(m, T, material)
+        pores = _cell_volume(u, layout, topo, i) - skeletal
+        gap += max(pores - skeletal * d.pore_ratio[i], 0.0)
+        initial += setup.reference.volume[i]
     end
-    return false
+    return initial > 0 ? gap / initial : 0.0
+end
+
+# The outermost live cell of the contiguous run outward of `c`, up to `top`,
+# that holds less than `1 + slack` times `ε_band` of its reference.
+function _spent_outward(
+    d::CellDeactivation,
+    layout::StateLayout,
+    u,
+    c::Int,
+    top::Int,
+    slack,
+)
+    hi = c
+    while hi < top && _below(d, layout, u, hi + 1, d.band, slack)
+        hi += 1
+    end
+    return hi
 end
 
 # The contiguous live cells around `c` that hold less than `1 + slack` times
@@ -309,22 +351,27 @@ outermost cell below `ε_m` goes, with the contiguous live cells around it below
 the live cell beneath the run, or, for a run from the innermost cell under live
 cells, into the live cell above it; a run of the whole column leaves the
 innermost cell, holding the run's inventories, as the survivor. A run with live
-cells outward of it goes only if they are spent, each under [`VOID_SKIN`](@ref)
-thresholds: a tail delayed their receiver, and the void is the transfer's. A skin
-over the run is a void the model cannot carry heat across, so the pass stops
-there. The live cells above a run that went move down into its slots, with
-every table of the [`SlotTables`](@ref), so that the dead slots are the outermost
-ones. After a merge the pass starts again, the receiver holding the run's
-inventories against its own reference, so that every cell below `ε_m` goes in the
-same invocation. On a fixed mesh, whose geometry stays with its slots, only the
-outermost live cell can go, while it is below `ε_m`, each merge re-testing the
-receiver with the dead cell's condensed inventories added. The last live cell,
-once below `ε_m`, goes with no receiver, its inventories written to the event as
-lost. The events of one call share their invocation. A positive `slack` widens
-both tests to `1 + slack` times `ε_m` and `ε_band`: an event located at a root
-passes the solve's relative tolerance, so that the crossing cell, which holds
-exactly its threshold there, goes, and with it the cells within the tolerance of
-their thresholds, whose crossing the solve does not resolve from the located one.
+cells outward of it goes when the gas it holds beyond its skeleton's own pores
+is below [`VOID_VOLUME`](@ref) of its initial volume: the gap the merge closes
+is then thermally invisible, whatever the cells above hold, and the column
+closes over it. A run whose gap reaches that fraction is a cavity the model
+cannot carry heat across, so the pass stops there. The live cells above a run that went move down into its
+slots, with every table of the [`SlotTables`](@ref), so that the dead slots are
+the outermost ones. After a merge the pass starts again, the receiver holding
+the run's inventories against its own reference, so that every cell below `ε_m`
+goes in the same invocation. On a fixed mesh, whose geometry stays with its
+slots and whose empty cell is a full cell of gas, a run leaves from the exposed
+side only: the outermost live cell while it is below `ε_m`, each merge
+re-testing the receiver with the dead cell's condensed inventories added, or a
+cell below `ε_m` together with the spent cells above it, each below `ε_band`,
+when they reach the exposed face; a cell below `ε_m` beneath a cell that still
+holds its material stops the pass. The last live cell, once below `ε_m`, goes
+with no receiver, its inventories written to the event as lost. The events of
+one call share their invocation. A positive `slack` widens both tests to
+`1 + slack` times `ε_m` and `ε_band`: an event located at a root passes the
+solve's relative tolerance, so that the crossing cell, which holds exactly its
+threshold there, goes, and with it the cells within the tolerance of their
+thresholds, whose crossing the solve does not resolve from the located one.
 
 The dead cells' inventories (masses, sensible enthalpy, history pair) go to
 the live cell beside them, the receiver, whose temperature follows from the
@@ -348,8 +395,8 @@ that gas is vented, its masses and sensible enthalpy written to the event as
 lost.
 
 Returns `:transferred`, `:burned_out` when the last live cell went, or `:interior`
-when a cell below the threshold remains inward of a live one on a fixed mesh or
-beneath a skin on a moving one.
+when a cell below the threshold remains beneath live cells the pass cannot take
+it through.
 """
 function deactivate!(
     u::AbstractVector,
@@ -365,9 +412,13 @@ function deactivate!(
         top == 0 && break
         c = _outermost_below(d, layout, u, top, slack)
         c == 0 && break
-        is_moving(layout) || c == top || break
-        lo, hi = is_moving(layout) ? _band_run(d, layout, u, c, top, slack) : (c, c)
-        _skin_above(d, layout, u, hi, top) && break
+        if is_moving(layout)
+            lo, hi = _band_run(d, layout, u, c, top, slack)
+            hi < top && _gap_fraction(u, d, def, lo:hi) >= VOID_VOLUME && break
+        else
+            lo, hi = c, _spent_outward(d, layout, u, c, top, slack)
+            hi == top || break
+        end
         if top == 1
             _lose!(u, d, def, top, Float64(t), invocation)
             d.outcome[] = :burned_out
@@ -546,7 +597,7 @@ end
 # the initial reference tables.
 function _receive_lineage!(d::CellDeactivation, r::Int, dead::UnitRange{Int})
     updates = Tuple{Int,Int,Float64}[]
-    isempty(d.reactants) && return updates
+    (isempty(d.reactants) || isempty(d.tables.lineage)) && return updates
     tables = d.tables
     _, initial = only(tables.lineage)
     for k in axes(d.lineage, 1)

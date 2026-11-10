@@ -84,6 +84,8 @@ function _named_tables(cp)
         "capacity_floor" => (:cell, r.capacity_floor),
         "thickness" => (:cell, r.thickness),
         "deactivation reference" => (:cell, cp.deactivation.reference),
+        "reactive reference" => (:cell, cp.deactivation.reactive),
+        "pore ratio" => (:cell, cp.deactivation.pore_ratio),
         "conduction floor" => (:face, find_kernel(ConductionKernel, k).d_floor),
         "boundary floor" => (:face, find_kernel(ThermalBoundaryKernel, k).d_floor),
         "lineage" => (:matrix, find_kernel(ReactionKernel, k).reference),
@@ -287,21 +289,31 @@ end
     energy in (:temperature, :enthalpy),
     model in (SURFACE_ABSORPTION, RADIATIVE_TRANSFER)
 
+    # Every removed cell reacts: the threshold tests only a cell with a condensed
+    # reactant, so the inert cells sit between them.
+    layer = [1, 2, 1, 2, 1, 1, 1, 1]
     radiating = model !== SURFACE_ABSORPTION
-    cp = _set_up(_column(_H, _T, _L, _R; radiating), energy; model)
+    cp = _set_up(_column(_H, _T, layer, _R; radiating), energy; model)
     keep = [i for i = 1:8 if i != k]
-    fresh =
-        _set_up(_column(_H[keep], _T[keep], _L[keep], _R[keep]; radiating), energy; model)
+    fresh = _set_up(
+        _column(_H[keep], _T[keep], layer[keep], _R[keep]; radiating),
+        energy;
+        model,
+    )
     layout, cells = cp.def.layout, cp.deactivation
     u = copy(cp.u0)
-    # Cell k empties under spent cells.
+    # Cell k empties beneath live cells, its volume following its mass, so the
+    # gap it leaves is thin and the pass takes it.
+    f = 0.5 * cells.threshold
     for j = 1:n_components(layout)
-        u[mass_index(layout, k, j)] *= 0.5 * cells.threshold
-        for i = (k+1):8
-            u[mass_index(layout, i, j)] *= 2 * cells.threshold
-        end
+        u[mass_index(layout, k, j)] *= f
+    end
+    Δ = (1 - f) * (u[position_index(layout, k + 1)] - u[position_index(layout, k)])
+    for nd = (k+1):9
+        u[position_index(layout, nd)] -= Δ
     end
     @test deactivate!(u, cells, cp.def, 0.1) === :transferred
+    @test only(cells.events).interior
     @test cells.tables.origin == vcat(keep, k)
     @test top_live_cell(layout) == 7
     _compare_with_fresh(cp, fresh, 7)

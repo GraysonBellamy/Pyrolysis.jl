@@ -794,7 +794,8 @@ All top-level exports:
 |---|---|
 | `get_profile(sol, field, i)` | one field at saved time `sol.t[i]`: `:T`; `:ξ` (`NC × n_cells`) or `:ξj` / `:xij` for component `j`; `:m` (`NC × n_cells`) or `:mj`; `:z`, the node positions (on a fixed mesh the mesh's). Deactivated cells, and nodes beyond the outermost live one, are `NaN`; another symbol is an `ArgumentError` |
 | `sol(t)` | the NamedTuple `(; t, T, ξ, m, z, cell_centers)` at any `t` in the span, reconstructed from the integrator's interpolant through the state mapping, with the mask of the last event at or before `t` (`z` empty on a fixed mesh) |
-| `interior_events(sol)` | the events of `sol` whose cell left from under spent cells; a void beneath a skin is never among them, since it ends the solve |
+| `interior_events(sol)` | the events of `sol` whose cell left from under live cells; a cavity is never among them, since it ends the solve |
+| `displaced_residue(sol)` | per invocation, the condensed mass the events moved into their receivers and that mass as a fraction of the column's initial condensed mass (§10.7) |
 | `succeeded(sol)` | `true` for `retcode` `:Success`, and for `:Terminated` with outcome `:burned_out` or `:min_thickness`; `false` for `:interior`, `:Failure`, and a termination by a callback of yours |
 | `completed(sol)` | `true` for `:Success` only, the end of the time span reached |
 | `conservation_audit(sol[, recorder])` | the mass and energy closures (§16.12) |
@@ -992,7 +993,7 @@ How a solve ends:
 | `:Success` | `:none` | reached `tspan[2]` (cells may have been deactivated on the way) |
 | `:Terminated` | `:burned_out` | the last live cell was deactivated |
 | `:Terminated` | `:min_thickness` | a moving mesh thinned below `min_thickness` |
-| `:Terminated` | `:interior` | a cell below the threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one; `solve` warns, naming the cell and the time |
+| `:Terminated` | `:interior` | a cell below the threshold lies beneath live cells it cannot leave through, a cavity; `solve` warns, naming the cell and the time |
 | `:Terminated` | `:none` | a callback of yours called `terminate!` |
 | `:Failure` | `:none` | the domain test gave up, a fixed step left the physical domain, or a deactivation event left the state inadmissible or the node velocities inconsistent; `solve` warns with the reason |
 | `:MaxIters` | `:none` | `maxiters` steps before the end |

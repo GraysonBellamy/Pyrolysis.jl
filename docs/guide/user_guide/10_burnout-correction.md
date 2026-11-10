@@ -40,10 +40,10 @@ when converting its components completely would leave less condensed mass
 than the threshold of what it started with (§10.5.1). A wood whose
 pyrolysis leaves 20 % char never reaches a 1 % threshold, whatever the
 heating; it needs a char-oxidation reaction to gasify the residue before
-deactivation has anything to do. At a reaction order other than one the test
-is on volume: a cell that would keep 1 % or more of its initial volume is
-not tested, so a char layer stays a resolved layer whatever its mass yield
-(§10.4).
+deactivation has anything to do. The test reads the reactant's mass, and only
+a cell that vanishes: one that would keep 1 % or more of its initial volume
+once converted is not tested, so a char layer stays a resolved layer whatever
+its mass yield (§10.4).
 
 As a measure of the cost of leaving it off: the moving-mesh example of
 §10.2.1, run without deactivation, thins its PMMA cells to below a nanometre
@@ -132,25 +132,28 @@ Kaowool cell. The solve runs on to 600 s heating the bare substrate.
 | Keyword | Default | Meaning |
 |---|---|---|
 | `deactivation` | `false` | Deactivate cells during the solve. |
-| `threshold` | `1e-2`; at an order other than one a tenth of the limiter's `conversion_threshold` | `ε_m`: a live cell deactivates when its condensed (solid and liquid) mass falls below this fraction of its own initial condensed mass, or at an order other than one when its reactive inventory falls below this fraction of its reactive reference (§10.4). Also scales the mass rows' absolute tolerances. |
-| `band` | `nothing` | `ε_band`, in `[threshold, 1)`: on a moving mesh, the contiguous cells around a crossing cell below this fraction of their initial condensed mass go with a cell that crosses the threshold (§10.4). `nothing` gives `max(threshold, 0.1)` when the equidistribution correction moves some layer, `threshold` otherwise. |
+| `threshold` | `1e-2`; at an order other than one a tenth of the limiter's `conversion_threshold` | `ε_m`: a live cell deactivates when its reactive inventory, the mass of each reaction's condensed reactant, falls below this fraction of its reference, the last live cell when its condensed mass does (§10.4). Also scales the mass rows' absolute tolerances. |
+| `band` | `nothing` | `ε_band`, in `[threshold, 1)`: on a moving mesh, the contiguous cells around a crossing cell below this fraction of their reference go with it; on a fixed mesh, the spent cells above a crossing, each below it, go with it when they reach the exposed face (§10.4, §10.8). `nothing` gives `max(threshold, 0.1)` when the equidistribution correction moves some layer and on a fixed mesh, `threshold` otherwise. |
 | `correction` | `nothing` | The mesh velocity relative to the solid on a moving mesh (§10.5). `nothing` installs the equidistribution correction by the rule of §10.5.1. |
 | `lagrangian` | `nothing` | Node ids that always move with the solid, the layer interfaces. `nothing` gives, under an equidistribution correction, every interior node between cells that start with different condensed components. |
 | `use_ale` | `false` | Move the mesh with the solid (node positions and velocities enter the state). |
 | `min_thickness` | `1e-6` | [m] On a moving mesh, end the solve when the live thickness falls below this (§10.3). Must be positive. |
 
 Choose the mesh mode by the material, not by cost. A fixed mesh keeps every
-cell's volume, so a gasifying layer thins in *density*, and only the
-outermost live cell can go (§10.8). The layer then burns top down when the
-surface cell is the hottest, as under surface absorption. Under radiative
-transfer the surface cell of a regressing polymer loses its emission and
-convection at the face and empties last, the cells beneath it nearly together. A
-fixed-mesh solve therefore ends at the first cell below the surface that reaches
-the threshold under a live one, warns, and returns outcome `:interior` (§10.7).
-The same deck as above on a fixed mesh stops this way at t ≈ 172.8 s: the exposed
-cell goes first, then the cell beneath the new exposed cell crosses.
-A fixed mesh with deactivation suits a layer that burns top down; use
-`use_ale = true` for materials that regress.
+cell's volume, so a gasifying layer thins in *density*, and a run leaves from
+the exposed side only (§10.8). The layer burns top down when the surface cell
+is the hottest, as under surface absorption. Under radiative transfer the
+surface cell of a regressing polymer loses its emission and convection at the
+face and empties last, the cells beneath it nearly together: a cell below the
+surface reaches the threshold under the exposed cell, which by then is spent
+too, and the two leave together, top down. On the same deck as above at 60 PMMA
+cells the first such crossing is at 157.5 s with the exposed cell holding 1.2
+thresholds, and the layer is gone by 372 s in 23 invocations, with the same
+mass lost as on the moving mesh (V-BO-05). A cell emptied beneath one that
+still holds its material is a cavity and ends the solve with outcome
+`:interior` (§10.7). A fixed mesh with deactivation suits a layer that burns
+top down or from within beneath spent cells; use `use_ale = true` for
+materials that regress.
 
 Deactivation is a line's: on a mesh of more than one dimension `setup`
 refuses it (cells there leave by element death, a residual-level building
@@ -351,10 +354,12 @@ the threshold. On the verification decks the largest fraction a band of 0.1 merg
 more than one invocation had cells above it (§10.9). The default, `0.1`, takes most of a
 layer in one event; the rest follows in another.
 
-At a reaction order other than one the threshold reads the cell's **reactive
-inventory**, the mass of each reaction's condensed reactant, against the sum of
-the reactions' lineage references (a first-order reaction's being its reactant's
-initial mass); the band reads the same measure. Only a cell that vanishes is tested. One
+The threshold reads the cell's **reactive inventory**, the mass of each reaction's
+condensed reactant, against the sum of the reactions' references, a first-order
+reaction's being its reactant's initial mass and any other order's its lineage
+reference; the band reads the same measure, at every order. A residue never holds
+a spent cell live, and what a receiver took from the cells above it does not count
+against it. Only a cell that vanishes is tested. One
 that would keep 1 % or more of its initial volume once fully converted
 (`retained_volumes`) is a layer the front burns beneath: merged into its neighbour it
 would stop resolving that layer, and the reactant then taken in would burn at the
@@ -555,10 +560,11 @@ other than `NoCorrection()` needs `use_ale = true`. Under
 already below the threshold go in an event, one invocation to a cell or so: a tail
 handed to a receiver delays it past its inward neighbour, so cells leave from under
 live ones (V-BO-11), and the live cells above move down a slot. On the deck of
-§10.2.1 under radiative transfer the Lagrangian mesh takes the PMMA off in 30
-invocations, 17 of them from under live cells, in 1118 accepted steps against the
-correction's two invocations and 865 steps. A cell beneath a skin that still holds its
-material would end the solve instead (§10.7). The correction is what carries a layer
+§10.2.1 under radiative transfer at 60 PMMA cells the Lagrangian mesh takes the PMMA
+off in 60 invocations, 45 of them from under live cells, in 1961 accepted steps
+against the correction's two invocations and 1706 steps; the fixed mesh takes it off
+in 23 invocations and 1856 steps, and all three lose the same mass. A cell beneath cells that still hold their
+material goes the same way while the gap it leaves is thin (§10.7). The correction is what carries a layer
 through burnout in one or two events.
 
 `correction = PrescribedCorrection(w)`, with `w(x, t)` a function of the node
@@ -606,7 +612,7 @@ the strict test, `:Success` only.
 | `:Success` | `:none` | `true` | The solve reached the end of `tspan`, with or without deactivations. |
 | `:Terminated` | `:burned_out` | `true` | The last live cell went; its inventories are written to the last event as lost. |
 | `:Terminated` | `:min_thickness` | `true` | The live thickness of a moving mesh fell below `min_thickness` (§10.3). |
-| `:Terminated` | `:interior` | `false` | A cell below the threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one; the solve warns and ends. |
+| `:Terminated` | `:interior` | `false` | A cell below the threshold lies beneath live cells it cannot leave through, a cavity (§10.7); the solve warns and ends. |
 | `:DtLessThanMin` | `:pore_closure` | `false` | The domain test kept rejecting a cell whose porosity left the resolved pore domain until the step fell below `dtmin`: its pore volume closed, or fell to its own mass, thermal and geometry uncertainty. Tighter tolerances resolve the second. |
 | `:DtLessThanMin` | `:matrix_exhausted` | `false` | A cell's matrix occupancy fell below the transport model's supported domain (`blend[2]` of a model without an `endpoint`): a material that leaves no residue has burned through it. Give the transport an `endpoint`, deactivate cells as they burn out, or keep a residue. |
 | `:DtLessThanMin` | `:unsupported_endpoint_occupancy`, `:negative_gas_pressure`, `:negative_surface_pressure` | `false` | The domain test kept rejecting a cell beyond its endpoint's skeletal occupancy, a pore gas below its pressure tolerance, or a negative reconstructed boundary pressure. |
@@ -615,44 +621,57 @@ the strict test, `:Success` only.
 The state a solve ends on is always saved, whether or not `saveat` names its
 time.
 
-**The interior void.** A cell can reach the threshold under live cells in two ways.
-On a moving mesh a tail handed to a receiver delays it past the cell inward of it, so
-that cell crosses first under a receiver that is itself spent. That void is the
-transfer's, and the pass closes it: the cell merges into the live cell beneath it, or a
-bottom run into the live cell above it, and the live cells above move down into its
-slots with their tables, so the live cells are always `1:top_live_cell`.
-`interior_events(sol)` lists these events and `show(sol)` counts them.
+**The interior void.** A cell can reach the threshold under live cells: on a moving
+mesh a tail handed to a receiver delays it past the cell inward of it, so that cell
+crosses first, and a polymer under radiative transfer, whose temperature maximum lies
+inside the solid, empties its near-surface cells nearly together. The pass asks what
+the merge would close. The cells above move down onto the receiver, so what closes is
+the gap the run's gas makes beyond its skeleton's own pores; the condensed residue the
+run holds, at the porosity it started with, is material the receiver keeps. While that
+gas is below `VOID_VOLUME` (0.02) of the run's initial volume the gap is thermally
+thin, a few per cent of one cell's conduction resistance at most, and the pass closes
+it whatever the cells above hold: the run
+merges into the live cell beneath it, or a bottom run into the live cell above it,
+and the live cells above move down into its slots with their tables, so the live
+cells are always `1:top_live_cell`. A cell whose volume follows its mass at its own
+porosity holds no gas beyond its pores, so every such crossing closes.
+`interior_events(sol)` lists these events and `show(sol)` counts them;
+`displaced_residue(sol)` gives, per invocation, the condensed mass every event moved
+into its receiver and that mass as a fraction of the column's initial condensed mass,
+the quantity to read when a band merge was large (on the PMMA cone of §10.2.1 the
+first invocation of the corrected default moves 1.75 % of the slab into one cell).
 
-A cell beneath the surface can also empty under a skin that still holds its material:
-a pocket, physical in PMMA, which the model has no gap to represent. A live cell
-outward of the crossing is a skin when it holds `VOID_SKIN` (10) thresholds or more of
-its reference, or is never tested. The cells above a tail's void hold at most 6
-thresholds, so a thin, nearly spent skin reads as spent. On a fixed mesh the geometry
-stays with its slots, so any cell under a live one is such a stop. The solve warns
-once,
+A run whose gas reaches that fraction is a cavity the model cannot close: on a fixed
+mesh, whose cells keep their volume, an emptied cell beneath one that still holds its
+material; on a moving mesh a cell that kept its volume while its mass went, which the
+volume law of a cell that vanishes never produces. The solve warns once,
 
 ```
-┌ Warning: solve(): cell 89 is below its threshold inward of a live cell at t = 172.81…; the solve ends with outcome :interior
+┌ Warning: solve(): cell 1 is below its threshold beneath live cells it cannot leave through at t = …; the solve ends with outcome :interior
 ```
 
-and ends with `:Terminated`: the regressing polymer under radiative transfer on a
-fixed mesh (§10.2.1; the V-BO-05 case asserts the stop). The remedy at order one is the moving mesh
-with its correction, which carries such a layer through burnout in one or two events.
+and ends with `:Terminated`. A pocket that forms in a bubbling melt, physical in
+PMMA, is represented neither by the merge nor by the stop: the model carries no gap
+and no skin mechanics (Technical Reference §14.10).
 
 ---
 ## 10.8 Fixed-mesh deactivation: the gas is vented
 
-On a fixed mesh (`use_ale = false`) no node moves, so there is no correction
-and no band. The outermost live cell goes while it is below `ε_m`, into the
-cell beneath it, each merge re-testing the receiver with the dead cell's
-condensed inventories added; several cells can go in one invocation that
-way.
+On a fixed mesh (`use_ale = false`) no node moves, so there is no correction.
+The outermost live cell goes while it is below `ε_m`, into the cell beneath it,
+each merge re-testing the receiver with the dead cell's condensed inventories
+added; several cells can go in one invocation that way. A cell below `ε_m`
+beneath the surface goes together with the spent cells above it, each below
+`band` (`0.1` by default on a fixed mesh), when they reach the exposed face, the
+run leaving top down into the cell beneath the crossing; roofed by a cell that
+still holds its material it is a cavity, and the solve ends (§10.7).
 
 The receiver keeps its volume and takes the dead cell's **condensed**
 inventories only. Its pores could hold the dead cell's gas only at a higher
 pressure, so that gas is vented: its masses and sensible enthalpy are written
 to the event as `lost_mass` and `lost_enthalpy`, and the conservation audit
-counts them as having left the live region. The receiver's temperature
+counts them as having left the live region (by the boundary's kinematics an
+outflow across the moved exposed face, milligrams per square metre per event). The receiver's temperature
 follows from the summed sensible enthalpy of what it takes (§10.2.3).
 
 ```julia
@@ -760,9 +779,10 @@ fraction against the band.
 **Key correctness reminders.** Deactivation conserves every component mass
 exactly (on a fixed mesh the dead cell's gas is vented and recorded) and the
 sensible enthalpy of everything the receiver takes; the state size and the
-Jacobian's pattern never change; on a moving mesh a cell leaves from under spent cells,
-which move down a slot, while beneath a skin, and on a fixed mesh beneath any live cell,
-a cell below the threshold ends the solve with outcome `:interior`; the band should exceed
+Jacobian's pattern never change; on a moving mesh a cell leaves from under live cells,
+which move down a slot, while the gap it leaves is thin, and on a fixed mesh with the
+spent cells above it; roofed by a cell that holds its material, or leaving a gap that is a
+cavity, a cell below the threshold ends the solve with outcome `:interior`; the band should exceed
 the residue of a layer's slowest cell; and the verified envelope is that of §10.9. For the theory behind these
 operations, see Technical Reference §11 (the mesh motion and the correction),
 §14 (deactivation), §15 (the integrator and the Jacobian) and §16 (the

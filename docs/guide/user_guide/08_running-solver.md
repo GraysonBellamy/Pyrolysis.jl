@@ -548,7 +548,7 @@ The keywords:
 | Keyword | Default | Effect |
 |---|---|---|
 | `deactivation` | `false` | Deactivate cells during the solve |
-| `threshold` | `1e-2`; `conversion_threshold/10` at an order other than one | `ε_m`; a cell that starts with no condensed mass, or at such an order with no reactive lineage, never deactivates |
+| `threshold` | `1e-2`; `conversion_threshold/10` at an order other than one | `ε_m`; a cell that starts with no condensed mass or with none of a reaction's reactant, or that keeps 1 % or more of its volume, never deactivates |
 | `band` | `max(threshold, 0.1)` when the equidistribution correction moves a layer, else `threshold` | `ε_band` in `[threshold, 1)`: on a moving mesh, the contiguous cells below this fraction around a cell that crosses `ε_m` go with it |
 | `correction` | by rule (§8.7) | On a moving mesh with `deactivation`, the equidistribution correction makes a layer's cells thin together and leave in one or two events |
 
@@ -575,15 +575,16 @@ The ways a deactivating solve ends:
 | `:none` | `:Success` | Reached the end of the time span; cells may have been deactivated on the way |
 | `:burned_out` | `:Terminated` | The last live cell went |
 | `:min_thickness` | `:Terminated` | A moving mesh thinned below `min_thickness` |
-| `:interior` | `:Terminated` | A cell below the threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one; `solve` warns, naming the cell |
+| `:interior` | `:Terminated` | A cell below the threshold lies beneath live cells it cannot leave through, a cavity; `solve` warns, naming the cell |
 
-A fixed mesh's geometry stays with its slots, so only the outermost live cell can go,
-and a material gasifying from within (for example a slab heated from its back face)
-stops with the warning `solve(): cell 1 is below its threshold inward of a live cell
-at t = …; the solve ends with outcome :interior`. On a moving mesh a cell under spent
-cells goes into the live cell beneath it, or a bottom cell into the live cell above
-it, and the cells above move down; beneath a skin the solve stops the same way
-(§10.7).
+A fixed mesh's geometry stays with its slots, so a run leaves from the exposed side
+only, and a material gasifying from within (for example a slab heated from its back
+face) stops with the warning `solve(): cell 1 is below its threshold beneath live
+cells it cannot leave through at t = …; the solve ends with outcome :interior`. On a
+moving mesh a cell under live cells goes into the live cell beneath it, or a bottom
+cell into the live cell above it, and the cells above move down, while the gas it
+holds beyond its own pores is below `VOID_VOLUME` of its initial volume; a wider gap
+stops the solve the same way (§10.7).
 
 An event can also end the solve with return code `:Failure`, with a warning:
 when the state after the merge is inadmissible (the receiver held to its own

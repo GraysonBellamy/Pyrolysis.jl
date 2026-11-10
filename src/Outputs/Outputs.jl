@@ -26,7 +26,7 @@ include("accessors.jl")
 export GasDiagnostics, get_gas_composition, get_boundary_exchange, gas_species_audit
 export PyrolysisSolution, SolutionExtras, SolverStatistics
 export succeeded, completed
-export get_profile, interior_events
+export get_profile, interior_events, displaced_residue
 export ConservationRecorder, conservation_audit, ledger_rates, live_inventories
 
 end # module Outputs

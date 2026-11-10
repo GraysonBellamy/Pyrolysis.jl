@@ -110,7 +110,8 @@ using .Closures: NoCorrection, EquidistributionCorrection, ActivationTime
 using .Closures: PrescribedCorrection
 using .Outputs: PyrolysisSolution, SolverStatistics
 using .Outputs: GasDiagnostics, get_gas_composition, get_boundary_exchange
-using .Outputs: gas_species_audit, succeeded, completed, get_profile, interior_events
+using .Outputs:
+    gas_species_audit, succeeded, completed, get_profile, interior_events, displaced_residue
 using .Outputs: ConservationRecorder, conservation_audit
 using .Integration: solve, setup, integrate, PreparedProblem, parameter_sweep
 using .Integration: default_policy, rodas5p_policy, fbdf_policy, kencarp4_policy
@@ -176,7 +177,7 @@ export StructuredKLU
 
 # The solution's accessors and the conservation audit
 export GasDiagnostics, get_gas_composition, get_boundary_exchange, gas_species_audit
-export succeeded, completed, get_profile, interior_events
+export succeeded, completed, get_profile, interior_events, displaced_residue
 export ConservationRecorder, conservation_audit
 
 # ============================================================================

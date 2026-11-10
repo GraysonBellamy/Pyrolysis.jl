@@ -53,7 +53,7 @@ completed(sol)     # :Success only: the solve reached tspan[2]
 | `:none` | neither the deactivation nor the thickness stop ended the solve (it reached the end, failed, or a callback of yours ended it) | `true` only with `:Success` |
 | `:burned_out` | the last live cell deactivated | `true` |
 | `:min_thickness` | on a moving mesh, the distance from the back node to the outermost live node fell below `min_thickness` | `true` |
-| `:interior` | a cell below its threshold lies inward of a live cell on a fixed mesh, or beneath a skin on a moving one | `false` |
+| `:interior` | a cell below its threshold lies beneath live cells it cannot leave through, a cavity | `false` |
 
 `succeeded(sol)` is the test to use for a burnout run, which normally ends with
 `:Terminated`; `completed(sol)` is the strict test that the solve reached the
@@ -84,7 +84,7 @@ solve time.
 | `solve(): stopped at t = …: the last proposed state, at t = …, takes cell i to or below absolute zero` | the solve stopped while rejecting proposals that cool a cell to 0 K | §15.3.2 |
 | `solve(): a constraint residual stayed above its tolerance for N consecutive steps at t = … (scaled residual r)` | the domain test gave up; the solve ends with `:Failure` | §15.3.3 |
 | `solve(): the fixed step accepted at t = … is inadmissible …` | a fixed-step solve left the physical domain; `:Failure` | §15.3.4 |
-| `solve(): cell i is below its threshold inward of a live cell at t = …; the solve ends with outcome :interior` | an interior void: any on a fixed mesh, beneath a skin on a moving one | §15.4.2 |
+| `solve(): cell i is below its threshold beneath live cells it cannot leave through at t = …; the solve ends with outcome :interior` | a cavity: on a fixed mesh an emptied cell roofed by one that holds its material, on a moving mesh a run of porous cells whose gap is wide | §15.4.2 |
 | `solve(): the state after deactivating cell(s) at t = … is inadmissible` | an event left the receiver outside its tolerances; `:Failure` | §15.4.4 |
 | `solve(): no consistent node velocities after deactivating cell(s) at t = …` | the mesh closure has no solution after an event; `:Failure` | §15.4.4 |
 
@@ -312,22 +312,21 @@ save it with `saveat`.
 solve(): cell i is below its threshold inward of a live cell at t = …; the solve ends with outcome :interior
 ```
 
-On a fixed mesh only the outermost live cell can go, so a cell that empties beneath
-a live cell ends the solve with `:Terminated`, outcome `:interior`, and
-`succeeded(sol) == false`. The solution up to the stop is valid. On a moving mesh the
-same stop comes from a cell that empties beneath a skin, cells that still hold
-`VOID_SKIN` thresholds or more (§10.7). A layer that empties from within, as one does
-when the temperature maximum lies below the surface under radiative transfer, ends
-the solve at the first such void: the model has no gap to represent it. The verification
-case V-BO-05 runs the PMMA-on-Kaowool deck of V-BO-01 under radiative transfer on a
-fixed mesh and stops at 157.0 s (120 cells) with outcome `:interior`: the PMMA beneath
-the surface empties nearly uniformly, the exposed cell slowest, and a cell 0.15 mm
-below the surface crosses the threshold first. A material that regresses
+On a fixed mesh a run leaves from the exposed side only, so a cell that empties
+beneath a cell that still holds its material is a cavity and ends the solve with
+`:Terminated`, outcome `:interior`, and `succeeded(sol) == false`. The solution up to
+the stop is valid. A cell that empties beneath spent cells, each below `band`, leaves
+with them when they reach the exposed face: a layer that empties from within, as one
+does when the temperature maximum lies below the surface under radiative transfer,
+burns through that way (V-BO-05 runs the PMMA-on-Kaowool deck of V-BO-01 under
+radiative transfer on a fixed mesh; §10.2.1). On a moving mesh a cell under live cells
+goes while the gas it holds beyond its own pores is below `VOID_VOLUME` of its
+initial volume, which a cell whose volume follows its mass always satisfies (§10.7). A material that regresses
 belongs on a moving mesh (`use_ale = true`), where its cells thin instead of
 emptying; V-BO-01 burns the same layer out on a moving mesh in two invocations, with the
 correction. Without the correction, and at an order other than one, which has none, a
-tail's void under spent cells closes and is reported by `interior_events(sol)`, and a
-void beneath a skin stops the solve here too.
+tail's void under live cells closes while its gap is thin and is reported by
+`interior_events(sol)`, and a cavity stops the solve here too.
 
 ### 15.4.3 A step pinned on a thin cell
 
