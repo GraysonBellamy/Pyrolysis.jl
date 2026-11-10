@@ -143,20 +143,20 @@ The band widens what one invocation moves from `ε_m` of a cell to `ε_band` of
 every cell of a run, so this is the quantity to read when a merge was large.
 """
 function displaced_residue(sol::PyrolysisSolution)
-    d = sol.deactivation
-    d === nothing && return NamedTuple{
-        (:invocation, :t, :cells, :mass, :fraction),
-        Tuple{Int,Float64,Int,Float64,Float64},
-    }[]
-    total = sum(d.reference; init = 0.0)
     out = NamedTuple{
         (:invocation, :t, :cells, :mass, :fraction),
         Tuple{Int,Float64,Int,Float64,Float64},
     }[]
+    d = sol.deactivation
+    d === nothing && return out
+    # An event names its cell on the initial mesh, while `d.reference` is read
+    # by slot: the references are those of the table as set up.
+    reference = only(initial for (initial, live) in d.tables.cell if live === d.reference)
+    total = sum(reference; init = 0.0)
     for k in unique(e.invocation for e in sol.events)
         events = [e for e in sol.events if e.invocation == k && e.receiver != 0]
         isempty(events) && continue
-        mass = sum(e.fraction * d.reference[e.cell] for e in events)
+        mass = sum(e.fraction * reference[e.cell] for e in events)
         push!(
             out,
             (;

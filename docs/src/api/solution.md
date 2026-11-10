@@ -24,6 +24,7 @@ succeeded
 completed
 get_profile
 interior_events
+displaced_residue
 ```
 
 ## Conservation

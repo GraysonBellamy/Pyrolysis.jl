@@ -2356,6 +2356,7 @@ end
         correction = NoCorrection(),
         energy_state = energy,
     )
+    reference = copy(cp.deactivation.reference)
     u = _prepared(cp, [0.8, 0.8, 0.015, 0.05, 0.06])
     consistent_state!(u, cp.def, cp.ws, 0.0)
     cp.u0 .= u
@@ -2370,15 +2371,37 @@ end
     )
     # What each invocation moved into its receiver.
     moved = displaced_residue(sol)
-    d = sol.deactivation
     @test sum(x.cells for x in moved) == count(e -> e.receiver != 0, sol.events)
     @test sum(x.mass for x in moved) ≈
-          sum(e.fraction * d.reference[e.cell] for e in sol.events if e.receiver != 0) rtol =
+          sum(e.fraction * reference[e.cell] for e in sol.events if e.receiver != 0) rtol =
         1e-14
     @test all(0 <= x.fraction < 1 for x in moved)
     @test all(
         x.t == first(e.t for e in sol.events if e.invocation == x.invocation) for x in moved
     )
+end
+
+@testset "displaced_residue reads each dead cell's own reference" begin
+    # The cells differ in size, so their references differ. The interior event
+    # moves the live cells above it down a slot, and the slot a dead cell left
+    # holds another cell's reference by the end of the solve.
+    nodes = [0.0, 1e-3, 3e-3, 4e-3, 7.5e-3, 1e-2]
+    problem =
+        _on_mesh(_burning(5; k = 2.0, radiating = true, t_end = 0.4), line_mesh(nodes))
+    cp = setup(problem; use_ale = true, deactivation = true, correction = NoCorrection())
+    reference = copy(cp.deactivation.reference)
+    @test length(unique(reference)) == 4
+    u = _prepared(cp, [0.8, 0.8, 0.015, 0.05, 0.06])
+    consistent_state!(u, cp.def, cp.ws, 0.0)
+    cp.u0 .= u
+    sol = integrate(cp; maxiters = 50_000, dtmin = 1e-14)
+    @test completed(sol)
+    @test any(e -> e.interior, sol.events)
+    @test sol.deactivation.tables.origin != 1:5
+    moved = displaced_residue(sol)
+    expected = sum(e.fraction * reference[e.cell] for e in sol.events if e.receiver != 0)
+    @test sum(x.mass for x in moved) ≈ expected rtol = 1e-14
+    @test sum(x.fraction for x in moved) ≈ expected / sum(reference) rtol = 1e-14
 end
 
 @testset "the void rule reads the gas a run holds beyond its own pores" begin

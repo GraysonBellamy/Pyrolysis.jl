@@ -264,7 +264,7 @@ function _reaction_references(
 end
 
 # The fraction of its initial volume a cell may keep once fully converted and
-# still leave at an order other than one. A cell that keeps more is a layer the
+# still be tested for deactivation. A cell that keeps more is a layer the
 # front burns beneath: merged into its neighbour it would stop resolving that layer,
 # and the reactant then taken in would burn at the temperature of the middle of it.
 const VANISHING_VOLUME = 1e-2
