@@ -1,0 +1,49 @@
+# Front-face convection [W/(m² K)] of the decks, by nominal flux [kW/m²],
+# written by calibrate_front.jl: the chamber's calcium-silicate runs
+# (decks/silcal.csv, Th Fig. 5.5) fitted in 1D, one h per flux and one factor
+# on the silicate's hot-wire conductivity shared by the three fluxes, over the
+# thermocouples at 2–40 mm, 10–600 s.
+#
+# Gray face (front = :silcal): the nominal flux absorbed at the silicate's
+# absorptivity below, re-radiation to T_a; h moves one for one with that
+# absorptivity (h_at_absorptivity_*).
+absorptivity_silcal = 0.85
+k_factor_silcal = 0.775
+rms_K = 9.37
+
+[h_front]
+25 = 7.49
+35 = 12.90
+45 = 7.18
+
+[rms_by_flux_K]
+25 = 7.91
+35 = 9.80
+45 = 10.23
+
+[h_at_absorptivity_80]
+25 = 4.54
+35 = 9.18
+45 = 3.11
+
+[h_at_absorptivity_92]
+25 = 11.61
+35 = 18.11
+45 = 12.88
+
+# Under the cone and window (front = :window, chamber_radiation.jl): h is the
+# convection left to fit once the window's radiation is computed.
+[window]
+k_factor_silcal = 0.800
+rms_K = 8.11
+rms_natural_convection_K = 24.68   # h = 6.0, nothing fitted but k
+
+[window.h_front]
+25 = 14.35
+35 = 19.19
+45 = 13.55
+
+[window.rms_by_flux_K]
+25 = 6.89
+35 = 7.17
+45 = 9.92

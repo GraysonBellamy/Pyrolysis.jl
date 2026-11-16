@@ -32,7 +32,9 @@ export lemta_argon_data,
     char_yield,
     reaction_heats,
     interp,
-    silcal_data
+    silcal_data,
+    silcal_problem,
+    FRONT
 
 const HERE = @__DIR__
 const DECKS = joinpath(HERE, "decks")
@@ -373,7 +375,8 @@ function k_char(ch, law, T)
 end
 
 """
-    material(d, rho; ch = chamber(), k_rule = PARALLEL, volatiles_c, permeability)
+    material(d, rho; ch = chamber(), k_rule = PARALLEL, volatiles_c, permeability,
+             wood_absorptivity = d["absorptivity"])
 
 The species `d` at dry density `rho` [kg/m³]: the three pseudo-components of
 the dry wood, the chars C2, C3 and the heat-only C4, the volatiles and the
@@ -382,7 +385,8 @@ chamber's argon.
   volume in their shares α. Each char has its reactant's volume (C2 and C4 at
   γ2 ρ, C3 at γ3 ρ), on a fixed mesh: the solid does not shrink, as in the
   thesis model.
-- The wood components carry the wood's c, k(ρ, T), ε(T) and absorptivity; the
+- The wood components carry the wood's c, k(ρ, T), ε(T) and absorptivity
+  (`wood_absorptivity`, for the heater's spectrum as it reaches the face); the
   chars the char's c and k law and ε = α = 0.95. Conductivity mixes by
   `k_rule` over the condensed volume shares, emissivity and absorptivity by
   those shares.
@@ -396,6 +400,7 @@ function material(
     k_rule = PARALLEL,
     volatiles_c::Real = ch["volatiles_c"],
     permeability::Real = ch["permeability"],
+    wood_absorptivity::Real = d["absorptivity"],
 )
     kin = d["kinetics"]
     α, γ = kin["alpha"], kin["gamma"]
@@ -414,7 +419,7 @@ function material(
         c = c_w,
         k = k_w,
         ε = ε_w,
-        absorptivity = d["absorptivity"],
+        absorptivity = wood_absorptivity,
         λ = ch["transfer_wood"],
         κ = permeability,
         ρ_intrinsic = ρs,
@@ -479,6 +484,8 @@ function material(
     )
 end
 
+include("chamber_radiation.jl")
+
 # ---------------------------------------------------------------------------
 # Scenario
 # ---------------------------------------------------------------------------
@@ -526,18 +533,107 @@ function chamber_rise(flux; data = silcal_data())
 end
 
 """
+The front-face convection of the decks (front.toml): the calcium-silicate
+calibration of `calibrate_front.jl`, in 1D with re-radiation to T_a, by
+nominal flux.
+"""
+const FRONT = joinpath(HERE, "front.toml")
+
+# The front-face h [W/(m² K)] at `flux` [kW/m²]: `front = :silcal` the gray
+# 1D calibration (front.toml [h_front]), `:window` the calibration under the
+# cone and window (front.toml [window.h_front]), `:thesis` the thesis's 3D fit
+# with its window exchange (chamber.toml [h_front]).
+function front_h(ch, flux, front::Symbol)
+    key = string(round(Int, flux))
+    front === :thesis && return Float64(ch["h_front"][key])
+    front === :silcal && return Float64(TOML.parsefile(FRONT)["h_front"][key])
+    front === :window && return Float64(TOML.parsefile(FRONT)["window"]["h_front"][key])
+    error("unknown front calibration $front")
+end
+
+"""
+    silcal_problem(flux; h, ch = chamber(), k_factor = 1.0, absorptivity,
+                   cells = 100, t_end = 600.0, save_every = 5.0) -> (problem, nodes)
+
+The calcium-silicate block of the chamber's calibration runs at nominal flux
+`flux` [kW/m²]: 50 mm, inert, with chamber.toml's [silcal] properties (k
+scaled by `k_factor`), uniform at the mean initial reading of its 8–40 mm
+thermocouples. The exposed face absorbs the flux at `absorptivity`,
+re-radiates at ε(T) to T_a and convects at `h` to T_a; or, given a window
+history `series`, takes the cone's transmitted radiation and the window's
+irradiation (`window_face`). The back is held at T_a, the measured rear-face
+record.
+"""
+function silcal_problem(
+    flux::Real;
+    h::Real,
+    ch = chamber(),
+    k_factor::Real = 1.0,
+    absorptivity::Real = ch["silcal"]["absorptivity"],
+    cells::Int = 100,
+    t_end::Real = 600.0,
+    save_every::Real = 5.0,
+    data = silcal_data(),
+    series = nothing,
+)
+    p = ch["silcal"]
+    d = data[round(Int, flux)]
+    T_a = t -> interp(d.t, d.T[:, end], t)
+    deep = [j for (j, z) in enumerate(d.depths) if 0.008 <= z <= 0.04]
+    T0 = sum(d.T[1, deep]) / length(deep)
+    c, k, e = p["c"], p["k"], p["emissivity"]
+    silcal = SolidComponent(
+        :SILCAL;
+        ρ = p["density"],
+        c = CallableProperty(T -> c[1] + c[2] * log(T)),
+        k = CallableProperty(
+            T -> k_factor * (k[1] + k[2] * (T - 273) + k[3] * (T - 273)^2),
+        ),
+        ε = CallableProperty(T -> (Tc = min(T, 1300.0); e[1] + e[2] * Tc + e[3] * Tc^2)),
+        absorptivity = absorptivity,
+    )
+    mat = Material(name = :silcal, components = (silcal,), reactions = ())
+    top =
+        series === nothing ?
+        RadiativeFluxBC(1000 * Float64(flux)) +
+        RadiativeBC(T_inf = T_a) +
+        ConvectiveBC(h = Float64(h), T_inf = T_a) : window_face(series, h, T_a)
+    bcs = BoundaryConditionSet(thermal = (top = top, bottom = DirichletThermalBC(T_a)))
+    L = Float64(ch["thickness"])
+    nodes = collect(range(0.0, L, length = cells + 1))
+    prob = PyrolysisProblem(
+        mesh = line_mesh(nodes),
+        material = mat,
+        bc_set = bcs,
+        T_initial = z -> T0,
+        ξ_initial = [z -> Float64(p["density"])],
+        tspan = (0.0, Float64(t_end)),
+        dt_initial = 1e-3,
+        output_times = collect(0.0:save_every:Float64(t_end)),
+    )
+    return prob, nodes
+end
+
+"""
     problem(species, flux, rho; T0, t_end, back = :chamber, T40 = nothing,
-            h_front = nothing, cells = 100, save_every = 5.0, T_window = nothing,
-            kwargs...)
+            front = :window, h_front = nothing, series = nothing, cells = 100,
+            save_every = 5.0, T_window = nothing, kwargs...)
         -> (problem, nodes)
 
 The 1D block of 50 mm across the grain for `species` at nominal flux `flux`
 [kW/m²] and dry density `rho` [kg/m³]. `T0` is the initial temperature [K],
 a number or a `(depths, temperatures)` pair interpolated in depth.
-- **Exposed face** (`:top`, z = L): absorbs the nominal flux at the
-  material's surface absorptivity (the wood's, then char 0.95, by volume
-  share), re-radiates to `T_window(t)` (default T_a(t)) and convects to T_a(t)
-  at the thesis's h (chamber.toml [h_front]), or `h_front` when given.
+- **Exposed face** (`:top`, z = L), by `front`:
+  - `:window`: under the cone and the window of `series` (`window_series`):
+    the cone's radiation transmitted by the window, absorbed at the material's
+    surface absorptivity (the wood's for that spectrum, then char 0.95, by
+    volume share); the window's long-wave irradiation, absorbed and emitted at
+    the surface emissivity; convection to T_a(t) at the h calibrated on the
+    calcium silicate under the same window (front.toml [window]);
+  - `:silcal`, `:thesis`: absorbs the nominal flux at the deck's absorptivity,
+    re-radiates to `T_window(t)` (default T_a(t)) and convects to T_a(t) at the
+    gray 1D calibration's h (front.toml) or the thesis's (chamber.toml);
+  - `h_front` replaces the h when given.
 - **Gas temperature** T_a(t) = T_ref + the calcium-silicate rear-face rise at
   this flux (`chamber_rise`), with T_ref the initial temperature at 40 mm.
 - **Back face** (`:bottom`), by `back`:
@@ -560,12 +656,21 @@ function problem(
     cells::Int = 100,
     save_every::Real = 5.0,
     T_window = nothing,
+    front::Symbol = :window,
     h_front::Union{Nothing,Real} = nothing,
+    series = nothing,
     ch = chamber(),
     kwargs...,
 )
     d = deck(species)
-    mat = material(d, rho; ch, kwargs...)
+    front === :window &&
+        series === nothing &&
+        error("front = :window needs a window history")
+    α_w =
+        front === :window ?
+        absorptivity_behind_window(wood_spectrum(species), series.T_c, series.T_w[1]) :
+        d["absorptivity"]
+    mat = material(d, rho; ch, wood_absorptivity = α_w, kwargs...)
     L = back === :tc40 ? 0.04 : Float64(ch["thickness"])
     T_init = T0 isa Real ? (z -> Float64(T0)) : (z -> interp(T0[1], T0[2], L - z))
     T_ref = T0 isa Real ? Float64(T0) : interp(T0[1], T0[2], 0.04)
@@ -573,8 +678,10 @@ function problem(
     T_a = t -> T_ref + rise(t)
     T_rad = something(T_window, T_a)
     q = 1000 * Float64(flux)
-    h = Float64(something(h_front, ch["h_front"][string(round(Int, flux))]))
-    top = RadiativeFluxBC(q) + RadiativeBC(T_inf = T_rad) + ConvectiveBC(h = h, T_inf = T_a)
+    h = Float64(something(h_front, front_h(ch, flux, front)))
+    top =
+        front === :window ? window_face(series, h, T_a) :
+        RadiativeFluxBC(q) + RadiativeBC(T_inf = T_rad) + ConvectiveBC(h = h, T_inf = T_a)
     bottom = if back === :chamber
         DirichletThermalBC(T_a)
     elseif back === :tc40
@@ -656,16 +763,47 @@ function problem(r::TemperatureRun; back::Symbol = :chamber, kwargs...)
 end
 
 """
-    simulate(r; reltol = 1e-6, dtmax = 5.0, kwargs...) -> NamedTuple
+    simulate(r; front = :window, passes = 3, reltol = 1e-6, dtmax = 5.0,
+             kwargs...) -> NamedTuple
 
 Solve the test's problem with a `ConservationRecorder` and return the series
 the comparison reads: temperatures [K] at the nominal thermocouple depths
 (cell centres interpolated linearly), the surface and back temperatures [K],
 the condensed mass over its initial value, the mass loss rate [g/(m² s)],
-and the mass and energy closures of `conservation_audit`.
+the window's temperature [K] (`NaN` unless `front = :window`), and the mass
+and energy closures of `conservation_audit`. Under `front = :window` the
+window and the sample are solved in turn `passes` times before the final
+solve.
 """
-function simulate(r; reltol = 1e-6, dtmax = 5.0, kwargs...)
-    prob, nodes = problem(r; kwargs...)
+function simulate(
+    r;
+    front::Symbol = :window,
+    passes::Int = 3,
+    reltol = 1e-6,
+    dtmax = 5.0,
+    kwargs...,
+)
+    series = nothing
+    if front === :window
+        T0 = _T0(r)
+        T_ref = T0 isa Real ? Float64(T0) : interp(T0[1], T0[2], 0.04)
+        rise = chamber_rise(r.flux)
+        T_a = t -> T_ref + rise(t)
+        ch = chamber()
+        ε_char = ch["char_emissivity"]
+        series = window_series(
+            s -> problem(r; front, series = s, kwargs...),
+            1000 * r.flux,
+            T_a,
+            T -> ε_char,
+            _t_end(r),
+            chamber_geometry(ch);
+            passes,
+            reltol,
+            dtmax,
+        )
+    end
+    prob, nodes = problem(r; front, series, kwargs...)
     rec = ConservationRecorder()
     sol = solve(prob; reltol, abstol = 1e-6, dtmax, callback = rec)
     audit = conservation_audit(sol, rec)
@@ -689,6 +827,8 @@ function simulate(r; reltol = 1e-6, dtmax = 5.0, kwargs...)
         T_back = sol.extras.back_temperature,
         m = m ./ m[1],
         mlr = 1000 .* sol.mass_loss_rate,
+        T_window = series === nothing ? fill(NaN, nt) :
+                   [interp(series.t, series.T_w, t) for t in sol.t],
         retcode = string(sol.retcode),
         solve_time = sol.solve_time,
         audit,

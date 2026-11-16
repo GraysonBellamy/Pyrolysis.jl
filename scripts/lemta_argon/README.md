@@ -17,7 +17,9 @@ calcium-silicate blocks run in the same chamber. Sources:
 - Flity et al., Int. J. Therm. Sci. 210 (2025) 109545: wood optics;
 - Flity, Jannot, Acem & Parent, "Thermal conductivity of wood char up to 800 °C"
   (SSRN preprint): char conductivity;
-- L. Terrei, PhD thesis, Université de Lorraine (2020): the flux behind the window.
+- L. Terrei, PhD thesis, Université de Lorraine (2020): the flux behind the window;
+- Jannot & Degiovanni, Int. J. Therm. Sci. 142 (2019) 379: the calcium silicate;
+- Thomas & Joseph, Johns Hopkins APL Tech. Dig. 9 (1988) 328: sapphire.
 
 ## Data
 
@@ -34,6 +36,7 @@ The data are Flity, Terrei, Acem & Parent, doi:10.57745/QRYAJ9, v1.0, licence Et
 ```sh
 bash scripts/lemta_argon/fetch_data.sh
 julia --project=scripts/verification scripts/lemta_argon/check_data.jl
+julia --project=scripts/verification scripts/lemta_argon/calibrate_front.jl
 julia --project=scripts/verification scripts/lemta_argon/smoke.jl poplar
 ```
 
@@ -41,11 +44,14 @@ julia --project=scripts/verification scripts/lemta_argon/smoke.jl poplar
 
 | path | what |
 |---|---|
-| `decks/chamber.toml` | the rig and the laws every species shares: c_p of wood and char, k of wood and char, char optics, the heat-only step, gas transport, the thesis's front convection |
+| `decks/chamber.toml` | the rig and the laws every species shares: c_p of wood and char, k of wood and char, char optics, the heat-only step, gas transport, the thesis's front convection, the calcium silicate, the cone and window |
 | `decks/silcal.csv` | the calcium-silicate runs in the chamber (thesis Fig. 5.5, read from its vector paths): temperatures at 2–40 mm and the rear face, at 25, 35 and 45 kW/m² |
 | `decks/<species>.toml` | kinetics, heats, optics and char law, each with its source |
 | `LemtaArgon.jl` | data loading and the defect list; decks to Pyrolysis.jl materials and problems; outputs at the thermocouple depths with the conservation ledgers |
 | `data_files.toml`, `fetch_data.sh` | the pinned dataset and its download |
+| `chamber_radiation.jl` | the cone, the sapphire window and the face's radiation exchange |
+| `decks/wood_absorptivity.csv` | the woods' spectral absorptivity (Flity et al. 2025 Fig. B.18, read from its vector paths) |
+| `calibrate_front.jl`, `front.toml` | the front-face h per flux, fitted to the calcium-silicate runs in 1D, under the cone and window and with a gray face |
 | `check_data.jl` | every test with its cuts, drawn per species (`results/figures/data_<species>.png`); `results/data_summary.csv` |
 | `smoke.jl` | one species at each flux: solves, ledgers, a sanity check against the data, and sensitivities on its 35 kW/m² tests |
 | `results/` | generated (ignored) |
@@ -69,8 +75,20 @@ julia --project=scripts/verification scripts/lemta_argon/smoke.jl poplar
 - **Gas.** One lumped volatile species and argon in the pores; every solid at 1e-12 m²
   so the volatiles leave through the exposed face at near-ambient pressure (the block
   vents along its vertical grain, which 1D cannot); the back is impermeable.
-- **Exposed face.** Absorbs the nominal flux at the deck's absorptivity, re-radiates to
-  T_a(t) and convects to T_a(t) at the thesis's h (`decks/chamber.toml` [h_front]).
+- **Exposed face** (`front`, default `:window`). Under the cone and the sapphire window
+  (`chamber_radiation.jl`): the coil, gray on the ISO 5660 frustum, at the
+  temperature that sends the nominal flux through the cold window to the sample's
+  centre; the window's spectral transmittance, reflectance and absorptance from its
+  phonon parameters and multiphonon edge (Thomas & Joseph, Johns Hopkins APL Tech.
+  Dig. 9 (1988) 328); its temperature from its own balance; the face absorbs the
+  transmitted coil radiation at its absorptivity for that spectrum (the woods' from
+  their measured spectra, `decks/wood_absorptivity.csv`; char 0.95), and the window's
+  emission and its own reflected emission at its emissivity; window and sample are
+  solved in turn. Convection to T_a(t) at the h fitted on the calcium-silicate runs
+  under the same window (`calibrate_front.jl`, `front.toml`). `front = :silcal`
+  instead absorbs the nominal flux at the deck's gray absorptivity and re-radiates
+  to T_a(t), with the gray h of the same calibration; `front = :thesis` takes the
+  thesis's h.
 - **T_a(t).** The test's initial 40 mm temperature plus the rise of the
   calcium-silicate rear face at the same flux (`decks/silcal.csv`), continued past
   600 s at its last slope.

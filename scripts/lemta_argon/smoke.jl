@@ -102,8 +102,12 @@ for r in sort(tr, by = r -> r.flux)
     flush(stdout)
 end
 
-# Sensitivities on the 35 kW/m² tests, against the deck: the back held at the
-# measured 40 mm record; volatiles without sensible heat.
+# Sensitivities on the 35 kW/m² tests, against the deck (the face under the
+# cone and window, h calibrated on the silicate): the back held at the
+# measured 40 mm record; volatiles without sensible heat; h at natural
+# convection; and the gray front (front = :silcal), calibrated at the
+# silicate absorptivity of front.toml and at the bounds 0.80 and 0.92, and
+# with the thesis's h.
 function sensitivities(species, mr, tr, results)
     println("== $species: sensitivities at 35 kW/m²")
     r = only(filter(r -> r.flux == 35, tr))
@@ -111,10 +115,25 @@ function sensitivities(species, mr, tr, results)
     probe(s, d, t0) =
         at(s.t, view(s.T, :, findfirst(x -> isapprox(x, d), s.depths)), t0) - 273.15
     data(d, t0) = at(r.t, usable(r, findfirst(x -> isapprox(x, d), DEPTHS)), t0) - 273.15
+    cal = LemtaArgon.TOML.parsefile(LemtaArgon.FRONT)
     cases = (
-        ("deck", (;)),
+        ("deck (cone and window)", (;)),
         ("back at the 40 mm record", (back = :tc40,)),
         ("volatiles without sensible heat", (volatiles_c = 0.0,)),
+        (
+            "cone and window, natural convection",
+            (h_front = chamber()["window"]["h_window"],),
+        ),
+        ("gray front", (front = :silcal,)),
+        (
+            "gray front, silicate absorptivity 0.80",
+            (front = :silcal, h_front = cal["h_at_absorptivity_80"]["35"]),
+        ),
+        (
+            "gray front, silicate absorptivity 0.92",
+            (front = :silcal, h_front = cal["h_at_absorptivity_92"]["35"]),
+        ),
+        ("gray front, thesis h", (front = :thesis,)),
     )
     @printf("%-40s %6s %6s %6s %8s %8s\n", "", "2 mm", "10 mm", "20 mm", "m/m₀", "MLRPUA")
     @printf("%-40s %6s %6s %6s %8s %8s\n", "", "600 s", "600 s", "600 s", "698 s", "300 s")

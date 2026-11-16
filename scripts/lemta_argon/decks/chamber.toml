@@ -5,7 +5,8 @@
 #   CHAR  Flity, Jannot, Acem & Parent, "Thermal conductivity of wood char up
 #         to 800 °C", SSRN preprint 6137656 (not peer reviewed);
 #   TT20  L. Terrei, Comportement au feu du matériau bois, PhD thesis,
-#         Université de Lorraine (2020), printed pages.
+#         Université de Lorraine (2020), printed pages;
+#   JD19  Y. Jannot & A. Degiovanni, Int. J. Therm. Sci. 142 (2019) 379.
 #
 # T_a, the gas temperature of the chamber, is "assumed equal to the temperature
 # measured at the back of the sample" and imposed on the back face (Th p.100,
@@ -70,8 +71,8 @@ skeletal_density = 1450.0     # kg/m³
 # the chamber in 3D, with T_a as the gas temperature and the window's
 # radiation exchange (Th eq. 5.5, at the window's measured but unpublished
 # temperature) in the balance (Th p.101–103). The 2023 FSJ spruce paper fits
-# 31 at 35 and 45 kW/m² together. The decks re-radiate to T_a in place of the
-# window's exchange.
+# 31 at 35 and 45 kW/m² together. The decks use front.toml instead, the same
+# calibration redone in 1D with re-radiation to T_a (calibrate_front.jl).
 [h_front]                     # W/(m² K), by nominal flux in kW/m²
 25 = 22.8
 35 = 29.6
@@ -93,3 +94,48 @@ beta = 900.0
 a = -1.244e-4
 b = 9.17e-2
 beta = 776.0
+
+# Calcium silicate (Silcal 1100), for the 1D calibration of the front face
+# (calibrate_front.jl):
+# - density 240 kg/m³ (Th p.96; JD19 weigh 245);
+# - c = c0 + c1 ln(T [K]) J/(kg K), Ohmura et al. by drop calorimetry,
+#   100–1000 °C (JD19 eq. 28). Th eq. 5.1 prints log₁₀, a misprint: it gives
+#   650 J/(kg K) where the text says about 1000;
+# - k = k0 + k1 θ + k2 θ² W/(m K), θ = T − 273 K, by parallel hot wire
+#   (Th eq. 5.2; JD19 eq. 26, the laboratories' reference law, agrees within 1 %);
+# - ε(T) = e0 + e1 T + e2 T² at the surface temperature (Th eq. 5.3, T read in
+#   K, held at 1300 K above);
+# - the absorptivity of the cone's radiation is eq. 5.3 at the cone's
+#   temperature (Th p.96), which is not published: 0.85 is eq. 5.3 at about
+#   1150 K, used by the gray calibration (front = :silcal), where the fitted h
+#   moves with it one for one;
+# - [silcal.bands]: a two-band spectral absorptivity (long below `edge`
+#   cm⁻¹, short above) whose Planck means reproduce eq. 5.3 within 0.005 at
+#   300–1300 K, used under the cone and window (front = :window).
+[silcal]
+density = 240.0
+c = [439.0, 82.9]
+k = [0.081, 7.8e-5, 4.1e-8]
+emissivity = [0.99, 4.26e-6, -1.16e-7]
+absorptivity = 0.85
+
+[silcal.bands]
+long = 0.970
+short = 0.600
+edge = 3400.0
+
+# The cone and the window, for the radiation between them and the sample
+# (chamber_radiation.jl, front = :window). The cone's base is 45 mm from the
+# sample (Th p.98); the window is 5 mm of sapphire, Ø 20 cm (Th p.98); the gap
+# between its inner face and the sample is not published (20 mm assumed); the
+# coil's emissivity 0.9 (oxidised alloy, assumed); natural convection on each
+# window face 6 W/(m² K) (laminar correlation for a 10 cm vertical plate in
+# argon, estimated); the sample and holder fill 0.9 of the window's view at
+# its centre (estimated for 16 × 16 cm at 20 mm).
+[window]
+cone_gap = 0.045
+window_gap = 0.020
+thickness = 0.005
+cone_emissivity = 0.9
+h_window = 6.0
+view_window_sample = 0.9
