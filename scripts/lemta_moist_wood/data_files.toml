@@ -1,0 +1,195 @@
+# The LEMTA moist-wood dataset: Terrei, Diarra & Parent, "In-depth temperature
+# and mass of wood species with a wide moisture content range, exposed to
+# 4 kW/m²", Recherche Data Gouv, doi:10.57745/CBLZ8P, version 1.0, licence
+# Etalab 2.0 (attribution). Each file as published: its datafile id in the
+# repository, the MD5 the repository states, and its SHA-256.
+doi = "10.57745/CBLZ8P"
+version = "1.0"
+licence = "etalab-2.0"
+api = "https://entrepot.recherche.data.gouv.fr/api"
+
+[[files]]
+name = "00_README.txt"
+id = 746747
+md5 = "0dc591025e1add201dc72d0fec23bab8"
+sha256 = "05539266ff9988ce0d09f061ff00eee30bf7d6963ea53b574a7eaac2c5ed4e7b"
+
+[[files]]
+name = "fir_10,5%_433.dat"
+id = 746664
+md5 = "4401b892bb13a0d76ded6b5fee2ab4d2"
+sha256 = "2a9c952a6317646d820c35b25c6254fc97e411ac84dbc9fa9dccf388a75d5100"
+
+[[files]]
+name = "fir_17,67%_433.dat"
+id = 746650
+md5 = "acf2772ec70d95ce591da0b202a69b41"
+sha256 = "6bea8b5add33ef00d76aa8e0d4c02fea3087cc45636aefc0c689122fd6af3ab5"
+
+[[files]]
+name = "fir_17,89%_433.dat"
+id = 746675
+md5 = "aaf3767233c5e98df4eeca90a6eec411"
+sha256 = "af866132216d42ffad2db7d89c27bab35b2b008265c3426c5c2769694b26f737"
+
+[[files]]
+name = "fir_21,23%_433.dat"
+id = 746658
+md5 = "b0a2b4e055d6344e3bf67c77a19dd5cf"
+sha256 = "c15aa719eaafab4e3a51c744b06e29d2c6bace8187fbb98e5b20a6a36af1e286"
+
+[[files]]
+name = "fir_9,1%_433.dat"
+id = 746651
+md5 = "6c447be21373eb3f36c5cd62a323d4b3"
+sha256 = "16fda17b01e1a800dab039e0f9eae41b6dd5eed743bd70f0fa2bea45d10d03de"
+
+[[files]]
+name = "fir_9%_433.dat"
+id = 746669
+md5 = "4008805acb2e15e7b032290850a7f9cc"
+sha256 = "7f20a1f59a949100ada031af634b09b0d2a3bb332c721a91e2be81fe968b3ba7"
+
+[[files]]
+name = "larch_11,2%_594.dat"
+id = 746648
+md5 = "70f41153e8e5453fe78c8259190cea5e"
+sha256 = "0cfbf3edd92f60d1569c5c96162a6d37b96c128ce2622257670c854095cfef88"
+
+[[files]]
+name = "larch_17,8%_594.dat"
+id = 746674
+md5 = "e68cdea789e68c0f87792afddf8759c7"
+sha256 = "b7529e4b1fe3eb517ed36b171959802dede519fefe3a02b9c7c36756eb014887"
+
+[[files]]
+name = "larch_23,5%_594.dat"
+id = 746672
+md5 = "b3e6ad7b9273fe0c9473dfdb560bf6b9"
+sha256 = "a52d7879efa67103a28c33d033f5a5c74965c557e42689faa5e4c940426bca1a"
+
+[[files]]
+name = "larch_7,3%_594.dat"
+id = 746660
+md5 = "c215c6b3243d06a7f6105828241df0b9"
+sha256 = "65e46f84926a2adfd9dac75f58862b169a9415a2811d3ae891d7d1e2c18a0b10"
+
+[[files]]
+name = "larch_7,6%_594.dat"
+id = 746653
+md5 = "99ce9a89fcab3418f350c43b432bfc02"
+sha256 = "2c48ba439b0c51b2043a3f5e5562c2bc2ffa62244958fa00c98606454e0a8b95"
+
+[[files]]
+name = "larch_test1_0%_594.dat"
+id = 746678
+md5 = "d523d680b691e6500c9ae1d8f4fa3fce"
+sha256 = "c3a46afb1bebf38c00216c243c5c0cad279b85747f5f0943aec44d266fb3913b"
+
+[[files]]
+name = "larch_test2_0%_594.dat"
+id = 746665
+md5 = "1cdbfaa81244816532e0580ffd384aec"
+sha256 = "91e827706773e81a30e22982bb689e7426d507e1f9d9a421afbb048339a46032"
+
+[[files]]
+name = "oak_10,5%_511.dat"
+id = 746656
+md5 = "7d627540fcb96cad4a4c7d09fe702a0b"
+sha256 = "a749729449356f8d38b111bb2bed0ac347663f5ef45c0a9834af535881331e11"
+
+[[files]]
+name = "oak_17,2%_511.dat"
+id = 746649
+md5 = "7b927f8e4acb91e3d1901dcafa4f2d23"
+sha256 = "38fa2f7c93055c5ab3942f61beee73757a3f9287d4505a317984e5d495e11c95"
+
+[[files]]
+name = "oak_20,1%_511.dat"
+id = 746666
+md5 = "982d47d96556bff44c4c25b6bba59480"
+sha256 = "d4aa6402bcb7b599b683596a4710995f491ad6876cc095d5d52c35c431d1a081"
+
+[[files]]
+name = "oak_7,3%_511.dat"
+id = 746657
+md5 = "00404f4f8dc1219ec39d891cf4e22649"
+sha256 = "66b083197230d447a8434654dcb01788ff2a1f8a6a334acbf763363b6e925550"
+
+[[files]]
+name = "oak_7,9%_511.dat"
+id = 746652
+md5 = "bc6fe6d5ff269f1e1afc524bd856c6d2"
+sha256 = "cc4365b6fed1f6893457e80469b9d59db80f40be07519c2b3593d0b10517a97e"
+
+[[files]]
+name = "oak_test1_0%_511.dat"
+id = 746673
+md5 = "91cfc5795d23b476cead80c0db5b84b1"
+sha256 = "2d695f6570d00e431d4b5cc9b5e322bf6a5de4af28384a92677ca5f2ce7ee500"
+
+[[files]]
+name = "oak_test2_0%_511.dat"
+id = 746654
+md5 = "62c4b4f1fc51cfcaded3f516c6f7fcd7"
+sha256 = "94aa05a28fe89b75f9e7a89333461234fc486e6f5b45c11b2c572b6f70d6aacc"
+
+[[files]]
+name = "poplar_10%_338.dat"
+id = 746670
+md5 = "77f29c1996cf8971e4a078f668b25f2e"
+sha256 = "9fa2b1d63709909fd3ed0a5bc74bc7f7b4a9bfcb14766941eca7973b07f8fe4b"
+
+[[files]]
+name = "poplar_17%_338.dat"
+id = 746655
+md5 = "e19d384423ea0bd61101a43b37850771"
+sha256 = "2c5ac0f9f6ccdf498e50c8da3c22e8ed7e21e59d8a0f259345faeac58d4ea0cc"
+
+[[files]]
+name = "poplar_23,3%_338.dat"
+id = 746661
+md5 = "76335ca23cda29a7e7798052f222dc73"
+sha256 = "e60546f0ded952a84d79808f07b30e8c45ada48fb8c1443b72b34b6053c6f983"
+
+[[files]]
+name = "poplar_test1_0%_338.dat"
+id = 746663
+md5 = "ff5ad1cea298a84a0bc6b9365b557825"
+sha256 = "c2f0138571fc3ccf2a48fb5e33054250442c2f5f78eb9add186daae66d9555b9"
+
+[[files]]
+name = "poplar_test2_0%_338.dat"
+id = 746671
+md5 = "5a1380f8893f4e6975e926f51a9a3975"
+sha256 = "d32bcfa1fd6377b761405d8ecfc18a49e07c25ba64f08bf5cfac5d1dc4c7bf28"
+
+[[files]]
+name = "spruce_11,42%_343.dat"
+id = 746676
+md5 = "253313ffd7c343b0a25c4db0fb568a57"
+sha256 = "77d6a1e4b1d58749841f51ed2284b89720c573696a95b2529f21f726cd3e0b04"
+
+[[files]]
+name = "spruce_26,1%_343.dat"
+id = 746668
+md5 = "52e1388013ea9151c95bec576d2c2715"
+sha256 = "5ed4a29ac5cb2656d968318fd9650e42053527a75b4b4e147f2d31eb2ce67196"
+
+[[files]]
+name = "spruce_29,9%_343.dat"
+id = 746667
+md5 = "5c9f2c874ab0d7f0b2b7e48922e4b3ed"
+sha256 = "71ed48808db85c883b82b78865fd971032ecb9f93ce0655a0ef5fea727fe8048"
+
+[[files]]
+name = "spruce_test1_0%_343.dat"
+id = 746662
+md5 = "177845d34ed56a3f7c29a725d66908e6"
+sha256 = "19b5ce6a485f4bbf4abc08dc204826bcd8df74acc8e767b52f5f8f662a123e99"
+
+[[files]]
+name = "spruce_test2_0%_343.dat"
+id = 746659
+md5 = "7a6d54ebb38cb9f2024718dfc8f2fc4b"
+sha256 = "98392cc03a27741f71cb90c7fca2fd8276183f97b81d3e69d2fd69172f764838"

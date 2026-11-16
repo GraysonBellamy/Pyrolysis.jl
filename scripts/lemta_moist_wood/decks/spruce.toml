@@ -1,0 +1,19 @@
+# Norway spruce (Picea), grain across the heat flux. Sources:
+#   Diarra et al., Fire Saf. J. 165 (2026) 104951, Table 1 (density);
+#   Flity et al., Int. J. Therm. Sci. 210 (2025) 109545, Fig. 12 (optics, read
+#   from the figure to ±0.002) and Table 1 (convection fitted with the sample in
+#   its Silcal holder, means of five dry tests).
+species = "spruce"
+genus = "Picea"
+rho_dry = 343.0               # kg/m³, across-grain dry density (filename, Table 1)
+absorptivity = 0.904          # of the cone's radiation (Fig. 12b)
+emissivity_T_C = [30.0, 80.0, 130.0, 180.0, 230.0]   # °C
+emissivity = [0.926, 0.923, 0.917, 0.911, 0.904]     # Fig. 12a
+h_front_heating = 6.9         # W/(m² K), exposed face under the cone
+h_front_cooling = 4.9         # W/(m² K), exposed face after the cone is withdrawn
+h_rear = 10.0                 # W/(m² K), back face, the whole loss there (no radiation term)
+# Darcy permeability across the grain [m²]: Ai et al., Holzforschung 71 (2017)
+# 147, Table 3, Norway spruce heartwood, tangential, slip-corrected K∞ 2.67 and
+# 2.86e-18 (along the grain 2.25 and 2.65e-14). Comstock 1970 Table 1 (Osnach
+# 1961), spruce heartwood: T 1.2e-19, R 1.3e-18; sapwood T 7.8e-18, R 7.5e-17.
+permeability = 3.0e-18

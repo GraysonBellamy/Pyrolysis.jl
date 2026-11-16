@@ -1,0 +1,19 @@
+# Silver fir (Abies), grain across the heat flux. Flity et al. 2025 did not
+# test fir: the optics and convection are spruce's (the closest species in
+# that study: both pale Pinaceae softwoods).
+#   Diarra et al., Fire Saf. J. 165 (2026) 104951, Table 1 (density).
+species = "fir"
+genus = "Abies"
+rho_dry = 433.0
+absorptivity = 0.904
+emissivity_T_C = [30.0, 80.0, 130.0, 180.0, 230.0]
+emissivity = [0.926, 0.923, 0.917, 0.911, 0.904]
+h_front_heating = 6.9
+h_front_cooling = 4.9
+h_rear = 10.0
+borrowed = "optics and convection from spruce (fir not in Flity et al. 2025)"
+# Darcy permeability across the grain [m²]: Comstock, Wood Sci. 3 (1970) 13,
+# Table 1 (Osnach 1961), fir (Abies, species not given) heartwood T 1.7e-18,
+# R 1.5e-17 (geometric mean 5e-18); sapwood T 1.3e-17, R 7.9e-17. Along the
+# grain: heartwood 4.4e-14, sapwood 8.9e-13.
+permeability = 5.0e-18

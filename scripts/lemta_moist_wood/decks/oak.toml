@@ -1,0 +1,15 @@
+# Oak (Quercus), grain across the heat flux.
+#   Diarra et al. 2026, Table 1 (density); Flity et al. 2025, Fig. 12 and Table 1.
+species = "oak"
+genus = "Quercus"
+rho_dry = 511.0
+absorptivity = 0.925
+emissivity_T_C = [30.0, 80.0, 130.0, 180.0, 230.0]
+emissivity = [0.940, 0.938, 0.934, 0.930, 0.925]
+h_front_heating = 7.1
+h_front_cooling = 4.3
+h_rear = 12.2
+# Darcy permeability across the grain [m²]: Choong et al. 1974 Tables 2–3,
+# Quercus alba (white oak), apparent, N₂ at 1.2 atm: sapwood R 9.9e-16, T 2.0e-16;
+# corewood R 3.9e-16, T 2.0e-16 (along the grain 1.3e-12 and 4.4e-14).
+permeability = 3.0e-16
