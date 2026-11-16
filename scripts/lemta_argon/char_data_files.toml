@@ -1,0 +1,22 @@
+# The char-depth dataset of the same chamber: Terrei, Erez, Acem, Suzanne,
+# Boulet & Parent, "Char depth of several wood species at the material scale",
+# Recherche Data Gouv, doi:10.57745/I9CL2R, version 1.1, licence Etalab 2.0
+# (attribution). Each file as published: its datafile id, the MD5 the
+# repository states and the SHA-256 of the file. The comparison reads its
+# inert rows (`char_depth_rows`).
+doi = "10.57745/I9CL2R"
+version = "1.1"
+licence = "etalab-2.0"
+api = "https://entrepot.recherche.data.gouv.fr/api"
+
+[[files]]
+name = "00_README.txt"
+id = 718672
+md5 = "5158e485eca518ccd02c36c3cc66dce7"
+sha256 = "7da67e41ab132ac888692b4ef636fb8c5df5eaebdeea99648b2397c20bfa991d"
+
+[[files]]
+name = "char_wood.dat"
+id = 718671
+md5 = "676a368d62e13fea1adda5ae98a5ad4d"
+sha256 = "7f82404810e02b1cac5a244b947fd0adb6dd6f1f539f2c88f29022eae6b2df8f"
