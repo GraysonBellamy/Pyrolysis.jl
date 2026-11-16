@@ -1,0 +1,95 @@
+# The LEMTA argon chamber and the laws shared by every species. Sources:
+#   Th    H. Flity, Modélisation de la dégradation et combustion du bois de
+#         construction, PhD thesis, Université de Lorraine (2023), printed pages;
+#   IJTS24 Flity et al., Int. J. Therm. Sci. 195 (2024) 108661;
+#   CHAR  Flity, Jannot, Acem & Parent, "Thermal conductivity of wood char up
+#         to 800 °C", SSRN preprint 6137656 (not peer reviewed);
+#   TT20  L. Terrei, Comportement au feu du matériau bois, PhD thesis,
+#         Université de Lorraine (2020), printed pages.
+#
+# T_a, the gas temperature of the chamber, is "assumed equal to the temperature
+# measured at the back of the sample" and imposed on the back face (Th p.100,
+# Fig. 5.4). It was measured only in the calcium-silicate runs, by the
+# thermocouple on the rear face: the 50 mm column of silcal.csv.
+
+# Sample: 10 × 10 × 5 cm, oven-dried, grain across the flux (Th p.97).
+thickness = 0.05              # m
+area = 0.01                   # m²
+
+# Exposure. The nominal flux is the incident flux at the sample behind the
+# sapphire window: the cone set-point was raised to give the flux values of the
+# open cone (TT20 p.53–54, p.74). How it was measured in this campaign is not
+# stated (Th §5.1.2).
+cone_distance = 0.045         # m, cone to sample (Th p.98)
+
+# Heat capacities [J/(kg K)], T in °C, the pair the DSC heats were extracted
+# with (Th eqs. 4.9–4.10). Wood: mean of eight species, dry, 20–90 °C (Th
+# eq. 2.7, IJTS24 Fig. 7). Char: ipé char made in the DSC, argon, to 600 °C,
+# repeatable to 500 °C (Th eq. 2.8). Both extended linearly above.
+c_wood = [1131.0, 4.67]
+c_char = [693.0, 3.44]
+
+# Conductivity of dry wood across the grain [W/(m K)], one law of dry density
+# and temperature for every species (IJTS24 Eq. 9; Th eq. 2.15):
+# k = k0 + k1 (ρ/1000) √(T/433 K), fitted at 20–160 °C, 130–1000 kg/m³,
+# rms 0.0065. Extended above 160 °C by the same law.
+k_wood = [0.0386, 0.1708]
+
+# Char surface: ε = α ≈ 0.95, measured by Terrei on cone-degraded wood (Th
+# p.48–49). TT20 Fig. 3.7 gives about 0.93 at 2564 cm⁻¹ for spruce.
+char_emissivity = 0.95
+char_absorptivity = 0.95
+
+# The heat-only step C2 → C4, the same for every species: K04 = (1.09 ±
+# 0.01)e5 s⁻¹, E4 = 99.1 ± 1.5 kJ/mol (Th p.91).
+A4 = 1.09e5                   # s⁻¹
+E4 = 99.1e3                   # J/mol
+
+# Gas transport, kept minimal (the thesis model has none, Th p.103): one
+# lumped volatile species and the chamber's argon in the pores; every solid at
+# a permeability that vents the gas at near-ambient pressure, since the block
+# vents along its vertical grain, which a 1D model across the grain cannot.
+# The volatiles' molar mass and heat capacity are round values for a
+# tar-rich mixture, not measurements.
+permeability = 1.0e-12        # m²
+transfer_wood = 5.0e-7        # m²/s, lumped transfer coefficient of the wood components
+transfer_char = 1.0e-5        # m²/s, of the char components
+volatiles_M = 0.05            # kg/mol
+volatiles_c = 1500.0          # J/(kg K)
+volatiles_k = 0.025           # W/(m K)
+argon_M = 0.039948            # kg/mol
+argon_c = 520.3               # J/(kg K), 5R/(2M)
+argon_k = 0.018               # W/(m K)
+
+# Skeletal (cell-wall) density of every species, for the pore volume: helium
+# pycnometry gives 1400–1500 kg/m³ for every species and the thesis takes
+# 1450 (Th p.25, eq. 2.5).
+skeletal_density = 1450.0     # kg/m³
+
+# Front-face convection of the thesis, fitted on calcium-silicate blocks in
+# the chamber in 3D, with T_a as the gas temperature and the window's
+# radiation exchange (Th eq. 5.5, at the window's measured but unpublished
+# temperature) in the balance (Th p.101–103). The 2023 FSJ spruce paper fits
+# 31 at 35 and 45 kW/m² together. The decks re-radiate to T_a in place of the
+# window's exchange.
+[h_front]                     # W/(m² K), by nominal flux in kW/m²
+25 = 22.8
+35 = 29.6
+45 = 29.6
+
+# Char conductivity across the grain [W/(m K)], hot wire under N₂ on chars
+# made at about 900 °C (CHAR Eqs. 8–11): k = a T + b + 16 σ T³/(3 β), T in K,
+# fitted to 20–840 °C. Only the sum is a conductivity: a T + b alone turns
+# negative above 375–544 °C. Species without their own char take the pooled law.
+[k_char.pooled]               # CHAR Eq. 11, poplar + "fir" + larch, rms 0.035
+a = -1.39e-4
+b = 9.2e-2
+beta = 826.0
+[k_char.poplar]               # CHAR Eq. 8, 20–740 °C, char 197 kg/m³, rms 0.022
+a = -1.42e-4
+b = 9.2e-2
+beta = 900.0
+[k_char.larch]                # CHAR Eq. 10, 105–840 °C, char 400 kg/m³, rms 0.029
+a = -1.244e-4
+b = 9.17e-2
+beta = 776.0

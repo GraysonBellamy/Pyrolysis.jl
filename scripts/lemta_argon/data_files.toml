@@ -1,0 +1,298 @@
+# The LEMTA dry argon dataset: Flity, Terrei, Acem & Parent, "In-depth temperature
+# and mass loss of eight dry wood species for dry samples exposed to 25, 35, and
+# 45 kW/m² under an inert atmosphere", Recherche Data Gouv, doi:10.57745/QRYAJ9,
+# version 1.0, licence Etalab 2.0 (attribution). Each file as published: its
+# datafile id, the MD5 the repository states and the SHA-256 of the original
+# upload (`name`); for a spreadsheet, the repository's tab-delimited export
+# (`tab`, the default download), which the loader reads, and its SHA-256. The
+# export holds the spreadsheet's cell values unchanged.
+doi = "10.57745/QRYAJ9"
+version = "1.0"
+licence = "etalab-2.0"
+api = "https://entrepot.recherche.data.gouv.fr/api"
+
+[[files]]
+name = "00_README-1.txt"
+id = 759699
+md5 = "5dfefc42862ee15019c75b05df0e85be"
+sha256 = "ff88ddbaacb2a142db340903456c519f48a122a8651ccc37ab1723d9f4785d33"
+
+[[files]]
+name = "Mass_Balsa_25kW.m-2_100.3kg.m-3.xlsx"
+id = 759710
+md5 = "3997920379b4d5e4654385313195b3fa"
+sha256 = "1e7befca4694c9a8aae18bc133510b6874845bccba0a5b1a1a5b71044634edb0"
+tab = "Mass_Balsa_25kW.m-2_100.3kg.m-3.tab"
+tab_sha256 = "386572b3a3f6909eca414b68b4e0ceb6ca4a3945a299055d2bb790ee61608356"
+
+[[files]]
+name = "Mass_Balsa_35kW.m-2_143kg.m-3.xlsx"
+id = 759713
+md5 = "6433e57b7f0a8d8ee6d15c6d4373af56"
+sha256 = "b6b642081e7cdebf9001840e3eebe0abcf37c9bc3b880bc17dacf8f7c241bd9d"
+tab = "Mass_Balsa_35kW.m-2_143kg.m-3.tab"
+tab_sha256 = "cf26745f3b878f987f5ac4c3aa1870b803b05c37cbba953476b15d687a37c9b2"
+
+[[files]]
+name = "Mass_Balsa_35kW.m-2_76kg.m-3.xlsx"
+id = 759682
+md5 = "3de9e453b79a3d85eb8f514bb2303376"
+sha256 = "bf7764ba2fac02ce137a1b7b6a50bda12b72129d339dffaae43ec836d9031f2a"
+tab = "Mass_Balsa_35kW.m-2_76kg.m-3.tab"
+tab_sha256 = "6989b8465433a53797b6d644fa4c054e6e1fea6366374e5952644d8c8ec0aaac"
+
+[[files]]
+name = "Mass_Beech_25kW.m-2_600kg.m-3.xlsx"
+id = 759702
+md5 = "98483a6f76772d290b45f6cb1c6110c0"
+sha256 = "616f438a6e1e1946e7e4a18fd83a554f6e98654c88d0b95c702429d308b20e85"
+tab = "Mass_Beech_25kW.m-2_600kg.m-3.tab"
+tab_sha256 = "e598b456d7476836082f5509bb58db2426bc7b07420e415a91213574df94660c"
+
+[[files]]
+name = "Mass_Beech_35kW.m-2_608kg.m-3.xlsx"
+id = 759688
+md5 = "4433803430c589b75cc32ae12ab27b59"
+sha256 = "c49508d75e6d120ad7d225656dc21ecab05aff0867e59bf650d06ab37c89d7d0"
+tab = "Mass_Beech_35kW.m-2_608kg.m-3.tab"
+tab_sha256 = "7a14edd5ce68805091457905f2d9dff005e294a08c0eea49912ad599b3c09333"
+
+[[files]]
+name = "Mass_Beech_45kW.m-2_598.5kg.m-3.xlsx"
+id = 759716
+md5 = "58eeed126fd19c131b67baf7a7179fce"
+sha256 = "cbe96a3b0204e56e8c52b2693398e29c6d18461d30fdfdbbbd9e327f9b413976"
+tab = "Mass_Beech_45kW.m-2_598.5kg.m-3.tab"
+tab_sha256 = "5763f14d13cea7ba811a0bdbf41bf03559f6c406281571ce4d91a4407a9a3c0d"
+
+[[files]]
+name = "Mass_Fir_25kW.m-2_376kg.m-3.xlsx"
+id = 759693
+md5 = "501e57b8ed5628ef327abd91f8697f58"
+sha256 = "2cb318c279d78dceae31f528908020f133f29d48079a009c2ad557ac15d8fb1f"
+tab = "Mass_Fir_25kW.m-2_376kg.m-3.tab"
+tab_sha256 = "4a165d45881c02974ff3c16e6b8eff2a381557aa6fe4421966e660cb1d8142ed"
+
+[[files]]
+name = "Mass_Fir_35kW.m-2_394kg.m-3.xlsx"
+id = 759696
+md5 = "5e133878239f68ba09487ca500abf826"
+sha256 = "9fd7e6b14cf5f418cba13b0d95f2426c078791441ee28606cdc91d3d72ddff86"
+tab = "Mass_Fir_35kW.m-2_394kg.m-3.tab"
+tab_sha256 = "9857d406a4eb46deca3c89c62e2091a238284c22c3f92893c8ca3fbb50ed49f9"
+
+[[files]]
+name = "Mass_Fir_45kW.m-2_376kg.m-3.xlsx"
+id = 759701
+md5 = "d2fcbd8063a65b308020a01fd7787d18"
+sha256 = "1acc6e1e97c06b3481b4243ec6f5d20598127fe49f4fe76441c94d0863d446af"
+tab = "Mass_Fir_45kW.m-2_376kg.m-3.tab"
+tab_sha256 = "980f90bc40e69bbefb81f6b03ea641f1a563d386d3a92ad1684355f71293ab01"
+
+[[files]]
+name = "Mass_Ipe_25kW.m-2_1022kg.m-3.xlsx"
+id = 759686
+md5 = "14660a46264780f06b12395a5866c48c"
+sha256 = "0f424a9a1dfe06e10d2f791ccc801acce809bc0ccf0d78385f69b3d42d653800"
+tab = "Mass_Ipe_25kW.m-2_1022kg.m-3.tab"
+tab_sha256 = "d43e60c8bf82d7462d58352c30e12219fda04f793d5ef8fe9e103fef1ccacfb6"
+
+[[files]]
+name = "Mass_Ipe_35kW.m-2_1049kg.m-3.xlsx"
+id = 759689
+md5 = "83876fe628fcf4b5435b9f9fafa12ddf"
+sha256 = "2953ef571bad9afbb30798dfda1e57a295419ebac184bcb0f9d4a10f456d527f"
+tab = "Mass_Ipe_35kW.m-2_1049kg.m-3.tab"
+tab_sha256 = "4b5012e2243d2e70ce2f8c610b5b6241aabbe4e5d1be8aee9a92aac2e43ec41b"
+
+[[files]]
+name = "Mass_Ipe_45kW.m-2_999kg.m-3.xlsx"
+id = 759683
+md5 = "9ec6d821115305165a04987947976931"
+sha256 = "2070b5ec45597e77292b08a645ac5ffbaea523bcb50933443f573e85621e22c1"
+tab = "Mass_Ipe_45kW.m-2_999kg.m-3.tab"
+tab_sha256 = "7d2a0338c64fe5cfa776daa4168d0c4627b79cace761b54baa13ead90237062a"
+
+[[files]]
+name = "Mass_Larch_25kW.m-2_548kg.m-3.xlsx"
+id = 759694
+md5 = "5d2b65d884851b6a23e73595593436fe"
+sha256 = "e61137f579dadd21074905e4444a0b77fbba20827820128cd6ee62020f35ee24"
+tab = "Mass_Larch_25kW.m-2_548kg.m-3.tab"
+tab_sha256 = "686f6e5b1c5a026ab654ad6eb7581e8a9da5cf7c59345c1cc09c95dd9120f395"
+
+[[files]]
+name = "Mass_Larch_35kW.m-2_533kg.m-3.xlsx"
+id = 759700
+md5 = "7272d5a598119d5283e56ec0462ed337"
+sha256 = "ed3643eb22a210dd13db9bd19b2f96aa7d2e224aea60a87bfdd2cdfa4aa7688b"
+tab = "Mass_Larch_35kW.m-2_533kg.m-3.tab"
+tab_sha256 = "f8e95b0b141dced64ed0bcf1afe3227d63f44ad422a7f1bf3912b7dbfa6d363a"
+
+[[files]]
+name = "Mass_Larch_45kW.m-2_613kg.m-3.xlsx"
+id = 759712
+md5 = "4d69a9994e625bc6d001c7d37fc98d9b"
+sha256 = "68ec73c2fa8af959d276206b67e0db168cc687c788bb5032d9b880c6ba7bf847"
+tab = "Mass_Larch_45kW.m-2_613kg.m-3.tab"
+tab_sha256 = "d156811bdbdd79c666eca96bf88d19ca58a9fc2d0c46df6be6fac7f82517c17d"
+
+[[files]]
+name = "Mass_Oak_25kW.m-2_725kg.m-3.xlsx"
+id = 759685
+md5 = "9cc2af3b5e64bda5394ecf9b026ae5b5"
+sha256 = "fa0ab7300d37959121786f2161f798dc5b4597068a09da89c2ecf374de16a6ff"
+tab = "Mass_Oak_25kW.m-2_725kg.m-3.tab"
+tab_sha256 = "eb36f4fca2cdce891ae56a140f033c4993d45e2cdd9ab95d79d80d676e1d0c93"
+
+[[files]]
+name = "Mass_Oak_35kW.m-2_634kg.m-3.xlsx"
+id = 759708
+md5 = "0d08a65e73e646069f773c9b1dd997f0"
+sha256 = "9a7c39cfc5d61c6f95de680dd3a8f180113da1464501d80b39321ce8ba97361b"
+tab = "Mass_Oak_35kW.m-2_634kg.m-3.tab"
+tab_sha256 = "176f685bb39a1a1919d46cf87318551b7e31419b14be35c25b9f35968b10784b"
+
+[[files]]
+name = "Mass_Oak_45kW.m-2_595kg.m-3.xlsx"
+id = 759706
+md5 = "4b706b0ff3d5bc64e9d5bd65dd55bbe8"
+sha256 = "86b968f98876ad1207900eddca5cc2095b7b2f65332475a989caa1996d17927c"
+tab = "Mass_Oak_45kW.m-2_595kg.m-3.tab"
+tab_sha256 = "58a5f75f9bad88eda4d183357ea6fb0b68c23a595011f883130392b467536cd0"
+
+[[files]]
+name = "Mass_Poplar_25kW.m-2_324kg.m-3.xlsx"
+id = 759681
+md5 = "53f6eefb2f27289c0db67604d7544b08"
+sha256 = "cec5a7ebd73b921e7cc38a739dd5f79409ee69b241972a7e055c54cedef7a5de"
+tab = "Mass_Poplar_25kW.m-2_324kg.m-3.tab"
+tab_sha256 = "3916667e84aa182180715c74bddbb05bf352bed32ae62af5f0323fd7157ae528"
+
+[[files]]
+name = "Mass_Poplar_35kW.m-2_327kg.m-3.xlsx"
+id = 759684
+md5 = "fc3df834e716f2ff9a7ac29e3b3cca90"
+sha256 = "a0886c3e263fe106244b509835c53d1475b1ddfeabead2b2d5503b26665138f7"
+tab = "Mass_Poplar_35kW.m-2_327kg.m-3.tab"
+tab_sha256 = "6bfea6f2a97739c6ddf64025b6655bcf40ee3d22e96d88ca82b7764cac3f4b71"
+
+[[files]]
+name = "Mass_Poplar_45kW.m-2_315kg.m-3.xlsx"
+id = 759690
+md5 = "49536921259ce3f3da1ec26c9b783f36"
+sha256 = "0a27493b66ae8be91dde5c4062e4035c56cfb1148ab7010c1080840c67f5ee87"
+tab = "Mass_Poplar_45kW.m-2_315kg.m-3.tab"
+tab_sha256 = "8f6d87dbbc43ea34f1208b2490eab9296f6be2b1d2e7fda3ddfe9a7a37c2b4fd"
+
+[[files]]
+name = "Temperature_Balsa_35kW.m-2_104kg.m-3.xlsx"
+id = 759704
+md5 = "f8b670991c6a420130d413524a273296"
+sha256 = "76c0f2993feda143e24c8e548be53d26ffd926f95c785f378f7c1d877adfb826"
+tab = "Temperature_Balsa_35kW.m-2_104kg.m-3.tab"
+tab_sha256 = "349fbedb39226a21fd3d927269aed7ff1530217a7f52ca88a0cff4ded4cb3aeb"
+
+[[files]]
+name = "Temperature_Balsa_45kW.m-2_102kg.m-3.xlsx"
+id = 759695
+md5 = "924d7d93e5e480f4eba3c61198625127"
+sha256 = "21a4b2c35c58e342919e1dfd40aeb1d57a4cee551b45dbeb2aea534d6cc13531"
+tab = "Temperature_Balsa_45kW.m-2_102kg.m-3.tab"
+tab_sha256 = "7162f9f4a1734c097327faa799ef9b65c0a9ea3263383757de64d3be21d71b65"
+
+[[files]]
+name = "Temperature_Beech_35kW.m-2_600kg.m-3.xlsx"
+id = 759714
+md5 = "2aac35bf4c771672647aa6248f31cfaf"
+sha256 = "32191441f2ea3c9ce5b0ec6582ad983c70b9421ee6bec0d3c6e30d3a645c0116"
+tab = "Temperature_Beech_35kW.m-2_600kg.m-3.tab"
+tab_sha256 = "604223434e47a5bb1d48d0f9d15ce51ef3e94720d6d9c726d5579c110b2458f6"
+
+[[files]]
+name = "Temperature_Beech_45kW.m-2_600kg.m-3.xlsx"
+id = 759687
+md5 = "54b5ea2bc09f1a22941a2e2085fc3c94"
+sha256 = "4b39e7d8ebd2d921a9c9e0e3ebd562a0f7c52c804329f488daf0ce5bccdce968"
+tab = "Temperature_Beech_45kW.m-2_600kg.m-3.tab"
+tab_sha256 = "c9ab2ca8d98b3b6773469f0f4a915c6fee4fb0137eec13492f2cdf039d6087e4"
+
+[[files]]
+name = "Temperature_Fir_35kW.m-2_422kg.m-3.xlsx"
+id = 759703
+md5 = "613028c667ed0b209ea4886c6057cc0c"
+sha256 = "f6841ee6f00c0c42c94279caa160792cb2462c81a02437b14e993a4fbc66eec5"
+tab = "Temperature_Fir_35kW.m-2_422kg.m-3.tab"
+tab_sha256 = "2698edf7d720d732aaa80eec8e0b25af115b27266b25b8629d4cf0b7c5d143ad"
+
+[[files]]
+name = "Temperature_Fir_45kW.m-2_380kg.m-3.xlsx"
+id = 759692
+md5 = "c4ea3e4bf013cf78b23ea0f85b021efc"
+sha256 = "aff6304d6f02cff1ec4a6c766e73125035e67c91b4776610023afefc5d8b303b"
+tab = "Temperature_Fir_45kW.m-2_380kg.m-3.tab"
+tab_sha256 = "8f6450f020135f70a2092a6415fbd0c633f2ed1cdb62e2ba0eb33d84250991e4"
+
+[[files]]
+name = "Temperature_Ipe_35kW.m-2_842kg.m-3.xlsx"
+id = 759698
+md5 = "7aa323c7156893f3e2e8d8b783b3ee26"
+sha256 = "efd2a3cc585feadf20b188051109ab9b734ce46e3a08f7711168a719e68c6a78"
+tab = "Temperature_Ipe_35kW.m-2_842kg.m-3.tab"
+tab_sha256 = "26dcdc304085b3d83fdc29e88515fbf6af6ca0cb5746e8a1c98f211795476136"
+
+[[files]]
+name = "Temperature_Ipe_35kW.m-2_885kg.m-3.xlsx"
+id = 759711
+md5 = "43b02acb37a08f711bf2e4648bea898b"
+sha256 = "e88634b940094248f9c34cb56752d76c173bb131cc65809f4fd20716b66933c3"
+tab = "Temperature_Ipe_35kW.m-2_885kg.m-3.tab"
+tab_sha256 = "c5bd63983cd07cfd7c4d202af90d3173ff3ffb0356f37d06bc716a6a93d8dbbe"
+
+[[files]]
+name = "Temperature_Larch_35kW.m-2_600kg.m-3.xlsx"
+id = 759709
+md5 = "720a476f1c02fe5559c6361862fe7e5e"
+sha256 = "53bb8a62950836f4345ce5e238db5c085ac5ad0cd47d3a767bd56b617459304c"
+tab = "Temperature_Larch_35kW.m-2_600kg.m-3.tab"
+tab_sha256 = "e6a33972dbb8eaedc63300c27bb158975e26db020bcbaa313788c9300de65fb9"
+
+[[files]]
+name = "Temperature_Larch_45kW.m-2_630kg.m-3.xlsx"
+id = 759691
+md5 = "23f3f7dfecf90a27a529627eddc0d6e7"
+sha256 = "2606d7414fdbf9697a646748f2da2a1653df95c3a69fc63007a9a8506b911109"
+tab = "Temperature_Larch_45kW.m-2_630kg.m-3.tab"
+tab_sha256 = "5822c35af079534f6e3e994e9fa9189c0edc7b4ed3d0abd94e174ead349437ee"
+
+[[files]]
+name = "Temperature_Oak_35kW.m-2_558.4kg.m-3.xlsx"
+id = 759707
+md5 = "0606119a39f5327e80018d65193c8110"
+sha256 = "22af5681fbc53fae5e8dd5f597a03d4731add91088a435aefadd4aa23f8f6e67"
+tab = "Temperature_Oak_35kW.m-2_558.4kg.m-3.tab"
+tab_sha256 = "462949a67ceba01e95e51960c1c95971d7be5164f690247909fc947305010446"
+
+[[files]]
+name = "Temperature_Oak_45kW.m-2_620kg.m-3.xlsx"
+id = 759697
+md5 = "7fad4ad89a8b04d1d801726e3bee8434"
+sha256 = "c4e645b4ae41f01afb808db2e8bcc50843d184728943d3c5762f3876214aa838"
+tab = "Temperature_Oak_45kW.m-2_620kg.m-3.tab"
+tab_sha256 = "c40cb0b567c60f352cc134d61d3ddb7d90aad6c57e15ce8ea743be405995666e"
+
+[[files]]
+name = "Temperature_Poplar_35kW.m-2_320kg.m-3.xlsx"
+id = 759715
+md5 = "977e8152bbd08a5d33c32bd33d34f5c4"
+sha256 = "00824a4363e20bda1fbe8248ec18d0000f47bcd7ac1bbf47cf15534f794b4338"
+tab = "Temperature_Poplar_35kW.m-2_320kg.m-3.tab"
+tab_sha256 = "d2804381756b0ae3b62b4334567b679bc9dfb4f7d1fb9de6eb35da45036812cf"
+
+[[files]]
+name = "Temperature_Poplar_45kW.m-2_320kg.m-3.xlsx"
+id = 759705
+md5 = "415c71201bbf205c78056d44077e946e"
+sha256 = "5e2e4316533e01d14bf85ebf1e990b638fd964b4b1421c5577c441c08fd134f2"
+tab = "Temperature_Poplar_45kW.m-2_320kg.m-3.tab"
+tab_sha256 = "4ec17e569479620f15be45e04af2f9b48f89d9a13c593b968dad38bf631357ae"

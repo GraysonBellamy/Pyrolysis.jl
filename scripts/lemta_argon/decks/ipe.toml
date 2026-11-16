@@ -1,0 +1,39 @@
+# Ipé (Handroanthus), grain across the heat flux. Sources:
+#   Th     H. Flity, PhD thesis, Université de Lorraine (2023), printed pages;
+#   IJTS25 Flity et al., Int. J. Therm. Sci. 210 (2025) 109545.
+# The dry density is each test's own (its file name), not a deck value.
+species = "ipe"
+dataset = "Ipe"   # name in doi:10.57745/QRYAJ9
+thesis = "ipé"   # name in Th
+genus = "Handroanthus"
+
+# Optics of the virgin wood (IJTS25 Fig. 12, read from its vector paths to
+# ±0.0005; Th Figs. 2.16–2.17 give the same to ±0.001): the Planck-mean
+# emissivity at the surface temperature, and the absorptivity of a 4 kW/m²
+# cone, which equals the emissivity at 230 °C.
+emissivity_T_C = [30.0, 80.0, 130.0, 180.0, 230.0]
+emissivity = [0.946, 0.946, 0.945, 0.944, 0.942]
+absorptivity = 0.942
+
+# Char conductivity law (chamber.toml [k_char]). Ipé char was not measured.
+char_conductivity = "pooled"
+
+# Three independent first-order reactions of the dry wood, fitted to TGA in N₂
+# at 5 and 10 K/min (Th Annex C, Table C.7, p.172): S1 → gas,
+# S2 → γ2 C2 + gas, S3 → γ3 C3 + gas; α is each pseudo-component's share of the
+# dry wood, γ the char per kg of its reactant. A in s⁻¹, E in J/mol.
+[kinetics]
+A = [5.1e6, 2.6e14, 3655.0]
+E = [98.1e3, 202.8e3, 96.8e3]
+alpha = [0.20, 0.63, 0.17]
+gamma = [0.0, 0.26, 0.50]
+
+# Heats [J per g of initial dry wood, positive endothermic], with H3 = 0 and
+# H4 that of the heat-only step C2 → C4 (Th §4.3; the same basis as Flity et
+# al. 2023 FSJ Eq. 11). Mean of the two ipé DSC tests at 20 mL/min (Yc 25.6 and
+# 25.8 %), read from Th Figs. 4.15–4.17 (p.93; no table): H1 −135.1/−135.1,
+# H2 −24.9/−22.3, H1 + H2 + H4 −263.4/−261.5.
+[heats]
+H1 = -135.1
+H2 = -23.6
+H4 = -103.8
