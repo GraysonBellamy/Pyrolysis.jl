@@ -482,6 +482,12 @@ extension at unit porosity. The length scale is positive physical data.
 The cap and its branch derivative are part of this constitutive closure.
 It is evaluated even when component permeabilities are zero.
 
+The form is the hydraulic-radius model of a packed bed of grains, with its
+constant fitted to such beds. It has no basis for cellular, fibrous or cracked
+media such as wood, char and foams, where the narrowest connected openings and
+the cracks set the permeability; for those, component permeabilities are the
+appropriate data.
+
 ### 5.7.3 Constitutive and interface derivatives
 
 `BRUGGEMAN` is rejected for permeability. State differentiation includes
@@ -625,9 +631,11 @@ These give $\mu(300\,\text{K}) = 1.846\times10^{-5}$ Pa·s and $\mu(600\,\text{K
 > global enthalpy datum `T_REF = 298.15 K` (§2). Do not conflate the two;
 > `SutherlandProperty()` carries $T_{\text{ref}} = 273.15$ in its own field.
 
-Sutherland's law is the Chapman–Enskog rigid-sphere result for a single gas and
-captures the *increase* of gas viscosity with temperature ($\mu \propto T^{1/2}$ in the
-high-$T$ limit), the opposite of liquid behaviour. It is valid roughly over
+Sutherland's law is the kinetic-theory viscosity of rigid spheres,
+$\mu \propto T^{1/2}$, corrected for a weak attraction between the molecules, which
+enlarges the collision cross-section by the factor $1 + S/T$. It captures the
+*increase* of gas viscosity with temperature, returning to $T^{1/2}$ in the
+high-$T$ limit, the opposite of liquid behaviour. It is valid roughly over
 200–2000 K for air-like gases.
 
 ### Material-supplied viscosity

@@ -181,6 +181,30 @@ exactly zero: zero permeability removes Darcy flow, while zero transfer
 coefficient removes the partial-pressure transfer term. Both zero gives a
 closed pore path.
 
+Writing $p_j=x_jP$ separates the two roles of $\Lambda$ in the molar flux
+$n_j=J_j/M_j$:
+
+$$
+n_j=-\frac{x_j}{RT}\left(\Lambda+\frac{\kappa P}{\mu}\right)\nabla P
+    -\frac{\Lambda P}{RT}\nabla x_j.
+$$
+
+The first term is Darcy flow with a Klinkenberg slip correction, an apparent
+permeability $\kappa(1+b/P)$ with $b=\mu\Lambda/\kappa$. The second is equimolar
+diffusion with diffusivity $\Lambda$. One coefficient therefore stands for
+both. Where the flow-limiting openings are sub-micron, $\Lambda$ is the
+Knudsen coefficient, $\Lambda=\kappa b/\mu$; the measured $b$ of spruce is
+0.5–1.1 bar (Ai et al. 2017). Where the pores are large, $\Lambda$ is the
+effective molecular diffusivity $(\phi/\tau)D_m$. The Bosanquet sum
+$1/\Lambda=\tau/(\phi D_m)+1/K$, with $D_m$ and the Knudsen coefficient $K$ as
+in §9.2.2, joins the two limits.
+
+With $\kappa=0$ only the partial-pressure term remains. Each species then
+relaxes its own partial pressure, the product gas does not displace the
+resident gas, and the pressure needed to carry a given release scales as
+$1/\Lambda$. That pressure is a transfer potential, and the pore composition
+is meaningful only with $\kappa>0$.
+
 ### 9.2.2 Dusty-gas friction
 
 `DustyGas(...)` distinguishes collisions of molecules with pore walls from
@@ -283,6 +307,20 @@ can disappear completely, the exact series law can jump when its weight
 reaches zero; setup checks reachable changes in the participating components
 and rejects unsupported paths. `CARMAN_KOZENY` provides a separate
 porosity-based permeability closure (§5.7).
+
+None of these rules is derived for a matrix in transition. With three or more
+decades between the permeability of virgin wood and of its char, the rule and
+its $\beta$ set $\kappa$ at intermediate conversion and are fitted quantities.
+
+The component values are effective as well. Softwood measured intact across
+the grain has $\kappa=5\times10^{-20}$–$2.5\times10^{-14}$ m², some four decades
+below its value along the grain (Comstock 1970). A burning specimen also vents
+through drying checks, through cracks, and through the longitudinal component
+that any slope of grain gives a face. A virgin-wood value set against
+pressures measured in burning spruce, $1.5\times10^{-16}$ m² (Fredlund 1993),
+is up to three decades above the laboratory values for that species. A pore
+pressure computed from tabulated or assumed permeabilities is therefore a
+calibrated quantity (§9.4.3).
 
 ### 9.3.2 Pore geometry for the dusty-gas model
 
@@ -535,7 +573,12 @@ leaking to the rear of the ISO 5660 holder and burning there is documented
 and Singer 1977; Fredlund 1993), and two transducers a few centimetres apart
 in one specimen differ by the whole signal when a crack reaches one of them.
 A predicted pore pressure is therefore a mean over a cracked char, credible up
-to about 1–1.5 bar overpressure and only while the matrix is intact. When
+to about 1–1.5 bar overpressure and only while the matrix is intact. It is
+also an upper bound wherever the grain lies parallel to the heated face:
+softwood is $5\times10^{2}$ to $8\times10^{4}$ times more permeable along the
+grain than across it (Comstock 1970), so the virgin zone vents to the specimen
+edges unless they are gas-tight, a path the one-dimensional model does not
+have. When
 pressure is compared with measurements, a leaky back is represented by
 `ConvectivePressureBC` with a board or leak resistance rather than by
 `ImpermeableBC`.
@@ -946,6 +989,13 @@ check matters even when nominal porosity is positive. Thermal independence
 of the calorically passive gas and a separate species ledger qualify that
 fixture. These results do not establish a general bound for arbitrary dense
 melts.
+
+In a dense polymer the pore state is a numerical device. The melt has no pore
+network; PMMA vents through bubbles up to about a millimetre across (Kashiwagi
+and Ohlemiller 1982). With $\kappa=0$ the computed pressure scales as
+$1/\Lambda$ and does not depend on the nominal $\phi$, and neither coefficient
+changes the release or the temperature. The porosity, pressure and pore
+composition of such a deck are not physical quantities.
 
 ## 9.11 Reading and verifying the transport solution
 
