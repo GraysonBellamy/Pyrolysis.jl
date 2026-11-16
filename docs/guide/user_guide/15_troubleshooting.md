@@ -27,14 +27,16 @@ accepted. Read how it ended before changing anything.
 ### 15.1.1 The return code and the outcome
 
 Two fields say how a solve ended: `retcode`, the integrator's return code as a
-`Symbol`, and `outcome`, which the deactivation and the thickness stop set when
-they end the solve.
+`Symbol`, and `outcome`, which an event sets when it ends the solve (the
+deactivation, the thickness stop, the end of the transport domain), and the
+gas-transport domain test when the integrator stopped while it was rejecting a
+cell.
 
 ```julia
 sol = solve(problem; use_ale = true, deactivation = true)
 
 sol.retcode        # :Success, :Terminated, :Failure, :DtLessThanMin, :MaxIters, …
-sol.outcome        # :none, :burned_out, :min_thickness or :interior
+sol.outcome        # :none, :burned_out, :min_thickness, :interior, :matrix_exhausted, …
 succeeded(sol)     # :Success, or :Terminated by a complete burnout or the thickness stop
 completed(sol)     # :Success only: the solve reached tspan[2]
 ```
@@ -42,7 +44,7 @@ completed(sol)     # :Success only: the solve reached tspan[2]
 | `retcode` | Meaning | Typical cause | See |
 |---|---|---|---|
 | `:Success` | reached `tspan[2]` | — | — |
-| `:Terminated` | an event ended the solve | the last live cell deactivated (outcome `:burned_out`); a moving mesh thinner than `min_thickness` (`:min_thickness`); on a fixed mesh, a cell below the deactivation threshold inward of a live one (`:interior`); a `terminate!` in a callback of yours (outcome `:none`) | §15.4 |
+| `:Terminated` | an event ended the solve | the last live cell deactivated (outcome `:burned_out`); a moving mesh thinner than `min_thickness` (`:min_thickness`); on a fixed mesh, a cell below the deactivation threshold inward of a live one (`:interior`); a cell at the end of its transport domain (`:matrix_exhausted`, `:unsupported_endpoint_occupancy`); a `terminate!` in a callback of yours (outcome `:none`) | §15.4, §10.7 |
 | `:Failure` | the solve's own checks ended it | more than 50 consecutive proposals rejected on a constraint residual; an inadmissible state, or no consistent node velocities, after a deactivation event; an inadmissible state accepted by a fixed-step solve | §15.3, §15.4.4 |
 | `:DtLessThanMin` | the step fell below `dtmin` (default `1e-12` s) | every proposal rejected: a cell driven to absolute zero, a trajectory leaving the physical domain | §15.3.2 |
 | `:MaxIters` | the step count reached `maxiters` (default `1_000_000`) | a step size that collapsed long before the end | §15.3 |
@@ -54,6 +56,8 @@ completed(sol)     # :Success only: the solve reached tspan[2]
 | `:burned_out` | the last live cell deactivated | `true` |
 | `:min_thickness` | on a moving mesh, the distance from the back node to the outermost live node fell below `min_thickness` | `true` |
 | `:interior` | a cell below its threshold lies beneath live cells it cannot leave through, a cavity | `false` |
+| `:matrix_exhausted`, `:unsupported_endpoint_occupancy` | a cell reached the end of its transport domain (§7.5.2, §10.7) | `false` |
+| `:pore_closure`, `:negative_gas_pressure`, `:negative_surface_pressure` | the integrator stopped while the domain test was rejecting a gas-bearing cell (§8.3) | `false` |
 
 `succeeded(sol)` is the test to use for a burnout run, which normally ends with
 `:Terminated`; `completed(sol)` is the strict test that the solve reached the
@@ -226,9 +230,9 @@ the trajectory itself is heading out of the domain.
 
 The step falls below `dtmin` when the integrator cannot find a proposal that
 both tests accept. Read `sol.outcome` first: a gas-transport domain outcome
-(`:matrix_exhausted`, `:pore_closure` and the others of §10.7) comes with a
-warning naming the cell and the quantity that left the domain, and a smaller
-`dtmin` does not help it. When the last rejection was a cell at or below
+(`:pore_closure`, `:negative_gas_pressure`, `:negative_surface_pressure`, §10.7)
+comes with a warning naming the cell and the quantity that left the domain,
+and a smaller `dtmin` does not help it. When the last rejection was a cell at or below
 absolute zero, `solve` names it:
 
 ```text

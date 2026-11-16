@@ -400,6 +400,7 @@ fixed-signature function wrapper (§15.5.7) and is assembled into one
 | deactivation safety net | discrete, every accepted step (`deactivation`) | §14.3.5 |
 | layer times | continuous, on the activation margin (every moving mesh) | sets the layers' equidistribution times (§14.2.2) |
 | thickness stop | continuous, on the live thickness minus `min_thickness` (moving mesh) | ends the solve with outcome `:min_thickness` |
+| transport domain's end | continuous, on the margin $\mu$ of §9.3.3 (every solve; infinite without gas transport) | ends the solve at the crossing, on its inside, with outcome `:matrix_exhausted` or `:unsupported_endpoint_occupancy` and a warning naming the cell |
 | conservation recorders | continuous, never firing (one per `ConservationRecorder` in `callback`) | read each step's end before its events (§16) |
 | progress bar | discrete (`progress = true`) | a read-only observer |
 | the caller's `callback` | as given | a read-only observer: the flag rule follows each discrete callback's `affect!` |
@@ -407,12 +408,28 @@ fixed-signature function wrapper (§15.5.7) and is assembled into one
 
 Continuous callbacks are located inside the step on the integrator's
 interpolant, and the earliest crossing ends the step there; the discrete ones
-run at each accepted step's end in the order listed. The step observer is
+run at each accepted step's end in the order listed. A deactivation threshold
+crossed before the transport domain's end in the same step goes first, and the
+cell leaves before its matrix runs out. The step observer is
 always installed, so a further read-only observer leaves the trajectory
 unchanged under every policy: a probe callback, alone or in a `CallbackSet`,
 leaves the saved times, the states, the accepted steps and the right-hand-side
 evaluations bit-identical (`test/integration/test_policies.jl`). A continuous
 callback of the caller's raises the flag at its event as any event does.
+
+The transport domain's margin depends on the state alone and is read at the
+ends of each step only, as the domain test reads its proposals: a crossing
+and return inside one step goes unseen by both. The end of a step is the
+state the domain test has just evaluated, whose residual evaluation stores the
+margin, and its start is the end of the step before, so neither read costs an
+evaluation. A state the solve reaches otherwise (the initial one, one an event
+moved, every state of a fixed-step solve) is mapped into derived-state buffers
+of the event's own, whose caloric inversion starts from temperatures of its
+own: the residual's workspace is untouched, and with no crossing the
+trajectory is bit-identical to one without the event. A cell exactly at the
+domain's end reads the smallest positive margin: it is inside the domain, and
+the event sees a crossing only from a positive margin. The conservation
+recorders bisect the same margin to close a step the event cuts (§16).
 
 ### 15.5.4 The domain test
 
@@ -428,8 +445,9 @@ controller's smallest factor, when
   the raw state, never through a guard: the trial clamp keeps such a state
   evaluable, and this test keeps it from being accepted;
 - a gas-bearing live cell lacks resolved physical pore volume above twice the
-  trial divisor floor plus its mass/thermal/geometry uncertainty, violates its
-  current negative-gas-pressure budget, or leaves its declared matrix domain;
+  trial divisor floor plus its mass/thermal/geometry uncertainty, or violates
+  its current negative-gas-pressure budget, or a reconstructed boundary pressure
+  is negative;
 - an algebraic row's scaled residual exceeds one (`constraint_residual`):
 
   $$
@@ -461,6 +479,13 @@ rejections the state is accepted and the monitor marked failed, and the step
 observer ends the solve with `ReturnCode.Failure` and a warning. A proposal
 rejected for a cell at or below absolute zero is recorded, and a solve that
 stops there warns naming the cell and the time.
+
+The end of the declared transport domain is not among the rejections. Those
+above guard trial states that the solve may cross transiently and recover
+from with a smaller step; the transport domain ends once, at a boundary no
+tolerance moves, and the solve ends there in an event (§9.3.3, §15.5.3). A
+rejected crossing would only bring the accepted steps ever closer to it until
+the step fell below `dtmin`.
 
 A fixed-step solve (`adaptive = false`) never reaches the domain test; the step
 observer holds each accepted state to admissibility and ends the solve with

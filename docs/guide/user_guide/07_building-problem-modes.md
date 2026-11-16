@@ -375,7 +375,19 @@ matrix (every solid, plus each liquid that declares `λ` or `κ`); skeletal volu
 is a separate sum over every condensed component. Retained cells that lose their matrix need a declared
 endpoint, for example `LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-5,κ=0.,
 max_skeletal_occupancy=1e-3))`. The finite coefficients and supported occupancy
-are physical data. Without an endpoint, the model ends at `:matrix_exhausted`.
+are physical data. A matrix that converts continuously still holds skeleton
+where its occupancy reaches `blend[2]`, and `max_skeletal_occupancy` must cover
+it: the default, zero, describes an empty channel such a cell never reaches.
+Without an endpoint the solve ends where a cell's matrix occupancy reaches
+`blend[2]`, with return code `:Terminated` and outcome `:matrix_exhausted`; with
+one, where a cell holds more skeleton than the endpoint supports
+(`:unsupported_endpoint_occupancy`, §10.7).
+
+An endpoint describes a cell that stays: one whose volume something still holds
+up, such as a condensed phase outside the matrix, or an interior channel. The
+surface cell of a material that leaves no residue does not stay; it recedes,
+which is deactivation (§10). Kept as an emptied cell under an endpoint, it
+would hold a layer of stagnant gas between the heated face and the solid.
 A nominal porosity for a dense melt must be tested jointly with mesh and
 pressure tolerance; it cannot be inferred from the numerical floor.
 

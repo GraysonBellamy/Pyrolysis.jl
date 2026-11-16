@@ -982,9 +982,10 @@ solution; it is a local-error budget, not a global pressure bound.
 The domain test rejects invalid masses, temperatures or geometry and checks
 algebraic constraints. Every gas-bearing state, including sealed gas, must
 have physical pore volume above twice the divisor floor plus its mass,
-thermal and geometric uncertainty margin. Accepted and post-event states
-must also remain in the declared transport domain. Repeated constraint
-rejections or an invalid fixed step terminate with a diagnosed failure.
+thermal and geometric uncertainty margin. The solve ends where a cell
+reaches the end of the declared transport domain, and a post-event state
+outside it fails. Repeated constraint rejections or an invalid fixed step
+terminate with a diagnosed failure.
 
 How a solve ends:
 
@@ -994,11 +995,12 @@ How a solve ends:
 | `:Terminated` | `:burned_out` | the last live cell was deactivated |
 | `:Terminated` | `:min_thickness` | a moving mesh thinned below `min_thickness` |
 | `:Terminated` | `:interior` | a cell below the threshold lies beneath live cells it cannot leave through, a cavity; `solve` warns, naming the cell and the time |
+| `:Terminated` | `:matrix_exhausted`, `:unsupported_endpoint_occupancy` | a cell reached the end of its transport domain (§7.5.2); the solve ends at the crossing and warns, naming the cell |
 | `:Terminated` | `:none` | a callback of yours called `terminate!` |
 | `:Failure` | `:none` | the domain test gave up, a fixed step left the physical domain, or a deactivation event left the state inadmissible or the node velocities inconsistent; `solve` warns with the reason |
 | `:MaxIters` | `:none` | `maxiters` steps before the end |
 | `:DtLessThanMin` | `:none` | the step fell below `dtmin` |
-| `:DtLessThanMin` | `:pore_closure`, `:matrix_exhausted`, `:unsupported_endpoint_occupancy`, `:negative_gas_pressure`, `:negative_surface_pressure` | the step fell below `dtmin` while the domain test rejected a cell under gas transport; `solve` warns naming the cell (§8.3, §10.7) |
+| `:DtLessThanMin` | `:pore_closure`, `:negative_gas_pressure`, `:negative_surface_pressure` | the step fell below `dtmin` while the domain test rejected a cell under gas transport; `solve` warns naming the cell (§8.3, §10.7) |
 
 A solve that stops early ends on the last state it accepted, which is saved.
 `succeeded` and `completed` combine the two fields (§16.5.3). Chapter 15

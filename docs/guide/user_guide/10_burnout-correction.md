@@ -37,7 +37,15 @@ empty, and size the mesh up front for everything else:
 
 What deactivation can remove follows from the reactions: a cell vanishes
 when converting its components completely would leave less condensed mass
-than the threshold of what it started with (§10.5.1). A wood whose
+than the threshold of what it started with (§10.5.1). Under gas transport on
+a fixed mesh a vanishing cell keeps its volume while its matrix goes, and it
+must leave before the matrix runs out, or the solve ends at
+`:matrix_exhausted` (§10.7) first: for a solid that gasifies, the fraction the
+threshold reads and the matrix occupancy are the same number, so the threshold
+must lie above the transport model's `blend[2]` (1e-3 by default). The
+first-order default, 1e-2, does; the default at any other order, 1e-4, does
+not. On a moving mesh the cell shrinks with its solid and its occupancy
+stays. A wood whose
 pyrolysis leaves 20 % char never reaches a 1 % threshold, whatever the
 heating; it needs a char-oxidation reaction to gasify the residue before
 deactivation has anything to do. The test reads the reactant's mass, and only
@@ -602,8 +610,9 @@ its own proposal (Chapter 11).
 
 ## 10.7 Outcomes and the interior void
 
-`sol.outcome` says how deactivation or the thickness stop ended the solve;
-`sol.retcode` is the integrator's return code. `succeeded(sol)` accepts a
+`sol.outcome` says which event ended the solve (the deactivation, the thickness
+stop, the end of the transport domain) or which gas-transport test the
+integrator stopped on; `sol.retcode` is the integrator's return code. `succeeded(sol)` accepts a
 complete run and the two terminations the model intends; `completed(sol)` is
 the strict test, `:Success` only.
 
@@ -613,10 +622,11 @@ the strict test, `:Success` only.
 | `:Terminated` | `:burned_out` | `true` | The last live cell went; its inventories are written to the last event as lost. |
 | `:Terminated` | `:min_thickness` | `true` | The live thickness of a moving mesh fell below `min_thickness` (§10.3). |
 | `:Terminated` | `:interior` | `false` | A cell below the threshold lies beneath live cells it cannot leave through, a cavity (§10.7); the solve warns and ends. |
+| `:Terminated` | `:matrix_exhausted` | `false` | A cell's matrix occupancy reached `blend[2]` of a transport model without an `endpoint`; the solve ends at the crossing and warns naming the cell. A material that leaves no residue has burned through the cell: deactivate cells as they burn out, with a threshold above `blend[2]` (§10.1). An `endpoint` belongs to a cell that stays (§7.5.2). |
+| `:Terminated` | `:unsupported_endpoint_occupancy` | `false` | A cell below `blend[2]` holds more skeleton than its endpoint's `max_skeletal_occupancy`; the solve ends at the crossing and warns naming the cell. |
 | `:DtLessThanMin` | `:pore_closure` | `false` | The domain test kept rejecting a cell whose porosity left the resolved pore domain until the step fell below `dtmin`: its pore volume closed, or fell to its own mass, thermal and geometry uncertainty. Tighter tolerances resolve the second. |
-| `:DtLessThanMin` | `:matrix_exhausted` | `false` | A cell's matrix occupancy fell below the transport model's supported domain (`blend[2]` of a model without an `endpoint`): a material that leaves no residue has burned through it. Give the transport an `endpoint`, deactivate cells as they burn out, or keep a residue. |
-| `:DtLessThanMin` | `:unsupported_endpoint_occupancy`, `:negative_gas_pressure`, `:negative_surface_pressure` | `false` | The domain test kept rejecting a cell beyond its endpoint's skeletal occupancy, a pore gas below its pressure tolerance, or a negative reconstructed boundary pressure. |
-| `:Failure` | `:none` | `false` | The state after an event was inadmissible (a receiver outside its own mass tolerances, crossed nodes, a cell at or below absolute zero, under gas transport a porosity outside `[0, 1]`), or no consistent node velocities exist after it; the solve warns naming the event's time. |
+| `:DtLessThanMin` | `:negative_gas_pressure`, `:negative_surface_pressure` | `false` | The domain test kept rejecting a pore gas below its pressure tolerance, or a negative reconstructed boundary pressure. |
+| `:Failure` | `:none` | `false` | The state after an event was inadmissible (a receiver outside its own mass tolerances, crossed nodes, a cell at or below absolute zero, under gas transport a porosity outside `[0, 1]` or a cell outside its transport domain), or no consistent node velocities exist after it; the solve warns naming the event's time. |
 
 The state a solve ends on is always saved, whether or not `saveat` names its
 time.

@@ -331,10 +331,28 @@ and the tortuosity factor in $\eta$ are blended with their endpoint values.
 Endpoint data also declare `max_skeletal_occupancy`, the largest remaining
 condensed volume fraction they support. This check matters because $q=0$
 alone does not establish an empty pore path: a liquid outside the transport
-matrix may still occupy space. Without an endpoint, the supported domain is
-$q\geq hi$; reaching its lower boundary terminates integration with outcome
-`:matrix_exhausted`. The implementation of these mixture and endpoint rules
-is in `src/Properties/gas_transport.jl`.
+matrix may still occupy space. A matrix that converts continuously never
+leaves exactly nothing: where $q$ reaches $hi$ a single solid of porosity $\phi$ holds the
+skeletal occupancy $(1-\phi)\,hi$, which the declared value must cover for the
+endpoint to take over. Without an endpoint, the supported domain is $q\geq hi$.
+
+The solve ends where a live cell reaches the end of its supported domain, at
+the crossing, with return code `:Terminated` and outcome `:matrix_exhausted`
+(no endpoint) or `:unsupported_endpoint_occupancy`. The crossing is a
+root of the smallest margin over the live cells, inside the step at whose end
+it has turned negative,
+
+$$
+\mu=\min_i\begin{cases}(q_i-hi)/hi & \text{without an endpoint,}\\
+\max\big(q_i-hi,\;s_{\max}-s_i\big)/hi & \text{with one,}\end{cases}
+$$
+
+with $s_i$ the skeletal occupancy and $s_{\max}$ the endpoint's
+`max_skeletal_occupancy`. $\mu$ is continuous in the state and negative
+exactly where the domain has ended (§15.5.3). The domain's end is a property of
+the material and its transport model that no tolerance moves, so it is located
+rather than rejected, and the saved state lies on the inside of the root. The implementation of these mixture and
+endpoint rules is in `src/Properties/gas_transport.jl`.
 
 ## 9.4 Exchange with the surroundings
 

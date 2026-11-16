@@ -678,8 +678,9 @@ rows and checks the result:
 4. admissibility (`inadmissible`, §15.5.4) with every live cell, the receiver
    included, held to its own mass tolerances, which are those the domain test
    applies to every later proposal, and under gas transport a porosity in
-   $[0,1]$ within the skeletal volume of the mass tolerances; a failure returns
-   `:inadmissible`.
+   $[0,1]$ within the skeletal volume of the mass tolerances and every cell
+   inside its transport domain (§9.3.3), whose event sees only a crossing; a
+   failure returns `:inadmissible`.
 
 Each status has one consequence:
 
@@ -840,6 +841,7 @@ A solve ends in one of these ways:
 | the last live cell went (§14.3.4, step 3) | `:Terminated` | `:burned_out` | `true` |
 | the live thickness fell below `min_thickness` (moving mesh) | `:Terminated` | `:min_thickness` | `true` |
 | a cell below the threshold beneath live cells it cannot leave through, a cavity (§14.3.4) | `:Terminated` | `:interior` | `false` |
+| a cell reached the end of its transport domain (§9.3.3) | `:Terminated` | `:matrix_exhausted`, `:unsupported_endpoint_occupancy` | `false` |
 | no consistent node velocities after an event, or an inadmissible state after it | `:Failure` | `:none` | `false` |
 | any other integrator failure | its return code | `:none` | `false` |
 

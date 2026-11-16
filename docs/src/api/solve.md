@@ -31,6 +31,7 @@ fbdf_policy
 kencarp4_policy
 StructuredKLU
 Integration.DomainCheck
+Integration.transport_margin
 Integration.inadmissible
 Integration.consistent_state!
 Integration.default_linear_solver
