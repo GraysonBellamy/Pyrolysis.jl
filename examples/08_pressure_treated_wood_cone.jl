@@ -48,8 +48,7 @@ ThermaKin Temperature Limits:
 New Features Demonstrated:
 - Surface absorption radiation model (radiation_model=SURFACE_ABSORPTION)
 - lumped wall and Darcy gas transport (diffusion + pressure-driven flow)
-- Darcy permeability declared per component (one placeholder value for virgin
-  wood and char)
+- Composition-dependent permeability evolution (virgin wood → porous char)
 - ALE mesh motion
 """
 
@@ -111,10 +110,12 @@ water_vapor_cp = CallableProperty(T -> 1716.7 + 0.4154 * T + 1.530e-4 * T^2)
 
 # Permeability parameters for Darcy flow (pressure-driven transport).
 # PTW.cmp carries no permeability: ThermaKin has no Darcy term and its gases
-# leave without resistance. The values here are placeholders, the same for
-# virgin wood and char, so the pore pressure of this deck is illustrative.
+# leave without resistance. The values here are assumed, not measured: the
+# virgin value lies within the range measured across the grain of southern
+# pine (Comstock 1970), and the char is given a thousand times that, as in
+# the Douglas fir example. The pore pressure of this deck is illustrative.
 κ_virgin = 1.0e-15  # m² - virgin PTW
-κ_char = 1.0e-15    # m² - char (same as virgin; not a measured value)
+κ_char = 1.0e-12    # m² - open char pore network
 
 # ============================================================================
 # Component Indices for Reference
