@@ -2068,8 +2068,10 @@ If you omit `mixing` from `Material(...)`, the defaults above are used.
   2. **Carman–Kozeny** (`CARMAN_KOZENY`): ignore component `κ` and compute
      permeability from **porosity** via `κ = min(ℓ²φ³/(180(1−φ)²), ℓ²)` — the
      packed-bed law capped at the free-flow scale `ℓ²` for very open structures
-     (`φ ≳ 0.93`). This captures the steep rise in permeability as virgin → char
-     raises porosity.
+     (`φ ≳ 0.93`). It suits beds of grains. It has no basis for cellular or
+     cracked media such as wood and char, where the narrowest openings and the
+     cracks set the permeability; give those component `κ` values (Technical
+     Reference §5.7.2).
 
 Carman–Kozeny directly supplies the effective permeability, including when
 all component permeabilities are zero. Both gas models use this permeability.

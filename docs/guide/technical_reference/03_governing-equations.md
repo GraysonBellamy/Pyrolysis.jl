@@ -247,11 +247,12 @@ matrix is rigid relative to itself: solids and liquids do **not** flux between c
 — they are consumed/produced in place by reactions and (on a moving mesh) carried by
 the mesh, never by molecular transport. A liquid component is water bound in the
 cell wall: it rides the skeleton and leaves only by evaporation. Below the fibre
-saturation point (a moisture content of about 0.3 on a dry basis) that is the physics,
-bound-water diffusion spreading only $\sqrt{D_bt}\approx0.1$–$0.3$ mm over a cone test;
-above it, capillary water flows and the vapour driven inward recondenses a few
-millimetres behind the drying front, which an irreversible evaporation reaction cannot
-represent (§1.8.1). Only gas components diffuse and advect through
+saturation point (a moisture content of about 0.3 on a dry basis) the bound water is
+immobile to that approximation, its diffusion spreading only
+$\sqrt{D_bt}\approx0.1$–$0.3$ mm over a cone test; above it, capillary water flows. At
+any moisture content the vapour driven inward recondenses a few millimetres ahead of
+the drying front, which an irreversible evaporation reaction cannot represent
+(§1.8.1). Only gas components diffuse and advect through
 the pore network, and they do so *relative to the skeleton*: the wall-friction, molecular-friction and Darcy closures return fluxes relative to the
 pore walls, so the laboratory-frame gas flux is $\xi_g\mathbf v_s + \mathbf J_g$ and the
 pore gas is carried with the pores it occupies (§11.1.2). Hence the **gas-vs-solid

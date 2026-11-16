@@ -81,7 +81,7 @@ The scope boundary is as important as the scope itself. The following are explic
 
 - **Multi-dimensional geometry.** Full solves are one-dimensional in $z$. The cross-section $A$ is a scalar gauge, not a resolved 2-D/3-D field; lateral shrinkage is a column-global area scaling driven by an empirical law (§10), not a resolved lateral transport. Meshes of two and three dimensions (`box_mesh`, `cell_mesh`) exist at the residual level — a potential closure of the mesh motion, conductivity tensors and element death are implemented and tested there (§11.3.5, §14.5) — but `setup` refuses gas transport, in-depth radiation, the variable cross section, the equidistribution correction and cell deactivation on them, and they are not a supported path for full solves.
 - **Full two-temperature gas.** The gas phase is *not* given its own energy equation with a separate gas temperature. Gas is assumed to be in local thermal equilibrium with the matrix at the cell temperature $T$: it stores sensible heat like every other phase, and its flux relative to the skeleton carries its sensible enthalpy across the cell faces (§1.4.3, §7).
-- **Liquid-water transport.** Moisture is water bound in the cell wall: it rides the skeleton and leaves only by evaporation. Below the fibre saturation point (a moisture content of about 0.3, dry basis) that is the physics; above it, capillary flow and the recondensation of inward vapour are missing (§1.8.1, §3.2.3).
+- **Liquid-water transport.** Moisture is water bound in the cell wall: it rides the skeleton and leaves only by evaporation. Below the fibre saturation point (a moisture content of about 0.3, dry basis) bound water is immobile, as modeled; above it, capillary flow is missing. At every moisture content the recondensation of the vapour driven inward from the drying front is missing (§1.8.1, §3.2.3).
 - **Multi-reactant reactions.** A `Reaction` has one reactant by construction: its `reactant` field is one component index. The reactant is consumed with unit mass stoichiometry and products are explicit yields summing to 1.0 (§6). ThermaKin supports bimolecular reactions and Gpyro V2 supports gas-consuming oxidative schemes; these cannot generally be reproduced by sequences of single-reactant steps. Several reactants, each with its own order and mass stoichiometry, are an open item (§1.8.1).
 - **Pressure- or oxygen-dependent kinetics, and distributed activation energy.** The Arrhenius pre-exponential $A_i$ is temperature-independent, the rate has no explicit pressure or oxygen factor, and there is no built-in distributed-activation-energy (DAEM) tooling (§6). A reaction order other than one acts on the conversion of the reactant against its lineage inventory (§6.4); the networks with no such inventory are refused (§6.5.5).
 
@@ -490,7 +490,7 @@ The physics below is absent from the model. It is ordered by its expected effect
 **Relevant to near-term applications**
 
 3. **Oxidative pyrolysis and char oxidation with O₂ ingress** (about 32.8 MJ per kg of carbon). It dominates at sub-critical fluxes, after flameout, and in smoldering, and it controls the late-time MLR tail and the residue mass of the Douglas-fir case. It needs multi-reactant kinetics (item 2) and an explicit reservoir composition supplied by `GasReservoir`. The upwind Darcy outflow suppresses ingress at high MLR.
-4. **Equilibrium (pressure-dependent) moisture evaporation and recondensation.** Drying is a pressure-independent Arrhenius reaction; no saturation pressure $P_{\text{sat}}(T)$ appears anywhere. Vapor recondensation ahead of the drying front (which raises the local moisture content by 30–50 %) is absent, and at the 1.5–2 atm pore pressure of pressure-treated wood the boiling point shifts to 112–121 °C, which Arrhenius drying cannot represent. An Arrhenius drying step is also only admissible while its rate at ambient temperature is negligible over the test; the wood examples' parameters are not (§6.10 item 11). It needs item 2 and a smooth $r \propto (P_v - P_{\text{sat}}(T))$ closure; the pressure is evaluated for all gas-bearing materials.
+4. **Equilibrium (pressure-dependent) moisture evaporation and recondensation.** Drying is a pressure-independent Arrhenius reaction; no saturation pressure $P_{\text{sat}}(T)$ appears anywhere. Vapor recondensation ahead of the drying front (which raises the local moisture content by 30–50 %) is absent, and at the 1.5–2 atm pore pressure of pressure-treated wood the boiling point shifts to 112–121 °C, which Arrhenius drying cannot represent. The vapour driven inward from the front stays in the cold pores at many times its saturation pressure, whatever the drying kinetics, and the latent heat it would release there is not delivered. The cold side of wet wood shows a plateau near 373 K (Bilbao et al. 1996; Lee et al. 2025); a model with an Arrhenius drying step shows no plateau and lies 30–50 K below the measured bottom-surface temperature of 9 mm pressure-treated pine while it dries (Lee et al. 2025, Fig. 6). The cold-side temperature of wet wood during drying, and the pore pressure and composition of any material with a kinetic drying step, are therefore outside the model, and a conductivity fitted to a back-face history of wet wood absorbs the missing plateau. An Arrhenius drying step is also only admissible while its rate at ambient temperature is negligible over the test; the wood examples' parameters are not (§6.10 item 11). It needs item 2 and a smooth $r \propto (P_v - P_{\text{sat}}(T))$ closure; the pressure is evaluated for all gas-bearing materials.
 5. **Backing layer and contact resistance at the back face.** There is no contact-resistance or substrate model. An adiabatic back face over-predicts late-time back-half temperatures (the missing loss is about 0.7–3 kW·m⁻² for 25 mm of wood over 10–20 min); a lumped Robin condition on the bottom face (radiative + convective, as in example `06_cone_calorimeter.jl`) is the available approximation. A contact conductance plus a semi-infinite-substrate $h(t)$ would close the gap. The back face is also taken gas-tight (`ImpermeableBC`), which the standard foil wrap is not at the pore pressures pyrolysis generates; a leaky back is represented by `ConvectivePressureBC` with a board or leak resistance, and a predicted pore pressure is a mean over a cracked char, credible to about 1–1.5 bar overpressure (§9.4.3).
 6. **Kinetics expressiveness.** A $T^n$ pre-factor and DAEM-style stacking are absent. Any real order $n \ge 0$ acts on the conversion of the reactant against its lineage inventory, on fixed and moving meshes alike (§6.4); a lineage fed through the gas is refused, and a lineage whose reference would depend on the rates needs an explicit `basis` (§6.5.5).
 7. **Transport-closure accuracy** (item 5 above). The gas viscosity is a material curve without composition-dependent mixing. Binary diffusivity and pore geometry must be supplied for the dusty-gas model. Both closures exclude thermal diffusion and gravity; donor advection is first order. A matrix endpoint supplies finite porous resistance, not a free-flow momentum model (§9).
@@ -1380,11 +1380,12 @@ matrix is rigid relative to itself: solids and liquids do **not** flux between c
 — they are consumed/produced in place by reactions and (on a moving mesh) carried by
 the mesh, never by molecular transport. A liquid component is water bound in the
 cell wall: it rides the skeleton and leaves only by evaporation. Below the fibre
-saturation point (a moisture content of about 0.3 on a dry basis) that is the physics,
-bound-water diffusion spreading only $\sqrt{D_bt}\approx0.1$–$0.3$ mm over a cone test;
-above it, capillary water flows and the vapour driven inward recondenses a few
-millimetres behind the drying front, which an irreversible evaporation reaction cannot
-represent (§1.8.1). Only gas components diffuse and advect through
+saturation point (a moisture content of about 0.3 on a dry basis) the bound water is
+immobile to that approximation, its diffusion spreading only
+$\sqrt{D_bt}\approx0.1$–$0.3$ mm over a cone test; above it, capillary water flows. At
+any moisture content the vapour driven inward recondenses a few millimetres ahead of
+the drying front, which an irreversible evaporation reaction cannot represent
+(§1.8.1). Only gas components diffuse and advect through
 the pore network, and they do so *relative to the skeleton*: the wall-friction, molecular-friction and Darcy closures return fluxes relative to the
 pore walls, so the laboratory-frame gas flux is $\xi_g\mathbf v_s + \mathbf J_g$ and the
 pore gas is carried with the pores it occupies (§11.1.2). Hence the **gas-vs-solid
@@ -3528,6 +3529,12 @@ extension at unit porosity. The length scale is positive physical data.
 The cap and its branch derivative are part of this constitutive closure.
 It is evaluated even when component permeabilities are zero.
 
+The form is the hydraulic-radius model of a packed bed of grains, with its
+constant fitted to such beds. It has no basis for cellular, fibrous or cracked
+media such as wood, char and foams, where the narrowest connected openings and
+the cracks set the permeability; for those, component permeabilities are the
+appropriate data.
+
 ### 5.7.3 Constitutive and interface derivatives
 
 `BRUGGEMAN` is rejected for permeability. State differentiation includes
@@ -3671,9 +3678,11 @@ These give $\mu(300\,\text{K}) = 1.846\times10^{-5}$ Pa·s and $\mu(600\,\text{K
 > global enthalpy datum `T_REF = 298.15 K` (§2). Do not conflate the two;
 > `SutherlandProperty()` carries $T_{\text{ref}} = 273.15$ in its own field.
 
-Sutherland's law is the Chapman–Enskog rigid-sphere result for a single gas and
-captures the *increase* of gas viscosity with temperature ($\mu \propto T^{1/2}$ in the
-high-$T$ limit), the opposite of liquid behaviour. It is valid roughly over
+Sutherland's law is the kinetic-theory viscosity of rigid spheres,
+$\mu \propto T^{1/2}$, corrected for a weak attraction between the molecules, which
+enlarges the collision cross-section by the factor $1 + S/T$. It captures the
+*increase* of gas viscosity with temperature, returning to $T^{1/2}$ in the
+high-$T$ limit, the opposite of liquid behaviour. It is valid roughly over
 200–2000 K for air-like gases.
 
 ### Material-supplied viscosity
@@ -7574,6 +7583,30 @@ exactly zero: zero permeability removes Darcy flow, while zero transfer
 coefficient removes the partial-pressure transfer term. Both zero gives a
 closed pore path.
 
+Writing $p_j=x_jP$ separates the two roles of $\Lambda$ in the molar flux
+$n_j=J_j/M_j$:
+
+$$
+n_j=-\frac{x_j}{RT}\left(\Lambda+\frac{\kappa P}{\mu}\right)\nabla P
+    -\frac{\Lambda P}{RT}\nabla x_j.
+$$
+
+The first term is Darcy flow with a Klinkenberg slip correction, an apparent
+permeability $\kappa(1+b/P)$ with $b=\mu\Lambda/\kappa$. The second is equimolar
+diffusion with diffusivity $\Lambda$. One coefficient therefore stands for
+both. Where the flow-limiting openings are sub-micron, $\Lambda$ is the
+Knudsen coefficient, $\Lambda=\kappa b/\mu$; the measured $b$ of spruce is
+0.5–1.1 bar (Ai et al. 2017). Where the pores are large, $\Lambda$ is the
+effective molecular diffusivity $(\phi/\tau)D_m$. The Bosanquet sum
+$1/\Lambda=\tau/(\phi D_m)+1/K$, with $D_m$ and the Knudsen coefficient $K$ as
+in §9.2.2, joins the two limits.
+
+With $\kappa=0$ only the partial-pressure term remains. Each species then
+relaxes its own partial pressure, the product gas does not displace the
+resident gas, and the pressure needed to carry a given release scales as
+$1/\Lambda$. That pressure is a transfer potential, and the pore composition
+is meaningful only with $\kappa>0$.
+
 ### 9.2.2 Dusty-gas friction
 
 `DustyGas(...)` distinguishes collisions of molecules with pore walls from
@@ -7676,6 +7709,20 @@ can disappear completely, the exact series law can jump when its weight
 reaches zero; setup checks reachable changes in the participating components
 and rejects unsupported paths. `CARMAN_KOZENY` provides a separate
 porosity-based permeability closure (§5.7).
+
+None of these rules is derived for a matrix in transition. With three or more
+decades between the permeability of virgin wood and of its char, the rule and
+its $\beta$ set $\kappa$ at intermediate conversion and are fitted quantities.
+
+The component values are effective as well. Softwood measured intact across
+the grain has $\kappa=5\times10^{-20}$–$2.5\times10^{-14}$ m², some four decades
+below its value along the grain (Comstock 1970). A burning specimen also vents
+through drying checks, through cracks, and through the longitudinal component
+that any slope of grain gives a face. A virgin-wood value set against
+pressures measured in burning spruce, $1.5\times10^{-16}$ m² (Fredlund 1993),
+is up to three decades above the laboratory values for that species. A pore
+pressure computed from tabulated or assumed permeabilities is therefore a
+calibrated quantity (§9.4.3).
 
 ### 9.3.2 Pore geometry for the dusty-gas model
 
@@ -7946,7 +7993,12 @@ leaking to the rear of the ISO 5660 holder and burning there is documented
 and Singer 1977; Fredlund 1993), and two transducers a few centimetres apart
 in one specimen differ by the whole signal when a crack reaches one of them.
 A predicted pore pressure is therefore a mean over a cracked char, credible up
-to about 1–1.5 bar overpressure and only while the matrix is intact. When
+to about 1–1.5 bar overpressure and only while the matrix is intact. It is
+also an upper bound wherever the grain lies parallel to the heated face:
+softwood is $5\times10^{2}$ to $8\times10^{4}$ times more permeable along the
+grain than across it (Comstock 1970), so the virgin zone vents to the specimen
+edges unless they are gas-tight, a path the one-dimensional model does not
+have. When
 pressure is compared with measurements, a leaky back is represented by
 `ConvectivePressureBC` with a board or leak resistance rather than by
 `ImpermeableBC`.
@@ -8357,6 +8409,13 @@ check matters even when nominal porosity is positive. Thermal independence
 of the calorically passive gas and a separate species ledger qualify that
 fixture. These results do not establish a general bound for arbitrary dense
 melts.
+
+In a dense polymer the pore state is a numerical device. The melt has no pore
+network; PMMA vents through bubbles up to about a millimetre across (Kashiwagi
+and Ohlemiller 1982). With $\kappa=0$ the computed pressure scales as
+$1/\Lambda$ and does not depend on the nominal $\phi$, and neither coefficient
+changes the release or the temperature. The porosity, pressure and pore
+composition of such a deck are not physical quantities.
 
 ## 9.11 Reading and verifying the transport solution
 
