@@ -1,0 +1,29 @@
+# Factors on the incident flux and on the conductivity across the grain fitted
+# to each species' dry runs by calibrate_dry.jl (grid 0.95–1.25 × 0.80–1.40,
+# pooled rms over the heating period; spruce_test2_0% left out). Read by
+# problem(...; calibrated = true). Fir has no dry run and keeps its deck.
+
+[larch]
+flux_factor = 1.0
+k_factor = 1.05
+rms_K = 2.2
+rms_base_K = 2.25
+
+[oak]
+flux_factor = 1.075
+k_factor = 1.1
+rms_K = 1.829
+rms_base_K = 7.236
+
+[poplar]
+flux_factor = 1.075
+k_factor = 0.95
+rms_K = 2.908
+rms_base_K = 6.377
+
+[spruce]
+flux_factor = 1.025
+k_factor = 0.95
+rms_K = 3.043
+rms_base_K = 3.311
+
