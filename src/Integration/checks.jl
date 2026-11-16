@@ -118,8 +118,9 @@ step shrunk by the controller's minimum factor, when
   included (recorded in the monitor, so a solve that cannot pass it says
   so);
 - a gas-bearing cell lacks resolved physical pore volume above twice the
-  divisor floor plus its mass/thermal/geometry uncertainty, violates its
-  current negative-gas-pressure budget, or leaves the declared transport domain;
+  divisor floor plus its mass/thermal/geometry uncertainty, or violates its
+  current negative-gas-pressure budget;
+- a reconstructed boundary pressure is negative;
 - an algebraic row's residual exceeds `rtol · S + a`, with `S` its own
   equation's scale and `a` the absolute tolerance of its unknown in the
   residual's units ([`constraint_residual`](@ref)).
@@ -132,8 +133,12 @@ and its controller's own cut. The residual is evaluated once per tested
 state. After more than `max_consecutive` consecutive constraint rejections
 the state is accepted and the monitor marked failed, and the step observer
 ends the solve.
+
+The end of the declared transport domain is not a rejection: the solve ends
+there, at the crossing located by an event on [`transport_margin`](@ref),
+which each evaluation stores with the residual it remembers.
 """
-struct DomainCheck{D<:ResidualDefinition,W<:ResidualWorkspace}
+struct DomainCheck{D<:ResidualDefinition,W<:ResidualWorkspace,M<:DerivedState}
     def::D
     ws::W
     du::Vector{Float64}
@@ -148,6 +153,11 @@ struct DomainCheck{D<:ResidualDefinition,W<:ResidualWorkspace}
     gas::Vector{Int}
     gas_masses::Vector{Float64}
     evaluations::Base.RefValue{Int}
+    margin::Base.RefValue{Tuple{Float64,Int}}
+    read_state::Vector{Float64}
+    read_valid::Base.RefValue{Bool}
+    read_margin::Base.RefValue{Tuple{Float64,Int}}
+    mapped::M
 end
 
 # The gas components' indices and molar masses. The components differ in type, so
@@ -185,23 +195,89 @@ function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
         gas,
         gas_masses,
         Ref(0),
+        Ref((Inf, 0)),
+        zeros(state_length(layout)),
+        Ref(false),
+        Ref((Inf, 0)),
+        DerivedState{Float64}(layout, def.setup, copy(cp.ws.T_warm)),
     )
 end
 
 """
 	evaluate!(check::DomainCheck, u, t) -> du
 
-The residual at `(u, t)` into the check's buffer, remembered: the state an
-accepted step ends on is the state the next step starts from, whose right-hand
-side the integrator asks for again, and a rejected step asks for it once more
-([`reuse!`](@ref)).
+The residual at `(u, t)` into the check's buffer, remembered with the state's
+[`transport_margin`](@ref): the state an accepted step ends on is the state the
+next step starts from, whose right-hand side the integrator asks for again, and
+a rejected step asks for it once more ([`reuse!`](@ref)); the transport
+domain's event reads the margin there ([`domain_margin`](@ref)).
 """
 function evaluate!(check::DomainCheck, u, t)
     check.evaluations[] += 1
     residual!(check.du, u, check.def, t, check.ws)
     copyto!(check.state, u)
     check.time[] = t
+    check.margin[] = transport_margin(check, check.ws.derived, check.def.setup.gas)
     return check.du
+end
+
+"""
+	transport_margin(check, ds, gas) -> (margin, cell)
+
+The smallest margin of a live cell of the derived state `ds` to the end of the
+declared transport domain ([`transport_domain`](@ref)), and that cell: with
+`hi = blend[2]`, the matrix occupancy's `(q − hi)/hi`, and with an endpoint the
+larger of that and `(s_max − s)/hi`, `s` the skeletal occupancy and `s_max` the
+endpoint's `max_skeletal_occupancy`. Continuous in the state, and negative
+exactly where the domain has ended; `(Inf, 0)` without gas transport.
+"""
+transport_margin(check::DomainCheck, ds::DerivedState, ::NoGasTransport) = (Inf, 0)
+function transport_margin(
+    check::DomainCheck,
+    ds::DerivedState{NC},
+    model::GasTransport,
+) where {NC}
+    material = check.def.setup.material
+    hi = model.blend[2]
+    endpoint = model.endpoint
+    margin, cell = Inf, 0
+    for i = 1:n_cells(check.def.layout)
+        ds.active[i] || continue
+        ξ = ntuple(j -> ds.m[j, i] / ds.V[i], Val(NC))
+        domain = transport_domain(ξ, ds.T[i], material)
+        x = (domain.q - hi) / hi
+        endpoint === nothing ||
+            (x = max(x, (endpoint.max_skeletal_occupancy - domain.skeletal) / hi))
+        x < margin && ((margin, cell) = (x, i))
+    end
+    return margin, cell
+end
+
+"""
+	domain_margin(check, u) -> (margin, cell)
+
+The [`transport_margin`](@ref) of the state `u`, which depends on the state
+alone: the one [`evaluate!`](@ref) stored when `u` is the state it remembers
+(the end of a step the domain test accepted), the one read last when `u` is
+that state (the start of the next step), and otherwise mapped from `u`
+([`derive!`](@ref)) into the check's own derived state, whose caloric inversion
+starts from temperatures of its own: a read leaves the residual's workspace as
+it was, so the trajectory of a solve that does not cross is the one without
+the transport domain's event.
+"""
+function domain_margin(check::DomainCheck, u)
+    check.def.setup.gas isa NoGasTransport && return (Inf, 0)
+    check.read_valid[] && u == check.read_state && return check.read_margin[]
+    margin = if !isnan(check.time[]) && u == check.state
+        check.margin[]
+    else
+        derive!(check.mapped, u, check.def.layout, check.def.setup)
+        transport_margin(check, check.mapped, check.def.setup.gas)
+    end
+    copyto!(check.read_state, u)
+    check.read_valid[] = true
+    check.read_margin[] = margin
+    return margin
 end
 
 """
@@ -252,10 +328,11 @@ end
 """
 	forget!(check::DomainCheck) -> check
 
-Drop the remembered residual: an event has changed the residual itself, which
-it can do without moving the state.
+Drop the remembered residual and the transport margin read last: an event has
+changed the residual itself, or the live cells, which it can do without
+moving the state.
 """
-forget!(check::DomainCheck) = (check.time[] = NaN; check)
+forget!(check::DomainCheck) = (check.time[] = NaN; check.read_valid[] = false; check)
 
 """
 	bind_error_test!(check::DomainCheck, integrator) -> check
@@ -427,12 +504,6 @@ function _porosity_out(check::DomainCheck, ds::DerivedState{NC}, ::GasTransport)
                 check.monitor.message="cell $i: gas :$(mat.components[j].name) exceeds the negative-pressure tolerance at its current pore state"
                 return true
             end
-        end
-        domain=transport_domain(ξ, ds.T[i], mat)
-        if !domain.admissible
-            check.monitor.outcome=domain.outcome
-            check.monitor.message="cell $i: $(domain.outcome) at matrix occupancy $(domain.q) and skeletal occupancy $(domain.skeletal)"
-            return true
         end
     end
     return false

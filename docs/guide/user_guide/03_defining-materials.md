@@ -822,7 +822,8 @@ states, initial-condition dimensions, the time span and initial step. Every
 gas-bearing initial state must leave positive skeletal pore volume, including
 sealed materials. Setup then checks the pore margin against the actual solver
 tolerances, reachable matrix support and endpoint assumptions. Proposed and
-post-event states undergo the same physical-domain checks. An explicitly zero
+post-event states undergo the same pore-volume and pressure checks; a solve
+ends where a cell leaves the transport domain (§8.3). An explicitly zero
 transport channel is valid; an omitted required coefficient is an error.
 
 `validate_problem(problem)` collects its errors into one diagnostic.

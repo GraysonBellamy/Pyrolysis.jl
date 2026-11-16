@@ -19,7 +19,12 @@ end
 Finite superficial transfer [m²/s] and permeability [m²] when the modeled
 matrix disappears. `max_skeletal_occupancy` declares how much remaining
 condensed skeletal volume this closure supports; zero describes an empty
-channel. The coefficients are physical data, independent of numerical cell size.
+channel, which a matrix that converts continuously does not reach: where its
+occupancy falls to `blend[2]` it still holds skeleton, and the closure takes
+over only if it supports that much. A solve ends where a cell leaves the
+supported occupancy, with return code `:Terminated` and outcome
+`:unsupported_endpoint_occupancy`. The coefficients are physical data,
+independent of numerical cell size.
 """
 struct LumpedEndpoint
     λ::Float64
@@ -37,7 +42,9 @@ end
 
 Finite channel geometry and permeability for the matrix-absent limit. A
 tortuosity of one describes an unobstructed channel only within the declared
-skeletal occupancy domain. The material's molecular reference data remain in use.
+skeletal occupancy domain, which must cover the skeleton a cell still holds
+where its matrix occupancy falls to `blend[2]` (see [`LumpedEndpoint`](@ref)).
+The material's molecular reference data remain in use.
 """
 struct DustyEndpoint
     pore_diameter::Float64
@@ -76,8 +83,9 @@ Superficial partial-pressure transfer with condensed-component `λ`, plus
 Darcy advection with condensed-component `κ`. The matrix is every solid and
 each liquid that declares `λ` or `κ` ([`participates_in_transport`](@ref)); its
 occupancy is `q = Σ_matrix ξ/ρ_bulk`. Coefficients blend to the explicit endpoint on
-`blend`. Without an endpoint the supported domain is `q ≥ blend[2]`;
-crossing it terminates integration with `:matrix_exhausted`.
+`blend`. Without an endpoint the supported domain is `q ≥ blend[2]`; a solve
+ends where a cell crosses it, with return code `:Terminated` and outcome
+`:matrix_exhausted`.
 """
 struct LumpedTransfer{E<:Union{Nothing,LumpedEndpoint}} <: GasTransport
     endpoint::E

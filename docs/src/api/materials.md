@@ -46,6 +46,7 @@ DustyGas
 LumpedEndpoint
 DustyEndpoint
 participates_in_transport
+Properties.transport_domain
 dry_gas_flags
 LineageGraph
 ```

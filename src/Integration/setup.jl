@@ -971,6 +971,9 @@ function setup(
     _report_support(find_kernel(ConductionKernel, kernels), ws.derived, topo)
     check=DomainCheck(cp)
     _porosity_out(check, ws.derived, gas) && throw(ArgumentError(check.monitor.message))
+    margin, cell = transport_margin(check, ws.derived, gas)
+    margin < 0 &&
+        throw(ArgumentError("cell $cell starts outside the declared transport domain"))
     return cp
 end
 

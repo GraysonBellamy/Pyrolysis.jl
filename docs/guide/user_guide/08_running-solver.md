@@ -250,10 +250,8 @@ rejected, and the step cut by the controller's smallest factor, when
 - under gas transport a live cell's porosity leaves `[0, 1]` by more
   than the skeletal volume of its mass tolerances (outcome `:pore_closure`), a
   pore gas is more negative than its pressure tolerance
-  (`:negative_gas_pressure`), a cell's matrix occupancy leaves the transport
-  model's supported domain (`:matrix_exhausted` without an `endpoint`,
-  `:unsupported_endpoint_occupancy` with one), or a reconstructed boundary
-  pressure is negative (`:negative_surface_pressure`);
+  (`:negative_gas_pressure`), or a reconstructed boundary pressure is negative
+  (`:negative_surface_pressure`);
 - an algebraic row (a node velocity, a radiative face flux, the cross-section area
   or its lateral rate) misses its own equation by more than `reltol` times the
   equation's scale plus the unknown's absolute tolerance.
@@ -277,11 +275,22 @@ above were rejecting its proposals, the outcome is recorded in `sol.outcome`
 and `solve` warns with the cell:
 
 ```
-solve(): stopped at t = …: the domain test rejected the proposals after the last accepted state, matrix_exhausted: cell 8: matrix_exhausted at matrix occupancy … and skeletal occupancy …
+solve(): stopped at t = …: the domain test rejected the proposals after the last accepted state, pore_closure: cell 8: raw porosity … is outside the resolved pore domain (uncertainty …)
 ```
 
 The integrator's own `dt <= dtmin` warning, printed with it, does not know the
 domain test and points at the model or its stability.
+
+The end of the transport model's supported domain is not a rejection. Where a
+live cell's matrix occupancy reaches `blend[2]` of a model without an
+`endpoint`, or a cell holds more skeleton than its endpoint supports
+(§7.5.2), the solve ends at that crossing, located inside the step, with return
+code `:Terminated`, outcome `:matrix_exhausted` or
+`:unsupported_endpoint_occupancy`, and the state at the crossing saved:
+
+```
+solve(): the solve ends at t = …, where cell 8 leaves its transport domain (matrix_exhausted): matrix occupancy … and skeletal occupancy …, against blend[2] = 0.001
+```
 
 ### The Newton-failure step cap
 

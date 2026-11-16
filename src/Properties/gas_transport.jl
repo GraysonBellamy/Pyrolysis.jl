@@ -73,6 +73,7 @@ end
 Check the physical matrix domain independently of its finite trial-state
 extension. Returns `admissible`, `outcome`, matrix occupancy and skeletal
 occupancy. Without endpoint data the domain ends at the upper blend boundary.
+A solve ends where a live cell reaches the domain's end.
 """
 function transport_domain(ξ, T, material)
     q, _ = transport_matrix_state(ξ, T, material)
@@ -89,7 +90,8 @@ function transport_domain(ξ, T, material)
 end
 
 # In a trial outside a declared matrix domain the normalized matrix remains
-# evaluable, and is zero at no occupancy. Accepted states are checked separately.
+# evaluable, and is zero at no occupancy. A solve ends where a step crosses the
+# domain's end.
 @inline _endpoint_coefficients(::Nothing, λ, κ, w) = (λ, κ)
 @inline _endpoint_coefficients(e::LumpedEndpoint, λ, κ, w) = (w*λ+(1-w)*e.λ, w*κ+(1-w)*e.κ)
 @inline _endpoint_coefficients(e::DustyEndpoint, λ, κ, w) =
