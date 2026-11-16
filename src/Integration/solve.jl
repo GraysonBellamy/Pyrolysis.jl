@@ -38,7 +38,13 @@ callbacks. `progress` draws a progress bar, a read-only observer as well.
 `use_ale`, `correction`, `lagrangian`, `deactivation` and
 `band` are those of [`setup`](@ref). On a moving mesh the solve ends with return code
 `:Terminated` and outcome `:min_thickness` when the thickness falls below
-`min_thickness` [m] (default 1e-6). With `deactivation`, cells are deactivated in events
+`min_thickness` [m] (default 1e-6). Under gas transport it ends with `:Terminated`
+where a live cell reaches the end of the declared transport domain
+([`transport_domain`](@ref)), at the crossing an event locates on
+[`transport_margin`](@ref), with a warning naming the cell: outcome
+`:matrix_exhausted` when its matrix occupancy reaches `blend[2]` of a model
+without an endpoint, `:unsupported_endpoint_occupancy` when it leaves what the
+endpoint supports. With `deactivation`, cells are deactivated in events
 ([`deactivate!`](@ref)): an event is located inside the
 step at the first time a live cell reaches its threshold (the first root of
 [`threshold_margin`](@ref)) and applied at the interpolated state
@@ -123,7 +129,8 @@ end
 Integrate a set-up problem from the state `u0`, whose algebraic rows must be
 consistent ([`consistent_state!`](@ref)), with the tolerances it was set up
 with. The keywords are those of [`solve`](@ref); `started` is the time the
-reported solve time counts from. An [`inadmissible`](@ref) `u0` is refused; a fixed-step solve,
+reported solve time counts from. An [`inadmissible`](@ref) `u0` is refused, and
+so is one outside the declared transport domain; a fixed-step solve,
 which the domain test never sees, ends with `ReturnCode.Failure` at the
 first accepted state that is inadmissible. A solve that fails ends on the
 last state it accepted. Every call starts with every cell live and, in the inventory
@@ -163,6 +170,12 @@ function integrate(
     policy = integrator_policy
 
     check = DomainCheck(cp)
+    margin, cell = domain_margin(check, u0)
+    margin < 0 && throw(
+        ArgumentError(
+            "the initial state leaves the declared transport domain in cell $cell",
+        ),
+    )
     rhs! = let check = check
         (du, u, p, t) -> begin
             right_hand_side!(du, check, u, t)
@@ -217,10 +230,11 @@ function integrate(
     )
     outcome = Ref(:none)
     thin = _thickness_termination(layout, Float64(min_thickness), outcome)
+    domain_end = _transport_domain_end(check, outcome)
     events = _deactivation_callback(cp, check, policy)
     layer_times = _layer_time_callback(cp, check, policy)
     recs, callback = _split_recorders(callback)
-    bound = [_BoundRecorder(r, cp, _crossings(cp, min_thickness)) for r in recs]
+    bound = [_BoundRecorder(r, cp, _crossings(cp, check, min_thickness)) for r in recs]
     # The last accepted state, after every callback of its step; then the
     # conservation recorders' commits and the step's saved states read again
     # (`_resave_step!`).
@@ -238,8 +252,15 @@ function integrate(
         (progress ? (_progress_observer(policy, cp.problem.tspan),) : ())...,
         (callback === nothing ? () : (_observing(callback, policy),))...,
     )
-    callbacks =
-        CallbackSet(observer, events..., layer_times..., thin..., observers..., recorder)
+    callbacks = CallbackSet(
+        observer,
+        events...,
+        layer_times...,
+        thin...,
+        domain_end,
+        observers...,
+        recorder,
+    )
 
     pressure_norm=PressureErrorNorm(cp)
     integrator = SciMLBase.init(
@@ -411,12 +432,12 @@ function _record!(
 end
 
 # The conditions of the events that can end a step before its end: the
-# deactivation's threshold margin, the layer times' activation margin and the
-# thickness stop's margin.
-function _crossings(cp::PreparedProblem, min_thickness::Real)
+# deactivation's threshold margin, the layer times' activation margin, the
+# thickness stop's margin and the transport domain's.
+function _crossings(cp::PreparedProblem, check::DomainCheck, min_thickness::Real)
     layout = cp.def.layout
     cells = cp.deactivation
-    out = _ScalarWrapper[]
+    out = _ScalarWrapper[_ScalarWrapper(u -> _domain_end_margin(check, u))]
     cells === nothing || push!(out, _ScalarWrapper(u -> threshold_margin(cells, layout, u)))
     corr = _layer_correction(cp.def)
     if corr !== nothing
@@ -543,6 +564,75 @@ function _thickness_termination(
     )
 end
 
+# The solve's end where a live cell reaches the end of the declared transport
+# domain: at a root of the smallest margin inside the step where it turns
+# negative ([`transport_margin`](@ref)), on the side inside the domain, with the
+# outcome of the model (`:matrix_exhausted` without an endpoint,
+# `:unsupported_endpoint_occupancy` with one) and a warning naming the cell. The
+# margin is read at the step's ends only, as the domain test reads its
+# proposals, and those reads cost no evaluation ([`domain_margin`](@ref)).
+# Without gas transport the margin is infinite and the event never fires; the
+# callback's types are the same either way.
+function _transport_domain_end(check::DomainCheck, outcome::Base.RefValue{Symbol})
+    margin = _ScalarWrapper(u -> _domain_end_margin(check, u))
+    stop = FunctionWrapper{Nothing,Tuple{_StateVector,Float64}}(
+        (u, t) -> begin
+            outcome[] = _report_transport_domain_end(check, u, t)
+            return nothing
+        end,
+    )
+    return ContinuousCallback(
+        (u, t, integrator) -> margin(u),
+        nothing;
+        affect_neg! = integrator -> begin
+            stop(integrator.u, integrator.t)
+            terminate!(integrator)
+        end,
+        rootfind = SciMLBase.LeftRootFind,
+        interp_points = 0,
+        save_positions = (false, false),
+    )
+end
+
+# The margin the transport domain's event locates its root on. A cell exactly at
+# the domain's end is inside it (`transport_domain`); the event sees a crossing
+# only from a positive margin, so such a cell reads the smallest positive one.
+function _domain_end_margin(check::DomainCheck, u)
+    margin = first(domain_margin(check, u))
+    return iszero(margin) ? floatmin(Float64) : margin
+end
+
+# The outcome of a solve that reached the end of the transport domain at
+# `(u, t)`, warned with the cell and its occupancies.
+_report_transport_domain_end(check::DomainCheck, u, t) =
+    _report_transport_domain_end(check, check.def.setup.gas, u, t)
+_report_transport_domain_end(check::DomainCheck, ::NoGasTransport, u, t) = :none
+function _report_transport_domain_end(check::DomainCheck, model::GasTransport, u, t)
+    ds = derive!(check.mapped, u, check.def.layout, check.def.setup)
+    i = last(transport_margin(check, ds, model))
+    domain = _cell_transport_domain(check, ds, i)
+    endpoint = model.endpoint
+    outcome, supported = if endpoint === nothing
+        :matrix_exhausted, "blend[2] = $(model.blend[2])"
+    else
+        :unsupported_endpoint_occupancy,
+        "blend[2] = $(model.blend[2]) and the endpoint's max_skeletal_occupancy = " *
+        "$(endpoint.max_skeletal_occupancy)"
+    end
+    @warn "solve(): the solve ends at t = $t, where cell $i leaves its transport domain " *
+          "($outcome): matrix occupancy $(domain.q) and skeletal occupancy " *
+          "$(domain.skeletal), against $supported"
+    return outcome
+end
+
+# The transport domain of cell `i` of the derived state `ds`.
+_cell_transport_domain(check::DomainCheck, ds::DerivedState{NC}, i::Int) where {NC} =
+    transport_domain(
+        ntuple(j -> ds.m[j, i] / ds.V[i], Val(NC)),
+        ds.T[i],
+        check.def.setup.material,
+    )
+
 # The outermost node whose rows are live.
 function _top_live_node(layout::StateLayout)
     for nd = n_nodes(layout):-1:1
@@ -558,7 +648,8 @@ end
 # there), then the consistent
 # sweep of the algebraic rows, the admissibility of the result (a merge's
 # receiver against its own mass tolerances, those the domain test applies to
-# the proposals after the event), and the policy's restart step. A
+# the proposals after the event, and inside the transport domain, whose event
+# sees only a crossing), and the policy's restart step. A
 # sweep that leaves a velocity row above round-off or an inadmissible result
 # ends the solve with `ReturnCode.Failure`. The margin is tested for downward
 # crossings, and location takes a cell at its first crossing, so a cell under
@@ -588,6 +679,7 @@ function _deactivation_callback(cp::PreparedProblem, check::DomainCheck, policy)
             inadmissible(u, layout, def.setup, check.abstol) && return :inadmissible
             _porosity_out(check, _derived(check, u, t), def.setup.gas) &&
                 return :inadmissible
+            first(check.margin[]) < 0 && return :inadmissible
             return status
         end,
     )

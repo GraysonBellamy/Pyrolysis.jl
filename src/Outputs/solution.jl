@@ -160,8 +160,12 @@ The solution at the saved times:
   in closed form)
 - `extras`: the [`SolutionExtras`](@ref) series
 - `events`: the [`DeactivationEvent`](@ref)s of the solve, in order
-- `outcome`: `:none` unless the deactivation or the thickness stop ended
-  the solve (`:burned_out`, `:interior`, `:min_thickness`); an event that
+- `outcome`: `:none` unless an event ended the solve, with `retcode`
+  `:Terminated`: the deactivation (`:burned_out`, `:interior`), the thickness
+  stop (`:min_thickness`) or the end of the transport domain
+  (`:matrix_exhausted`, `:unsupported_endpoint_occupancy`); or the domain test
+  was rejecting a gas-bearing cell when the integrator stopped (`:pore_closure`,
+  `:negative_gas_pressure`, `:negative_surface_pressure`). An event that
   leaves the state inadmissible or the node velocities inconsistent ends the
   solve with a warning and `retcode` `:Failure`, the outcome `:none`
 - `retcode`: the integrator's return code
