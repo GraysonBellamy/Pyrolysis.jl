@@ -19,6 +19,8 @@ export lemta_argon_data,
     load_temperature,
     mass_runs,
     temperature_runs,
+    lemta_char_data,
+    char_depth_rows,
     usable,
     live,
     SPECIES,
@@ -31,10 +33,17 @@ export lemta_argon_data,
     simulate,
     char_yield,
     reaction_heats,
+    shifted_heats,
+    k_char,
     interp,
     silcal_data,
     silcal_problem,
-    FRONT
+    FRONT,
+    CHAR_EXPOSURE,
+    CHAR_THRESHOLDS,
+    series_path,
+    write_series,
+    read_series
 
 const HERE = @__DIR__
 const DECKS = joinpath(HERE, "decks")
@@ -62,21 +71,27 @@ lemta_argon_data() =
     get(ENV, "LEMTA_ARGON_DATA", joinpath(homedir(), "Documents", "data", "lemta-QRYAJ9"))
 
 """
-Check every file of the dataset against its pinned SHA-256 (data_files.toml):
-each original upload, and each spreadsheet's tab-delimited export.
+Check every file of the two datasets against its pinned SHA-256: the argon
+set (data_files.toml), each original upload and each spreadsheet's
+tab-delimited export, in `root`; the char-depth set (char_data_files.toml) in
+`char_root`.
 """
-function check_data(; root = lemta_argon_data())
-    isdir(root) || error(
-        "LEMTA argon data not found at $root (set LEMTA_ARGON_DATA, or run fetch_data.sh)",
+function check_data(; root = lemta_argon_data(), char_root = lemta_char_data())
+    for (dir, manifest, var) in (
+        (root, "data_files.toml", "LEMTA_ARGON_DATA"),
+        (char_root, "char_data_files.toml", "LEMTA_CHAR_DATA"),
     )
-    for f in TOML.parsefile(joinpath(HERE, "data_files.toml"))["files"]
-        for (name, sum) in
-            ((f["name"], f["sha256"]), (get(f, "tab", ""), get(f, "tab_sha256", "")))
-            isempty(name) && continue
-            path = joinpath(root, name)
-            isfile(path) || error("missing $name in $root (run fetch_data.sh)")
-            got = bytes2hex(open(sha256, path))
-            got == sum || error("$name differs from the published file (SHA-256 $got)")
+        isdir(dir) ||
+            error("$manifest: data not found at $dir (set $var, or run fetch_data.sh)")
+        for f in TOML.parsefile(joinpath(HERE, manifest))["files"]
+            for (name, sum) in
+                ((f["name"], f["sha256"]), (get(f, "tab", ""), get(f, "tab_sha256", "")))
+                isempty(name) && continue
+                path = joinpath(dir, name)
+                isfile(path) || error("missing $name in $dir (run fetch_data.sh)")
+                got = bytes2hex(open(sha256, path))
+                got == sum || error("$name differs from the published file (SHA-256 $got)")
+            end
         end
     end
     return root
@@ -323,6 +338,39 @@ mass_runs(; root = lemta_argon_data()) = [load_mass(n; root) for n in _names("Ma
 temperature_runs(; root = lemta_argon_data()) =
     [load_temperature(n; root) for n in _names("Temperature_"; root)]
 
+"""
+The char-depth dataset of the same chamber (Terrei et al., doi:10.57745/I9CL2R):
+`LEMTA_CHAR_DATA`, by default `~/Documents/data/lemta-I9CL2R`.
+"""
+lemta_char_data() =
+    get(ENV, "LEMTA_CHAR_DATA", joinpath(homedir(), "Documents", "data", "lemta-I9CL2R"))
+
+"""
+    char_depth_rows(; root = lemta_char_data()) -> Dict
+
+The inert rows of the char-depth dataset (char_wood.dat) for the species of
+this set: 12 min at one flux, no second exposure, grain across the flux, by
+`(species, flux)`, each row `(char, lost)` [mm]: the char layer's thickness
+and the thickness lost (`char_regression`, 50 mm less the char and the
+remaining wood, measured with a ruler on the sample cut at its centre).
+"""
+function char_depth_rows(; root = lemta_char_data())
+    rows = Dict{Tuple{String,Int},Vector{NTuple{2,Float64}}}()
+    lines = readlines(joinpath(root, "char_wood.dat"))
+    for l in lines[2:end]
+        f = strip.(split(replace(l, '\r' => ""), '\t'))
+        length(f) >= 13 || continue
+        haskey(SPECIES, f[1]) || continue
+        (f[7] == "Inert" && f[4] == "12" && f[5] == "0" && f[12] == "Vertical") || continue
+        (isempty(f[8]) || isempty(f[10])) && continue
+        push!(
+            get!(rows, (SPECIES[f[1]], parse(Int, f[3])), NTuple{2,Float64}[]),
+            (parse(Float64, f[8]), parse(Float64, f[10])),
+        )
+    end
+    return rows
+end
+
 # ---------------------------------------------------------------------------
 # Decks and properties
 # ---------------------------------------------------------------------------
@@ -353,13 +401,31 @@ end
 
 """
 Heats of the four reactions per kg of their reactant [J/kg, positive
-endothermic], from the deck's heats per g of initial dry wood: H1/α1, H2/α2,
-0 and H4/(α2γ2).
+endothermic], from heats per g of initial dry wood (`h`, the deck's by
+default): H1/α1, H2/α2, 0 and H4/(α2γ2).
 """
-function reaction_heats(d)
+function reaction_heats(d; h = d["heats"])
     α, γ = d["kinetics"]["alpha"], d["kinetics"]["gamma"]
-    h = d["heats"]
     return (1e3h["H1"] / α[1], 1e3h["H2"] / α[2], 0.0, 1e3h["H4"] / (α[2] * γ[2]))
+end
+
+"""
+    shifted_heats(d, ΔYc) -> Dict
+
+The deck's heats [J per g of initial dry wood] moved along the six-species
+fits of the heats against the DSC char yield Yc [%] (Flity 2023 thesis, Figs.
+4.15–4.17, 17 tests at 20 mL/min): H1 by −10.1 ΔYc, H2 by −16.0 ΔYc and
+H1 + H2 + H4 by −33.0 ΔYc, so H4 by −6.9 ΔYc. A positive `ΔYc` [percentage
+points] is a higher char yield and more exothermic heats.
+"""
+function shifted_heats(d, ΔYc::Real)
+    h = d["heats"]
+    dH1, dH2, dtotal = -10.1ΔYc, -16.0ΔYc, -33.0ΔYc
+    return Dict(
+        "H1" => h["H1"] + dH1,
+        "H2" => h["H2"] + dH2,
+        "H4" => h["H4"] + dtotal - dH1 - dH2,
+    )
 end
 
 # Linear law of the temperature in °C, with T in K.
@@ -368,15 +434,24 @@ _celsius_law(c) = T -> c[1] + c[2] * (T - 273.15)
 """Dry wood across the grain [W/(m K)] at dry density `ρ` and `T` [K]."""
 k_wood(ch, ρ, T) = ch["k_wood"][1] + ch["k_wood"][2] * (ρ / 1000) * sqrt(T / 433)
 
-"""Char across the grain [W/(m K)] at `T` [K], by the named law of [k_char]."""
+"""
+Char across the grain [W/(m K)] at `T` [K], by the named law of [k_char], or
+`"low"` / `"high"`: the least and the greatest of the three measured chars'
+laws (poplar, spruce, larch) at that temperature.
+"""
 function k_char(ch, law, T)
+    law in ("low", "high") && return (law == "low" ? minimum : maximum)(
+        k_char(ch, l, T) for l in ("poplar", "spruce", "larch")
+    )
     p = ch["k_char"][law]
     return p["a"] * T + p["b"] + 16σ_SB * T^3 / (3p["beta"])
 end
 
 """
     material(d, rho; ch = chamber(), k_rule = PARALLEL, volatiles_c, permeability,
-             wood_absorptivity = d["absorptivity"], shrinkage = nothing)
+             wood_absorptivity = d["absorptivity"], shrinkage = nothing,
+             char_conductivity = d["char_conductivity"], heats = d["heats"],
+             k_solid = nothing)
 
 The species `d` at dry density `rho` [kg/m³]: the three pseudo-components of
 the dry wood, the chars C2, C3 and the heat-only C4, the volatiles and the
@@ -394,6 +469,9 @@ chamber's argon.
   those shares.
 - Every solid has the chamber deck's permeability and lumped transfer
   coefficient; the volatiles' heat capacity is `volatiles_c`.
+- `char_conductivity` names the char's law (`k_char`), `heats` the heats per g
+  of initial dry wood (`reaction_heats`); `k_solid`, a function of T [K],
+  replaces the conductivity of every solid.
 """
 function material(
     d,
@@ -404,6 +482,9 @@ function material(
     permeability::Real = ch["permeability"],
     wood_absorptivity::Real = d["absorptivity"],
     shrinkage::Union{Nothing,Real} = nothing,
+    char_conductivity::AbstractString = d["char_conductivity"],
+    heats = d["heats"],
+    k_solid = nothing,
 )
     kin = d["kinetics"]
     α, γ = kin["alpha"], kin["gamma"]
@@ -411,9 +492,8 @@ function material(
     εtab = Float64.(d["emissivity"])
     c_w = CallableProperty(_celsius_law(ch["c_wood"]))
     c_c = CallableProperty(_celsius_law(ch["c_char"]))
-    k_w = CallableProperty(T -> k_wood(ch, rho, T))
-    law = d["char_conductivity"]
-    k_c = CallableProperty(T -> k_char(ch, law, T))
+    k_w = CallableProperty(something(k_solid, T -> k_wood(ch, rho, T)))
+    k_c = CallableProperty(something(k_solid, T -> k_char(ch, char_conductivity, T)))
     ε_w = CallableProperty(T -> interp(Tε, εtab, T))
     ρs = ch["skeletal_density"]
     wood(name) = SolidComponent(
@@ -455,7 +535,7 @@ function material(
         GaseousComponent(:ARGON; M = ch["argon_M"], c = ch["argon_c"], k = ch["argon_k"]),
     )
     A, E = kin["A"], kin["E"]
-    H = reaction_heats(d)
+    H = reaction_heats(d; h = heats)
     reactions = (
         Reaction(:R1, :WOOD_1 => :VOLATILES; A = A[1], E = E[1], h = H[1]),
         Reaction(
@@ -637,7 +717,8 @@ a number or a `(depths, temperatures)` pair interpolated in depth.
   - `:silcal`, `:thesis`: absorbs the nominal flux at the deck's absorptivity,
     re-radiates to `T_window(t)` (default T_a(t)) and convects to T_a(t) at the
     gray 1D calibration's h (front.toml) or the thesis's (chamber.toml);
-  - `h_front` replaces the h when given.
+  - `h_front` replaces the h when given, `wood_absorptivity` the wood's
+    absorptivity for the heater's radiation.
 - **Gas temperature** T_a(t) = T_ref + the calcium-silicate rear-face rise at
   this flux (`chamber_rise`), with T_ref the initial temperature at 40 mm.
 - **Back face** (`:bottom`), by `back`:
@@ -665,6 +746,7 @@ function problem(
     T_window = nothing,
     front::Symbol = :window,
     h_front::Union{Nothing,Real} = nothing,
+    wood_absorptivity::Union{Nothing,Real} = nothing,
     series = nothing,
     ch = chamber(),
     shrinkage = ch["shrinkage"],
@@ -675,10 +757,12 @@ function problem(
     front === :window &&
         series === nothing &&
         error("front = :window needs a window history")
-    α_w =
+    α_w = something(
+        wood_absorptivity,
         front === :window ?
         absorptivity_behind_window(wood_spectrum(species), series.T_c, series.T_w[1]) :
-        d["absorptivity"]
+        d["absorptivity"],
+    )
     mat = material(d, rho; ch, wood_absorptivity = α_w, shrinkage, kwargs...)
     L = back === :tc40 ? 0.04 : Float64(ch["thickness"])
     T_init = T0 isa Real ? (z -> Float64(T0)) : (z -> interp(T0[1], T0[2], L - z))
@@ -749,50 +833,77 @@ _t_end(r::MassRun) = r.t[end]
 _t_end(r::TemperatureRun) = min(r.t_end, r.t[end])
 
 """
-    problem(r::MassRun; kwargs...)
-    problem(r::TemperatureRun; back = :chamber, kwargs...)
+    problem(r::MassRun; t_end, kwargs...)
+    problem(r::TemperatureRun; back = :chamber, t_end, kwargs...)
 
-The test's problem: its species, flux and density, to the end of its record
-or exposure. A mass test starts uniform at the chamber's initial gas
-temperature at its flux, the first reading of the calcium-silicate rear face
-(its own initial temperature was not recorded); a temperature test starts from
-its first row.
+The test's problem: its species, flux and density, to `t_end`, by default the
+end of its record or exposure. A mass test starts uniform at the chamber's
+initial gas temperature at its flux, the first reading of the calcium-silicate
+rear face (its own initial temperature was not recorded); a temperature test
+starts from its first row.
 """
-function problem(r::MassRun; kwargs...)
-    return problem(r.species, r.flux, r.rho; T0 = _T0(r), t_end = _t_end(r), kwargs...)
+function problem(r::MassRun; t_end::Real = _t_end(r), kwargs...)
+    return problem(r.species, r.flux, r.rho; T0 = _T0(r), t_end, kwargs...)
 end
 
-function problem(r::TemperatureRun; back::Symbol = :chamber, kwargs...)
+function problem(
+    r::TemperatureRun;
+    back::Symbol = :chamber,
+    t_end::Real = _t_end(r),
+    kwargs...,
+)
     T40 = nothing
     if back === :tc40
         j = length(DEPTHS)
         live(r, j) || error("$(r.name): no 40 mm record")
         T40 = (r.t, r.T[:, j])
     end
-    return problem(
-        r.species,
-        r.flux,
-        r.rho;
-        T0 = _T0(r),
-        t_end = _t_end(r),
-        back,
-        T40,
-        kwargs...,
-    )
+    return problem(r.species, r.flux, r.rho; T0 = _T0(r), t_end, back, T40, kwargs...)
+end
+
+"""
+The exposure of the char-depth tests in this chamber (Terrei et al.,
+doi:10.57745/I9CL2R, inert rows): 12 min. Mass tests are solved to it.
+"""
+const CHAR_EXPOSURE = 720.0   # s
+
+"""
+The model's char/virgin boundary: the depth at which the conversion of the
+dry wood's three pseudo-components, X = 1 − (S1 + S2 + S3)/(their initial
+mass) in each material cell, crosses a threshold. 0.5 is the boundary the
+comparison scores (S1 and most of S2 gone, ≈ 330–370 °C at these heating
+rates); 0.2 and 0.8 bracket it.
+"""
+const CHAR_THRESHOLDS = (0.2, 0.5, 0.8)
+
+# Depth [m] below the current exposed face at which the conversion X of each
+# cell (`X`, bottom to top) falls below `x`, interpolated between cell centres
+# at depths `dc`; zero when the face cell has not reached it.
+function _front_depth(X, dc, x)
+    n = length(X)
+    X[n] < x && return 0.0
+    c = n
+    while c > 1 && X[c-1] >= x
+        c -= 1
+    end
+    c == 1 && return dc[1]
+    return dc[c] + (X[c] - x) / (X[c] - X[c-1]) * (dc[c-1] - dc[c])
 end
 
 """
     simulate(r; front = :window, passes = 3, shrinkage = 0.20, reltol = 1e-6,
-             dtmax = 5.0, kwargs...) -> NamedTuple
+             abstol = 1e-6, dtmax = 5.0, t_end, kwargs...) -> NamedTuple
 
 Solve the test's problem with a `ConservationRecorder` and return the series
 the comparison reads: temperatures [K] at the nominal thermocouple depths
 (cell centres interpolated linearly), the surface and back temperatures [K],
 the condensed mass over its initial value, the mass loss rate [g/(m² s)],
-the window's temperature [K] (`NaN` unless `front = :window`), and the mass
-and energy closures of `conservation_audit`. Under `front = :window` the
-window and the sample are solved in turn `passes` times before the final
-solve. With `shrinkage` (see [`material`](@ref)) the mesh moves with the solid
+the window's temperature [K] (`NaN` unless `front = :window`), the depth of
+the char/virgin boundary [m] at each of `CHAR_THRESHOLDS` (`char`, one column
+each), and the mass and energy closures of `conservation_audit`. Under
+`front = :window` the window and the sample are solved in turn `passes` times
+before the final solve; `window_retcodes` are those solves' return codes. With
+`shrinkage` (see [`material`](@ref)) the mesh moves with the solid
 (`use_ale`), each thermocouple is read at its material point, and `thickness`
 [m] is the block's thickness over time.
 """
@@ -801,11 +912,14 @@ function simulate(
     front::Symbol = :window,
     passes::Int = 3,
     reltol = 1e-6,
+    abstol = 1e-6,
     dtmax = 5.0,
+    t_end::Real = _t_end(r),
     shrinkage = chamber()["shrinkage"],
     kwargs...,
 )
     shrinkage = _shrinkage(shrinkage, r.species)
+    ale = shrinkage !== nothing
     series = nothing
     if front === :window
         T0 = _T0(r)
@@ -815,42 +929,47 @@ function simulate(
         ch = chamber()
         ε_char = ch["char_emissivity"]
         series = window_series(
-            s -> problem(r; front, series = s, shrinkage, kwargs...),
+            s -> problem(r; front, series = s, shrinkage, t_end, kwargs...),
             1000 * r.flux,
             T_a,
             T -> ε_char,
-            _t_end(r),
+            t_end,
             chamber_geometry(ch);
             passes,
             reltol,
+            abstol,
             dtmax,
-            use_ale = shrinkage !== nothing,
+            use_ale = ale,
         )
     end
-    prob, nodes = problem(r; front, series, shrinkage, kwargs...)
+    prob, nodes = problem(r; front, series, shrinkage, t_end, kwargs...)
     rec = ConservationRecorder()
-    ale = shrinkage !== nothing
-    sol = solve(prob; reltol, abstol = 1e-6, dtmax, callback = rec, use_ale = ale)
+    sol = solve(prob; reltol, abstol, dtmax, callback = rec, use_ale = ale)
     audit = conservation_audit(sol, rec)
     L = nodes[end]
     nt = length(sol.t)
+    nc = length(nodes) - 1
     # node positions at each saved time: the mesh moves with the solid under
     # shrinkage, so a node stays at its material point
     z(k) = ale ? view(sol.z, :, k) : nodes
+    centres(k) = 0.5 .* (z(k)[1:(end-1)] .+ z(k)[2:end])
     depths = filter(d -> d < L, DEPTHS)
     T = [
-        interp(
-            0.5 .* (z(k)[1:(end-1)] .+ z(k)[2:end]),
-            view(sol.T, :, k),
-            interp(nodes, z(k), L - d),
-        ) for k = 1:nt, d in depths
+        interp(centres(k), view(sol.T, :, k), interp(nodes, z(k), L - d)) for
+        k = 1:nt, d in depths
     ]
     solids = 1:6
-    m = [
-        sum(
-            sol.ξ[j, c, k] * (z(k)[c+1] - z(k)[c]) for j in solids, c = 1:(length(nodes)-1)
-        ) for k = 1:nt
-    ]
+    cell_mass(js, c, k) = sum(sol.ξ[j, c, k] for j in js) * (z(k)[c+1] - z(k)[c])
+    m = [sum(cell_mass(solids, c, k) for c = 1:nc) for k = 1:nt]
+    reactant0 = [cell_mass(1:3, c, 1) for c = 1:nc]
+    char = zeros(nt, length(CHAR_THRESHOLDS))
+    for k = 1:nt
+        X = [1 - cell_mass(1:3, c, k) / reactant0[c] for c = 1:nc]
+        dc = z(k)[end] .- centres(k)
+        for (i, x) in enumerate(CHAR_THRESHOLDS)
+            char[k, i] = _front_depth(X, dc, x)
+        end
+    end
     return (;
         t = sol.t,
         depths,
@@ -861,10 +980,93 @@ function simulate(
         mlr = 1000 .* sol.mass_loss_rate,
         T_window = series === nothing ? fill(NaN, nt) :
                    [interp(series.t, series.T_w, t) for t in sol.t],
-        thickness = [z(k)[end] for k = 1:nt],
+        thickness = [z(k)[end] - z(k)[1] for k = 1:nt],
+        char,
         retcode = string(sol.retcode),
+        window_retcodes = series === nothing ? String[] : series.retcodes,
         solve_time = sol.solve_time,
         audit,
+    )
+end
+
+# ---------------------------------------------------------------------------
+# Series files
+# ---------------------------------------------------------------------------
+
+"""The series file of test `name` under `variant`: results/<variant>/<name>.csv."""
+series_path(variant, name) = joinpath(RESULTS, variant, name * ".csv")
+
+_char_column(x) = @sprintf("char_X%02d_mm", round(Int, 100x))
+
+"""
+Write a `simulate` result as CSV: time, the temperatures at the thermocouple
+depths, the surface and back, m/m₀, the mass loss rate, the window, the
+thickness and the char depths [mm]; the return codes, solve time and ledger
+closures on a trailing comment line.
+"""
+function write_series(path, s)
+    mkpath(dirname(path))
+    open(path, "w") do io
+        head = [
+            "time_s"
+            [@sprintf("T_%gmm_K", 1000d) for d in s.depths]
+            ["T_surface_K", "T_back_K", "m_over_m0", "mlr_g_m2_s", "T_window_K"]
+            "thickness_mm"
+            [_char_column(x) for x in CHAR_THRESHOLDS]
+        ]
+        println(io, join(head, ","))
+        for k in eachindex(s.t)
+            v = [
+                s.t[k]
+                s.T[k, :]
+                [s.T_surface[k], s.T_back[k], s.m[k], s.mlr[k], s.T_window[k]]
+                1000 * s.thickness[k]
+                1000 .* s.char[k, :]
+            ]
+            println(io, join((@sprintf("%.7g", x) for x in v), ","))
+        end
+        @printf(
+            io,
+            "# retcode=%s window_retcodes=%s solve_time=%.2f mass_relative=%.3g energy_relative=%.3g\n",
+            s.retcode,
+            join(s.window_retcodes, ";"),
+            s.solve_time,
+            s.audit.mass.relative,
+            s.audit.energy.relative
+        )
+    end
+end
+
+"""Read a series file written by `write_series` (lengths in m, as `simulate`)."""
+function read_series(path)
+    lines = readlines(path)
+    rows = filter(l -> !startswith(l, "#"), lines)
+    header = split(rows[1], ',')
+    data = [parse.(Float64, split(l, ',')) for l in rows[2:end]]
+    col(name) = [row[findfirst(==(name), header)] for row in data]
+    tcs = [h for h in header if occursin(r"^T_[\d.]+mm_K$", h)]
+    meta = Dict{String,String}()
+    for l in filter(l -> startswith(l, "# retcode"), lines), kv in split(strip(l[2:end]))
+
+        k, v = split(kv, '='; limit = 2)
+        meta[k] = v
+    end
+    return (;
+        t = col("time_s"),
+        depths = [parse(Float64, h[3:(end-4)]) / 1000 for h in tcs],
+        T = reduce(hcat, [col(h) for h in tcs]),
+        T_surface = col("T_surface_K"),
+        T_back = col("T_back_K"),
+        m = col("m_over_m0"),
+        mlr = col("mlr_g_m2_s"),
+        T_window = col("T_window_K"),
+        thickness = col("thickness_mm") ./ 1000,
+        char = reduce(hcat, [col(_char_column(x)) ./ 1000 for x in CHAR_THRESHOLDS]),
+        retcode = get(meta, "retcode", "?"),
+        window_retcodes = filter(!isempty, split(get(meta, "window_retcodes", ""), ';')),
+        solve_time = parse(Float64, get(meta, "solve_time", "NaN")),
+        mass_relative = parse(Float64, get(meta, "mass_relative", "NaN")),
+        energy_relative = parse(Float64, get(meta, "energy_relative", "NaN")),
     )
 end
 

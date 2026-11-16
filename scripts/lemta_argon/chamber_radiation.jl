@@ -256,13 +256,15 @@ function wood_spectrum(species)
 end
 
 """
-    window_series(build, q, T_a, ε_s, t_end, g; passes = 3, reltol, dtmax) -> series
+    window_series(build, q, T_a, ε_s, t_end, g; passes = 3, reltol, abstol, dtmax)
+        -> series
 
 The window's history under a sample: `build(series)` returns the sample's
 `(problem, nodes)` for a window history `series` (`window_history`). The
 window is computed from the sample's surface temperature of the previous solve
 (the first from a surface warming to T_a + 400 K over a minute), `passes`
-times; the last history is returned.
+times; the last history is returned, with the return codes of the passes'
+solves (`retcodes`).
 """
 function window_series(
     build,
@@ -273,19 +275,22 @@ function window_series(
     g;
     passes::Int = 3,
     reltol = 1e-6,
+    abstol = 1e-6,
     dtmax = 5.0,
     use_ale::Bool = false,
 )
     T_s = t -> T_a(t) + 400 * (1 - exp(-t / 60))
     series = window_history(q, T_s, ε_s, T_a, t_end, g)
+    retcodes = String[]
     for _ = 1:passes
         prob, _ = build(series)
-        sol = solve(prob; reltol, abstol = 1e-6, dtmax, use_ale)
+        sol = solve(prob; reltol, abstol, dtmax, use_ale)
+        push!(retcodes, string(sol.retcode))
         ts, Ts = copy(sol.t), copy(sol.surface_T)
         T_s = t -> interp(ts, Ts, t)
         series = window_history(q, T_s, ε_s, T_a, t_end, g)
     end
-    return series
+    return merge(series, (; retcodes))
 end
 
 # The exposed face under the cone and window: the cone's radiation transmitted

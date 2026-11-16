@@ -20,31 +20,6 @@ outdir = joinpath(RESULTS, "smoke")
 mkpath(outdir)
 mkpath(joinpath(RESULTS, "figures"))
 
-function write_series(path, s)
-    open(path, "w") do io
-        tcs = [@sprintf("T_%gmm_K", 1000d) for d in s.depths]
-        println(
-            io,
-            join(
-                ["time_s"; tcs; ["T_surface_K", "T_back_K", "m_over_m0", "mlr_g_m2_s"]],
-                ",",
-            ),
-        )
-        for k in eachindex(s.t)
-            v = [s.t[k]; s.T[k, :]; [s.T_surface[k], s.T_back[k], s.m[k], s.mlr[k]]]
-            println(io, join((@sprintf("%.6g", x) for x in v), ","))
-        end
-        @printf(
-            io,
-            "# retcode=%s solve_time=%.1f mass_relative=%.3g energy_relative=%.3g\n",
-            s.retcode,
-            s.solve_time,
-            s.audit.mass.relative,
-            s.audit.energy.relative
-        )
-    end
-end
-
 ledger(s) = @sprintf(
     "%s in %.0f s; mass defect %.2g (relative %.2g), energy defect %.3g J/m² (relative %.2g)",
     s.retcode,

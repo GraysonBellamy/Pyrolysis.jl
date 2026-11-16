@@ -98,6 +98,10 @@ beta = 826.0
 a = -1.42e-4
 b = 9.2e-2
 beta = 900.0
+[k_char.spruce]               # CHAR Eq. 9, "fir", 110–815 °C, char 250 kg/m³, rms 0.018
+a = -1.15e-4                  # (the thesis's spruce char: same photograph and TGA,
+b = 9.4e-2                    # Th Figs. 6.12c, 6.13); no deck uses it
+beta = 1020.0
 [k_char.larch]                # CHAR Eq. 10, 105–840 °C, char 400 kg/m³, rms 0.029
 a = -1.244e-4
 b = 9.17e-2

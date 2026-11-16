@@ -31,14 +31,25 @@ The data are Flity, Terrei, Acem & Parent, doi:10.57745/QRYAJ9, v1.0, licence Et
   repository states, and the repository's tab-delimited export of it, checked against
   the SHA-256 pinned in `data_files.toml`. The export holds the spreadsheet's cell
   values unchanged; the loader reads it.
-- `check_data()` checks every file against the SHA-256s in `data_files.toml`.
+- The comparison also scores the char depths of the same chamber's cone tests: Terrei,
+  Erez, Acem, Suzanne, Boulet & Parent, doi:10.57745/I9CL2R, v1.1, licence Etalab 2.0,
+  in `LEMTA_CHAR_DATA` (default `~/Documents/data/lemta-I9CL2R`), pinned in
+  `char_data_files.toml` and fetched by the same script.
+- `check_data()` checks every file of both against the SHA-256s of the two manifests.
 
 ```sh
 bash scripts/lemta_argon/fetch_data.sh
 julia --project=scripts/verification scripts/lemta_argon/check_data.jl
 julia --project=scripts/verification scripts/lemta_argon/calibrate_front.jl
 julia --project=scripts/verification scripts/lemta_argon/smoke.jl poplar
+julia --project=scripts/verification scripts/lemta_argon/run_cases.jl deck
+julia --project=scripts/verification scripts/lemta_argon/compare.jl
 ```
+
+`run_cases.jl` takes one or more variants of `variants.jl` (the decks; 200 cells and
+tighter tolerances; one lever each; a diagnostic with the thesis's fitted
+conductivity, which is fitted to these tests and is not a deck value), optionally test
+or species names and `--part=i/n` to split the runs over processes.
 
 ## Layout
 
@@ -48,12 +59,14 @@ julia --project=scripts/verification scripts/lemta_argon/smoke.jl poplar
 | `decks/silcal.csv` | the calcium-silicate runs in the chamber (thesis Fig. 5.5, read from its vector paths): temperatures at 2–40 mm and the rear face, at 25, 35 and 45 kW/m² |
 | `decks/<species>.toml` | kinetics, heats, optics and char law, each with its source |
 | `LemtaArgon.jl` | data loading and the defect list; decks to Pyrolysis.jl materials and problems; outputs at the thermocouple depths with the conservation ledgers |
-| `data_files.toml`, `fetch_data.sh` | the pinned dataset and its download |
+| `data_files.toml`, `char_data_files.toml`, `fetch_data.sh` | the pinned datasets and their download |
 | `chamber_radiation.jl` | the cone, the sapphire window and the face's radiation exchange |
 | `decks/wood_absorptivity.csv` | the woods' spectral absorptivity (Flity et al. 2025 Fig. B.18, read from its vector paths) |
 | `calibrate_front.jl`, `front.toml` | the front-face h per flux, fitted to the calcium-silicate runs in 1D, under the cone and window and with a gray face |
 | `check_data.jl` | every test with its cuts, drawn per species (`results/figures/data_<species>.png`); `results/data_summary.csv` |
 | `smoke.jl` | one species at each flux: solves, ledgers, a sanity check against the data, and sensitivities on its 35 kW/m² tests |
+| `variants.jl`, `run_cases.jl` | the comparison's variants, and their runs on every test (`results/<variant>/<test>.csv`; mass tests to 720 s, the char-depth tests' exposure) |
+| `compare.jl` | scores against the data: m/m₀, mass loss rates, temperatures by depth, char depth and thickness lost (`results/metrics_*.csv`, `results/tables/*.md`, `results/figures/compare_<species>.png`, `levers.png`) |
 | `results/` | generated (ignored) |
 
 ## Scenario
@@ -100,6 +113,10 @@ julia --project=scripts/verification scripts/lemta_argon/smoke.jl poplar
   40 mm and holds it at the test's own 40 mm record; `:adiabatic`.
 - **Initial state.** A temperature test starts from its first row, interpolated in
   depth; a mass test starts uniform at the chamber's initial gas temperature.
+- **Char depth.** The char/virgin boundary is where the conversion of the three
+  pseudo-components in a material cell, X = 1 − (S1 + S2 + S3)/(their initial mass),
+  crosses 0.5 (0.2 and 0.8 bracket it; `CHAR_THRESHOLDS`), measured from the current
+  face; the thickness lost is the initial thickness less the current one.
 
 ## Defects
 
