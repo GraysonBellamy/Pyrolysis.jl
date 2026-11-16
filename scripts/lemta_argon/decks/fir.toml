@@ -22,6 +22,8 @@ absorptivity = 0.904
 # takes the pooled law.
 char_conductivity = "pooled"
 
+# No inert rows for fir in I9CL2R: `shrinkage = :cone` is not available.
+
 # Three independent first-order reactions of the dry wood, fitted to TGA in N₂
 # at 5, 10 and 20 K/min (Th Annex C, Table C.3, p.168): S1 → gas,
 # S2 → γ2 C2 + gas, S3 → γ3 C3 + gas; α is each pseudo-component's share of the

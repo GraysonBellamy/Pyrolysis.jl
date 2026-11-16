@@ -18,6 +18,8 @@ absorptivity = 0.942
 # Char conductivity law (chamber.toml [k_char]). Ipé char was not measured.
 char_conductivity = "pooled"
 
+# No inert rows for ipe in I9CL2R: `shrinkage = :cone` is not available.
+
 # Three independent first-order reactions of the dry wood, fitted to TGA in N₂
 # at 5 and 10 K/min (Th Annex C, Table C.7, p.172): S1 → gas,
 # S2 → γ2 C2 + gas, S3 → γ3 C3 + gas; α is each pseudo-component's share of the

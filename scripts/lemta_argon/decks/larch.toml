@@ -18,6 +18,11 @@ absorptivity = 0.926
 # Char conductivity law (chamber.toml [k_char]).
 char_conductivity = "larch"
 
+# Shrinkage of the converted layer in the cone tests of this chamber, 12 min
+# under argon (Terrei et al., doi:10.57745/I9CL2R, inert rows: lost thickness
+# over char + lost; 35 and 45 kW/m²: 0.26, 0.20, 0.39, 0.22). Used by `shrinkage = :cone`.
+shrinkage_cone = 0.27
+
 # Three independent first-order reactions of the dry wood, fitted to TGA in N₂
 # at 5, 10 and 20 K/min (Th Annex C, Table C.4, p.169): S1 → gas,
 # S2 → γ2 C2 + gas, S3 → γ3 C3 + gas; α is each pseudo-component's share of the

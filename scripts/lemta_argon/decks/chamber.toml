@@ -62,6 +62,14 @@ argon_M = 0.039948            # kg/mol
 argon_c = 520.3               # J/(kg K), 5R/(2M)
 argon_k = 0.018               # W/(m K)
 
+# Shrinkage across the grain: the share of its thickness a fully converted
+# layer loses (`material(...; shrinkage)`). 20 %, measured on 10 × 10 × 5 cm
+# blocks of every species charred at about 900 °C for days (Th §6.5.1,
+# p.130–131; 13 % along the grain). The cone tests in this chamber lost 14–43 %
+# of their converted layer in 12 min (I9CL2R, inert rows; each species' share is
+# its deck's `shrinkage_cone`, the `shrinkage = :cone` variant).
+shrinkage = 0.20
+
 # Skeletal (cell-wall) density of every species, for the pore volume: helium
 # pycnometry gives 1400–1500 kg/m³ for every species and the thesis takes
 # 1450 (Th p.25, eq. 2.5).

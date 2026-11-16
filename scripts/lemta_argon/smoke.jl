@@ -103,8 +103,9 @@ for r in sort(tr, by = r -> r.flux)
 end
 
 # Sensitivities on the 35 kW/m² tests, against the deck (the face under the
-# cone and window, h calibrated on the silicate): the back held at the
-# measured 40 mm record; volatiles without sensible heat; h at natural
+# cone and window, h calibrated on the silicate, 20 % shrinkage): no
+# shrinkage, and the species' own shrinkage in the cone tests; the back held
+# at the measured 40 mm record; volatiles without sensible heat; h at natural
 # convection; and the gray front (front = :silcal), calibrated at the
 # silicate absorptivity of front.toml and at the bounds 0.80 and 0.92, and
 # with the thesis's h.
@@ -117,7 +118,9 @@ function sensitivities(species, mr, tr, results)
     data(d, t0) = at(r.t, usable(r, findfirst(x -> isapprox(x, d), DEPTHS)), t0) - 273.15
     cal = LemtaArgon.TOML.parsefile(LemtaArgon.FRONT)
     cases = (
-        ("deck (cone and window)", (;)),
+        ("deck (cone and window, shrinkage 0.20)", (;)),
+        ("no shrinkage", (shrinkage = nothing,)),
+        ("shrinkage of the cone tests", (shrinkage = :cone,)),
         ("back at the 40 mm record", (back = :tc40,)),
         ("volatiles without sensible heat", (volatiles_c = 0.0,)),
         (

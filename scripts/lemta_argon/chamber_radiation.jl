@@ -274,12 +274,13 @@ function window_series(
     passes::Int = 3,
     reltol = 1e-6,
     dtmax = 5.0,
+    use_ale::Bool = false,
 )
     T_s = t -> T_a(t) + 400 * (1 - exp(-t / 60))
     series = window_history(q, T_s, ε_s, T_a, t_end, g)
     for _ = 1:passes
         prob, _ = build(series)
-        sol = solve(prob; reltol, abstol = 1e-6, dtmax)
+        sol = solve(prob; reltol, abstol = 1e-6, dtmax, use_ale)
         ts, Ts = copy(sol.t), copy(sol.surface_T)
         T_s = t -> interp(ts, Ts, t)
         series = window_history(q, T_s, ε_s, T_a, t_end, g)

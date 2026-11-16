@@ -58,8 +58,12 @@ julia --project=scripts/verification scripts/lemta_argon/smoke.jl poplar
 
 ## Scenario
 
-- **Geometry and mesh.** A 1D block of 50 mm across the grain, 100 equal cells, fixed:
-  the solid does not shrink.
+- **Geometry and mesh.** A 1D block of 50 mm across the grain, 100 equal cells. The
+  chars are denser than their reactants so that a fully converted layer keeps
+  1 − `shrinkage` of its thickness (default 0.20, charred blocks across the grain;
+  `:cone`, the species' share in this chamber's cone tests; `nothing`, none on a fixed
+  mesh). The mesh moves with the solid, and each thermocouple is read at its material
+  point.
 - **Material.** Three pseudo-components of the dry wood decompose independently at
   first order: S1 → volatiles, S2 → γ2 C2 + volatiles, S3 → γ3 C3 + volatiles, and the
   heat-only C2 → C4 keeps C2's mass. Each pseudo-component has the test's density, so

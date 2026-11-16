@@ -376,7 +376,7 @@ end
 
 """
     material(d, rho; ch = chamber(), k_rule = PARALLEL, volatiles_c, permeability,
-             wood_absorptivity = d["absorptivity"])
+             wood_absorptivity = d["absorptivity"], shrinkage = nothing)
 
 The species `d` at dry density `rho` [kg/m³]: the three pseudo-components of
 the dry wood, the chars C2, C3 and the heat-only C4, the volatiles and the
@@ -384,7 +384,9 @@ chamber's argon.
 - Each pseudo-component has the wood's bulk density, so the three fill the
   volume in their shares α. Each char has its reactant's volume (C2 and C4 at
   γ2 ρ, C3 at γ3 ρ), on a fixed mesh: the solid does not shrink, as in the
-  thesis model.
+  thesis model. With `shrinkage = s`, the chars are denser by the factor that
+  leaves a fully converted layer at 1 − s of its thickness, ρ_C = γρ/f with
+  f = (1 − s)/(α2 + α3) (S1 leaves no char), for a moving mesh.
 - The wood components carry the wood's c, k(ρ, T), ε(T) and absorptivity
   (`wood_absorptivity`, for the heater's spectrum as it reaches the face); the
   chars the char's c and k law and ε = α = 0.95. Conductivity mixes by
@@ -401,6 +403,7 @@ function material(
     volatiles_c::Real = ch["volatiles_c"],
     permeability::Real = ch["permeability"],
     wood_absorptivity::Real = d["absorptivity"],
+    shrinkage::Union{Nothing,Real} = nothing,
 )
     kin = d["kinetics"]
     α, γ = kin["alpha"], kin["gamma"]
@@ -424,9 +427,10 @@ function material(
         κ = permeability,
         ρ_intrinsic = ρs,
     )
+    f = shrinkage === nothing ? 1.0 : (1 - shrinkage) / (α[2] + α[3])
     char(name, yield) = SolidComponent(
         name;
-        ρ = yield * rho,
+        ρ = yield * rho / f,
         c = c_c,
         k = k_c,
         ε = ch["char_emissivity"],
@@ -616,8 +620,8 @@ end
 
 """
     problem(species, flux, rho; T0, t_end, back = :chamber, T40 = nothing,
-            front = :window, h_front = nothing, series = nothing, cells = 100,
-            save_every = 5.0, T_window = nothing, kwargs...)
+            front = :window, h_front = nothing, series = nothing, shrinkage = 0.20,
+            cells = 100, save_every = 5.0, T_window = nothing, kwargs...)
         -> (problem, nodes)
 
 The 1D block of 50 mm across the grain for `species` at nominal flux `flux`
@@ -643,6 +647,9 @@ a number or a `(depths, temperatures)` pair interpolated in depth.
   - `:adiabatic`, no flux.
 - **Gas**: out through the exposed face to argon at T_a(t); the back is
   impermeable.
+- **Shrinkage**: `shrinkage` (default chamber.toml's 0.20; `nothing` for none,
+  `:cone` for the species' share from the cone tests), see [`material`](@ref); a
+  solve with shrinkage needs `use_ale = true` (`simulate` sets it).
 `kwargs` go to [`material`](@ref).
 """
 function problem(
@@ -660,9 +667,11 @@ function problem(
     h_front::Union{Nothing,Real} = nothing,
     series = nothing,
     ch = chamber(),
+    shrinkage = ch["shrinkage"],
     kwargs...,
 )
     d = deck(species)
+    shrinkage = _shrinkage(shrinkage, species)
     front === :window &&
         series === nothing &&
         error("front = :window needs a window history")
@@ -670,7 +679,7 @@ function problem(
         front === :window ?
         absorptivity_behind_window(wood_spectrum(species), series.T_c, series.T_w[1]) :
         d["absorptivity"]
-    mat = material(d, rho; ch, wood_absorptivity = α_w, kwargs...)
+    mat = material(d, rho; ch, wood_absorptivity = α_w, shrinkage, kwargs...)
     L = back === :tc40 ? 0.04 : Float64(ch["thickness"])
     T_init = T0 isa Real ? (z -> Float64(T0)) : (z -> interp(T0[1], T0[2], L - z))
     T_ref = T0 isa Real ? Float64(T0) : interp(T0[1], T0[2], 0.04)
@@ -724,6 +733,16 @@ function _initial_profile(r::TemperatureRun)
     return (DEPTHS[j], r.T0[j])
 end
 
+# The shrinkage a solve uses: a share, `nothing` (none, on a fixed mesh), or
+# `:cone`, the species' own share from the cone tests (its deck's `shrinkage_cone`).
+function _shrinkage(s, species)
+    s === :cone || return s
+    d = deck(species)
+    haskey(d, "shrinkage_cone") ||
+        error("$species has no shrinkage measured in the cone tests")
+    return Float64(d["shrinkage_cone"])
+end
+
 _T0(r::MassRun) = silcal_data()[round(Int, r.flux)].T[1, end]
 _T0(r::TemperatureRun) = _initial_profile(r)
 _t_end(r::MassRun) = r.t[end]
@@ -763,8 +782,8 @@ function problem(r::TemperatureRun; back::Symbol = :chamber, kwargs...)
 end
 
 """
-    simulate(r; front = :window, passes = 3, reltol = 1e-6, dtmax = 5.0,
-             kwargs...) -> NamedTuple
+    simulate(r; front = :window, passes = 3, shrinkage = 0.20, reltol = 1e-6,
+             dtmax = 5.0, kwargs...) -> NamedTuple
 
 Solve the test's problem with a `ConservationRecorder` and return the series
 the comparison reads: temperatures [K] at the nominal thermocouple depths
@@ -773,7 +792,9 @@ the condensed mass over its initial value, the mass loss rate [g/(m² s)],
 the window's temperature [K] (`NaN` unless `front = :window`), and the mass
 and energy closures of `conservation_audit`. Under `front = :window` the
 window and the sample are solved in turn `passes` times before the final
-solve.
+solve. With `shrinkage` (see [`material`](@ref)) the mesh moves with the solid
+(`use_ale`), each thermocouple is read at its material point, and `thickness`
+[m] is the block's thickness over time.
 """
 function simulate(
     r;
@@ -781,8 +802,10 @@ function simulate(
     passes::Int = 3,
     reltol = 1e-6,
     dtmax = 5.0,
+    shrinkage = chamber()["shrinkage"],
     kwargs...,
 )
+    shrinkage = _shrinkage(shrinkage, r.species)
     series = nothing
     if front === :window
         T0 = _T0(r)
@@ -792,7 +815,7 @@ function simulate(
         ch = chamber()
         ε_char = ch["char_emissivity"]
         series = window_series(
-            s -> problem(r; front, series = s, kwargs...),
+            s -> problem(r; front, series = s, shrinkage, kwargs...),
             1000 * r.flux,
             T_a,
             T -> ε_char,
@@ -801,22 +824,31 @@ function simulate(
             passes,
             reltol,
             dtmax,
+            use_ale = shrinkage !== nothing,
         )
     end
-    prob, nodes = problem(r; front, series, kwargs...)
+    prob, nodes = problem(r; front, series, shrinkage, kwargs...)
     rec = ConservationRecorder()
-    sol = solve(prob; reltol, abstol = 1e-6, dtmax, callback = rec)
+    ale = shrinkage !== nothing
+    sol = solve(prob; reltol, abstol = 1e-6, dtmax, callback = rec, use_ale = ale)
     audit = conservation_audit(sol, rec)
     L = nodes[end]
     nt = length(sol.t)
-    centres = 0.5 .* (nodes[1:(end-1)] .+ nodes[2:end])
+    # node positions at each saved time: the mesh moves with the solid under
+    # shrinkage, so a node stays at its material point
+    z(k) = ale ? view(sol.z, :, k) : nodes
     depths = filter(d -> d < L, DEPTHS)
-    T = [interp(centres, view(sol.T, :, k), L - d) for k = 1:nt, d in depths]
+    T = [
+        interp(
+            0.5 .* (z(k)[1:(end-1)] .+ z(k)[2:end]),
+            view(sol.T, :, k),
+            interp(nodes, z(k), L - d),
+        ) for k = 1:nt, d in depths
+    ]
     solids = 1:6
     m = [
         sum(
-            sol.ξ[j, c, k] * (nodes[c+1] - nodes[c]) for
-            j in solids, c = 1:(length(nodes)-1)
+            sol.ξ[j, c, k] * (z(k)[c+1] - z(k)[c]) for j in solids, c = 1:(length(nodes)-1)
         ) for k = 1:nt
     ]
     return (;
@@ -829,6 +861,7 @@ function simulate(
         mlr = 1000 .* sol.mass_loss_rate,
         T_window = series === nothing ? fill(NaN, nt) :
                    [interp(series.t, series.T_w, t) for t in sol.t],
+        thickness = [z(k)[end] for k = 1:nt],
         retcode = string(sol.retcode),
         solve_time = sol.solve_time,
         audit,
