@@ -44,10 +44,11 @@ end
 
 # `PYROLYSIS_TEST_GROUP` runs one part of the tests, so CI can run the parts
 # side by side: `jacobian` (the Jacobian, multi-D and type-analysis suites),
-# `burnout` (the burnout path's suites), `other` (every other module suite),
-# `domains` (the verification cases), or `all`, the default.
+# `burnout` (the burnout path's suites), `outputs` (the output and kernel
+# suites), `other` (every other module suite), `domains` (the verification
+# cases), or `all`, the default.
 const _GROUP = get(ENV, "PYROLYSIS_TEST_GROUP", "all")
-const _GROUPS = ("all", "jacobian", "burnout", "other", "domains")
+const _GROUPS = ("all", "jacobian", "burnout", "outputs", "other", "domains")
 _GROUP in _GROUPS ||
     error("PYROLYSIS_TEST_GROUP must be one of $(join(_GROUPS, ", ")), not $(_GROUP)")
 
@@ -62,7 +63,9 @@ const _BURNOUT = (
 function _group(f)
     any(d -> startswith(f, d * "/"), ("jacobian", "multid", "type_analysis")) &&
         return "jacobian"
-    return f in _BURNOUT ? "burnout" : "other"
+    f in _BURNOUT && return "burnout"
+    any(d -> startswith(f, d * "/"), ("outputs", "kernels")) && return "outputs"
+    return "other"
 end
 _runs(f) = _GROUP == "all" || _GROUP == _group(f)
 

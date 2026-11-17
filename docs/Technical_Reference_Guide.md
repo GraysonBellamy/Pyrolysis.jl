@@ -16618,13 +16618,13 @@ environment should not carry.
   `PYROLYSIS_ENERGY_STATE=enthalpy` runs every solve of the suite in the enthalpy
   form (a run of `runtests.jl` in that form runs only the verification cases, since
   the module suites cover both energy forms themselves). `PYROLYSIS_TEST_GROUP`
-  selects a part of the tests (`jacobian`, `burnout`, `other`, `domains` for the
-  verification cases, or `all`).
+  selects a part of the tests (`jacobian`, `burnout`, `outputs`, `other`,
+  `domains` for the verification cases, or `all`).
 - **Continuous integration** (`.github/workflows/tests.yml`) runs a fast matrix on
-  every pull request (the three module groups and the verification cases side by
-  side, in the temperature form, without the spot checks) and a full matrix weekly
-  (`Pkg.test()` as a user runs it, with the spot checks, and the verification cases
-  in the enthalpy form with their spot checks).
+  every pull request and every push to `main` (the four module groups and the
+  verification cases side by side, in the temperature form, without the spot
+  checks) and a full matrix weekly (`Pkg.test()` as a user runs it, with the spot
+  checks, and the verification cases in the enthalpy form with their spot checks).
 - **Report mode** runs in the isolated environment `scripts/verification/` (its
   own `Project.toml` with CairoMakie, so the test manifest stays free of plotting
   dependencies):

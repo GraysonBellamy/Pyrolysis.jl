@@ -1,17 +1,22 @@
 # The numerical gate. Two matrices:
 #
-# fast, on pull requests to main and by dispatch: every suite at its CI
-# resolution in the temperature form, without the convergence spot checks
-# (PYROLYSIS_TEST_FAST), in four jobs side by side: the module suites in their
-# three groups (test/runtests.jl) and the verification cases. The package is
-# built without its precompile workloads, whose test runs them in the
-# test process.
+# fast, on pull requests to main, on pushes to main and by dispatch: every
+# suite at its CI resolution in the temperature form, without the convergence
+# spot checks (PYROLYSIS_TEST_FAST), in five jobs side by side: the module
+# suites in their four groups (test/runtests.jl) and the verification cases.
+# The package is built without its precompile workloads, whose test runs them
+# in the test process. The run on main leaves a cache each pull request's first
+# run restores (a pull request cannot read another's).
 #
 # full, weekly and by dispatch with `matrix: full`: `Pkg.test()` as a user runs
 # it (every suite, the verification cases with their spot checks, both energy
 # forms in the module suites), and the verification cases in the enthalpy
 # form with their spot checks. The package is built with its precompile
 # workloads, as for a user.
+#
+# Package images are built for a fixed CPU target rather than the runner's own
+# CPU, which varies between runs: a cache built natively on one CPU model is
+# rejected on another and every dependency recompiles (8-13 minutes a job).
 name: Tests
 
 on:
@@ -24,16 +29,21 @@ on:
         type: choice
         options: [fast, full]
         default: fast
+  push:
+    branches: [main]
   schedule:
     - cron: "0 5 * * 1"
 
 concurrency:
-  group: tests-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'fast' || inputs.matrix || 'full' }}
+  group: tests-${{ github.ref }}-${{ github.event_name == 'schedule' && 'full' || inputs.matrix || 'fast' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  JULIA_CPU_TARGET: haswell
 
 jobs:
   fast:
-    if: github.event_name == 'pull_request' || inputs.matrix == 'fast'
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || inputs.matrix == 'fast'
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -45,6 +55,8 @@ jobs:
             group: jacobian
           - name: Module suites (burnout)
             group: burnout
+          - name: Module suites (outputs, kernels)
+            group: outputs
           - name: Module suites (other)
             group: other
           - name: Verification cases

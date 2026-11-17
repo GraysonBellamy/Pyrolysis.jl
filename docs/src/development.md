@@ -27,10 +27,12 @@ each in a module of its own, the type analysis in a fresh process, and the
 verification cases (`test/verification/runcases.jl`). The module suites test
 both energy forms themselves; `PYROLYSIS_ENERGY_STATE=enthalpy` runs the
 verification cases in the enthalpy form. `PYROLYSIS_TEST_GROUP` selects one
-part (`jacobian`, `burnout`, `other`, `domains`, or `all`, the default) and
+part (`jacobian`, `burnout`, `outputs`, `other`, `domains`, or `all`, the
+default) and
 `PYROLYSIS_TEST_FAST=1` skips the verification cases' convergence spot
 checks; the `tests.yml` workflow runs the parts side by side on every pull
-request to `main`, and the whole suite weekly and on dispatch.
+request to `main` and every push to it, and the whole suite weekly and on
+dispatch.
 
 ## Quality tooling
 
