@@ -149,7 +149,8 @@ end
     @test sol.ξ[:, :, 1] ≈ _Ξ_RECORDED rtol = 1e-12
 
     # Under a lateral shrinkage law each cell's conversion history starts at
-    # G = 0 and M its initial solid mass, the gas it holds excluded.
+    # G = 0 and M its initial solid mass, the gas it holds excluded. The
+    # profiles do not fill the cells, which `setup` warns of on a moving mesh.
     shrinking = Material(;
         name = :shrinking,
         components = (
@@ -159,7 +160,10 @@ end
         reactions = (Reaction(:decomp, 1 => 2, A = 1e5, E = 5e4, h = 1e5),),
         lateral_shrinkage_law = χ -> 1.0 - 0.2χ,
     )
-    cpχ = setup(_problem(mesh; material = shrinking); use_ale = true)
+    cpχ = @test_logs (:warn, r"do not fill 7 of 7 cells") setup(
+        _problem(mesh; material = shrinking);
+        use_ale = true,
+    )
     layoutχ = cpχ.def.layout
     @test has_chi(layoutχ)
     for i = 1:7

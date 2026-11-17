@@ -329,8 +329,9 @@ $$
 - the sum runs over the condensed (solid and liquid) components: when one
   depletes, the matrix loses its volume; a gas never enters (escaping gas does not
   change the skeleton volume).
-- $\rho_j(T)$ is the **bulk** (pure-phase) density of component $j$, evaluated at the
-  cell's trial temperature through the property function `comp.density(T)`.
+- $\rho_j$ is the **bulk** (apparent) density of component $j$, a constant: a
+  moving mesh refuses a condensed density given as a law of temperature
+  (§10.1.1).
 - $S_j$ is the **reaction mass source** of component $j$ per unit volume. The
   closure reads it from the reaction kernel's cell sources, $S_{j,i} =
   (\text{reaction mass source})_{j,i}/V_i$, after every kernel has run and before any
@@ -1126,10 +1127,11 @@ The principal limitations and open issues are:
    two algebraic rows (11.11) that read every cell: the system's two dense rows. A
    resolved lateral deformation is not modelled, and the law needs planar coordinates.
 
-3. **Density evaluation in the strain rate.** The strain rate (11.7) uses $\rho_j(T)$
-   at the cell's trial temperature; whether a time-averaged density would improve
-   consistency near steep thermal transients is an open modeling question, as is the
-   extension of the volume-change accounting to multi-reactant stoichiometry.
+3. **Constant densities in the strain rate.** The strain rate (11.7) takes each
+   condensed bulk density as a constant, and a moving mesh refuses a density given as
+   a law of temperature (§10.1.1); thermal expansion would need the dilation term
+   (§10.12). The extension of the volume-change accounting to multi-reactant
+   stoichiometry is an open modeling question.
 
 4. **Free stream beyond the planar line.** The uniform-field property holds to
    round-off only on a planar line with a constant cross section; in cylindrical and

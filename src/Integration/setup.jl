@@ -84,6 +84,23 @@ function _require_supported(
         # sources read the face areas, which agree only where the areas are equal.
         throw(ArgumentError("in-depth radiation needs planar coordinates"))
     end
+    if use_ale
+        # The strain rate holds each condensed bulk density constant: a density
+        # law without the thermal dilation term would make a cell's volume
+        # depend on its temperature history.
+        for c in material.components
+            (is_gas(c) || c.density isa ConstantProperty) && continue
+            throw(
+                ArgumentError(
+                    "component :$(c.name) of material $(material.name) has a bulk " *
+                    "density that is a law of temperature, which a moving mesh " *
+                    "cannot use: the strain rate takes each solid's and liquid's " *
+                    "bulk density as a constant, without the thermal dilation a " *
+                    "density law implies. Give ρ as a number, or solve on a fixed mesh",
+                ),
+            )
+        end
+    end
     if material.lateral_shrinkage_law !== nothing
         use_ale || throw(
             ArgumentError(
@@ -122,6 +139,80 @@ function _require_supported(
             ),
         )
     end
+    return nothing
+end
+
+# How far a cell's initial condensed occupancy may depart from one, and a
+# reaction's condensed products from its reactant's volume, before `setup`
+# says so: below it lie densities rounded to four figures.
+const OCCUPANCY_TOLERANCE = 1e-3
+
+# The volume the condensed products of `rxn` hold per unit volume of its
+# reactant, `Σ yⱼ ρ_A/ρⱼ`, at the densities at `T`; `Inf` for a gas reactant
+# with a condensed product, one for a gas reactant without.
+function _condensed_volume_ratio(material::Material, rxn, T)
+    comps = material.components
+    kept = sum(
+        (
+            last(p) / comps[first(p)].density(T) for
+            p in rxn.products if !is_gas(comps[first(p)])
+        );
+        init = 0.0,
+    )
+    a = comps[rxn.reactant]
+    return is_gas(a) ? (kept > 0 ? Inf : 1.0) : kept * a.density(T)
+end
+
+# Runs when some reaction of `material` changes the condensed volume by more
+# than `OCCUPANCY_TOLERANCE` at the mean initial temperature. A moving mesh
+# integrates that change from the initial volumes, so the condensed occupancy
+# `Σ ξⱼ/ρⱼ` over the solids and liquids equals one later only if it does at the
+# start: warn of the cells that start outside the tolerance of one, leaving out
+# a gap, a cell with no condensed mass, unless `sources` add mass, which moves
+# the occupancy whatever the start. A fixed mesh holds the skeleton rigid, so
+# the change shows in the porosity alone: say so, once a session.
+function _check_condensed_volume(
+    material::Material{NC},
+    T0,
+    ξ0,
+    use_ale::Bool,
+    sources,
+) where {NC}
+    comps = material.components
+    T = sum(T0) / length(T0)
+    ratios = map(rxn -> _condensed_volume_ratio(material, rxn, T), material.reactions)
+    r = findfirst(ratio -> abs(ratio - 1) > OCCUPANCY_TOLERANCE, ratios)
+    r === nothing && return nothing
+    if use_ale
+        _external_mass(sources) && return nothing
+        filled = map(axes(ξ0, 2)) do i
+            sum(
+                (ξ0[j, i] / comps[j].density(T0[i]) for j = 1:NC if !is_gas(comps[j]));
+                init = 0.0,
+            )
+        end
+        off = findall(s -> s > 0 && abs(s - 1) > OCCUPANCY_TOLERANCE, filled)
+        isempty(off) && return nothing
+        lo, hi = round.(extrema(filled[off]); sigdigits = 4)
+        spread = lo == hi ? "is $lo" : "runs from $lo to $hi"
+        @warn "setup(): the condensed components do not fill $(length(off)) of " *
+              "$(length(filled)) cells at the start, the first cell $(first(off)): " *
+              "Σ ξⱼ/ρⱼ over the solids and liquids $spread there. A moving " *
+              "mesh integrates the volume change from the initial volumes, so an " *
+              "over-filled cell shrinks below the volume its solid holds and an " *
+              "under-filled one keeps volume no component accounts for. Wood with " *
+              "bound water at dry-basis moisture MC fills its cell at " *
+              "ξ_wood = ρ/(1 + MC ρ/ρ_w)."
+        return nothing
+    end
+    held =
+        isinf(ratios[r]) ? "forms condensed mass from a gas" :
+        "leaves condensed products holding $(round(ratios[r]; sigdigits = 3)) of its " *
+        "reactant's volume"
+    @info "setup(): reaction :$(material.reactions[r].name) of material " *
+          "$(material.name) $held, but the mesh is fixed (use_ale = false): the " *
+          "skeleton keeps its volume and the porosity takes up the difference. Solve " *
+          "with use_ale = true to move the mesh with the solid." maxlog = 1
     return nothing
 end
 
@@ -685,7 +776,15 @@ balance; a `RadiativeFluxBC` on `:top` arrives diffuse or as the beams of its
 `use_ale` moves the mesh with the solid: the mesh's pinned nodes (on a line
 the back node) stay at rest and every other node follows the cells' reaction
 strain rates through the mesh closure, with its unknowns consistent at the
-start; without it every node is pinned. On a line the closure is the
+start; without it every node is pinned. A moving mesh takes each solid's and
+liquid's bulk density as a constant, and a density given as a law of
+temperature is refused. When a reaction's condensed products hold a
+different volume from its reactant (by more than `1e-3` of it), `setup` warns
+on a moving mesh if the condensed components do not fill some cell that
+holds any (`Σ ξⱼ/ρⱼ` over the solids and liquids departs from one by more
+than `1e-3`), since the mesh integrates the volume change from the initial
+volumes, unless `sources` add mass; on a fixed mesh, where the skeleton keeps
+its volume, it says so once a session. On a line the closure is the
 balance rows of [`BalanceRowClosure`](@ref), and a material with a lateral
 shrinkage law also carries the conversion-history pair and its cross
 section's area and lateral rate. `correction` moves a line's mesh relative
@@ -800,6 +899,7 @@ function setup(
         history,
         deformation,
     )
+    _check_condensed_volume(material, T0, ξ0, use_ale, sources)
     lagrangian = something(
         lagrangian,
         correction isa EquidistributionCorrection ?

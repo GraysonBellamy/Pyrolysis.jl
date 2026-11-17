@@ -49,7 +49,9 @@ _ξ = (z -> 450.0 - 1e4 * z, z -> 15.0 + 1e3 * z, z -> 0.5)
 
 # A 1 cm column of `n` stretched cells on a line, and the same column as `n`
 # rectangles one cell wide, its width the line's cross section, its lateral
-# faces adiabatic (and, the gas not moving, impermeable).
+# faces adiabatic (and, the gas not moving, impermeable). The solids fill 0.87
+# to 0.99 of each cell, varying with depth, which `setup` warns of on a moving
+# mesh.
 function _columns(n; energy)
     line = PyrolysisProblem(
         mesh = stretched_mesh(0.01, n, 1.1),
@@ -59,7 +61,11 @@ function _columns(n; energy)
         ξ_initial = collect(_ξ),
         tspan = (0.0, 1.0),
     )
-    cp1 = setup(line; energy_state = energy, use_ale = true)
+    cp1 = @test_logs (:warn, r"do not fill") match_mode = :any setup(
+        line;
+        energy_state = energy,
+        use_ale = true,
+    )
     z = cp1.def.setup.reference.positions
     width = cp1.def.setup.reference.cross_section
     column = PyrolysisProblem(
@@ -77,7 +83,12 @@ function _columns(n; energy)
         ξ_initial = [x -> f(x[2]) for f in _ξ],
         tspan = (0.0, 1.0),
     )
-    cp2 = setup(column; energy_state = energy, use_ale = true, closure = :balance)
+    cp2 = @test_logs (:warn, r"do not fill") match_mode = :any setup(
+        column;
+        energy_state = energy,
+        use_ale = true,
+        closure = :balance,
+    )
     return cp1, cp2, width
 end
 

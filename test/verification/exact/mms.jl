@@ -332,7 +332,7 @@ end
 
 """
 Continuous volumetric strain rate θ*(z,t) [1/s] on the manufactured fields:
-θ* = Σⱼ dξⱼ_rxn/ρⱼ(T*) over the condensed components — REACTION rates only, via the same
+θ* = Σⱼ dξⱼ_rxn/ρⱼ over the condensed components — REACTION rates only, via the same
 `Physics.volume_change_rate` the mesh closure's strain rates use.
 """
 function mms_theta(material, fields::MMSFields, z, t)
@@ -340,7 +340,7 @@ function mms_theta(material, fields::MMSFields, z, t)
     ξ = mms_xi_tuple(fields, z, t)
     NC = n_components(material)
     dξ_rxn = ntuple(j -> mms_rxn_source(material, j, ξ, T), NC)
-    return Physics.volume_change_rate(promote(dξ_rxn...), T, material)
+    return Physics.volume_change_rate(promote(dξ_rxn...), material)
 end
 
 const _MMS_GL_NODES, _MMS_GL_WEIGHTS = _gauss_legendre(32)

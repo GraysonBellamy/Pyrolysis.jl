@@ -84,7 +84,8 @@ char = SolidComponent(:char; ρ=150., ρ_intrinsic=1950.,
 ```
 
 Bulk density `ρ`, heat capacity `c` and conductivity `k` are required.
-The constructor's `ρ` describes the pure material. Set its amount in a
+The constructor's `ρ` is the component's apparent density, its own pores
+included: the concentration at which it fills a cell alone. Set its amount in a
 mixture through `ξ_initial` (§5.10). An FDS component density `ρ_{s,j}`
 corresponds to that concentration, while FDS's material density property
 is a separate input (§1.3; Technical Reference §4.8.3).
@@ -104,6 +105,14 @@ Bulk density `ρ` sets the volume a condensed component holds: its bulk
 occupancy `ξ/ρ` drives the volume-change law and weights conductivity,
 emissivity and absorptivity. Specify intrinsic density or pure-phase porosity
 to describe its skeletal volume. Full signatures and units are in §16.2.1.
+
+On a moving mesh `ρ` must be a number: a solid or liquid whose `ρ` is a law of
+temperature is refused there, since the strain rate carries no thermal
+dilation (Technical Reference §10.1.1). A fixed mesh accepts one. A char's `ρ`
+sets the residue thickness: produced with yield `y` from a virgin of density
+`ρ_v`, a char whose measured thickness is the fraction `f_c` of the virgin's at
+the heat flux of interest has `ρ = y ρ_v / f_c`. A char conductivity fitted with
+the model belongs to that density (Technical Reference §10.2).
 
 Conductivities are *apparent*: `k` is the conductivity of the component as a
 porous bulk at its own porosity, pore gas included, and a gas component's `k` is
@@ -157,7 +166,14 @@ dry-basis moisture content, initialize
 
 Setting `ξ_wood = ρ` and adding the water on top overfills the cell: the slab
 holds more mass than its thickness admits, and it dries to a wood denser than
-`ρ`.
+`ρ`. On a moving mesh `setup` warns when the condensed occupancies `Σ ξ_j/ρ_j`
+of a cell depart from one by more than `1e-3` and some reaction changes the
+condensed volume.
+
+A liquid is a bound liquid: it holds its own volume, as bound water does below
+the fibre saturation point (a dry-basis moisture content of about 0.3). Above
+it, free water fills existing pores and shrinks nothing as it leaves, so the
+model overstates drying shrinkage there.
 
 ---
 

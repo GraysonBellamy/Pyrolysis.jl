@@ -49,8 +49,9 @@ end
 A solid-phase component with temperature-dependent thermophysical properties
 and Darcy-flow permeability.
 
-`density` is the *bulk* (pure-phase) density used by mixing rules, mixture
-density, and volume-change kernels. `intrinsic_density` is the *skeletal*
+`density` is the *bulk* density, an apparent density that counts the
+component's own pores, used by mixing rules, mixture density, and
+volume-change kernels. `intrinsic_density` is the *skeletal*
 (cell-wall) density used only by the porosity formula
 `φ = 1 − Σ ξⱼ/ρⱼ_intrinsic`. When not specified, `intrinsic_density` defaults
 to `density`, recovering the implicit assumption that the pure
@@ -149,7 +150,9 @@ Create a solid component.
 
 # Arguments
 - `name::Symbol`: Component identifier
-- `ρ`: Bulk (pure-phase) density [kg/m³] (number or property function)
+- `ρ`: Bulk density [kg/m³], apparent, the component's own pores included
+  (number or property function; a number on a moving mesh, whose strain rate
+  takes it as a constant)
 - `c`: Heat capacity [J/(kg·K)] (number or property function)
 - `k`: Thermal conductivity [W/(m·K)] (number or property function)
 - `ε=0.9`: Surface emissivity [-] (number or property function of `T`, same
@@ -431,7 +434,8 @@ Create a liquid component.
 
 # Arguments
 - `name::Symbol`: Component identifier
-- `ρ`: Bulk density [kg/m³] (number or property function)
+- `ρ`: Bulk density [kg/m³] (number or property function; a number on a moving
+  mesh, whose strain rate takes it as a constant)
 - `c`: Heat capacity [J/(kg·K)] (number or property function)
 - `k`: Thermal conductivity [W/(m·K)] (number or property function)
 - `λ=nothing`: Condensed superficial transfer [m²/s]; declaring it makes the

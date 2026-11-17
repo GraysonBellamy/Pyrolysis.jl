@@ -468,13 +468,13 @@ Part II (the User Guide) mirrors this structure at the workflow level, beginning
 
 The model carries several known limitations, recorded here so that users size their expectations correctly (each is revisited in the relevant chapter):
 
-1. **Dimensionality and lateral transport.** Full solves are 1-D (meshes of more dimensions exist at the residual level only, §1.2.2); lateral shrinkage is a column-global area scaling driven by an *empirical* law $A/A_0=\mathrm{law}(\bar\chi)$, not a resolved 2-D field. The physical justification of the shrinkage law and its interaction with multi-dimensional geometry is an open question (§10).
+1. **Dimensionality and lateral transport.** Full solves are 1-D (meshes of more dimensions exist at the residual level only, §1.2.2); lateral shrinkage is a column-global area scaling driven by an *empirical* law $A/A_0=\mathrm{law}(\bar\chi)$, not a resolved 2-D field. The physical justification of the shrinkage law and its interaction with multi-dimensional geometry is an open question (§10); the column-wide law stretches unreacted cells as the area shrinks and suits modest area changes (§10.12).
 2. **One temperature.** The matrix and the pore gas share one temperature (local thermal equilibrium); there is no two-temperature gas energy equation, so regimes with very fast, hot gas throughput are outside the model (§3.9).
 3. **Single-reactant kinetics only.** Multi-reactant (bimolecular, competitive) reactions are unsupported, as are temperature-dependent activation energy, pressure dependence, and distributed-activation-energy tooling (§6).
 4. **The heat-of-reaction datum.** The energy balance takes the heats of reaction at the local temperature (the DSC-style, inverse-calibrated convention), which the formation term $\sum_j\omega_j h_j(T)$ of (1.1) converts to the sensible-enthalpy datum exactly. A heat quoted at the datum $T_{\text{ref}}$ differs from the local-temperature heat by Kirchhoff's law, $h_r(T) = h_r(T_{\text{ref}}) + \sum_j\nu_{r,j}h_j(T)$, and must be converted before it is supplied (§6.6.3). The datum decides which heat is released, not whether energy is conserved: the energy ledger closes exactly in both energy forms for any composition change (§16.5.2).
 5. **Transport closures and spatial accuracy.** Donor selection makes advective contributions first order. The lumped model uses one superficial matrix coefficient; the dusty-gas model adds species-dependent wall friction and declared binary diffusivity. The pore-gas viscosity is one curve per material, without composition-dependent mixing (§5, §9).
 6. **Burnout inside an envelope; sensitivities across events.** Cell deactivation is verified under joint refinement of the mesh and the tolerance inside the envelope stated in User Guide §10.9 — the threshold, the band, the cells across a vanishing layer, the tolerance — and outside it the end-of-layer transient need not converge with resolution (§14.2.4). Finite-difference parameter sensitivities remain valid across located deactivation events, whose times are smooth functions of the parameters, but an objective that samples an event at the data's times can be rough at small steps, so the step is chosen by a convergence check (§17.7.3).
-7. **Material calibration.** Experimental comparison requires the complete species and energy boundary closure, declared pore structure and transport model. Numerical convergence does not establish the validity of material parameters (§18).
+7. **Material calibration.** Experimental comparison requires the complete species and energy boundary closure, declared pore structure and transport model. Numerical convergence does not establish the validity of material parameters (§18). A char's bulk density sets the residue thickness and is tied to the char conductivity through $k\rho$, so it is defined by the measured residue thickness at the heat flux of interest (§10.2).
 
 These limitations bound the model's domain of applicability; within that domain — 1-D, single-reactant, atmospheric-to-moderate-pressure condensed-phase pyrolysis — local roots, constitutive branches, solution accuracy and conservation must be qualified for each application.
 
@@ -486,22 +486,24 @@ The physics below is absent from the model. It is ordered by its expected effect
 
 1. **Flame heat-flux feedback.** There is no ignition-triggered flame heat-flux boundary condition. After ignition a cone-calorimeter flame returns roughly 20–30 kW·m⁻² (PMMA) or 10–15 kW·m⁻² (wood) to the surface, 40–60 % on top of a 50 kW·m⁻² exposure, so parameters calibrated without it absorb that net-flux bias. The natural form is a flame-flux BC switched on by a critical-MLR or critical-$T_s$ callback. Flame feedback and the blowing reduction of the convective coefficient (the `blowing` model of `ConvectiveBC`, §12.3.3) both raise the net surface flux when the film temperature is the ambient one the examples use, since blowing cuts a loss; they offset each other only when the film temperature is the flame's, so that blowing suppresses the flame's convective heating. Enabling a blowing model alone on a cone example calibrated without either therefore raises $T_s$ and MLR. Both belong in place before the cone examples are recalibrated.
 2. **Multi-reactant kinetics** (item 3 above). A `Reaction` holds one reactant index and one order. This blocks char oxidation, recondensation, and autocatalysis (Prout–Tompkins fits cannot be represented). Several reactants, each with its own order and mass stoichiometry, would touch the reaction type, the kinetics, the volumetric strain rate, and the reaction kernel (the colored Jacobian differentiates whatever the kernel computes).
+3. **Thermal expansion and swelling of PMMA.** A PMMA slab is taken to stay flat, dense and at its cold specific volume. Thermal expansion, about 18 % of the local volume at the surface and 5–10 % of the slab thickness, is absent (§10.12), and so is the swelling of bubbles and curl: unrestrained cast PMMA rises by millimetres in cone tests before recession takes over, more at low heat flux, while extruded PMMA bubbles without swelling. Expansion reaches the computed temperature through $k\rho$ of the hot layer only, and a conductivity fitted with this model to samples of known cold thickness already holds it. Swelling acts mainly on the experiment: it moves the surface toward the heater, which raises the absorbed flux and the mass loss rate, and it detaches a back-face thermocouple. Restrained or non-swelling samples are the ones to compare with.
 
 **Relevant to near-term applications**
 
-3. **Oxidative pyrolysis and char oxidation with O₂ ingress** (about 32.8 MJ per kg of carbon). It dominates at sub-critical fluxes, after flameout, and in smoldering, and it controls the late-time MLR tail and the residue mass of the Douglas-fir case. It needs multi-reactant kinetics (item 2) and an explicit reservoir composition supplied by `GasReservoir`. The upwind Darcy outflow suppresses ingress at high MLR.
-4. **Equilibrium (pressure-dependent) moisture evaporation and recondensation.** Drying is a pressure-independent Arrhenius reaction; no saturation pressure $P_{\text{sat}}(T)$ appears anywhere. Vapor recondensation ahead of the drying front (which raises the local moisture content by 30–50 %) is absent, and at the 1.5–2 atm pore pressure of pressure-treated wood the boiling point shifts to 112–121 °C, which Arrhenius drying cannot represent. The vapour driven inward from the front stays in the cold pores at many times its saturation pressure, whatever the drying kinetics, and the latent heat it would release there is not delivered. The cold side of wet wood shows a plateau near 373 K (Bilbao et al. 1996; Lee et al. 2025); a model with an Arrhenius drying step shows no plateau and lies 30–50 K below the measured bottom-surface temperature of 9 mm pressure-treated pine while it dries (Lee et al. 2025, Fig. 6). The cold-side temperature of wet wood during drying, and the pore pressure and composition of any material with a kinetic drying step, are therefore outside the model, and a conductivity fitted to a back-face history of wet wood absorbs the missing plateau. An Arrhenius drying step is also only admissible while its rate at ambient temperature is negligible over the test; the wood examples' parameters are not (§6.10 item 11). It needs item 2 and a smooth $r \propto (P_v - P_{\text{sat}}(T))$ closure; the pressure is evaluated for all gas-bearing materials.
-5. **Backing layer and contact resistance at the back face.** There is no contact-resistance or substrate model. An adiabatic back face over-predicts late-time back-half temperatures (the missing loss is about 0.7–3 kW·m⁻² for 25 mm of wood over 10–20 min); a lumped Robin condition on the bottom face (radiative + convective, as in example `06_cone_calorimeter.jl`) is the available approximation. A contact conductance plus a semi-infinite-substrate $h(t)$ would close the gap. The back face is also taken gas-tight (`ImpermeableBC`), which the standard foil wrap is not at the pore pressures pyrolysis generates; a leaky back is represented by `ConvectivePressureBC` with a board or leak resistance, and a predicted pore pressure is a mean over a cracked char, credible to about 1–1.5 bar overpressure (§9.4.3).
-6. **Kinetics expressiveness.** A $T^n$ pre-factor and DAEM-style stacking are absent. Any real order $n \ge 0$ acts on the conversion of the reactant against its lineage inventory, on fixed and moving meshes alike (§6.4); a lineage fed through the gas is refused, and a lineage whose reference would depend on the rates needs an explicit `basis` (§6.5.5).
-7. **Transport-closure accuracy** (item 5 above). The gas viscosity is a material curve without composition-dependent mixing. Binary diffusivity and pore geometry must be supplied for the dusty-gas model. Both closures exclude thermal diffusion and gravity; donor advection is first order. A matrix endpoint supplies finite porous resistance, not a free-flow momentum model (§9).
+4. **Oxidative pyrolysis and char oxidation with O₂ ingress** (about 32.8 MJ per kg of carbon). It dominates at sub-critical fluxes, after flameout, and in smoldering, and it controls the late-time MLR tail and the residue mass of the Douglas-fir case. It needs multi-reactant kinetics (item 2) and an explicit reservoir composition supplied by `GasReservoir`. The upwind Darcy outflow suppresses ingress at high MLR.
+5. **Equilibrium (pressure-dependent) moisture evaporation and recondensation.** Drying is a pressure-independent Arrhenius reaction; no saturation pressure $P_{\text{sat}}(T)$ appears anywhere. Vapor recondensation ahead of the drying front (which raises the local moisture content by 30–50 %) is absent, and at the 1.5–2 atm pore pressure of pressure-treated wood the boiling point shifts to 112–121 °C, which Arrhenius drying cannot represent. The vapour driven inward from the front stays in the cold pores at many times its saturation pressure, whatever the drying kinetics, and the latent heat it would release there is not delivered. The cold side of wet wood shows a plateau near 373 K (Bilbao et al. 1996; Lee et al. 2025); a model with an Arrhenius drying step shows no plateau and lies 30–50 K below the measured bottom-surface temperature of 9 mm pressure-treated pine while it dries (Lee et al. 2025, Fig. 6). The cold-side temperature of wet wood during drying, and the pore pressure and composition of any material with a kinetic drying step, are therefore outside the model, and a conductivity fitted to a back-face history of wet wood absorbs the missing plateau. An Arrhenius drying step is also only admissible while its rate at ambient temperature is negligible over the test; the wood examples' parameters are not (§6.10 item 11). It needs item 2 and a smooth $r \propto (P_v - P_{\text{sat}}(T))$ closure; the pressure is evaluated for all gas-bearing materials.
+6. **Backing layer and contact resistance at the back face.** There is no contact-resistance or substrate model. An adiabatic back face over-predicts late-time back-half temperatures (the missing loss is about 0.7–3 kW·m⁻² for 25 mm of wood over 10–20 min); a lumped Robin condition on the bottom face (radiative + convective, as in example `06_cone_calorimeter.jl`) is the available approximation. A contact conductance plus a semi-infinite-substrate $h(t)$ would close the gap. The back face is also taken gas-tight (`ImpermeableBC`), which the standard foil wrap is not at the pore pressures pyrolysis generates; a leaky back is represented by `ConvectivePressureBC` with a board or leak resistance, and a predicted pore pressure is a mean over a cracked char, credible to about 1–1.5 bar overpressure (§9.4.3).
+7. **Kinetics expressiveness.** A $T^n$ pre-factor and DAEM-style stacking are absent. Any real order $n \ge 0$ acts on the conversion of the reactant against its lineage inventory, on fixed and moving meshes alike (§6.4); a lineage fed through the gas is refused, and a lineage whose reference would depend on the rates needs an explicit `basis` (§6.5.5).
+8. **Transport-closure accuracy** (item 5 above). The gas viscosity is a material curve without composition-dependent mixing. Binary diffusivity and pore geometry must be supplied for the dusty-gas model. Both closures exclude thermal diffusion and gravity; donor advection is first order. A matrix endpoint supplies finite porous resistance, not a free-flow momentum model (§9).
 
-8. **Attenuation of the incident flux by the pyrolysate plume.** The flux the
+9. **Attenuation of the incident flux by the pyrolysate plume.** The flux the
    surface receives is the set flux; the volatiles above the face absorb
    $6$–$14\,\%$ of it before ignition and $20$–$27\,\%$ at steady outgassing in
    a cone-type geometry (Zhou et al. 2009, 2010), $35\,\%$ under a coil heater
    (Kashiwagi 1979), while a cone flame lets more than $95\,\%$ through (Rhodes
    and Quintiere 1996). The effect depends on the apparatus and its extraction
    flow, so it is left to the calibration of $h$ and $a_s$ (§12.12).
+10. **Free water.** A liquid component is a bound liquid that holds its own volume (§10.2), so above the fibre saturation point (a moisture content of about 0.3, dry basis) drying shrinkage is overstated, and liquid migration is missing there as well (§1.2.2). Wet wood is in scope below that point.
 
 **Niche or future**
 
@@ -509,6 +511,7 @@ The physics below is absent from the model. It is ordered by its expected effect
 - Substrate reflection; scattering ($\sigma_s$ is not modeled); view-factor edge fall-off.
 - Species-pair-dependent molecular diffusivities and thermal-transpiration effects beyond the declared common-diffusivity dusty-gas closure.
 - Liquid free-water capillarity (relevant only above the fiber-saturation point, about 30 % moisture content) and bound-water diffusion ($\sqrt{Dt} \approx 0.25$ mm over a cone test, negligible at fire heating rates).
+- Flux-dependent swelling: strain is a function of composition alone, so a product density fitted at one heat flux does not predict the expansion of an intumescent or foaming material at another (§10.2).
 - Mechanics (char cracking, delamination, spalling), anisotropic conductivity (about 2× along the wood grain), melting and dripping, and 2-D/3-D edge burning (about a 10–20 % effect on late-time MLR in cone tests; item 1 above).
 
 ---
@@ -542,9 +545,10 @@ Conventions:
   so endothermic reactions give $Q_{\text{rxn}} < 0$. (This is the storage convention used
   internally; note ThermaKin publishes $h > 0 = \text{exothermic}$; Gpyro V2 and FDS use this convention — see overload
   note H1.)
-- "Bulk" density $\rho_j$ is the pure-phase density used by mixing rules and mixture
-  density; "intrinsic/skeletal" density $\rho_{i,j}$ (cell-wall density) is used
-  ONLY in the porosity (skeletal volume fraction) formula.
+- "Bulk" density $\rho_j$ is the apparent density of component $j$, its own pores
+  included, used by the mixing rules and the strain rate; "intrinsic/skeletal"
+  density $\rho_{i,j}$ (cell-wall density) is used ONLY in the porosity (skeletal
+  volume fraction) formula.
 - Mass concentration $\xi_j$ (kg/m³) is the **constitutive species variable**, not
   mass fraction: $\xi_j = Y_j \rho$. The integrated discrete state is the cell
   inventory $m_{j,i} = \xi_{j,i} V_i$ (kg); every kernel reads
@@ -785,7 +789,7 @@ Conventions:
 | $\xi_{\text{th}}$ | Concentration scale of the depletion limiter (`DepletionLimiter` `threshold`, default 1 kg·m⁻³) | kg·m⁻³ |
 | $\xi_{\text{tol},i}$ | Mass tolerance of cell *i* over its initial volume, the positivity scale of the relative-flux face states (§11.6.2, §11.6.3) | kg·m⁻³ |
 | $\rho$ | Bulk density ($\sum \xi_j$ for the total inventory density) | kg·m⁻³ |
-| $\rho_j$ | Bulk (pure-phase) density of component *j* | kg·m⁻³ |
+| $\rho_j$ | Bulk (apparent) density of component *j*, its own pores included | kg·m⁻³ |
 | $\rho_{i,j}$ | Intrinsic / skeletal density of component *j* (skeletal volume fraction only) | kg·m⁻³ |
 | $\rho_g$ | Gas-phase density (ideal-gas law) | kg·m⁻³ |
 | $\rho_{s,j}$ ($\rho_{s,\alpha}$) | FDS component density: the condensed-component mass concentration $\xi_j = m_j/V$ | kg·m⁻³ |
@@ -1780,7 +1784,7 @@ deforms. The local **volumetric strain rate** (relative rate of cell-volume chan
 $$
 \boxed{\;
 \theta_i = \frac{1}{V_i}\frac{dV_i}{dt}
-= \sum_{j\in S\cup L} \frac{\omega_{j,i}}{\rho_j(T_i)} ,
+= \sum_{j\in S\cup L} \frac{\omega_{j,i}}{\rho_j} ,
 \;}
 $$
 
@@ -1790,14 +1794,14 @@ rate $\omega_j$, it frees or claims volume at rate $\omega_j/\rho_j$. Gases neve
 the sum: they leave through the pore space without changing the matrix volume.
 Depletion of a solid shrinks the matrix, and a product of lower bulk density than its
 reactant (a light char or foam) swells it. The implementing kernel
-`volume_change_rate` sums exactly $\sum_{j\in S\cup L} \omega_j/\rho_j(T)$, skipping
-every gas, at the trial temperature and with the *reaction* mass
+`volume_change_rate` sums exactly $\sum_{j\in S\cup L} \omega_j/\rho_j$, skipping
+every gas, with each $\rho_j$ a constant (§10.1.1) and the *reaction* mass
 sources alone as the driver: the mesh closure forms it from the kernels' reaction
 sources before any external source is added, so a manufactured source of a
 verification run does not move the mesh. The absolute rate is $dV_i/dt = V_i\theta_i$
 on a mesh that moves with the skeleton.
 
-> **Implementation notes.** $\theta = \sum_{j\in S\cup L} \omega_j/\rho_j(T)$ is
+> **Implementation notes.** $\theta = \sum_{j\in S\cup L} \omega_j/\rho_j$ is
 > `volume_change_rate` (`_volume_change_rate`) in `src/Physics/volume_change.jl`
 > (gases skipped by the type-level `is_gas`), called per cell by `closure_rows!`
 > (`src/Closures/balance.jl`). It is the per-component condensed form, not
@@ -1964,7 +1968,7 @@ This is the contract that makes the residual a *pure function* of the state.
 | Porosity $\varphi$ | intrinsic density | $1-\sum_{S/L}\xi_j/\rho_{i,j}$, smoothly floored at $10^{-12}$ where divided by | §5 |
 | Gas velocity $v_g$ | Darcy | $-(\kappa/\mu)\nabla P$, half-cell mobility $\kappa/\mu$, interface pressure from total species-flux continuity | §9 |
 | Effective $k_{\mathrm{eff}},\lambda_{\mathrm{eff}},\kappa_{\mathrm{eff}},\varepsilon_{\mathrm{eff}},a_{\mathrm{eff}},\alpha_{\mathrm{eff}}$ | mixing rules | parallel/series/weighted/Bruggeman/Carman–Kozeny | §5 |
-| Volume-change rate $\theta$ | condensed-volume continuity | $\sum_{S\cup L}\omega_j/\rho_j(T)$, reaction sources only | §10 |
+| Volume-change rate $\theta$ | condensed-volume continuity | $\sum_{S\cup L}\omega_j/\rho_j$, constant $\rho_j$, reaction sources only | §10 |
 | Node velocity $w$ | balance rows | $0=A_{i+1}(w-c)_{i+1}-A_i(w-c)_i-(\theta_i-\theta_A)V_i$, $0 = w_1$ | §11.3.2, (11.9)–(11.10) |
 | Node correction $c$ | equidistribution | installed by `setup`'s rule, or given | §11.7 |
 | Cross-section $A$, $\theta_A$ | algebraic rows | $A=A_0\,\mathrm{law}(\bar\chi_c)$, $\theta_A = \frac{d}{dt}\log\mathrm{law}(\bar\chi_c)$ | §10, §11.3.3 |
@@ -2232,10 +2236,12 @@ skeleton).
 The single most important constitutive distinction at the component level is
 between two densities (overload note A7 of Chapter 2):
 
-- **Bulk (pure-phase) density** $\rho_j$ [kg·m⁻³] — the mass of pure phase $j$ per
-  unit of the *bulk volume it would occupy in the mixture*. This is the density
+- **Bulk density** $\rho_j$ [kg·m⁻³] — the apparent density of component $j$: its
+  mass per unit of the *bulk volume it occupies in the mixture*, its own pores
+  included, so a char's bulk density counts the char's pores. This is the density
   used to form thermal and matrix transport weights and by the volume-
-  change kernels (Chapter 10). Field `density`.
+  change kernels (Chapter 10), where it is a constant on a moving mesh. Field
+  `density`.
 
 - **Intrinsic / skeletal density** $\rho_{i,j}$ [kg·m⁻³] — the density of the
   cell-wall material itself, ignoring any pore volume internal to the component.
@@ -3062,7 +3068,7 @@ $N_C$ components of a `Material`, and $i$ is the **cell index** running over the
 $n$ finite volumes (overload resolution I1, §2). The constitutive species variable is
 the **mass concentration** $\xi_j$ (kg·m⁻³), not the mass fraction (§3, Governing
 Equations); the integrated state is the cell mass $m_{j,i} = \xi_{j,i} V_i$. Two
-density symbols are used with care: the **bulk** (pure-phase) density $\rho_j$
+density symbols are used with care: the **bulk** (apparent) density $\rho_j$
 sets declared bulk occupancy in mixing and strain, while the **intrinsic**
 (skeletal, cell-wall) density $\rho_{i,j}$ appears *only* in the pore-fraction
 formula (overload resolution A7, §2). The three binding sign conventions of §2
@@ -8697,7 +8703,7 @@ The mesh-motion machinery (the node positions as differential unknowns, the bala
 
 ### 10.1.1 Continuous derivation from the mixture continuity equation
 
-Consider a material control volume $V$ whose condensed-phase matrix (solids and liquids) forms a skeleton through which gas can percolate. The matrix occupies a volume that is the sum of the partial volumes of each matrix-forming component. If component $j$ has bulk (pure-phase) density $\rho_j$ and mass concentration $\xi_j$ (kg of $j$ per m³ of bulk material, see §2), then the mass of $j$ in the cell is $m_j=\xi_j V$, and the partial (pure-phase) volume it occupies is $m_j/\rho_j=\xi_j V/\rho_j$.
+Consider a material control volume $V$ whose condensed-phase matrix (solids and liquids) forms a skeleton through which gas can percolate. The matrix occupies a volume that is the sum of the partial volumes of each matrix-forming component. If component $j$ has bulk density $\rho_j$ and mass concentration $\xi_j$ (kg of $j$ per m³ of bulk material, see §2), then the mass of $j$ in the cell is $m_j=\xi_j V$, and the partial volume it occupies is $m_j/\rho_j=\xi_j V/\rho_j$. The bulk density is an apparent density: the mass of the component per unit of the volume it takes up in the mixture, its own pores included, so a char's bulk density counts the char's pores. The intrinsic density of §4.1.4 leaves them out.
 
 The total matrix volume is the sum of the partial volumes of the condensed components, the *skeleton* that the mesh must track; a gas occupies the pores the skeleton leaves and claims none:
 
@@ -8707,9 +8713,11 @@ V \;=\; \sum_{j\in S\cup L} \frac{m_j}{\rho_j}
 \tag{10.1}
 $$
 
-A solid or liquid claims its pure-phase volume in the skeleton (when it depletes, the matrix shrinks); a gas escapes through the pores and does not set the matrix dimensions. Equation (10.1) is the constitutive *definition* of the matrix volume in terms of composition; it is exact for an additive-volume mixture.
+A solid or liquid claims its partial volume in the skeleton (when it depletes, the matrix shrinks); a gas escapes through the pores and does not set the matrix dimensions. Equation (10.1) is the constitutive assumption of the model: the volumes of the condensed components add. It takes the place of a momentum balance for the skeleton, which therefore does not respond to pore pressure or to restraint, and whose constituents are incompressible.
 
-Differentiate (10.1) with respect to time at a fixed material point, holding $\rho_j$ as a (slowly varying) property:
+Equation (10.1) is also a condition on the initial state. The mesh integrates the rate (10.2) below from the initial cell volumes, so (10.1) holds during a solve only if the initial concentrations satisfy $\sum_{j\in S\cup L}\xi_j(0)/\rho_j=1$ in every cell. A cell that starts over-filled later shrinks below the volume its solid holds, and one that starts under-filled keeps volume that no component accounts for. On a moving mesh `setup` warns when some cell holding condensed mass departs from one by more than $10^{-3}$ and some reaction changes the condensed volume. Wood of oven-dry density $\rho$ holding bound water at dry-basis moisture content $MC$ fills its cell at $\xi_{\text{wood}}=\rho/(1+MC\,\rho/\rho_w)$, $\xi_w=MC\,\xi_{\text{wood}}$.
+
+Differentiate (10.1) with respect to time at a fixed material point:
 
 $$
 \frac{dV}{dt} \;=\; V\sum_{j\in S\cup L}\frac{1}{\rho_j}\frac{d\xi_j}{dt}
@@ -8717,27 +8725,29 @@ $$
 \;+\; \frac{dV}{dt}\sum_{j\in S\cup L}\frac{\xi_j}{\rho_j}.
 $$
 
-Using (10.1), $\sum_{j\in S\cup L}\xi_j/\rho_j=1$, so the last term reproduces $dV/dt$. The standard reduction — the one the code adopts — is to *neglect the density-rate term* $\xi_j\,d(1/\rho_j)/dt$ (thermal expansion of the pure phases is small compared with reaction-driven mass exchange) and to read off the **relative volume change rate** — the volumetric strain rate — directly from the mass-source term:
+Using (10.1), $\sum_{j\in S\cup L}\xi_j/\rho_j=1$, so the last term reproduces $dV/dt$. The middle term is the thermal dilation of the components. The model takes every bulk density in (10.1) as a constant, so the term is zero, and the **relative volume change rate**, the volumetric strain rate, follows from the mass-source term alone:
 
 $$
 \boxed{\;\theta \;\equiv\; \frac{1}{V}\frac{dV}{dt}
-\;=\; \sum_{j\in S\cup L}\frac{1}{\rho_j(T)}\,\frac{d\xi_j}{dt}\;}
+\;=\; \sum_{j\in S\cup L}\frac{1}{\rho_j}\,\frac{d\xi_j}{dt}\;}
 \tag{10.2}
 $$
 
-with SI units of $\mathrm{s^{-1}}$. The interpretation is transparent: a unit decrease in the mass concentration of solid $j$ ($d\xi_j/dt<0$) frees a pure-phase volume of $1/\rho_j$ per unit mass, contracting the matrix ($\theta<0$); a product of lower bulk density claims more volume than its reactant frees, expanding it; a gas is invisible to $\theta$ regardless of how fast it is produced.
+with SI units of $\mathrm{s^{-1}}$. The interpretation is transparent: a unit decrease in the mass concentration of solid $j$ ($d\xi_j/dt<0$) frees a volume of $1/\rho_j$ per unit mass, contracting the matrix ($\theta<0$); a product of lower bulk density claims more volume than its reactant frees, expanding it; a gas is invisible to $\theta$ regardless of how fast it is produced.
 
-> **Implementation note.** $\theta$ is computed by `volume_change_rate(dξ, T, material)` in `src/Physics/volume_change.jl` (inline methods for $N_C\in\{1,2,3\}$ and a `@generated` method for $N_C>3$, so the loop over the heterogeneous component tuple allocates nothing). The loop is
+The densities in (10.2) are constants. A density that varied with temperature would bring the dilation term with it; without that term the volume (10.2) integrates, $\int\sum_j dm_j/\rho_j(T)$, depends on the temperature at which the mass converted. A cell heated, reacted and cooled would end at a different volume from one reacted cold, and (10.1) would stop holding as soon as $T$ moved. For a char former of solid yield $y$ the relative error in the residue thickness is of order $(s-1)/y$, with $s=\rho(T_0)/\rho(T)$: a density that falls 15 % by 650 K cuts the residue thickness of a 30 % char former by 40 %, and a solid that leaves almost no char runs out of volume with mass still in its cells. A moving mesh therefore refuses a solid or liquid whose `density` is a law of temperature. A fixed mesh, which does not use (10.2), accepts one.
+
+> **Implementation note.** $\theta$ is computed by `volume_change_rate(dξ, material)` in `src/Physics/volume_change.jl`, a `@generated` method that unrolls the loop over the heterogeneous component tuple, so it allocates nothing. The loop is
 > ```julia
-> θ += dξ[j] / ρⱼ        # ρⱼ = comps[j].density(T)
+> θ += dξ[j] / ρⱼ        # ρⱼ the constant bulk density of comps[j]
 > ```
-> evaluated **only for the condensed components**: the test `is_gas` resolves from the component type at compile time, so a gas term is folded away and no gas density is evaluated. There is **no minus sign** in the code: the sign of $\theta$ is carried entirely by the sign of $d\xi_j/dt$, which is negative for a depleting reactant (the species source consumes the reactant with coefficient $-1$; see §6.5). The density $\rho_j(T)$ is the *bulk* density property evaluated at the cell's trial temperature $T_{\mathrm{trial}}$ (the cell temperature smoothly clamped into the property bracket $[200, 3000]$ K, the identity on every physical state) — not the intrinsic/skeletal density $\rho_{i,j}$, which is reserved for the porosity (§5.3 and §2, overload A7).
+> evaluated **only for the condensed components**: the test `is_gas` resolves from the component type at compile time, so a gas term is folded away and no gas density is read. There is **no minus sign** in the code: the sign of $\theta$ is carried entirely by the sign of $d\xi_j/dt$, which is negative for a depleting reactant (the species source consumes the reactant with coefficient $-1$; see §6.5). The density $\rho_j$ is the component's constant *bulk* density, which `_require_supported` (`src/Integration/setup.jl`) requires of every solid and liquid on a moving mesh — not the intrinsic/skeletal density $\rho_{i,j}$, which is reserved for the porosity (§5.3 and §2, overload A7). `_check_condensed_volume` in the same file checks the initial state against (10.1), except under the external mass source of a verification run, which moves the occupancy whatever the start.
 
 ### 10.1.2 What $d\xi_j/dt$ is in (10.2)
 
 A subtle and load-bearing point: the $d\xi_j/dt$ fed into (10.2) is the **reaction source only**, $S_{j}=\sum_r\nu_{r,j}r_r$, not the full rate of change of the concentration (which also includes gas transport, the fluxes relative to a moving mesh, and the change of the cell volume itself). This is correct because $\theta$ measures the rate at which mass is *converted between phases by chemistry* — the only process that changes the additive-volume balance (10.1). Transport of an already-gaseous species through the pores does not change the matrix volume, and the concentration change that the volume change itself produces is the consequence of $\theta$, not a cause of it (§10.7). Including them would double-count the volume change that the mesh motion is itself representing.
 
-> **Implementation note.** `closure_rows!` (`src/Closures/balance.jl`) runs after every kernel and before the external sources are added (`add_sources!`), and reads the cell mass sources `c.S_mass` [kg/s], which only the reaction kernel writes (the transport kernels write face fluxes). For each cell it forms `dξ = S_mass[:, i] / V_eval[i]`, with $\tilde V_i$ the smoothly floored cell volume, and sets `c.θ[i] = volume_change_rate(dξ, ds.T_trial[i], material)`. So $\theta_i$ is the strain rate of the reactions alone, exactly (10.2) with $d\xi_j/dt = S_{j,i}$; a manufactured mass source of a verification run does not move the mesh.
+> **Implementation note.** `closure_rows!` (`src/Closures/balance.jl`) runs after every kernel and before the external sources are added (`add_sources!`), and reads the cell mass sources `c.S_mass` [kg/s], which only the reaction kernel writes (the transport kernels write face fluxes). For each cell it forms `dξ = S_mass[:, i] / V_eval[i]`, with $\tilde V_i$ the smoothly floored cell volume, and sets `c.θ[i] = volume_change_rate(dξ, material)`. So $\theta_i$ is the strain rate of the reactions alone, exactly (10.2) with $d\xi_j/dt = S_{j,i}$; a manufactured mass source of a verification run does not move the mesh.
 
 ### 10.1.3 Absolute cell volume rate
 
@@ -8758,7 +8768,7 @@ Each condensed component holds the volume $\xi_j/\rho_j$ of its bulk density, an
 
 | Phase | Volume held | Effect on $\theta$ |
 |---|---|---|
-| Solid | $\xi_j/\rho_j$; depletion frees pure-phase volume | $\theta<0$ when solid is consumed |
+| Solid | $\xi_j/\rho_j$; depletion frees that volume | $\theta<0$ when solid is consumed |
 | Liquid | $\xi_j/\rho_j$, like a solid | $\theta<0$ when it evaporates or reacts away |
 | Gas | none; it escapes through the pores and does not set matrix dimensions | none |
 
@@ -8768,8 +8778,10 @@ Each condensed component holds the volume $\xi_j/\rho_j$ of its bulk density, an
 
 - **Non-charring shrinkage (e.g. a polymer converting to gas):** as the solid converts to gas, $\theta<0$ and the column recedes — the classic shrinking-slab picture.
 - **Charring:** a char of bulk density $\rho_c$ produced with yield $y_c$ from a virgin of bulk density $\rho_v$ leaves $V_f/V_0=y_c\rho_v/\rho_c$ of the volume. A char that keeps the virgin volume has $\rho_c=y_c\rho_v$; a denser char shrinks the column.
-- **Drying:** bound moisture is a liquid at the density of water, so the wood shrinks by the volume of the water it loses, and the water conducts and emits by its volume share while it remains.
-- **Intumescence (expansion):** give the condensed product a bulk density below its yield times the reactant's, $\rho_p<y_p\rho_A$ — a light char or foam. Its formation contributes $\theta>0$, i.e. the matrix *inflates*. Combined with a swelling lateral law (§10.5) this reproduces the order-of-magnitude expansion of intumescent coatings. Axial intumescence (through-thickness swell) is captured by $\theta>0$ in (10.2); radial intumescence (lateral swell of the column) is captured by $\mathrm{law}(\bar\chi)>1$ in (10.8).
+- **The char's bulk density is set by the residue thickness.** Without a lateral law the volume ratio is the thickness ratio, so a char whose measured thickness is the fraction $f_c$ of the virgin's has $\rho_c=y_c\rho_v/f_c$, with $f_c$ taken at the heat flux of interest: measured contraction of softwood chars spans roughly 0.44–0.86 and rises with flux. A handbook density of char does not give $\rho_c$. The thermal problem sees a layer's thickness only through the product $k\rho$ (in the mass coordinate conduction reads $\partial_M(k\rho\,\partial_M T)$), so a char conductivity fitted with the model belongs to the $\rho_c$ it was fitted with, and changing $\rho_c$ afterwards changes the char's conductance in proportion. The choice is first-rank: on a 12 mm Douglas-fir slab at 75 kW/m², a char that shrinks the slab to 0.58 of its thickness instead of a rigid one raises the plateau mass loss rate by 4–14 % and the burnout peak by 20 %, and lowers the surface temperature by about 20 K.
+- **Drying:** bound moisture is a liquid at the density of water, so the wood shrinks by the volume of the water it loses, and the water conducts and emits by its volume share while it remains. A liquid component is a bound liquid: every liquid holds its own volume at its density. That is how bound water behaves below the fibre saturation point (a moisture content of about 0.3, dry basis), where wood shrinks by the volume of water removed. Free water above it fills existing lumens and shrinks nothing as it leaves, so above the fibre saturation point the model overstates drying shrinkage: wood of 530 kg/m³ at 0.6 would shrink by 24 % of its wet volume, against about 12 % measured. In one dimension the whole drying shrinkage goes to the thickness, a few per cent at the moisture contents of the cone examples, where real wood shrinks 1–2.5 % in each transverse direction.
+- **Intumescence (expansion):** give the condensed product a bulk density below its yield times the reactant's, $\rho_p<y_p\rho_A$ — a light char or foam. Its formation contributes $\theta>0$, i.e. the matrix *inflates*. Combined with a swelling lateral law (§10.5) this reproduces the order-of-magnitude expansion of intumescent coatings. Axial intumescence (through-thickness swell) is captured by $\theta>0$ in (10.2); radial intumescence (lateral swell of the column) is captured by $\mathrm{law}(\bar\chi)>1$ in (10.8). The strain is a function of composition alone, while the measured expansion of intumescent and foaming materials depends on the heating, so a product density fitted at one heat flux does not predict the expansion at another.
+- **Fixed mesh:** with `use_ale = false`, the default, every node is pinned and (10.2) is not used: the skeleton keeps its volume whatever the densities imply, and a reaction whose condensed products hold a different volume from its reactant changes the porosity instead of the thickness. `setup` says so once a session. The densities still weight the mixing and set the occupancy of the transport matrix, so the porosity, and with it when a gas-bearing solve reaches the end of its transport domain, depends on the mesh option.
 
 ---
 
@@ -9134,7 +9146,7 @@ $$
 = r\!\left(\frac{\nu_{\mathrm{char}}}{\rho_{\mathrm{char}}} - \frac{1}{\rho_{\mathrm{virgin}}}\right).
 $$
 
-Char is typically far less dense than virgin ($\rho_{\mathrm{char}}\ll\rho_{\mathrm{virgin}}$) but is produced in smaller mass ($\nu_{\mathrm{char}}<1$). The sign of $\theta$ is set by the competition $\nu_{\mathrm{char}}/\rho_{\mathrm{char}}$ vs. $1/\rho_{\mathrm{virgin}}$: for a high-char-yield, very-low-density char the matrix can *swell* ($\theta>0$, the char occupies more pure-phase volume than the virgin it replaced); for a low-char-yield, dense char it *shrinks* ($\theta<0$). The gas never contributes — it escapes through the pores. With $\theta<0$ the char mass $m_{\mathrm{char}}$, a state, is unchanged by the contraction while $V$ falls, so the char concentration $\xi_{\mathrm{char}}=m_{\mathrm{char}}/V$ rises at the rate $-\xi_{\mathrm{char}}\theta>0$ of (10.15), conserving char mass. Through the balance rows (10.13), $\theta<0$ in every cell gives a downward solid velocity ($w<0$ at every node above the bottom), so the surface node recedes — material burns away from the top while the substrate stays pinned.
+Char is typically far less dense than virgin ($\rho_{\mathrm{char}}\ll\rho_{\mathrm{virgin}}$) but is produced in smaller mass ($\nu_{\mathrm{char}}<1$). The sign of $\theta$ is set by the competition $\nu_{\mathrm{char}}/\rho_{\mathrm{char}}$ vs. $1/\rho_{\mathrm{virgin}}$: for a high-char-yield, very-low-density char the matrix can *swell* ($\theta>0$, the char occupies more volume than the virgin it replaced); for a low-char-yield, dense char it *shrinks* ($\theta<0$). The gas never contributes — it escapes through the pores. With $\theta<0$ the char mass $m_{\mathrm{char}}$, a state, is unchanged by the contraction while $V$ falls, so the char concentration $\xi_{\mathrm{char}}=m_{\mathrm{char}}/V$ rises at the rate $-\xi_{\mathrm{char}}\theta>0$ of (10.15), conserving char mass. Through the balance rows (10.13), $\theta<0$ in every cell gives a downward solid velocity ($w<0$ at every node above the bottom), so the surface node recedes — material burns away from the top while the substrate stays pinned.
 
 **An exact endpoint.** Because the strain rate is linear in the reaction rate, the volume change of a cell under a single reaction $A\to\sum_j y_jB_j$ is linear in the converted mass and path-independent: with $r\,V\,dt=-dm_A$,
 
@@ -9145,7 +9157,7 @@ dV = \Big(\frac{1}{\rho_A}-\sum_{j\in S\cup L}\frac{y_j}{\rho_j}\Big)\,dm_A ,
 \quad(\xi_{A}(0)=\rho_A),
 $$
 
-whatever the temperature history. The verification case V-CPL-03 asserts this endpoint for six permutations (a swelling product of half the reactant density, $V_f/V_0=2$; a shrinking one, $1/2$; a neutral one, $1$; char plus gas, $0.3$; mass loss at constant volume, $1$; and the lateral law of §10.5.2, $A_f/A_0=0.75$), each to $3\times10^{-6}$, together with total-mass conservation.
+whatever the temperature history, because the densities are constants (§10.1.1). The verification case V-CPL-03 asserts this endpoint for six permutations (a swelling product of half the reactant density, $V_f/V_0=2$; a shrinking one, $1/2$; a neutral one, $1$; char plus gas, $0.3$; mass loss at constant volume, $1$; and the lateral law of §10.5.2, $A_f/A_0=0.75$), each to $3\times10^{-6}$, together with total-mass conservation.
 
 ---
 
@@ -9246,7 +9258,7 @@ User Guide §§6.7 and 7.6 covers deformation setup.
 
 The following limitations are documented in the source and should guide use and future work:
 
-1. **Density in $\theta$.** Equation (10.2) uses $\rho_j(T)$ evaluated at the *current* cell (trial) temperature, and the density-rate term $\xi_j\,d(1/\rho_j)/dt$ is neglected (§10.1.1). For materials with strongly temperature-dependent pure-phase densities and steep thermal gradients this is an approximation; whether retaining the term would materially change $\theta$ has not been quantified.
+1. **Constant densities, no thermal expansion.** The bulk densities in (10.2) are constants and the dilation term is absent (§10.1.1), so a moving mesh refuses a condensed density given as a law of temperature. Thermal expansion is therefore outside the model: about 18 % of the local volume at a PMMA surface near pyrolysis, 5–10 % of the slab thickness, and under 1–2.5 % for wood and char. It reaches the temperature through $k\rho$ of the heated layer only, and a conductivity fitted with this model to samples of known cold thickness already holds it. Representing it would take the dilation term $\sum_j(\xi_j/\rho_j)\beta_j\,dT/dt$ in $\theta$, with $\beta_j$ the volumetric expansion coefficient, not a temperature-dependent density in (10.2).
 
 2. **Empirical lateral law, which must be smooth.** $\mathrm{law}(\bar\chi)$ is user-specified with no first-principles closure (§10.5.3). A percolation- or homogenization-based predictor of the functional form would remove a calibration degree of freedom, especially for intumescent coatings whose expansion factor can exceed an order of magnitude. The law must also be *smooth*: the lateral-rate row differentiates $\log\mathrm{law}$ by `ForwardDiff`, and the colored Jacobian differentiates that row again, so an exact Jacobian needs a twice-differentiable law. A piecewise-linear or table law gives a discontinuous $\theta_A$ at its kinks, degrades the Jacobian there, and makes any sensitivity taken across a kink ill-defined (§17.7.2).
 
@@ -9260,7 +9272,7 @@ The following limitations are documented in the source and should guide use and 
 
 7. **Dry gas by lineage only.** The dry-gas set is the gas the solids give off through the reaction graph (§10.3.3). A species that both a solid lineage and another reactant produce (decomposition water and moisture vapour as one species) is refused and must be split, and a gas produced from a solid that the user means to treat as moisture-derived cannot be excluded except by its reaction graph.
 
-8. **One lateral strain for the whole column.** The axial (node-motion) and lateral (cross-section) channels are rows of one DAE, solved together, but the lateral channel is a single column-global $\theta_A$ subtracted from every cell's $\theta_i$. A cross-section that varies with depth, or lateral motion that differs between layers, would need a multi-dimensional model; the variable cross section is a line's (planar coordinates, one-dimensional mesh).
+8. **One lateral strain for the whole column.** The axial (node-motion) and lateral (cross-section) channels are rows of one DAE, solved together, but the lateral channel is a single column-global $\theta_A$ subtracted from every cell's $\theta_i$. A cross-section that varies with depth, or lateral motion that differs between layers, would need a multi-dimensional model; the variable cross section is a line's (planar coordinates, one-dimensional mesh). A cell with no reaction has $\theta_i=0$ and axial strain $-\theta_A$, so while the area shrinks the unreacted layer below a front thickens to keep its volume: its conduction path lengthens by $A_0/A$ before it has reacted, and the absorbed power falls with the area over the whole column. The law suits modest area changes, a final loss of roughly 15 % or less, and back-face temperatures before full conversion carry this bias.
 
 9. **The mesh follows the solid unless corrected.** The volume-change pipeline of this chapter defines the *solid* velocity $v_s$ through the balance rows; the mesh velocity is $w=v_s+c$, and it differs from the solid velocity only under the equidistribution correction (installed for burnout) or a prescribed mesh velocity for verification, with every inventory and the history pair then crossing the faces at the relative velocity $-c$ (§11.6, §11.7). A prescribed mesh velocity moves the mesh over a solid at rest, so its material must not react (§11.7.7).
 
@@ -9597,8 +9609,9 @@ $$
 - the sum runs over the condensed (solid and liquid) components: when one
   depletes, the matrix loses its volume; a gas never enters (escaping gas does not
   change the skeleton volume).
-- $\rho_j(T)$ is the **bulk** (pure-phase) density of component $j$, evaluated at the
-  cell's trial temperature through the property function `comp.density(T)`.
+- $\rho_j$ is the **bulk** (apparent) density of component $j$, a constant: a
+  moving mesh refuses a condensed density given as a law of temperature
+  (§10.1.1).
 - $S_j$ is the **reaction mass source** of component $j$ per unit volume. The
   closure reads it from the reaction kernel's cell sources, $S_{j,i} =
   (\text{reaction mass source})_{j,i}/V_i$, after every kernel has run and before any
@@ -10394,10 +10407,11 @@ The principal limitations and open issues are:
    two algebraic rows (11.11) that read every cell: the system's two dense rows. A
    resolved lateral deformation is not modelled, and the law needs planar coordinates.
 
-3. **Density evaluation in the strain rate.** The strain rate (11.7) uses $\rho_j(T)$
-   at the cell's trial temperature; whether a time-averaged density would improve
-   consistency near steep thermal transients is an open modeling question, as is the
-   extension of the volume-change accounting to multi-reactant stoichiometry.
+3. **Constant densities in the strain rate.** The strain rate (11.7) takes each
+   condensed bulk density as a constant, and a moving mesh refuses a density given as
+   a law of temperature (§10.1.1); thermal expansion would need the dilation term
+   (§10.12). The extension of the volume-change accounting to multi-reactant
+   stoichiometry is an open modeling question.
 
 4. **Free stream beyond the planar line.** The uniform-field property holds to
    round-off only on a planar line with a constant cross section; in cylindrical and

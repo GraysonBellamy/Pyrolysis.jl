@@ -215,7 +215,10 @@ ptw_material = Material(
             # Skeletal density interpolated toward char (1950), same progress as ε
             ρ_intrinsic = 1835.0,
         ),
-        # 7. Char - final solid residue
+        # 7. Char - final solid residue. Its bulk density sets the residue
+        # thickness (Technical Reference §10.2): each step's product density
+        # is its yield times its reactant's, so the slab keeps its dry
+        # thickness as it chars, the measured residue thickness.
         SolidComponent(
             :Char,
             ρ = 98.28,

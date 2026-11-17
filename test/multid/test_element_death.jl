@@ -73,6 +73,14 @@ _problem(mesh) = PyrolysisProblem(
 
 _options = (use_ale = true, slip = _slip, tensor = _A)
 
+# The set-up problem on `mesh`. Its solids fill 0.90 to 0.98 of each cell,
+# varying across the mesh, which `setup` warns of on a moving mesh.
+_set_up(mesh, energy) = @test_logs (:warn, r"do not fill") match_mode = :any setup(
+    _problem(mesh);
+    energy_state = energy,
+    _options...,
+)
+
 # The mesh of the live cells of `full` (`live` flags them), its nodes
 # renumbered in order: a side another live cell shares stays interior, a side
 # a dead cell shared is tagged `:top`, the exposed tag, and every other side
@@ -171,7 +179,7 @@ end
     :enthalpy,
 )
     mesh = box_mesh(0:0.01:0.03, 0:0.01:0.03; transform = _inside)
-    cp = setup(_problem(mesh); energy_state = energy, _options...)
+    cp = _set_up(mesh, energy)
     layout = cp.def.layout
     topo = mesh.topology
     pattern = copy(cp.jacobian.pattern)
@@ -198,7 +206,7 @@ end
         # The live rows are those of the mesh without the dead cells, its new
         # faces under the exposed condition.
         reduced, cells, nodes = _without(mesh, live)
-        cpr = setup(_problem(reduced); energy_state = energy, _options...)
+        cpr = _set_up(reduced, energy)
         @test cpr.def.closure isa PotentialClosure
         hot = copy(u)
         for i = 1:n_cells(topo)

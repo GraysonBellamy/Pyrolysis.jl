@@ -126,7 +126,7 @@ function closure_rows!(
     @inbounds for i = 1:n_cells(topo)
         V = ds.V_eval[i]
         dξ = ntuple(j -> c.S_mass[j, i] / V, Val(NC))
-        c.θ[i] = volume_change_rate(dξ, ds.T_trial[i], material)
+        c.θ[i] = volume_change_rate(dξ, material)
     end
     multiplier_rows!(c, cl, ds, topo)
     return nothing

@@ -26,12 +26,13 @@ include(joinpath(@__DIR__, "..", "verification", "exact", "gauss_legendre.jl"))
 include(joinpath(@__DIR__, "..", "verification", "exact", "two_stream.jl"))
 include(joinpath(@__DIR__, "..", "verification", "exact", "gray_slab.jl"))
 
-# A semi-transparent decomposing slab: the virgin solid's emissivity and
-# density depend on temperature, its absorption coefficient differs from the
-# char's, so the radiation rows read the temperature and the composition of
-# their cells. Unless `absorbing`, no component sets an absorptivity and
-# every radiation enters at the emissivity; with it the virgin solid absorbs
-# beams at 0.7, which no diffuse flux may accompany.
+# A semi-transparent decomposing slab: the virgin solid's emissivity and, for
+# a fixed mesh, its density depend on temperature (a `moving` mesh needs a
+# constant bulk density), its absorption coefficient differs from the char's,
+# so the radiation rows read the temperature and the composition of their
+# cells. Unless `absorbing`, no component sets an absorptivity and every
+# radiation enters at the emissivity; with it the virgin solid absorbs beams at
+# 0.7, which no diffuse flux may accompany.
 function _slab(
     n;
     top,
@@ -39,6 +40,7 @@ function _slab(
     λ = 0.0,
     reacting = true,
     absorbing = false,
+    moving = false,
     coordinates = Planar(),
     mesh = stretched_mesh(0.01, n, 1.15; coordinates),
 )
@@ -46,7 +48,7 @@ function _slab(
         :virgin;
         ρ_intrinsic = 1600.0,
         λ = λ,
-        ρ = T -> 1100.0 - 0.05 * (T - 300.0),
+        ρ = moving ? 1100.0 : T -> 1100.0 - 0.05 * (T - 300.0),
         c = (900.0, 1.5),
         k = (0.2, 2e-4),
         ε = (0.95, -1.5e-4),
@@ -458,6 +460,7 @@ end
             top = _tops[top],
             bottom = _backs[back],
             absorbing = _absorbing(top, back),
+            moving,
         );
         use_ale = moving,
         radiation_model = RADIATIVE_TRANSFER,
@@ -568,6 +571,7 @@ end
             top = _tops[top],
             bottom = _backs[back],
             absorbing = _absorbing(top, back),
+            moving,
         );
         use_ale = moving,
         radiation_model = RADIATIVE_TRANSFER,
@@ -611,7 +615,7 @@ end
     top in keys(_tops)
 
     cp = setup(
-        _slab(6; top = _tops[top], bottom = _backs.open);
+        _slab(6; top = _tops[top], bottom = _backs.open, moving = true);
         energy_state = energy,
         use_ale = true,
         radiation_model = RADIATIVE_TRANSFER,

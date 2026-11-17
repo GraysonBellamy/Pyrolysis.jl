@@ -27,9 +27,10 @@ Conventions:
   so endothermic reactions give $Q_{\text{rxn}} < 0$. (This is the storage convention used
   internally; note ThermaKin publishes $h > 0 = \text{exothermic}$; Gpyro V2 and FDS use this convention — see overload
   note H1.)
-- "Bulk" density $\rho_j$ is the pure-phase density used by mixing rules and mixture
-  density; "intrinsic/skeletal" density $\rho_{i,j}$ (cell-wall density) is used
-  ONLY in the porosity (skeletal volume fraction) formula.
+- "Bulk" density $\rho_j$ is the apparent density of component $j$, its own pores
+  included, used by the mixing rules and the strain rate; "intrinsic/skeletal"
+  density $\rho_{i,j}$ (cell-wall density) is used ONLY in the porosity (skeletal
+  volume fraction) formula.
 - Mass concentration $\xi_j$ (kg/m³) is the **constitutive species variable**, not
   mass fraction: $\xi_j = Y_j \rho$. The integrated discrete state is the cell
   inventory $m_{j,i} = \xi_{j,i} V_i$ (kg); every kernel reads
@@ -270,7 +271,7 @@ Conventions:
 | $\xi_{\text{th}}$ | Concentration scale of the depletion limiter (`DepletionLimiter` `threshold`, default 1 kg·m⁻³) | kg·m⁻³ |
 | $\xi_{\text{tol},i}$ | Mass tolerance of cell *i* over its initial volume, the positivity scale of the relative-flux face states (§11.6.2, §11.6.3) | kg·m⁻³ |
 | $\rho$ | Bulk density ($\sum \xi_j$ for the total inventory density) | kg·m⁻³ |
-| $\rho_j$ | Bulk (pure-phase) density of component *j* | kg·m⁻³ |
+| $\rho_j$ | Bulk (apparent) density of component *j*, its own pores included | kg·m⁻³ |
 | $\rho_{i,j}$ | Intrinsic / skeletal density of component *j* (skeletal volume fraction only) | kg·m⁻³ |
 | $\rho_g$ | Gas-phase density (ideal-gas law) | kg·m⁻³ |
 | $\rho_{s,j}$ ($\rho_{s,\alpha}$) | FDS component density: the condensed-component mass concentration $\xi_j = m_j/V$ | kg·m⁻³ |

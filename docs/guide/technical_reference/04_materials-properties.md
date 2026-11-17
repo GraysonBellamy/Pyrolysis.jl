@@ -127,10 +127,12 @@ skeleton).
 The single most important constitutive distinction at the component level is
 between two densities (overload note A7 of Chapter 2):
 
-- **Bulk (pure-phase) density** $\rho_j$ [kg·m⁻³] — the mass of pure phase $j$ per
-  unit of the *bulk volume it would occupy in the mixture*. This is the density
+- **Bulk density** $\rho_j$ [kg·m⁻³] — the apparent density of component $j$: its
+  mass per unit of the *bulk volume it occupies in the mixture*, its own pores
+  included, so a char's bulk density counts the char's pores. This is the density
   used to form thermal and matrix transport weights and by the volume-
-  change kernels (Chapter 10). Field `density`.
+  change kernels (Chapter 10), where it is a constant on a moving mesh. Field
+  `density`.
 
 - **Intrinsic / skeletal density** $\rho_{i,j}$ [kg·m⁻³] — the density of the
   cell-wall material itself, ignoring any pore volume internal to the component.
