@@ -429,8 +429,8 @@ Pkg.test("Pyrolysis")
 ```
 
 The whole suite takes a while. The environment variable `PYROLYSIS_TEST_GROUP`
-runs one part of it (`jacobian`, `burnout`, `other`, `domains`, or `all`, the
-default), and `PYROLYSIS_TEST_FAST=1` skips the verification cases' convergence
+runs one part of it (`jacobian`, `burnout`, `outputs`, `other`, `domains`, or
+`all`, the default), and `PYROLYSIS_TEST_FAST=1` skips the verification cases' convergence
 spot checks (the Development page of the documentation).
 
 For a real end-to-end check, run the minimal example in §1.8 — completing it
