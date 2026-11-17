@@ -52,10 +52,10 @@ end
     mat = _participation_material()
     T = 300.0
     # θ = Σ dξ/ρ over the solid and the liquid; a gas source adds nothing.
-    @test volume_change_rate((-10.0, 0.0, 10.0), T, mat) == -10.0 / 500.0
-    @test volume_change_rate((0.0, -10.0, 10.0), T, mat) == -10.0 / 1000.0
-    @test volume_change_rate((-10.0, 5.0, 5.0), T, mat) ≈ -10.0 / 500.0 + 5.0 / 1000.0
-    @test volume_change_rate((0.0, 0.0, 10.0), T, mat) == 0.0
+    @test volume_change_rate((-10.0, 0.0, 10.0), mat) == -10.0 / 500.0
+    @test volume_change_rate((0.0, -10.0, 10.0), mat) == -10.0 / 1000.0
+    @test volume_change_rate((-10.0, 5.0, 5.0), mat) ≈ -10.0 / 500.0 + 5.0 / 1000.0
+    @test volume_change_rate((0.0, 0.0, 10.0), mat) == 0.0
 
     # The mixing weights are the same bulk occupancies, normalized.
     ξ = (250.0, 50.0, 1.0)  # v_s = 0.5, v_w = 0.05

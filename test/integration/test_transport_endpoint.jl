@@ -2,6 +2,18 @@ using Test, Pyrolysis
 using Pyrolysis.Materials: R_GAS
 using Pyrolysis.Properties: transport_matrix_state, transport_coefficients
 
+# The matrix fills half of each cell, the pore space the residue is left in, so
+# on a moving mesh `setup` warns that the cells hold volume no component
+# accounts for: `endpoint_solve` expects it there.
+function endpoint_solve(p, moving; kwargs...)
+    moving || return solve(p; use_ale = false, kwargs...)
+    return @test_logs (:warn, r"do not fill") match_mode = :any solve(
+        p;
+        use_ale = true,
+        kwargs...,
+    )
+end
+
 function endpoint_problem(n, width; dusty = false)
     ep=dusty ?
        DustyEndpoint(
@@ -68,9 +80,9 @@ end
 
     rec=ConservationRecorder()
     p=endpoint_problem(6, 0.02; dusty)
-    sol=solve(
-        p;
-        use_ale = moving,
+    sol=endpoint_solve(
+        p,
+        moving;
         energy_state = energy,
         callback = rec,
         reltol = 1e-8,
@@ -102,9 +114,9 @@ end
     escape=zeros(3, 3)
     for (i, n) in enumerate((6, 12, 24)), (j, width) in enumerate((0.02, 0.01, 0.005))
         rec=ConservationRecorder()
-        sol=solve(
-            endpoint_problem(n, width);
-            use_ale = moving,
+        sol=endpoint_solve(
+            endpoint_problem(n, width),
+            moving;
             callback = rec,
             reltol = 1e-9,
             abstol = 1e-11,

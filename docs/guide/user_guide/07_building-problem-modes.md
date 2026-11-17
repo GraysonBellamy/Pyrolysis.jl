@@ -189,14 +189,19 @@ state and the residual, and how to inspect what `setup` built.
 
 - **Fixed** (`use_ale = false`, default): every node is pinned. The node positions are not
   part of the state, the geometry is constant, and a cell carries its component masses and
-  its energy state.
+  its energy state. A reaction whose condensed products hold a different volume from its
+  reactant then changes the porosity, not the thickness, and `setup` says so once a
+  session.
 - **Moving** (`use_ale = true`): the node positions and velocities are part of the state. The
   back node is pinned; every other node moves with `w = v_s + c`, the solid velocity that the
   cells' reaction strain rates `θ` give through one volume-balance row per cell, plus the
   correction `c` (zero unless one is installed, §7.3.3). This lets the domain shrink as the
   solid is consumed (charring, ablation) or expand (swelling, intumescence) without a
   moving-boundary equation. Every component, pore gas included, rides the mesh; the gas
-  moves relative to it through its transport flux.
+  moves relative to it through its transport flux. Each solid's and liquid's bulk density
+  must be a constant, and the initial concentrations should fill every cell,
+  `Σ ξ_j/ρ_j = 1` over the solids and liquids (§3.2.2): the mesh integrates the volume
+  change from the initial volumes.
 
 ```julia
 # Fixed mesh (default)

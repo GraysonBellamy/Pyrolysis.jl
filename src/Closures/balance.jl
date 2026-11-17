@@ -24,7 +24,7 @@ velocity row of its node farther from the pinned node,
 in 1D `A_{k+1} (w − c)_{k+1} − A_k (w − c)_k − (θ_k − θ_A) V_k`, with `c` the
 node corrections of the [`Correction`](@ref) (`ds.c`, zero under
 [`NoCorrection`](@ref)), `θ_k` the strain rate of the cell's reaction mass
-sources (`Physics.volume_change_rate` at the trial temperature) and `θ_A`
+sources (`Physics.volume_change_rate`) and `θ_A`
 the lateral strain rate of a variable cross section: the solid velocity
 `w − c` satisfies the volume balance. The rows are bidiagonal from the
 pinned node and each reads one cell and its two nodes, besides what the
@@ -271,7 +271,7 @@ function closure_rows!(
     @inbounds for i = 1:n_cells(topo)
         V = ds.V_eval[i]
         dξ = ntuple(j -> c.S_mass[j, i] / V, Val(NC))
-        c.θ[i] = volume_change_rate(dξ, ds.T_trial[i], material)
+        c.θ[i] = volume_change_rate(dξ, material)
     end
     _history_sources!(c, cl.lateral, topo)
     _velocity_rows!(c, cl, cl.correction, ds, topo, t)

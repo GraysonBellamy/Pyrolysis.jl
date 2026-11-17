@@ -647,7 +647,7 @@ deforms. The local **volumetric strain rate** (relative rate of cell-volume chan
 $$
 \boxed{\;
 \theta_i = \frac{1}{V_i}\frac{dV_i}{dt}
-= \sum_{j\in S\cup L} \frac{\omega_{j,i}}{\rho_j(T_i)} ,
+= \sum_{j\in S\cup L} \frac{\omega_{j,i}}{\rho_j} ,
 \;}
 $$
 
@@ -657,14 +657,14 @@ rate $\omega_j$, it frees or claims volume at rate $\omega_j/\rho_j$. Gases neve
 the sum: they leave through the pore space without changing the matrix volume.
 Depletion of a solid shrinks the matrix, and a product of lower bulk density than its
 reactant (a light char or foam) swells it. The implementing kernel
-`volume_change_rate` sums exactly $\sum_{j\in S\cup L} \omega_j/\rho_j(T)$, skipping
-every gas, at the trial temperature and with the *reaction* mass
+`volume_change_rate` sums exactly $\sum_{j\in S\cup L} \omega_j/\rho_j$, skipping
+every gas, with each $\rho_j$ a constant (§10.1.1) and the *reaction* mass
 sources alone as the driver: the mesh closure forms it from the kernels' reaction
 sources before any external source is added, so a manufactured source of a
 verification run does not move the mesh. The absolute rate is $dV_i/dt = V_i\theta_i$
 on a mesh that moves with the skeleton.
 
-> **Implementation notes.** $\theta = \sum_{j\in S\cup L} \omega_j/\rho_j(T)$ is
+> **Implementation notes.** $\theta = \sum_{j\in S\cup L} \omega_j/\rho_j$ is
 > `volume_change_rate` (`_volume_change_rate`) in `src/Physics/volume_change.jl`
 > (gases skipped by the type-level `is_gas`), called per cell by `closure_rows!`
 > (`src/Closures/balance.jl`). It is the per-component condensed form, not
@@ -831,7 +831,7 @@ This is the contract that makes the residual a *pure function* of the state.
 | Porosity $\varphi$ | intrinsic density | $1-\sum_{S/L}\xi_j/\rho_{i,j}$, smoothly floored at $10^{-12}$ where divided by | §5 |
 | Gas velocity $v_g$ | Darcy | $-(\kappa/\mu)\nabla P$, half-cell mobility $\kappa/\mu$, interface pressure from total species-flux continuity | §9 |
 | Effective $k_{\mathrm{eff}},\lambda_{\mathrm{eff}},\kappa_{\mathrm{eff}},\varepsilon_{\mathrm{eff}},a_{\mathrm{eff}},\alpha_{\mathrm{eff}}$ | mixing rules | parallel/series/weighted/Bruggeman/Carman–Kozeny | §5 |
-| Volume-change rate $\theta$ | condensed-volume continuity | $\sum_{S\cup L}\omega_j/\rho_j(T)$, reaction sources only | §10 |
+| Volume-change rate $\theta$ | condensed-volume continuity | $\sum_{S\cup L}\omega_j/\rho_j$, constant $\rho_j$, reaction sources only | §10 |
 | Node velocity $w$ | balance rows | $0=A_{i+1}(w-c)_{i+1}-A_i(w-c)_i-(\theta_i-\theta_A)V_i$, $0 = w_1$ | §11.3.2, (11.9)–(11.10) |
 | Node correction $c$ | equidistribution | installed by `setup`'s rule, or given | §11.7 |
 | Cross-section $A$, $\theta_A$ | algebraic rows | $A=A_0\,\mathrm{law}(\bar\chi_c)$, $\theta_A = \frac{d}{dt}\log\mathrm{law}(\bar\chi_c)$ | §10, §11.3.3 |

@@ -279,7 +279,10 @@ douglas_fir = Material(
             # Skeletal density interpolated toward char (1950) by progress 0.74
             ρ_intrinsic = 1833.0,
         ),
-        # 6. Char - final solid residue (fully porous)
+        # 6. Char - final solid residue (fully porous). Its bulk density sets
+        # the residue thickness (Technical Reference §10.2): with the chain's
+        # solid yield of 0.164, the slab chars to 0.58 of its dry thickness,
+        # the measured residue thickness.
         SolidComponent(
             :Char,
             ρ = 150.0,

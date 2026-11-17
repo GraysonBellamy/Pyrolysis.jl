@@ -23,7 +23,9 @@ using OrdinaryDiffEq: DiscreteCallback
 # `h` the thicknesses, `T` the temperatures, `layer` 1 for the reacting solid
 # and 2 for the inert one, `ρ` the density of each cell's solid. The value of a
 # field in a cell follows from the cell the position falls in, so removing a
-# cell's entries gives the deck without it.
+# cell's entries gives the deck without it. The solids fill less of each cell
+# than it spans, which `setup` warns of on a moving mesh (`_set_up`);
+# no table depends on it.
 function _column(h, T, layer, ρ; radiating = false)
     a = SolidComponent(:a; φ = 0.3, ρ = 800.0, c = 1000.0, k = 0.2, λ = 1e-6, α = 50.0)
     b = SolidComponent(:b; φ = 0.6, ρ = 900.0, c = 1300.0, k = 0.1, λ = 1e-6, α = 50.0)
@@ -63,14 +65,15 @@ const _T = [640.0, 630.0, 625.0, 610.0, 600.0, 590.0, 585.0, 570.0]
 const _L = [2, 2, 2, 1, 1, 1, 1, 1]
 const _R = [500.0, 480.0, 450.0, 400.0, 390.0, 370.0, 360.0, 340.0]
 
-_set_up(p, energy; model = SURFACE_ABSORPTION) = setup(
-    p;
-    energy_state = energy,
-    use_ale = true,
-    deactivation = true,
-    correction = NoCorrection(),
-    radiation_model = model,
-)
+_set_up(p, energy; model = SURFACE_ABSORPTION) =
+    @test_logs (:warn, r"do not fill") match_mode = :any setup(
+        p;
+        energy_state = energy,
+        use_ale = true,
+        deactivation = true,
+        correction = NoCorrection(),
+        radiation_model = model,
+    )
 
 # The registered tables by name: (kind, live array).
 function _named_tables(cp)
@@ -324,7 +327,7 @@ end
     layer = [2, 2, 2, 2, 1, 1, 1, 1, 1, 1]
     T = fill(600.0, 10)
     ρ = fill(400.0, 10)
-    cp = setup(
+    cp = @test_logs (:warn, r"do not fill") match_mode = :any setup(
         _column(h, T, layer, ρ);
         use_ale = true,
         deactivation = true,

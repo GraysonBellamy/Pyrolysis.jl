@@ -15,7 +15,7 @@ $N_C$ components of a `Material`, and $i$ is the **cell index** running over the
 $n$ finite volumes (overload resolution I1, §2). The constitutive species variable is
 the **mass concentration** $\xi_j$ (kg·m⁻³), not the mass fraction (§3, Governing
 Equations); the integrated state is the cell mass $m_{j,i} = \xi_{j,i} V_i$. Two
-density symbols are used with care: the **bulk** (pure-phase) density $\rho_j$
+density symbols are used with care: the **bulk** (apparent) density $\rho_j$
 sets declared bulk occupancy in mixing and strain, while the **intrinsic**
 (skeletal, cell-wall) density $\rho_{i,j}$ appears *only* in the pore-fraction
 formula (overload resolution A7, §2). The three binding sign conventions of §2
