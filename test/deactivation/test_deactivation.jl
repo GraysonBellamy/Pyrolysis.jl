@@ -1,4 +1,5 @@
 using Test
+using Logging
 using SparseArrays
 using Pyrolysis
 using Pyrolysis.Materials: RADIATIVE_TRANSFER, T_REF
@@ -1538,12 +1539,12 @@ end
     else
         # A fixed cell keeps its volume: emptied beneath cells that hold their
         # material it is a cavity, and the solve ends.
-        sol =
-            @test_logs (:warn, r"cell 1 is below its threshold.*outcome :interior") Integration.solve(
-                problem;
-                use_ale = false,
-                options...,
-            )
+        interior = r"cell 1 is below its threshold.*outcome :interior"
+        sol = @test_logs (:warn, interior) min_level = Logging.Warn Integration.solve(
+            problem;
+            use_ale = false,
+            options...,
+        )
         @test sol.retcode === :Terminated
         @test sol.outcome === :interior
         @test isempty(sol.events)
