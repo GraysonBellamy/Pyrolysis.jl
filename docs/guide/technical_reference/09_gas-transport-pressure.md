@@ -316,11 +316,14 @@ The component values are effective as well. Softwood measured intact across
 the grain has $\kappa=5\times10^{-20}$–$2.5\times10^{-14}$ m², some four decades
 below its value along the grain (Comstock 1970). A burning specimen also vents
 through drying checks, through cracks, and through the longitudinal component
-that any slope of grain gives a face. A virgin-wood value set against
-pressures measured in burning spruce, $1.5\times10^{-16}$ m² (Fredlund 1993),
-is up to three decades above the laboratory values for that species. A pore
-pressure computed from tabulated or assumed permeabilities is therefore a
-calibrated quantity (§9.4.3).
+that any slope of grain gives a face. The one model found that was set against
+pressures measured in burning spruce kept its virgin value, $0.9\times10^{-16}$
+m², near laboratory measurements across the grain ($1.2$–$2.2\times10^{-16}$ m²
+for pine and spruce, Tveit 1966) and fitted only the rise toward char, a factor
+$e^{11}\approx6\times10^{4}$ that stands for cracks as well as pore growth
+(Fredlund 1988). Other laboratories put transverse spruce up to three decades
+lower (Comstock 1970). A pore pressure computed from tabulated
+or assumed permeabilities is therefore a calibrated quantity (§9.4.3).
 
 ### 9.3.2 Pore geometry for the dusty-gas model
 
@@ -587,11 +590,13 @@ with `+`.
 wrap is not a gas seal at the pressures pyrolysis generates: pyrolysis gas
 leaking to the rear of the ISO 5660 holder and burning there is documented
 (Sandinge et al. 2022). Measured pore overpressures in burning wood range from
-0.3 kPa to 130 kPa with moisture, grain direction and cracking (Lee, Chaiken
-and Singer 1977; Fredlund 1993), and two transducers a few centimetres apart
-in one specimen differ by the whole signal when a crack reaches one of them.
-A predicted pore pressure is therefore a mean over a cracked char, credible up
-to about 1–1.5 bar overpressure and only while the matrix is intact. It is
+0.3 kPa to about 190 kPa with moisture, grain direction and cracking; oven-dry
+spruce under 90 kW·m⁻² reaches 70–95 kPa from pyrolysis gas alone, and wood
+at 24 % moisture about 190 kPa (Lee, Chaiken and Singer 1977; Fredlund 1988,
+1993). Two transducers a few centimetres apart in one specimen differ by the
+whole signal when a crack reaches one of them. A predicted pore pressure is
+therefore a mean over a cracked char, credible up to about 2 bar overpressure
+and only while the matrix is intact. It is
 also an upper bound wherever the grain lies parallel to the heated face:
 softwood is $5\times10^{2}$ to $8\times10^{4}$ times more permeable along the
 grain than across it (Comstock 1970), so the virgin zone vents to the specimen

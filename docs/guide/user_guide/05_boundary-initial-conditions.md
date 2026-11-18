@@ -513,7 +513,7 @@ gas seal at the pore pressures pyrolysis generates, so when pore pressure is
 compared with measurements represent a leaky back by `ConvectivePressureBC`
 with the resistance of the backing board (about `3e3` Pa m² s/kg for a
 ceramic-fibre board, i.e. effectively ambient pressure); predicted pore
-pressures are means over a cracked char and are credible to about 1–1.5 bar
+pressures are means over a cracked char and are credible to about 2 bar
 overpressure (Technical Reference §9.4.3).
 
 ---

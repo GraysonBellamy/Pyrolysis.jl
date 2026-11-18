@@ -492,7 +492,7 @@ The physics below is absent from the model. It is ordered by its expected effect
 
 4. **Oxidative pyrolysis and char oxidation with O₂ ingress** (about 32.8 MJ per kg of carbon). It dominates at sub-critical fluxes, after flameout, and in smoldering, and it controls the late-time MLR tail and the residue mass of the Douglas-fir case. It needs multi-reactant kinetics (item 2) and an explicit reservoir composition supplied by `GasReservoir`. The upwind Darcy outflow suppresses ingress at high MLR.
 5. **Equilibrium (pressure-dependent) moisture evaporation and recondensation.** Drying is a pressure-independent Arrhenius reaction; no saturation pressure $P_{\text{sat}}(T)$ appears anywhere. Vapor recondensation ahead of the drying front (which raises the local moisture content by 30–50 %) is absent, and at the 1.5–2 atm pore pressure of pressure-treated wood the boiling point shifts to 112–121 °C, which Arrhenius drying cannot represent. The vapour driven inward from the front stays in the cold pores at many times its saturation pressure, whatever the drying kinetics, and the latent heat it would release there is not delivered. The cold side of wet wood shows a plateau near 373 K (Bilbao et al. 1996; Lee et al. 2025); a model with an Arrhenius drying step shows no plateau and lies 30–50 K below the measured bottom-surface temperature of 9 mm pressure-treated pine while it dries (Lee et al. 2025, Fig. 6). The cold-side temperature of wet wood during drying, and the pore pressure and composition of any material with a kinetic drying step, are therefore outside the model, and a conductivity fitted to a back-face history of wet wood absorbs the missing plateau. An Arrhenius drying step is also only admissible while its rate at ambient temperature is negligible over the test; the wood examples' parameters are not (§6.10 item 11). It needs item 2 and a smooth $r \propto (P_v - P_{\text{sat}}(T))$ closure; the pressure is evaluated for all gas-bearing materials.
-6. **Backing layer and contact resistance at the back face.** There is no contact-resistance or substrate model. An adiabatic back face over-predicts late-time back-half temperatures (the missing loss is about 0.7–3 kW·m⁻² for 25 mm of wood over 10–20 min); a lumped Robin condition on the bottom face (radiative + convective, as in example `06_cone_calorimeter.jl`) is the available approximation. A contact conductance plus a semi-infinite-substrate $h(t)$ would close the gap. The back face is also taken gas-tight (`ImpermeableBC`), which the standard foil wrap is not at the pore pressures pyrolysis generates; a leaky back is represented by `ConvectivePressureBC` with a board or leak resistance, and a predicted pore pressure is a mean over a cracked char, credible to about 1–1.5 bar overpressure (§9.4.3).
+6. **Backing layer and contact resistance at the back face.** There is no contact-resistance or substrate model. An adiabatic back face over-predicts late-time back-half temperatures (the missing loss is about 0.7–3 kW·m⁻² for 25 mm of wood over 10–20 min); a lumped Robin condition on the bottom face (radiative + convective, as in example `06_cone_calorimeter.jl`) is the available approximation. A contact conductance plus a semi-infinite-substrate $h(t)$ would close the gap. The back face is also taken gas-tight (`ImpermeableBC`), which the standard foil wrap is not at the pore pressures pyrolysis generates; a leaky back is represented by `ConvectivePressureBC` with a board or leak resistance, and a predicted pore pressure is a mean over a cracked char, credible to about 2 bar overpressure (§9.4.3).
 7. **Kinetics expressiveness.** A $T^n$ pre-factor and DAEM-style stacking are absent. Any real order $n \ge 0$ acts on the conversion of the reactant against its lineage inventory, on fixed and moving meshes alike (§6.4); a lineage fed through the gas is refused, and a lineage whose reference would depend on the rates needs an explicit `basis` (§6.5.5).
 8. **Transport-closure accuracy** (item 5 above). The gas viscosity is a material curve without composition-dependent mixing. Binary diffusivity and pore geometry must be supplied for the dusty-gas model. Both closures exclude thermal diffusion and gravity; donor advection is first order. A matrix endpoint supplies finite porous resistance, not a free-flow momentum model (§9).
 
@@ -7724,11 +7724,14 @@ The component values are effective as well. Softwood measured intact across
 the grain has $\kappa=5\times10^{-20}$–$2.5\times10^{-14}$ m², some four decades
 below its value along the grain (Comstock 1970). A burning specimen also vents
 through drying checks, through cracks, and through the longitudinal component
-that any slope of grain gives a face. A virgin-wood value set against
-pressures measured in burning spruce, $1.5\times10^{-16}$ m² (Fredlund 1993),
-is up to three decades above the laboratory values for that species. A pore
-pressure computed from tabulated or assumed permeabilities is therefore a
-calibrated quantity (§9.4.3).
+that any slope of grain gives a face. The one model found that was set against
+pressures measured in burning spruce kept its virgin value, $0.9\times10^{-16}$
+m², near laboratory measurements across the grain ($1.2$–$2.2\times10^{-16}$ m²
+for pine and spruce, Tveit 1966) and fitted only the rise toward char, a factor
+$e^{11}\approx6\times10^{4}$ that stands for cracks as well as pore growth
+(Fredlund 1988). Other laboratories put transverse spruce up to three decades
+lower (Comstock 1970). A pore pressure computed from tabulated
+or assumed permeabilities is therefore a calibrated quantity (§9.4.3).
 
 ### 9.3.2 Pore geometry for the dusty-gas model
 
@@ -7995,11 +7998,13 @@ with `+`.
 wrap is not a gas seal at the pressures pyrolysis generates: pyrolysis gas
 leaking to the rear of the ISO 5660 holder and burning there is documented
 (Sandinge et al. 2022). Measured pore overpressures in burning wood range from
-0.3 kPa to 130 kPa with moisture, grain direction and cracking (Lee, Chaiken
-and Singer 1977; Fredlund 1993), and two transducers a few centimetres apart
-in one specimen differ by the whole signal when a crack reaches one of them.
-A predicted pore pressure is therefore a mean over a cracked char, credible up
-to about 1–1.5 bar overpressure and only while the matrix is intact. It is
+0.3 kPa to about 190 kPa with moisture, grain direction and cracking; oven-dry
+spruce under 90 kW·m⁻² reaches 70–95 kPa from pyrolysis gas alone, and wood
+at 24 % moisture about 190 kPa (Lee, Chaiken and Singer 1977; Fredlund 1988,
+1993). Two transducers a few centimetres apart in one specimen differ by the
+whole signal when a crack reaches one of them. A predicted pore pressure is
+therefore a mean over a cracked char, credible up to about 2 bar overpressure
+and only while the matrix is intact. It is
 also an upper bound wherever the grain lies parallel to the heated face:
 softwood is $5\times10^{2}$ to $8\times10^{4}$ times more permeable along the
 grain than across it (Comstock 1970), so the virgin zone vents to the specimen
