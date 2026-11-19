@@ -28,11 +28,13 @@ using ..Physics:
     primal,
     TransportFailure
 using ..Physics: evaluate_reactions!, species_source_terms!, reaction_heat_source
+using ..Physics: moisture_content, phase_change_rate, phase_change_heat
 using ..Meshes
 using ..States
 
 include("contributions.jl")
 include("reactions.jl")
+include("phase_change.jl")
 include("conduction.jl")
 include("gas_transport.jl")
 include("radiative_transfer.jl")
@@ -42,6 +44,7 @@ include("relative_flux.jl")
 
 export Kernel, Contributions, reset!, contribute!, find_kernel
 export ReactionKernel
+export PhaseChangeKernel
 export ConductionKernel, normal_conductivity, cell_gradient, gradient_support
 export GasTransportKernel, face_peclet
 export RadiativeTransferKernel, MirrorBack, OpenBack, consistent_radiation!

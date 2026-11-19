@@ -6,9 +6,10 @@ analysis.
 JET's `@test_call` analyses `residual!` and the colored `jacobian!` at the
 concrete types `setup` builds, on a fixed mesh with and without a collimated
 heater under radiative transfer, a moving mesh with radiative transfer (an
-open back, and a cone heater) and lumped wall and Darcy transport, and a
+open back, and a cone heater) and lumped wall and Darcy transport, a
 moving mesh under the
-equidistribution correction, in both energy forms. Reports are limited to the
+equidistribution correction, and a moving mesh with a phase change, in both
+energy forms. Reports are limited to the
 package's own modules.
 """
 
@@ -65,6 +66,33 @@ function _wood()
     gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03)
     rxn = Reaction(:pyrolysis, 1 => 2, A = 1e10, E = 150e3, h = -300e3)
     return Material(name = :wood, components = (virgin, gas), reactions = (rxn,))
+end
+
+# Wood holding water, with its vapour and the pyrolysis gas: the phase change
+# beside the pyrolysis under an activity function, whose heat takes a nested
+# derivative.
+function _wet()
+    wood = SolidComponent(
+        :wood,
+        ρ = 500.0,
+        c = (1500.0, 0.5),
+        k = 0.15,
+        ε = 0.9,
+        κ = 1e-14,
+        λ = 1e-5,
+        ρ_intrinsic = 1500.0,
+    )
+    water = LiquidComponent(:water, ρ = 1000.0, c = 4180.0, k = 0.6)
+    vapour = GaseousComponent(:vapour, M = 0.018015, c = 1900.0, k = 0.025)
+    gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03)
+    return Material(
+        name = :wet,
+        components = (wood, water, vapour, gas),
+        reactions = (Reaction(:pyrolysis, 1 => 4, A = 1e10, E = 150e3, h = -300e3),),
+        phase_changes = (
+            PhaseChange(:moisture, 2 => 3; activity = CAST_SPRUCE, sorbents = (1,)),
+        ),
+    )
 end
 
 _column(mat; top, stretch = nothing) = PyrolysisProblem(
@@ -124,6 +152,19 @@ const _configurations = (
             use_ale = true,
             correction = EquidistributionCorrection(activation = (0.99, 0.5)),
         ),
+    ),
+    moving_phase_change = (
+        problem = () -> PyrolysisProblem(
+            mesh = uniform_mesh(0.01, 8),
+            material = _wet(),
+            bc_set = BoundaryConditionSet(
+                thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()),
+            ),
+            T_initial = z -> 300.0,
+            ξ_initial = [z -> 450.0, z -> 45.0, z -> 0.01, z -> 0.0],
+            tspan = (0.0, 100.0),
+        ),
+        options = (use_ale = true,),
     ),
 )
 

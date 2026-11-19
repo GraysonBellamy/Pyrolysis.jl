@@ -2564,3 +2564,93 @@ end
     @test all(>(0), cp.deactivation.reactive) == tested
     @test all(iszero, cp.deactivation.reactive) == !tested
 end
+
+# The ablating solid of `_ablator` holding water at `water` kg/m³ that leaves
+# through a phase change, its cells filled by the two (`wet = false`: the dry
+# twin, the solid alone with the same components and no phase change), its
+# pores holding only the vapour, in equilibrium, open to a vacuum.
+function _wet_ablator(n; water = 50.0, wet = true, L = 3e-3, q = 2.8e6, t_end = 0.8)
+    ρ, c, k = 1000.0, 1000.0, 1.0
+    R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
+    v = 2.0e-3
+    A = v^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (k / (ρ * c) * R * Tp^2)
+    solid = SolidComponent(:solid; ρ, c, k, λ = 1e-6, ρ_intrinsic = 1.25ρ, κ = 1e-12)
+    liquid = LiquidComponent(:water; ρ = 1000.0, c = 4180.0, k = 0.6)
+    vapour = GaseousComponent(:vapour, M = 0.018, c = 2000.0, k = 0.025)
+    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02)
+    mat = Material(
+        name = :wet_ablator,
+        components = (solid, liquid, vapour, gas),
+        reactions = (Reaction(:ablate, 1 => 4; A = A, E = E, h = 1.0e6),),
+        phase_changes = wet ?
+                        (
+            PhaseChange(:drying, 2 => 3; activity = FreeLiquid(), sorbents = (1,)),
+        ) : (),
+    )
+    ξ_water = wet ? water : 0.0
+    ξc = (ρ * (1 - ξ_water / 1000.0), ξ_water, 0.0, 0.0)
+    ξ_v = wet ? equilibrium_vapour_concentration(mat, ξc, T0) : 0.0
+    return PyrolysisProblem(
+        mesh = uniform_mesh(L, n),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = HeatFluxBC(q), bottom = AdiabaticBC()),
+            mass = (
+                top = AmbientGasBC(
+                    GasReservoir(
+                        P = 0.0,
+                        T = T0,
+                        mole_fractions = (gas = 1.0, vapour = 0.0),
+                    ),
+                ),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> T0,
+        ξ_initial = [z -> ξc[1], z -> ξc[2], z -> ξ_v, z -> 0.0],
+        tspan = (0.0, t_end),
+        output_times = collect(0.0:0.05:t_end),
+    )
+end
+
+# Water holding a twentieth of every cell: without the rule that the liquid of
+# a phase change leaves nothing, each cell would keep that volume once
+# converted, be held to it and never be tested, and no correction would be
+# installed.
+@testset "a wet solid that gasifies completely leaves as its dry twin: $(energy) form" for energy in
+                                                                                           (
+    :temperature,
+    :enthalpy,
+)
+    wet, dry = _wet_ablator(30), _wet_ablator(30; wet = false)
+    options = (
+        energy_state = energy,
+        use_ale = true,
+        deactivation = true,
+        abstol = 1e-8,
+        reltol = 1e-6,
+        pressure_tolerance = 1e-3,
+    )
+    cw, cd = setup(wet; options...), setup(dry; options...)
+    @test cw.def.closure.correction isa LayerCorrection
+    @test cd.def.closure.correction isa LayerCorrection
+    # every cell tested, its reactive inventory the solid's alone
+    @test all(>(0), cw.deactivation.reactive)
+    @test cw.deactivation.reactive ≈ 0.95 .* cd.deactivation.reactive rtol = 1e-14
+    @test residues(wet.material) == (0.0, 0.0, 0.0, 0.0)
+    rec = ConservationRecorder()
+    sw = Integration.solve(wet; callback = rec, options...)
+    sd = Integration.solve(dry; options...)
+    @test sw.retcode === sd.retcode === :Success
+    @test sw.outcome === sd.outcome === :none
+    # the same cells leave, in the same order, into the same receivers
+    cells = [e.cell for e in sw.events]
+    @test length(cells) >= 5
+    @test cells == [e.cell for e in sd.events][1:length(cells)]
+    @test cells == 30:-1:(31-length(cells))
+    @test [e.receiver for e in sw.events] == [e.receiver for e in sd.events][1:length(cells)]
+    # the mass ledger closes through the events
+    audit = conservation_audit(sw, rec)
+    @test abs(audit.mass.relative) <= 1e-6
+    @test abs(audit.energy.relative) <= 1e-6
+end

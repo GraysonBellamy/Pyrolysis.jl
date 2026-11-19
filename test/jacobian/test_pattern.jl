@@ -242,6 +242,72 @@ _largest_row(S) = maximum(diff(sparse(transpose(S)).colptr))
     @test all(==(counts[1]), counts)
 end
 
+# A phase change reads its own cell's masses, energy and, on a moving mesh, its
+# nodes' positions, which every cell row already reaches: the pattern and the
+# color count are those of its twin with a one-way drying reaction in its place.
+function _wet_problem(n; phase_change = true)
+    wood = SolidComponent(
+        :wood,
+        ρ = 500.0,
+        ρ_intrinsic = 1500.0,
+        c = 1500.0,
+        k = 0.15,
+        κ = 1e-14,
+        λ = 1e-5,
+    )
+    water = LiquidComponent(:water, ρ = 1000.0, c = 4180.0, k = 0.6)
+    vapour = GaseousComponent(:vapour, M = 0.018015, c = 1900.0, k = 0.025)
+    gas = GaseousComponent(:g, M = 0.03, c = 1100.0, k = 0.03)
+    pyrolysis = Reaction(:r, 1 => 4; A = 5e9, E = 1.4e5, h = 8e5)
+    drying = Reaction(:drying, 2 => 3; A = 1e5, E = 5e4, h = 2.3e6)
+    mat = Material(
+        name = :wet,
+        components = (wood, water, vapour, gas),
+        reactions = phase_change ? (pyrolysis,) : (pyrolysis, drying),
+        phase_changes = phase_change ?
+                        (
+            PhaseChange(:moisture, 2 => 3; activity = CAST_SPRUCE, sorbents = (1,)),
+        ) : (),
+    )
+    return PyrolysisProblem(
+        mesh = stretched_mesh(0.01, n, 1.05),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = _heaters[:diffuse], bottom = AdiabaticBC()),
+            mass = (
+                top = AmbientGasBC(
+                    GasReservoir(
+                        P = 101325.0,
+                        T = 300.0,
+                        mole_fractions = (g = 1.0, vapour = 0.0),
+                    ),
+                ),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> 300.0 + 2e4 * z,
+        ξ_initial = [z -> 450.0, z -> 45.0, z -> 0.01, z -> 1.0],
+        tspan = (0.0, 10.0),
+    )
+end
+
+@testset "colors: a phase change adds none, $(name)" for (name, options) in pairs((
+    fixed = (;),
+    moving = (use_ale = true,),
+    moving_radiative_transfer = (use_ale = true, radiation_model = RADIATIVE_TRANSFER),
+))
+    for n in (6, 8, 12)
+        wet = setup(_wet_problem(n); options...)
+        twin = setup(_wet_problem(n; phase_change = false); options...)
+        layout = wet.def.layout
+        @test wet.jacobian.pattern == twin.jacobian.pattern
+        @test wet.jacobian.n_colors == twin.jacobian.n_colors
+        @test wet.jacobian.n_colors == _largest_row(wet.jacobian.colored)
+        @test wet.jacobian.n_colors ==
+              _expected(4, is_moving(layout), radiation_rows(layout), false, false, false)
+    end
+end
+
 # Under radiative transfer each family reads itself at its own face and at the
 # face upstream of it in its direction of travel, q⁻ and the beams (toward the
 # back, node 1) at the face above, q⁺ at the face below; q⁻ and q⁺ read each

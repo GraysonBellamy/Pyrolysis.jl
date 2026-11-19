@@ -31,5 +31,6 @@ export volume_change_rate
 export pore_state, ideal_gas_pressure
 export background_gas_concentration
 export moisture_content, equilibrium_vapour_pressure, phase_change_rate, phase_change_heat
+export equilibrium_vapour_concentration
 
 end # module Physics

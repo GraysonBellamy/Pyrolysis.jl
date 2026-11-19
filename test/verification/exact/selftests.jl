@@ -1064,3 +1064,127 @@ end
         end
     end
 end
+
+@testset "Phase change: the closures and the sealed cell (exact/phase_change.jl)" begin
+    @testset "saturation pressure of water (Wagner and Pruß 2002)" begin
+        # the triple point and the normal boiling point
+        @test pc_saturation(273.16) ≈ 611.657 rtol = 2e-6
+        @test pc_saturation(373.15) ≈ 101418.0 rtol = 1e-6
+        # IAPWS-95 at 25 °C (NIST fluid tables), within the auxiliary equation's accuracy
+        @test pc_saturation(298.15) ≈ 3169.929 rtol = 4e-5
+        # the package's curve, which clamps outside 255–640 K only
+        for T in (280.0, 300.0, 350.0, 400.0, 450.0, 600.0)
+            @test pc_saturation(T) ≈ WATER_SATURATION(T) rtol = 1e-14
+        end
+    end
+
+    @testset "CAST isotherm (Dietenberger, Glass and Boardman 2024)" begin
+        # Table 3 as typed here and in the package
+        @test CAST_TABLE3.spruce == CAST_SPRUCE.β
+        @test CAST_TABLE3.beech == CAST_BEECH.β
+        # beech holds X = 0.0795 at a = 0.5 and 25 °C under the model's law
+        # (eq. 18 alone gives 0.0794: the vanishing factor adds X0/X of a)
+        a(X) = pc_activity((:cast, CAST_TABLE3.beech), X, 298.15)
+        @test bisect_root(X -> a(X) - 0.5, 0.01, 0.2) ≈ 0.0795 atol = 5e-5
+        bare(X) = exp(-cast_gibbs(CAST_TABLE3.beech, X, 298.15) / (PC_R * 298.15))
+        @test bisect_root(X -> bare(X) - 0.5, 0.01, 0.2) ≈ 0.0794 atol = 5e-5
+        # eq. 25: spruce's Δg vanishes at 29 % at 25 °C
+        @test bisect_root(X -> cast_gibbs(CAST_TABLE3.spruce, X, 298.15), 0.1, 0.5) ≈ 0.2897 atol =
+            5e-4
+        # eq. 19 is (R T²/M) ∂ln a/∂T of eq. 18, by central differences
+        for β in CAST_TABLE3, X in (0.02, 0.1, 0.2), T in (300.0, 373.15, 450.0)
+            lna(t) = -cast_gibbs(β, X, t) / (PC_R * t)
+            h = 1e-3
+            fd = PC_R * T^2 / 0.018015 * (lna(T + h) - lna(T - h)) / 2h
+            @test cast_sorption_heat(β, X, T, 0.018015) ≈ fd rtol = 1e-7
+        end
+    end
+
+    @testset "the model's laws against the package's" begin
+        laws = (
+            ((:cast, CAST_TABLE3.spruce), CAST_SPRUCE),
+            ((:cast, CAST_TABLE3.beech), CAST_BEECH),
+            ((:free,), FreeLiquid()),
+        )
+        for (law, package) in laws,
+            X in (-0.01, 0.0, 1e-5, 0.03, 0.1, 0.25, 0.6),
+            T in (280.0, 350.0, 420.0)
+
+            @test pc_activity(law, X, T) ≈ Pyrolysis.Materials.activity(package, X, T) rtol =
+                1e-13 atol = 1e-16
+            @test pc_sorption_heat(law, X, T, 0.018015) ≈
+                  Pyrolysis.Materials.sorption_heat(package, X, T, 0.018015) rtol = 1e-9 atol =
+                1e-6
+        end
+        # the cap at one and its slope
+        @test pc_cap(0.5) == 0.5 && pc_cap(2.0) == 1.0
+        @test 1 - pc_cap(1.05) < 1e-4
+        @test pc_cap_slope(0.5) == 1.0 && pc_cap_slope(2.0) == 0.0
+        x = 0.99
+        @test pc_cap_slope(x) ≈ x * (pc_cap(x + 1e-7) - pc_cap(x - 1e-7)) / 2e-7 / pc_cap(x) rtol =
+            1e-6
+    end
+
+    cell(law; K = 1e2, L_ref = 2.4417e6, c_water = 4180.0) = SealedCell(
+        ξ_s = 400.0,
+        ρ_s = 1500.0,
+        ξ_w0 = 40.0,
+        ξ_a = 0.9,
+        T0 = 350.0,
+        law = law,
+        K = K,
+        L_ref = L_ref,
+        c = (1500.0, c_water, 1900.0, 1006.0),
+    )
+
+    @testset "the athermal cell: end state and quadrature" begin
+        c = cell((:frozen, CAST_TABLE3.spruce, 298.15); L_ref = 0.0, c_water = 1900.0)
+        x∞ = pc_athermal_end(c)
+        @test abs(pc_equilibrium_vapour(c, 40.0 - x∞, 350.0) - x∞) <= 1e-15 * x∞
+        # an independent Runge–Kutta integration of the one equation
+        f(x) = c.K * (pc_equilibrium_vapour(c, 40.0 - x, 350.0) - x)
+        x, dt, t = 0.0, 1e-5 / c.K, 0.0
+        for target in (0.5, 2.0, 8.0) ./ c.K
+            n = round(Int, (target - t) / dt)
+            for _ = 1:n
+                k1 = f(x)
+                k2 = f(x + dt / 2 * k1)
+                k3 = f(x + dt / 2 * k2)
+                k4 = f(x + dt * k3)
+                x += dt / 6 * (k1 + 2k2 + 2k3 + k4)
+            end
+            t = target
+            @test pc_athermal_vapour(c, target) ≈ x rtol = 1e-12
+        end
+        # the linear tail joins the quadrature
+        t_tail = _pc_athermal_time(c, x∞, PC_LINEAR_TAIL)
+        below, above = pc_athermal_vapour(c, t_tail * (1 - 1e-9)),
+        pc_athermal_vapour(c, t_tail * (1 + 1e-9))
+        @test abs(above - below) <= 1e-13 * x∞
+        @test pc_athermal_vapour(c, 100 / c.K) ≈ x∞ rtol = 1e-14
+        # the vapour pressure at equilibrium is the equilibrium pressure
+        @test pc_vapour_pressure(c, 40.0 - x∞, x∞, 350.0) ≈
+              pc_equilibrium_pressure(c, 40.0 - x∞, 350.0) rtol = 1e-13
+    end
+
+    @testset "the thermal cell: Runge–Kutta and the free-water end state" begin
+        for law in ((:cast, CAST_TABLE3.spruce), (:free,))
+            c = cell(law)
+            times = (0.5, 2.0, 8.0) ./ c.K
+            x1, T1 = pc_thermal_history(c, times)
+            x2, T2 = pc_thermal_history(c, times; steps_per = 2000)
+            @test maximum(abs.(x1 ./ x2 .- 1)) <= 1e-12
+            @test maximum(abs.(T1 .- T2)) <= 1e-10
+            @test all(<(350.0), T1)
+        end
+        c = cell((:free,))
+        x, T = pc_thermal_history(c, (40.0 / c.K,))
+        x∞, T∞ = pc_free_water_end(c)
+        @test only(x) ≈ x∞ rtol = 1e-12
+        @test only(T) ≈ T∞ atol = 1e-9
+        # the total enthalpy is conserved along the path of free water
+        @test pc_total_enthalpy(c, x∞, T∞) ≈ pc_total_enthalpy(c, 0.0, 350.0) rtol = 1e-14
+        @test pc_total_enthalpy(c, only(x), only(T)) ≈ pc_total_enthalpy(c, 0.0, 350.0) rtol =
+            1e-12
+    end
+end

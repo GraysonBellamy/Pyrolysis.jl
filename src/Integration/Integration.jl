@@ -40,6 +40,7 @@ using ..Physics: TransportFailure
 using ForwardDiff
 using ..Properties: skeletal_volume_fraction
 using ..BoundaryConditions: ImpermeableBC, MassFluxBC, validate_gas_boundary, reads_time
+using ..BoundaryConditions: AmbientGasBC, ConvectivePressureBC
 using ..Meshes
 using ..States
 using ..Kernels

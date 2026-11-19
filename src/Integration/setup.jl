@@ -119,6 +119,13 @@ function _require_supported(
                 "material must not react (it has $(n_reactions(material)) reactions)",
             ),
         )
+        n_phase_changes(material) == 0 || throw(
+            ArgumentError(
+                "a prescribed mesh velocity moves the mesh over a solid at rest, so the " *
+                "material must not change phase (it has " *
+                "$(n_phase_changes(material)) phase changes)",
+            ),
+        )
         deactivation && throw(
             ArgumentError("cells are not deactivated under a prescribed mesh velocity"),
         )
@@ -164,7 +171,8 @@ function _condensed_volume_ratio(material::Material, rxn, T)
 end
 
 # Runs when some reaction of `material` changes the condensed volume by more
-# than `OCCUPANCY_TOLERANCE` at the mean initial temperature. A moving mesh
+# than `OCCUPANCY_TOLERANCE` at the mean initial temperature, or the material
+# has a phase change, whose vapour holds none of its liquid's volume. A moving mesh
 # integrates that change from the initial volumes, so the condensed occupancy
 # `Σ ξⱼ/ρⱼ` over the solids and liquids equals one later only if it does at the
 # start: warn of the cells that start outside the tolerance of one, leaving out
@@ -180,7 +188,10 @@ function _check_condensed_volume(
 ) where {NC}
     comps = material.components
     T = sum(T0) / length(T0)
-    ratios = map(rxn -> _condensed_volume_ratio(material, rxn, T), material.reactions)
+    ratios = (
+        map(rxn -> _condensed_volume_ratio(material, rxn, T), material.reactions)...,
+        map(_ -> 0.0, material.phase_changes)...,
+    )
     r = findfirst(ratio -> abs(ratio - 1) > OCCUPANCY_TOLERANCE, ratios)
     r === nothing && return nothing
     if use_ale
@@ -205,14 +216,76 @@ function _check_condensed_volume(
               "ξ_wood = ρ/(1 + MC ρ/ρ_w)."
         return nothing
     end
+    NR = n_reactions(material)
+    step =
+        r <= NR ? "reaction :$(material.reactions[r].name)" :
+        "phase change :$(material.phase_changes[r-NR].name)"
     held =
+        r > NR ? "turns its liquid into vapour, which holds none of the liquid's volume" :
         isinf(ratios[r]) ? "forms condensed mass from a gas" :
         "leaves condensed products holding $(round(ratios[r]; sigdigits = 3)) of its " *
         "reactant's volume"
-    @info "setup(): reaction :$(material.reactions[r].name) of material " *
+    @info "setup(): $step of material " *
           "$(material.name) $held, but the mesh is fixed (use_ale = false): the " *
           "skeleton keeps its volume and the porosity takes up the difference. Solve " *
           "with use_ale = true to move the mesh with the solid." maxlog = 1
+    return nothing
+end
+
+# Runs for a material with phase changes: warns, once per vapour and mass
+# condition, of each open face whose reservoir (`AmbientGasBC`,
+# `ConvectivePressureBC`) does not name the vapour at the start, `tspan[1]`,
+# which makes that face a perfectly dry sink for it. A reservoir that names
+# the vapour, at any mole fraction including zero, has stated its humidity.
+function _check_vapour_reservoirs(problem)
+    material = problem.material
+    n_phase_changes(material) == 0 && return nothing
+    t = first(problem.tspan)
+    for (tag, bc) in pairs(problem.bc_set.mass)
+        bc isa Union{AmbientGasBC,ConvectivePressureBC} || continue
+        x = bc.reservoir.mole_fractions
+        named = keys(x isa Function ? x(t) : x)
+        for pc in material.phase_changes
+            vapour = material.components[pc.vapour].name
+            vapour in named && continue
+            @warn "setup(): the reservoir of the :$tag mass condition does not name " *
+                  ":$vapour, the vapour of phase change :$(pc.name), so the face is a " *
+                  "perfectly dry sink for it. Give its mole fraction, RH p_sat(T∞)/P " *
+                  "at a relative humidity RH, or zero for a dry ambient"
+        end
+    end
+    return nothing
+end
+
+# How far a cell's initial vapour may lie from equilibrium with its liquid, as
+# a fraction of the equilibrium concentration, before `setup` says so.
+const EQUILIBRIUM_START_TOLERANCE = 1e-2
+
+# Runs for a material with phase changes: warns, once, when the vapour of some
+# cell holding the liquid starts farther than `EQUILIBRIUM_START_TOLERANCE` of
+# the equilibrium concentration from it, giving the farthest cell. `T0` and
+# `ξ0` are the initial temperatures and concentrations (`NC × n`).
+function _check_phase_change_start(material::Material{NC}, T0, ξ0) where {NC}
+    worst = (0.0, 0, 0, 0.0, 0.0)
+    for (k, pc) in enumerate(material.phase_changes), i in axes(ξ0, 2)
+        ξ0[pc.liquid, i] > 0 || continue
+        ξ = ntuple(j -> ξ0[j, i], Val(NC))
+        ξ_eq =
+            Physics.equilibrium_vapour_concentration(material, ξ, T0[i]; phase_change = k)
+        off = abs(ξ[pc.vapour] - ξ_eq)
+        (off > EQUILIBRIUM_START_TOLERANCE * ξ_eq && off > worst[1] * ξ_eq) || continue
+        worst = (off / ξ_eq, k, i, ξ[pc.vapour], ξ_eq)
+    end
+    _, k, i, ξ_v, ξ_eq = worst
+    k == 0 && return nothing
+    pc = material.phase_changes[k]
+    vapour = material.components[pc.vapour].name
+    @warn "setup(): the pore vapour :$vapour starts off equilibrium with the liquid " *
+          "of phase change :$(pc.name), farthest in cell $i: " *
+          "$(round(ξ_v; sigdigits = 4)) kg/m³ against " *
+          "$(round(ξ_eq; sigdigits = 4)) kg/m³ in equilibrium. It relaxes in about " *
+          "1/K = $(1 / pc.exchange_rate) s; equilibrium_vapour_concentration gives " *
+          "the start in equilibrium"
     return nothing
 end
 
@@ -482,8 +555,8 @@ function gas_can_move(problem::PyrolysisProblem)
     return !closed_transport_channel(mat)
 end
 
-# The kernels in assembler order: reactions, gas transport (whose boundary
-# mass fluxes the surface balance reads), in-depth radiation, conduction, the
+# The kernels in assembler order: reactions, phase changes, gas transport
+# (whose boundary mass fluxes the surface balance reads), in-depth radiation, conduction, the
 # thermal boundary, and under a correction the inventory fluxes relative to
 # the mesh. `tensors` holds every cell's dimensionless conductivity tensor on
 # more than one dimension, `nothing` on a line.
@@ -501,6 +574,7 @@ function _kernels(
 )
     material = problem.material
     reactions = n_reactions(material) > 0 ? (ReactionKernel(material, references),) : ()
+    phase = n_phase_changes(material) > 0 ? (PhaseChangeKernel(),) : ()
     transport =
         !gas_can_move(problem) ? () :
         (GasTransportKernel(gas, topo, g0, problem.bc_set, material, laws),)
@@ -519,6 +593,7 @@ function _kernels(
     )
     return (
         reactions...,
+        phase...,
         transport...,
         radiation...,
         ConductionKernel(topo, g0; tensor = tensors),
@@ -779,12 +854,22 @@ strain rates through the mesh closure, with its unknowns consistent at the
 start; without it every node is pinned. A moving mesh takes each solid's and
 liquid's bulk density as a constant, and a density given as a law of
 temperature is refused. When a reaction's condensed products hold a
-different volume from its reactant (by more than `1e-3` of it), `setup` warns
-on a moving mesh if the condensed components do not fill some cell that
-holds any (`Σ ξⱼ/ρⱼ` over the solids and liquids departs from one by more
-than `1e-3`), since the mesh integrates the volume change from the initial
-volumes, unless `sources` add mass; on a fixed mesh, where the skeleton keeps
-its volume, it says so once a session. On a line the closure is the
+different volume from its reactant (by more than `1e-3` of it), or the
+material has a phase change, whose vapour holds none of its liquid's volume,
+`setup` warns on a moving mesh if the condensed components do not fill some
+cell that holds any (`Σ ξⱼ/ρⱼ` over the solids and liquids departs from one
+by more than `1e-3`), since the mesh integrates the volume change from the
+initial volumes, unless `sources` add mass; on a fixed mesh, where the
+skeleton keeps its volume, it says so once a session.
+
+A material with phase changes ([`PhaseChange`](@ref)) gets two warnings, once
+per `setup`: when the reservoir of an open mass condition (`AmbientGasBC`,
+`ConvectivePressureBC`) does not name a vapour at the start, which makes the
+face a perfectly dry sink for it (a reservoir that names it at a mole
+fraction of zero is dry on purpose); and when the initial vapour of some cell
+holding the liquid lies farther than 1 % of the equilibrium concentration
+from it ([`equilibrium_vapour_concentration`](@ref) gives the start in
+equilibrium). On a line the closure is the
 balance rows of [`BalanceRowClosure`](@ref), and a material with a lateral
 shrinkage law also carries the conversion-history pair and its cross
 section's area and lateral rate. `correction` moves a line's mesh relative
@@ -817,7 +902,11 @@ fraction `threshold` (`ε_m`, 1e-2 by default; at a reaction order other than
 one a tenth of the limiter's `conversion_threshold`, 1e-4 with the default
 limiter) of its reference, the reactants' initial mass or lineage reference
 ([`below_threshold`](@ref), [`CellDeactivation`](@ref)); a cell that keeps a
-hundredth or more of its volume once converted is never tested. On a moving
+hundredth or more of its volume once converted is never tested. A phase
+change adds nothing to the reactive inventory, which reads the reactions'
+reactants alone, so water that can condense back neither holds a spent cell
+live nor empties a live one by drying; once converted, its liquid leaves
+nothing. On a moving
 mesh a cell goes wherever it sits, together with the contiguous cells around it
 below the fraction `band` (`ε_band`, in `[threshold, 1)`; by default the larger
 of the threshold and [`CORRECTION_BAND`](@ref) when the bound equidistribution
@@ -900,6 +989,8 @@ function setup(
         deformation,
     )
     _check_condensed_volume(material, T0, ξ0, use_ale, sources)
+    _check_vapour_reservoirs(problem)
+    _check_phase_change_start(material, T0, ξ0)
     lagrangian = something(
         lagrangian,
         correction isa EquidistributionCorrection ?

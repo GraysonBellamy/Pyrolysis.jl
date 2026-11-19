@@ -37,8 +37,8 @@ of the `:top` (surface) or `:bottom` (back) faces are `NaN` without that tag
 or once no live cell borders it; per-area quantities divide by the current
 area of the faces they name unless noted.
 
-- `gas_generation_rate`: the gas the reactions of the live cells produce, per
-  unit initial area of the `:top` faces [kg/(m²·s)]
+- `gas_generation_rate`: the gas the reactions and phase changes of the live
+  cells produce, net, per unit initial area of the `:top` faces [kg/(m²·s)]
 - `back_temperature`: the temperature of the `:bottom` faces [K]
 - `total_mass`: the summed component masses, per unit initial area of the
   `:top` faces [kg/m²]
