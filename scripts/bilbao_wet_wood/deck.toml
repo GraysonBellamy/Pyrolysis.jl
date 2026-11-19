@@ -1,0 +1,82 @@
+# Pinus pinaster slab of Bilbao, Mastral, Ceamanos & Aldea, J. Anal. Appl.
+# Pyrolysis 36 (1996) 81-97 ("B96", printed pages), and the laws shared with
+# the LEMTA decks. Sources:
+#   B96    the paper: rig, specimen, the authors' own measurements;
+#   IJTS24 Flity et al., Int. J. Therm. Sci. 195 (2024) 108661 (wood c, k(T));
+#   Th     H. Flity, PhD thesis, Université de Lorraine (2023) (char c,
+#          skeletal density);
+#   CHAR   Flity, Jannot, Acem & Parent, "Thermal conductivity of wood char up
+#          to 800 °C", SSRN preprint 6137656 (char k, pooled law).
+# The evaporation laws, the heat of desorption and the water and vapour
+# properties are those of scripts/lemta_moist_wood (LemtaMoistWood.jl).
+
+# Specimen: 110 × 110 × 19 mm, one face exposed, the others in fibreglass
+# (B96 p.83). Heated across the grain (a 19 mm slab; not stated).
+thickness = 0.019             # m
+area = 0.0121                 # m², the exposed face
+rho_dry = 430.0               # kg/m³, "initial density of the solid", measured (B96 p.93)
+T0 = 300.0                    # K, the first readings of Figs 3, 4, 11, 12 (296-306 K)
+
+# Heat transfer.
+# - The exposed face absorbs the incident flux of data/flux.csv (the Gardon
+#   gauge, Fig. 2) at the surface absorptivity, re-radiates at ε to T_amb and,
+#   with `h_front` > 0, convects to T_amb. The authors' model has no
+#   convection (B96 eq. 6): the face looks up at a hotter panel 35 mm above,
+#   a stably stratified gap.
+# - The back and sides are in fibreglass; the back is adiabatic, as in B96
+#   eq. 5.
+T_amb = 300.0                 # K
+h_front = 0.0                 # W/(m² K)
+
+# Dry wood across the grain.
+# - k: the IJTS24 law k0 + k1 (ρ/1000) √(T/433 K), scaled to the authors'
+#   measured 0.103 W/(m K) at 20 °C (B96 p.92; the law gives 0.0990 at 430
+#   kg/m³ and 293 K): factor 1.040.
+# - c = 1131 + 4.67 T(°C) J/(kg K) (IJTS24, mean of eight species).
+# - ε = α = 0.78, pine slabs (B96 p.93, from the literature).
+k_wood = [0.0386, 0.1708]
+k_wood_scale = 1.040
+c_wood = [1131.0, 4.67]
+wood_emissivity = 0.78
+
+# Char. c = 693 + 3.44 T(°C) (Th eq. 2.8); k = aT + b + 16σT³/(3β), the
+# pooled law of three chars (CHAR eq. 11); ε = α = 0.95 (Th p.48-49).
+# A fully converted layer keeps 1 − shrinkage of the wood's volume (`material`);
+# with no shrinkage (B96 assumption 1) the char's component density is the
+# char yield times ρ_dry.
+c_char = [693.0, 3.44]
+k_char = { a = -1.39e-4, b = 9.2e-2, beta = 826.0 }
+char_emissivity = 0.95
+
+# Pyrolysis, single step (families `bilbao`, `tc1_bilbao`; the larch scheme
+# the other families use is `SCHEMES` in BilbaoWetWood.jl):
+# wood → γ char + (1 − γ) volatiles, first order. The Arrhenius
+# part of the authors' TGA kinetics, k = 4.987e7 exp(−24208/RT) min⁻¹ with R
+# in cal/(mol K) (B96 eq. 12): A = 8.31e5 s⁻¹, E = 101.3 kJ/mol. The authors
+# clamp k to 0.017 min⁻¹ at 435-563 K and add heating-rate terms; those are
+# not used. A_s = 0.76 pyrolysable (B96 p.92), so γ = 0.24.
+A_pyrolysis = 8.312e5         # s⁻¹
+E_pyrolysis = 101.29e3        # J/mol
+char_yield = 0.24
+# Heats per kg of mass lost, by DSC on this pine (B96 p.92): +274 kJ/kg
+# (endothermic) while the dry-basis conversion X_s ≤ 0.6, −353 kJ/kg after.
+heat_early = 274.0e3          # J/kg of volatiles
+heat_late = -353.0e3          # J/kg of volatiles
+X_switch = 0.6
+
+# Gas. One lumped volatile species (round values, as the LEMTA argon decks),
+# the water vapour of the LEMTA moist decks, and the furnace's N₂.
+volatiles_M = 0.05            # kg/mol
+volatiles_c = 1500.0          # J/(kg K)
+volatiles_k = 0.025           # W/(m K)
+n2_M = 0.028014               # kg/mol
+n2_c = 1040.0                 # J/(kg K)
+n2_k = 0.026                  # W/(m K)
+# Darcy permeability and lumped transfer coefficient. Wood across the grain:
+# 1e-15 m², the LEMTA moist decks' value (pine sapwood is quoted at 1e-16 to
+# 1e-14 across the grain). Char: 1e-11 m² (fissured, B96 p.93), and 1e-5 m²/s.
+kappa_wood = 1.0e-15          # m²
+kappa_char = 1.0e-11          # m²
+transfer_wood = 5.0e-7        # m²/s
+transfer_char = 1.0e-5        # m²/s
+skeletal_density = 1450.0     # kg/m³ (Th p.25)

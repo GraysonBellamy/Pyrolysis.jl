@@ -1,0 +1,57 @@
+# Flux factor (and wood k factor) per thermal family, fitted to the dry
+# run's 9 and 19 mm records over 0-24 min by calibrate_dry.jl.
+[backloss]
+flux_factor = 2.7635
+k_scale = 1.0
+rms_19mm_K = 21.0
+rms_1mm_K = 83.3
+rms_9mm_K = 22.7
+
+[bilbao]
+flux_factor = 2.7536
+k_scale = 1.0
+rms_19mm_K = 9.8
+rms_1mm_K = 79.7
+rms_9mm_K = 15.6
+
+[deck]
+flux_factor = 2.444
+k_scale = 1.0
+rms_19mm_K = 5.9
+rms_1mm_K = 59.4
+rms_9mm_K = 20.2
+
+[fixed]
+flux_factor = 2.7145
+k_scale = 1.0
+rms_19mm_K = 7.7
+rms_1mm_K = 80.0
+rms_9mm_K = 21.4
+
+[kwood]
+flux_factor = 2.5251
+k_scale = 0.9
+rms_19mm_K = 4.4
+rms_1mm_K = 67.4
+rms_9mm_K = 18.0
+
+[tc1]
+flux_factor = 1.0
+k_scale = 1.366
+rms_19mm_K = 13.8
+rms_1mm_K = 0.0
+rms_9mm_K = 22.5
+
+[tc1_bilbao]
+flux_factor = 1.0
+k_scale = 1.526
+rms_19mm_K = 19.8
+rms_1mm_K = 0.0
+rms_9mm_K = 25.5
+
+[tc1_fixed]
+flux_factor = 1.0
+k_scale = 1.475
+rms_19mm_K = 17.9
+rms_1mm_K = 0.0
+rms_9mm_K = 27.4
