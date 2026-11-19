@@ -15,11 +15,15 @@ This module provides:
 - Temperature-dependent property functions
 - Component and material type definitions
 - Reaction type definitions
+- The saturation pressure of water and the activity laws of a liquid held in
+  sorbing solids
 - The abstract boundary-condition supertypes (concretes live in
   `BoundaryConditions`)
 - The `RadiationModel` enum
 """
 module Materials
+
+using ForwardDiff: ForwardDiff
 
 # ============================================================================
 # Abstract Type Hierarchy (must be defined BEFORE includes)
@@ -41,6 +45,8 @@ abstract type AbstractMassBC end
 include("constants.jl")
 include("guards.jl")
 include("property_functions.jl")
+include("saturation.jl")
+include("activity.jl")
 include("components.jl")
 include("reactions.jl")
 include("gas_transport.jl")
@@ -68,6 +74,11 @@ export StateDependentProperty  # For state-dependent heats of reaction
 export evaluate_param, evaluate_param_T  # Unified parameter evaluation (defined in property_functions.jl)
 export property_temperature  # Argument clamp shared by every temperature-dependent law
 export identically_zero  # Structural zero test of a property law
+export WaterSaturation, WATER_SATURATION  # Saturation pressure of water
+
+# Activity laws of a liquid held in sorbing solids
+export AbstractActivity, CASTIsotherm, CAST_SPRUCE, CAST_BEECH, FreeLiquid, ActivityFunction
+export activity, sorption_heat
 
 # Components
 export Phase, SOLID, LIQUID, GAS

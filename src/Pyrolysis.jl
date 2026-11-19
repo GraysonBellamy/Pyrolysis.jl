@@ -136,6 +136,10 @@ export MixingSpec, MaterialMixing
 export ConstantProperty, LinearProperty, PolynomialProperty, SutherlandProperty
 export ArrheniusProperty, TableProperty, CallableProperty, StateDependentProperty
 
+# Phase change of a liquid: activity laws and the saturation pressure of water
+export CASTIsotherm, CAST_SPRUCE, CAST_BEECH, FreeLiquid, ActivityFunction
+export WATER_SATURATION, equilibrium_vapour_pressure
+
 # Boundary conditions
 export HeatFluxBC,
     ConvectiveBC,
