@@ -1248,8 +1248,8 @@ start is more than 1 % off equilibrium, naming the cell farthest from it.
   only as vapour.
 - **A separate free-water inventory.** Free and bound water are one component, so free
   water swells a moving mesh (§6.7.6).
-- **Bound-water diffusion** as a flux of its own: across the grain it is what the vapour
-  transfer coefficient of virgin wood stands for (§9.2.1).
+- **Bound-water diffusion** as a flux of its own: across the grain or along it, it is what
+  the vapour transfer coefficient of virgin wood stands for (§9.2.1).
 - The excess heat capacity of sorbed water (§6.7.4) and CAST's fugacity correction
   (§6.7.2).
 

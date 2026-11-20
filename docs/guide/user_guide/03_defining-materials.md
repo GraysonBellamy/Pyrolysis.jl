@@ -189,9 +189,12 @@ model overstates drying shrinkage there, and vapour that condenses above the
 isotherm's capacity swells a moving mesh.
 
 The moisture model has these limits. Below fibre saturation it is tested by the
-moist-wood suites as far as they go: the temperatures of drying wood and the
-cold-side plateau, but not the water lost across the grain, which the transfer
-coefficient of the wood sets (Technical Reference §18.6.3). Above fibre saturation
+moist-wood suites as far as they go: the temperatures of drying wood, the cold-side
+plateau and the water lost along the grain. Across the grain the water lost falls short,
+consistent with the water the end grain of the test blocks carries; in both directions the
+model builds a moisture bank that no measured profile shows, and no single transfer
+coefficient matches the water and the temperatures together (Technical Reference
+§18.6.3). Above fibre saturation
 free water evaporates and condenses at the saturation pressure but has no
 capillary flow. One isotherm serves sorption and desorption, with no hysteresis.
 

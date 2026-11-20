@@ -205,7 +205,7 @@ resident gas, and the pressure needed to carry a given release scales as
 $1/\Lambda$. That pressure is a transfer potential, and the pore composition
 is meaningful only with $\kappa>0$.
 
-**Wet wood across the grain.** Moisture crosses the cell walls as bound water, in
+**Wet wood.** Across the grain moisture crosses the cell walls as bound water, in
 series with the vapour in the lumens (Siau 1984, ch. 6). Under the phase change of §6.7
 the water and its vapour stay near sorption equilibrium, so a moisture diffusion
 coefficient $D_X$ carries the same flux as a vapour transfer coefficient
@@ -226,7 +226,11 @@ equations tend to give low values for drying. The transfer coefficient $\lambda$
 virgin wood in a wet deck stands for this flux, as a constant: $5\times10^{-7}$ m²·s⁻¹
 suits about 10–12 % moisture and is two to four times low at 15–20 %. Along the grain
 the coefficient is 50–100 times larger at 5 % and 2–4 times larger at 30 % (Siau 1984),
-so the end grain of a small block vents more than its one-dimensional path does. A
+so the end grain of a small block vents more than its one-dimensional path across the
+grain does. The LEMTA blocks dried along the grain lose the measured water at ten times
+the across-grain coefficient, Siau's ratio near 20 % moisture, and fall short at the
+across-grain value by as much as the blocks dried across it (§18.6.3); the drying is set
+by $\lambda$ in both directions, not by the permeability. A
 vapour-pressure gradient is also not quite the driving force of bound water: in sealed
 specimens under a temperature gradient the steady state keeps a higher vapour pressure
 on the warm side (Siau 1984), so this form overstates the hot-to-cold flux there. A
@@ -317,7 +321,8 @@ components have zero matrix weight and carry neither $\lambda$ nor $\kappa$.
 
 For every component of $\mathcal T$, the lumped model requires explicit
 $\lambda$ data; $\kappa$ defaults to zero. In wet wood the virgin component's
-$\lambda$ stands for the bound-water diffusion across the grain, with the measured sizes
+$\lambda$ stands for the bound-water diffusion along the column, across the grain or along
+it, with the measured sizes
 of §9.2.1; the char's is its own. For either coefficient $a_j$, the mixture
 rules are
 

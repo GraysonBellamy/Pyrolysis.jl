@@ -1077,22 +1077,36 @@ Two suites run the phase change of §6.7 against measurements; each README
 (`scripts/lemta_moist_wood/`, `scripts/bilbao_wet_wood/`) gives the deck, its sources and
 the one-way drying laws scored beside it.
 
-- **LEMTA cone-heater drying** (Diarra et al. 2026; data of Terrei, Diarra and Parent).
-  Blocks of 10 × 10 × 5 cm at 0–30 % moisture, grain across the flux, heated at 4 kW·m⁻²
-  for 2.5 h and then cooled, with thermocouples from 2 to 40 mm and the mass; the deck
-  takes `CAST_SPRUCE`, an ambient of 50 % relative humidity and
-  $\lambda = 1.5\times10^{-6}$ m²·s⁻¹ for the virgin wood. On the eleven long runs the
-  thermocouples are matched to 5.6 K rms (5.8 K on all 22 runs), the passage from 85 to
-  115 °C comes 4.9 min late on average, the ratio of the heating rates at 100 and 70 °C
-  is the measured 0.30, and the sign of the mass change after the heater is withdrawn is
-  right in all eleven. The water lost is 0.67 of the measured, because the drying is
-  limited by the transport across the grain, and the water driven inward builds a bank:
-  the wettest slice holds 1.24 times the initial moisture against 1.04 in the sliced
-  profiles of Diarra et al. (2026, Fig. 11; `profiles.jl`), with the deep thermocouples
-  4–7 K warm. The transfer coefficient that matches the temperatures and the heating-rate
-  ratio removes too little water, and part of the measured loss leaves through the end
-  grain of these blocks (§9.2.1), so the case does not validate moisture transport across
-  the grain.
+- **LEMTA cone-heater drying** (Diarra et al. 2026; data of Terrei, Diarra and Parent,
+  and the authors' along-grain records and slice values, L. Terrei, personal
+  communication). Blocks of 10 × 10 × 5 cm of five species at 0–30 % moisture, the grain
+  across or along the flux, heated at 4 kW·m⁻² for 2.5 h and then cooled, with
+  thermocouples from 2 to 40 mm and the mass, and spruce blocks at about 10 and 30 %
+  sliced after 0.5, 1 and 2 h. The deck takes `CAST_SPRUCE` and an ambient of 50 %
+  relative humidity, and for the virgin wood $\lambda = 1.5\times10^{-6}$ m²·s⁻¹ across
+  the grain and ten times that along it, Siau's ratio near 20 % moisture (§9.2.1), with
+  the along-grain densities of Diarra et al. (2026) and conductivities of Flity et al.
+  (2024).
+  - *Across the grain*, on the eleven long runs, the thermocouples are matched to 5.6 K
+    rms (5.8 K on all 22 runs), the passage from 85 to 115 °C comes 4.9 min late on
+    average, the ratio of the heating rates at 100 and 70 °C is the measured 0.30, and
+    the sign of the mass change after the heater is withdrawn is right in all eleven.
+    The water lost is 0.67 of the measured, with the deep thermocouples 4–7 K warm.
+  - *Along the grain*, on ten moist runs (temperatures on six), the water lost is 0.99 of
+    the measured (0.78–1.25), the thermocouples are matched to 5.4 K rms, the passage
+    from 85 to 115 °C at 10 mm comes 3.9 min late, the heating-rate ratio is 0.59 against
+    0.53 measured, and the samples at about 10 % regain water after the withdrawal, as
+    measured, in five of five. At the across-grain $\lambda$ the same runs keep 0.61 of
+    the water, the across-grain shortfall, and the across-grain permeability in place of
+    the along-grain one leaves the water at 0.97: the drying is set by $\lambda$. The
+    across-grain shortfall is therefore consistent with water leaving those blocks through
+    their end grain, which a one-dimensional column across the grain does not carry.
+  - *The moisture profiles.* The water driven inward builds a bank in every slice set,
+    the wettest slice at 1.17–1.24 times the unexposed moisture across the grain and
+    1.16–1.22 along it, against 1.02–1.05 measured (`profiles.jl`); a larger $\lambda$
+    shrinks it without removing it. No constant $\lambda$ matches the water lost and the
+    temperatures together in either direction, so the case does not validate moisture
+    transport; the bank is open.
 - **Bilbao et al. (1996)**, *Pinus pinaster* slabs of 19 mm at 0, 9 and 20 % moisture,
   heated by a radiant panel in nitrogen, with thermocouples at 1, 9 and 19 mm and the
   mass: the case under pyrolysis, with vapour driven inward against a sealed back. The
@@ -1466,10 +1480,12 @@ The V&V coverage above has gaps that a user should weigh:
    estimates and the empirical shrinkage laws are unvalidated or simplified, and cases that
    lean on them inherit that uncertainty.
 
-7. **Moisture transport across the grain is not validated** (§18.6.3): the phase change
-   matches the temperatures of the LEMTA drying tests and the cold-side plateau of Bilbao
-   et al., but no constant transfer coefficient matches the water lost and the moisture
-   profile together, and the early interior heating of the wettest Bilbao runs is open.
+7. **Moisture transport is not validated** (§18.6.3): the phase change matches the
+   temperatures of the LEMTA drying tests, the water lost along the grain and the
+   cold-side plateau of Bilbao et al., but no constant transfer coefficient matches the
+   water lost and the temperatures together in either grain direction, the model builds a
+   moisture bank (1.16–1.24 times the unexposed moisture) that no measured profile shows,
+   and the early interior heating of the wettest Bilbao runs is open.
 
 7. **Cross-code coverage.** ThermaKin2Ds cannot express V-CPL-01,
    V-RX-02a/c or the pressure-driven gas cases, and its runs can be reproduced

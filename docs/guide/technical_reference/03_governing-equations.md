@@ -251,9 +251,9 @@ mesh) carried by the mesh, never by molecular transport. A liquid component is w
 held in the cell wall: it rides the skeleton and changes only through its sources.
 Below the fibre saturation point (a moisture content of about 0.3 on a dry basis) the
 bound water is immobile to that approximation, its diffusion spreading only
-$\sqrt{D_bt}\approx0.1$–$0.3$ mm over a cone test; across the grain that diffusion, in
-series with the vapour in the lumens, is what the vapour transfer coefficient of the
-wood stands for (§9.2.1). Above it, capillary water flows, which the model leaves out
+$\sqrt{D_bt}\approx0.1$–$0.3$ mm over a cone test; that diffusion, in series with the
+vapour in the lumens, across the grain or along it, is what the vapour transfer
+coefficient of the wood stands for (§9.2.1). Above it, capillary water flows, which the model leaves out
 (§1.8.1). The phase change of §6.7 is two-way: the water evaporates where its vapour
 stands below the equilibrium pressure and the vapour driven inward from a drying front
 condenses back into it, a few millimetres ahead of the front, where it stands above.

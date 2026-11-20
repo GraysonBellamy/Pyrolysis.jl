@@ -81,7 +81,7 @@ The scope boundary is as important as the scope itself. The following are explic
 
 - **Multi-dimensional geometry.** Full solves are one-dimensional in $z$. The cross-section $A$ is a scalar gauge, not a resolved 2-D/3-D field; lateral shrinkage is a column-global area scaling driven by an empirical law (§10), not a resolved lateral transport. Meshes of two and three dimensions (`box_mesh`, `cell_mesh`) exist at the residual level — a potential closure of the mesh motion, conductivity tensors and element death are implemented and tested there (§11.3.5, §14.5) — but `setup` refuses gas transport, in-depth radiation, the variable cross section, the equidistribution correction and cell deactivation on them, and they are not a supported path for full solves.
 - **Full two-temperature gas.** The gas phase is *not* given its own energy equation with a separate gas temperature. Gas is assumed to be in local thermal equilibrium with the matrix at the cell temperature $T$: it stores sensible heat like every other phase, and its flux relative to the skeleton carries its sensible enthalpy across the cell faces (§1.4.3, §7).
-- **Liquid-water transport.** Moisture is water held in the cell wall: it rides the skeleton and leaves or arrives only through its vapour, by the phase change of §6.7, which also condenses and resorbs the vapour driven inward from the drying front. Below the fibre saturation point (a moisture content of about 0.3, dry basis) the bound water itself is immobile; its diffusion across the grain is what the vapour transfer coefficient of virgin wood stands for, as a constant whose measured size rises from about $0.05$ to $2\times10^{-6}$ m²/s between 5 and 18 % moisture (§9.2.1). Above fibre saturation, capillary flow of free water is missing (§1.8.1).
+- **Liquid-water transport.** Moisture is water held in the cell wall: it rides the skeleton and leaves or arrives only through its vapour, by the phase change of §6.7, which also condenses and resorbs the vapour driven inward from the drying front. Below the fibre saturation point (a moisture content of about 0.3, dry basis) the bound water itself is immobile; its diffusion along the column, across the grain or along it, is what the vapour transfer coefficient of virgin wood stands for, as a constant. Across the grain its measured size rises from about $0.05$ to $2\times10^{-6}$ m²/s between 5 and 18 % moisture; along the grain it is 2–100 times larger (§9.2.1). Above fibre saturation, capillary flow of free water is missing (§1.8.1).
 - **Multi-reactant reactions.** A `Reaction` has one reactant by construction: its `reactant` field is one component index. The reactant is consumed with unit mass stoichiometry and products are explicit yields summing to 1.0 (§6). ThermaKin supports bimolecular reactions and Gpyro V2 supports gas-consuming oxidative schemes; these cannot generally be reproduced by sequences of single-reactant steps. Several reactants, each with its own order and mass stoichiometry, are an open item (§1.8.1).
 - **Pressure- or oxygen-dependent kinetics, and distributed activation energy.** The Arrhenius pre-exponential $A_i$ is temperature-independent, the rate has no explicit pressure or oxygen factor, and there is no built-in distributed-activation-energy (DAEM) tooling (§6). A reaction order other than one acts on the conversion of the reactant against its lineage inventory (§6.4); the networks with no such inventory are refused (§6.5.5).
 
@@ -1416,9 +1416,9 @@ mesh) carried by the mesh, never by molecular transport. A liquid component is w
 held in the cell wall: it rides the skeleton and changes only through its sources.
 Below the fibre saturation point (a moisture content of about 0.3 on a dry basis) the
 bound water is immobile to that approximation, its diffusion spreading only
-$\sqrt{D_bt}\approx0.1$–$0.3$ mm over a cone test; across the grain that diffusion, in
-series with the vapour in the lumens, is what the vapour transfer coefficient of the
-wood stands for (§9.2.1). Above it, capillary water flows, which the model leaves out
+$\sqrt{D_bt}\approx0.1$–$0.3$ mm over a cone test; that diffusion, in series with the
+vapour in the lumens, across the grain or along it, is what the vapour transfer
+coefficient of the wood stands for (§9.2.1). Above it, capillary water flows, which the model leaves out
 (§1.8.1). The phase change of §6.7 is two-way: the water evaporates where its vapour
 stands below the equilibrium pressure and the vapour driven inward from a drying front
 condenses back into it, a few millimetres ahead of the front, where it stands above.
@@ -5572,8 +5572,8 @@ start is more than 1 % off equilibrium, naming the cell farthest from it.
   only as vapour.
 - **A separate free-water inventory.** Free and bound water are one component, so free
   water swells a moving mesh (§6.7.6).
-- **Bound-water diffusion** as a flux of its own: across the grain it is what the vapour
-  transfer coefficient of virgin wood stands for (§9.2.1).
+- **Bound-water diffusion** as a flux of its own: across the grain or along it, it is what
+  the vapour transfer coefficient of virgin wood stands for (§9.2.1).
 - The excess heat capacity of sorbed water (§6.7.4) and CAST's fugacity correction
   (§6.7.2).
 
@@ -8048,7 +8048,7 @@ resident gas, and the pressure needed to carry a given release scales as
 $1/\Lambda$. That pressure is a transfer potential, and the pore composition
 is meaningful only with $\kappa>0$.
 
-**Wet wood across the grain.** Moisture crosses the cell walls as bound water, in
+**Wet wood.** Across the grain moisture crosses the cell walls as bound water, in
 series with the vapour in the lumens (Siau 1984, ch. 6). Under the phase change of §6.7
 the water and its vapour stay near sorption equilibrium, so a moisture diffusion
 coefficient $D_X$ carries the same flux as a vapour transfer coefficient
@@ -8069,7 +8069,11 @@ equations tend to give low values for drying. The transfer coefficient $\lambda$
 virgin wood in a wet deck stands for this flux, as a constant: $5\times10^{-7}$ m²·s⁻¹
 suits about 10–12 % moisture and is two to four times low at 15–20 %. Along the grain
 the coefficient is 50–100 times larger at 5 % and 2–4 times larger at 30 % (Siau 1984),
-so the end grain of a small block vents more than its one-dimensional path does. A
+so the end grain of a small block vents more than its one-dimensional path across the
+grain does. The LEMTA blocks dried along the grain lose the measured water at ten times
+the across-grain coefficient, Siau's ratio near 20 % moisture, and fall short at the
+across-grain value by as much as the blocks dried across it (§18.6.3); the drying is set
+by $\lambda$ in both directions, not by the permeability. A
 vapour-pressure gradient is also not quite the driving force of bound water: in sealed
 specimens under a temperature gradient the steady state keeps a higher vapour pressure
 on the warm side (Siau 1984), so this form overstates the hot-to-cold flux there. A
@@ -8160,7 +8164,8 @@ components have zero matrix weight and carry neither $\lambda$ nor $\kappa$.
 
 For every component of $\mathcal T$, the lumped model requires explicit
 $\lambda$ data; $\kappa$ defaults to zero. In wet wood the virgin component's
-$\lambda$ stands for the bound-water diffusion across the grain, with the measured sizes
+$\lambda$ stands for the bound-water diffusion along the column, across the grain or along
+it, with the measured sizes
 of §9.2.1; the char's is its own. For either coefficient $a_j$, the mixture
 rules are
 
@@ -18104,22 +18109,36 @@ Two suites run the phase change of §6.7 against measurements; each README
 (`scripts/lemta_moist_wood/`, `scripts/bilbao_wet_wood/`) gives the deck, its sources and
 the one-way drying laws scored beside it.
 
-- **LEMTA cone-heater drying** (Diarra et al. 2026; data of Terrei, Diarra and Parent).
-  Blocks of 10 × 10 × 5 cm at 0–30 % moisture, grain across the flux, heated at 4 kW·m⁻²
-  for 2.5 h and then cooled, with thermocouples from 2 to 40 mm and the mass; the deck
-  takes `CAST_SPRUCE`, an ambient of 50 % relative humidity and
-  $\lambda = 1.5\times10^{-6}$ m²·s⁻¹ for the virgin wood. On the eleven long runs the
-  thermocouples are matched to 5.6 K rms (5.8 K on all 22 runs), the passage from 85 to
-  115 °C comes 4.9 min late on average, the ratio of the heating rates at 100 and 70 °C
-  is the measured 0.30, and the sign of the mass change after the heater is withdrawn is
-  right in all eleven. The water lost is 0.67 of the measured, because the drying is
-  limited by the transport across the grain, and the water driven inward builds a bank:
-  the wettest slice holds 1.24 times the initial moisture against 1.04 in the sliced
-  profiles of Diarra et al. (2026, Fig. 11; `profiles.jl`), with the deep thermocouples
-  4–7 K warm. The transfer coefficient that matches the temperatures and the heating-rate
-  ratio removes too little water, and part of the measured loss leaves through the end
-  grain of these blocks (§9.2.1), so the case does not validate moisture transport across
-  the grain.
+- **LEMTA cone-heater drying** (Diarra et al. 2026; data of Terrei, Diarra and Parent,
+  and the authors' along-grain records and slice values, L. Terrei, personal
+  communication). Blocks of 10 × 10 × 5 cm of five species at 0–30 % moisture, the grain
+  across or along the flux, heated at 4 kW·m⁻² for 2.5 h and then cooled, with
+  thermocouples from 2 to 40 mm and the mass, and spruce blocks at about 10 and 30 %
+  sliced after 0.5, 1 and 2 h. The deck takes `CAST_SPRUCE` and an ambient of 50 %
+  relative humidity, and for the virgin wood $\lambda = 1.5\times10^{-6}$ m²·s⁻¹ across
+  the grain and ten times that along it, Siau's ratio near 20 % moisture (§9.2.1), with
+  the along-grain densities of Diarra et al. (2026) and conductivities of Flity et al.
+  (2024).
+  - *Across the grain*, on the eleven long runs, the thermocouples are matched to 5.6 K
+    rms (5.8 K on all 22 runs), the passage from 85 to 115 °C comes 4.9 min late on
+    average, the ratio of the heating rates at 100 and 70 °C is the measured 0.30, and
+    the sign of the mass change after the heater is withdrawn is right in all eleven.
+    The water lost is 0.67 of the measured, with the deep thermocouples 4–7 K warm.
+  - *Along the grain*, on ten moist runs (temperatures on six), the water lost is 0.99 of
+    the measured (0.78–1.25), the thermocouples are matched to 5.4 K rms, the passage
+    from 85 to 115 °C at 10 mm comes 3.9 min late, the heating-rate ratio is 0.59 against
+    0.53 measured, and the samples at about 10 % regain water after the withdrawal, as
+    measured, in five of five. At the across-grain $\lambda$ the same runs keep 0.61 of
+    the water, the across-grain shortfall, and the across-grain permeability in place of
+    the along-grain one leaves the water at 0.97: the drying is set by $\lambda$. The
+    across-grain shortfall is therefore consistent with water leaving those blocks through
+    their end grain, which a one-dimensional column across the grain does not carry.
+  - *The moisture profiles.* The water driven inward builds a bank in every slice set,
+    the wettest slice at 1.17–1.24 times the unexposed moisture across the grain and
+    1.16–1.22 along it, against 1.02–1.05 measured (`profiles.jl`); a larger $\lambda$
+    shrinks it without removing it. No constant $\lambda$ matches the water lost and the
+    temperatures together in either direction, so the case does not validate moisture
+    transport; the bank is open.
 - **Bilbao et al. (1996)**, *Pinus pinaster* slabs of 19 mm at 0, 9 and 20 % moisture,
   heated by a radiant panel in nitrogen, with thermocouples at 1, 9 and 19 mm and the
   mass: the case under pyrolysis, with vapour driven inward against a sealed back. The
@@ -18493,10 +18512,12 @@ The V&V coverage above has gaps that a user should weigh:
    estimates and the empirical shrinkage laws are unvalidated or simplified, and cases that
    lean on them inherit that uncertainty.
 
-7. **Moisture transport across the grain is not validated** (§18.6.3): the phase change
-   matches the temperatures of the LEMTA drying tests and the cold-side plateau of Bilbao
-   et al., but no constant transfer coefficient matches the water lost and the moisture
-   profile together, and the early interior heating of the wettest Bilbao runs is open.
+7. **Moisture transport is not validated** (§18.6.3): the phase change matches the
+   temperatures of the LEMTA drying tests, the water lost along the grain and the
+   cold-side plateau of Bilbao et al., but no constant transfer coefficient matches the
+   water lost and the temperatures together in either grain direction, the model builds a
+   moisture bank (1.16–1.24 times the unexposed moisture) that no measured profile shows,
+   and the early interior heating of the wettest Bilbao runs is open.
 
 7. **Cross-code coverage.** ThermaKin2Ds cannot express V-CPL-01,
    V-RX-02a/c or the pressure-driven gas cases, and its runs can be reproduced

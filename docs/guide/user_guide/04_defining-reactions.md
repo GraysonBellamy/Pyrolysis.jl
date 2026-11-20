@@ -752,10 +752,11 @@ produce water vapour too, give it a species of its own (Technical Reference §4.
    ways, so the reservoir names the vapour: at a relative humidity `RH` its mole
    fraction is `RH * WATER_SATURATION(T∞) / P` (§5.3.2). A reservoir in equilibrium
    with the initial moisture keeps a conditioned sample at rest until the heater acts.
-3. **The transfer coefficient of the wood.** Across the grain the water moves as bound
-   water in the cell walls, and the lumped transfer coefficient `λ` of the virgin wood
-   stands for that flux. Its measured size rises about thirtyfold from 5 to 18 %
-   moisture: about `5e-7` m²/s suits 10–12 %, and 15–20 % wants two to four times that
+3. **The transfer coefficient of the wood.** The water moves as bound water in the cell
+   walls, and the lumped transfer coefficient `λ` of the virgin wood stands for that flux
+   along the column. Across the grain its measured size rises about thirtyfold from 5 to
+   18 % moisture: about `5e-7` m²/s suits 10–12 %, and 15–20 % wants two to four times
+   that. Along the grain it is 2–100 times larger, about ten times near 20 % moisture
    (Technical Reference §9.2.1). It sets the drying rate; the permeability matters
    less.
 
@@ -837,9 +838,10 @@ admissible only while its rate at the ambient temperature is negligible over the
   cell that would keep 1 % or more of its volume, as a char layer does, is not
   tested and stays (§7.3.3, §10.4, Technical Reference §6.11). Without deactivation a cell that empties stalls the solve there.
 - **Moisture is a `PhaseChange`** (§4.14), with these limits: below fibre saturation it
-  is tested on the temperatures of drying wood and the cold-side plateau, not on the
-  water lost across the grain, which the transfer coefficient sets as a constant
-  (Technical Reference §18.6.3); above fibre saturation free water has no capillary
+  is tested on the temperatures of drying wood, the cold-side plateau and the water lost
+  along the grain, while across the grain the water lost falls short and in both
+  directions the model builds a moisture bank no measurement shows; the transfer
+  coefficient is a constant (Technical Reference §18.6.3); above fibre saturation free water has no capillary
   flow, and as one inventory with the bound water it swells a moving mesh where it
   condenses; one isotherm serves sorption and desorption, with no hysteresis.
 
