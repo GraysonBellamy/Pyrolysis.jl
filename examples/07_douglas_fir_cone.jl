@@ -58,7 +58,9 @@ Moisture:
 New Features Demonstrated:
 - Two-way phase change of the moisture and its vapour (PhaseChange)
 - Surface absorption radiation model (radiation_model=SURFACE_ABSORPTION)
-- Physically-based gas transfer coefficients (λ ~ 1e-5 to 1e-4 m²/s)
+- Gas transfer coefficients of 5e-7 m²/s in the virgin wood, where λ stands for
+  the bound water's transfer across the grain (Technical Reference §9.2.1), and
+  1e-5 m²/s in the char, an estimate
 - lumped wall and Darcy gas transport (diffusion + pressure-driven flow)
 - Composition-dependent permeability evolution (virgin wood → porous char)
 - Species molar masses in the ideal-gas pore pressure (Darcy)
@@ -1728,7 +1730,9 @@ println("\nSimulation complete!")
 println("\nFeatures used in this example:")
 println("  ✓ WEIGHTED conductivity mixing (β=0.5; volume weights differ from ThermaKin)")
 println("  ✓ WEIGHTED mixing rule for gas transfer coefficient (β_λ=0.5)")
-println("  ✓ Physically-based gas transfer coefficients (λ ~ 1e-5 to 1e-4 m²/s)")
+println(
+    "  ✓ Gas transfer coefficients (virgin wood: $(λ_wood) m²/s, the bound water's transfer across the grain; char: $(λ_char) m²/s)",
+)
 println("  ✓ lumped wall and Darcy gas transport (diffusion + pressure-driven flow)")
 println(
     "  ✓ Temperature-dependent permeability (virgin: $(κ_virgin) m², char: $(κ_char) m²)",
