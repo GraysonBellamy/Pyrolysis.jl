@@ -16648,14 +16648,13 @@ $\theta_q$ has no interactions.
 
 Pyrolysis.jl does not bundle a Sobol estimator into the core solver; instead the
 global workflow is built on the **parameter-sweep harness** (§17.5.3) plus a
-*surrogate* fitted to the swept solutions. The shipped reference implementation
-is `examples/sensitivity_analysis/sensitivity_sobol.jl`, which for the
-Douglas-fir cone problem:
+*surrogate* fitted to the swept solutions. For a cone problem with correlated
+material data, such a study:
 
-1. Draws correlated parameter samples (16 uncertain parameters in 7
-   *independent* groups — calibration biases, low/high-T virgin $c_p$, char
-   $c_p$, heat of sorption, heats of reaction). Correlations are *within-group
-   only*, so the standard Sobol formulas (17.4) apply at the group level without
+1. Draws correlated parameter samples, the uncertain parameters in *independent*
+   groups (by the measurement that supplied them: calibration biases, heat
+   capacities, heats of reaction). Correlations are *within-group only*, so the
+   standard Sobol formulas (17.4) apply at the group level without
    correlated-input extensions.
 2. Transforms the correlated draws to independent standard normals (Cholesky
    inverse for Gaussian groups; Rosenblatt sequential conditioning for
@@ -16675,9 +16674,8 @@ Douglas-fir cone problem:
 The PCE surrogate is the practical enabler: it converts an
 $\mathcal{O}(N_{\text{samples}})$ *solve* budget into closed-form indices,
 avoiding the $\mathcal{O}((p{+}2)N)$ solves of a raw Saltelli/Sobol pick-freeze
-estimator. The degree-selection rationale is documented in
-`examples/sensitivity_analysis/pce_degree_selection.md`; `compare_degrees.jl`
-sweeps the degree explicitly.
+estimator. The degree is a choice to check: the indices should change little
+between consecutive degrees.
 
 ### 17.5.3 Relation to the parameter-sweep harness
 
@@ -17009,10 +17007,10 @@ practical sensitivity and fitting checks.
    residual; responsibility for a clean, non-mutating, $C^1$ injection rests with
    the user (§17.4.1).
 
-6. **Global-sensitivity tooling lives in examples, not the core.** Sobol/PCE is
-   implemented in `examples/sensitivity_analysis/`, not as a packaged function;
-   the design and degree-selection choices (PCE order, BCa bootstrap,
-   group-correlation handling) are reference recipes rather than a stable API.
+6. **Global-sensitivity tooling is not in the package.** Sobol/PCE is not a packaged
+   function: a study builds it on `parameter_sweep` (§17.5.3), and the design and
+   degree-selection choices (PCE order, BCa bootstrap, group-correlation handling)
+   are recipes rather than a stable API.
 
 Cross-references: the colored Jacobian that an exact forward or adjoint
 sensitivity would reuse, and the mass-matrix system it belongs to, are §15

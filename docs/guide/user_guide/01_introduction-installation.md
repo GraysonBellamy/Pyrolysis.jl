@@ -562,12 +562,10 @@ with:
 | `examples/08_gas_transport.jl` | Lumped and dusty-gas transport with a finite reservoir film |
 | `examples/08_pressure_treated_wood_cone.jl` | Pressure-treated wood with multi-step Arrhenius kinetics, transcribed from ThermaKin with its one-way drying step |
 | `examples/convergence_douglas_fir.jl` | Grid-convergence study (uses `Distributed`) |
-| `examples/moisture_hos_comparison.jl` | Moisture transport with state-dependent heat of sorption |
 | `examples/export_results_csv.jl` | Writes a solution's series and profiles to CSV files |
 
 The subdirectories hold larger studies: `inverse_analysis/` (fitting white-pine
-properties to cone data), `sensitivity_analysis/`, `literature_comparison/`, and
-`macfp/` (the MaCFP gasification targets).
+properties to cone data) and `macfp/` (the MaCFP gasification targets).
 
 To run an example, start Julia in the examples environment from the repository
 root:

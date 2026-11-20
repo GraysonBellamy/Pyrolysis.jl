@@ -43,10 +43,6 @@ scripts/profile/output/
 /ptw_*.png
 /ptw_*.csv
 
-# Throwaway scratch tests under examples/
-examples/sensitivity_analysis/test_*.jl
-examples/sensitivity_analysis/test_*.csv
-
 # Local working notes: dated investigation reports, handoffs, and their
 # scripts and evidence
 docs/*_[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md

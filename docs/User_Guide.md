@@ -591,12 +591,10 @@ with:
 | `examples/08_gas_transport.jl` | Lumped and dusty-gas transport with a finite reservoir film |
 | `examples/08_pressure_treated_wood_cone.jl` | Pressure-treated wood with multi-step Arrhenius kinetics, transcribed from ThermaKin with its one-way drying step |
 | `examples/convergence_douglas_fir.jl` | Grid-convergence study (uses `Distributed`) |
-| `examples/moisture_hos_comparison.jl` | Moisture transport with state-dependent heat of sorption |
 | `examples/export_results_csv.jl` | Writes a solution's series and profiles to CSV files |
 
 The subdirectories hold larger studies: `inverse_analysis/` (fitting white-pine
-properties to cone data), `sensitivity_analysis/`, `literature_comparison/`, and
-`macfp/` (the MaCFP gasification targets).
+properties to cone data) and `macfp/` (the MaCFP gasification targets).
 
 To run an example, start Julia in the examples environment from the repository
 root:
@@ -9459,9 +9457,8 @@ finite-difference solves in parallel (§13.5).
 
 The sweep harness is also the substrate for **global / variance-based (Sobol)**
 sensitivity: you sample the parameter space (the grid), run the sweep, and feed
-the input/output table into a Sobol estimator. See
-`examples/sensitivity_analysis/sensitivity_douglas_fir.jl` and
-`sensitivity_sobol.jl` (§14.8) and Technical Reference §17.5 for that workflow.
+the input/output table into a Sobol estimator. Chapter 13 (§13.8) and Technical
+Reference §17.5 give that workflow.
 
 ---
 
@@ -9556,9 +9553,8 @@ residual.
 > constructor. `p_inject` must construct the components, reactions, material,
 > mesh, BCs and problem **from scratch**, substituting the entries of `θ` where
 > they belong — exactly like the `modify` closure for a parameter sweep
-> (Chapter 12), and exactly like the `build_and_solve(θ)` function in
-> `examples/sensitivity_analysis/sensitivity_douglas_fir.jl`. The base problem
-> is only there to supply the parts of the configuration you are *not* varying.
+> (Chapter 12). The base problem is only there to supply the parts of the
+> configuration you are *not* varying.
 
 A minimal, correct `p_inject` for a single charring reaction whose
 pre-exponential `A`, activation energy `E`, and heat of reaction `h` we want to
@@ -9649,10 +9645,7 @@ virgin = SolidComponent(:virgin; ρ = 1190.0, c = cp, k = 0.20)
 
 `Reaction` accepts a scalar `h` (a constant), a tuple `h = (a, b)` (linear in `T`,
 `a + b*T`), or a property object such as `StateDependentProperty((T, ξ) -> ...)`
-for composition-dependent heats (Technical Reference §6.6). The
-`build_and_solve(θ)` in `sensitivity_douglas_fir.jl` demonstrates the
-state-dependent form on the heat of sorption of the published study's one-way drying
-step.
+for composition-dependent heats (Technical Reference §6.6).
 
 ---
 
@@ -9896,7 +9889,7 @@ TGA, DSC, MCC, or cone-calorimeter measurements. The pattern is:
 
 The shipped fitting workflow, `examples/inverse_analysis/inverse_white_pine.jl`,
 is derivative-free: `Optim.jl`'s `Fminbox(NelderMead())` on the loss, with a
-`FiniteDiff` Hessian at the optimum for the standard errors (§14.7). It is robust
+`FiniteDiff` Hessian at the optimum for the standard errors (§14.6). It is robust
 to the non-smooth responses of §13.9 and is the recommended starting point.
 
 A gradient-based alternative hands `Optim` a central-difference gradient:
@@ -9935,18 +9928,13 @@ Variance-based global sensitivity quantifies how much of an output's variance ea
 input (or group of inputs) is responsible for, over a *distribution* of inputs
 rather than at a single point. Pyrolysis.jl has no dedicated Sobol function;
 instead you build a sampling design, run it through `parameter_sweep`
-(Chapter 12), and post-process. The shipped example
-`examples/sensitivity_analysis/sensitivity_douglas_fir.jl` is a complete,
-production-grade realization of this for a 16-parameter Douglas-fir cone model,
-and `examples/sensitivity_analysis/sensitivity_sobol.jl` computes the variance
-decomposition from its output.
+(Chapter 12), and post-process.
 
 The workflow has three stages:
 
-**1. Sample the parameter space.** The example uses Owen-scrambled Sobol
-quasi-random samples from `QuasiMonteCarlo.jl`, transformed to correlated
-multivariate-Normal / Student-t groups whose covariances come from the
-measurement campaign:
+**1. Sample the parameter space.** Owen-scrambled Sobol quasi-random samples
+from `QuasiMonteCarlo.jl` suit this, transformed to each input's distribution
+(correlated groups through the Cholesky factor of their covariance):
 
 ```julia
 using QuasiMonteCarlo, Distributions, LinearAlgebra
@@ -9961,8 +9949,8 @@ sobol_unit = QuasiMonteCarlo.sample(
 ```
 
 **2. Solve every sample.** Each column of `samples` is a full parameter vector
-`θ`; a `build_and_solve(θ)` function (the example's `p_inject`-equivalent)
-rebuilds the Douglas-fir material and problem and solves it. Because every solve
+`θ`; a `build_and_solve(θ)` function, the `p_inject` of §13.2, rebuilds the
+material and problem and solves it. Because every solve
 is independent, this parallelizes cleanly with `Distributed.jl`:
 
 ```julia
@@ -9977,23 +9965,20 @@ results = pmap(j -> extract_qois(build_and_solve(samples[:, j])), 1:n_samples)
 This is the same separation as `parameter_sweep`: an immutable base, a `modify`/
 `build_and_solve` that materializes a fresh problem per point, and an `extract`
 that pulls out quantities of interest (peak MLR, time to ignition, total mass
-loss, peak surface temperature, MLR/temperature curves, …). The example's solve
-uses `use_ale = true`, `radiation_model = SURFACE_ABSORPTION`, `abstol = 1e-9`,
-`reltol = 1e-7`, `min_thickness = 0.5e-3` and the default integrator. Its
-`pmap` runs over the sample ids that have no result on disk yet, wraps each
-solve in `try`/`catch` and writes each run's curves as it finishes, so an
-interrupted study resumes where it stopped (§12.7 treats the same fault
-tolerance for sweeps).
+loss, peak surface temperature, MLR/temperature curves, …). For a long study,
+run `pmap` over the sample ids that have no result on disk yet, wrap each solve
+in `try`/`catch` and write each run's results as it finishes, so an interrupted
+study resumes where it stopped (§12.7 treats the same fault tolerance for
+sweeps).
 
-**3. Decompose the variance.** `sensitivity_sobol.jl` fits a Polynomial Chaos
-Expansion (PCE) surrogate to each scalar QoI and reads first-order and total
-*group* Sobol indices analytically from the PCE coefficients, with bootstrap
-confidence intervals. The Douglas-fir study groups the 16 parameters into 7
-measurement sources (HFM/DSC calibration biases, three heat-capacity regressions,
-heat-of-sorption parameters, and five heats of reaction), and reports how much of
-each QoI's variance each *source* explains. A lighter-weight alternative used in
-the same example is **Standardized Rank Regression Coefficients (SRRC)**, which
-need only the sampled `(θ, QoI)` pairs and no surrogate.
+**3. Decompose the variance.** A Polynomial Chaos Expansion (PCE) surrogate
+fitted to each scalar QoI gives first-order and total Sobol indices analytically
+from its coefficients, for single inputs or for *groups* of them (Technical
+Reference §17.5); a bootstrap of the fit gives confidence intervals. Grouping the
+inputs by the measurement that supplied them reports how much of each QoI's
+variance each *source* explains. A lighter-weight alternative is
+**Standardized Rank Regression Coefficients (SRRC)**, which need only the sampled
+`(θ, QoI)` pairs and no surrogate.
 
 > **You do not need PCE to get useful global sensitivity.** SRRC (rank regression
 > of standardized inputs against the QoI) is a few lines on top of the sweep
@@ -10067,7 +10052,7 @@ Reference §17.6), but several configurations still spoil a derivative:
 | Gradient of a scalar loss | `FiniteDiff.finite_difference_gradient(loss, θ0, Val(:central); relstep)` |
 | Qualify a derivative | `fd_check(y, θ0, k)`: steps 1, 2, 4, 8e-3, `reltol` 1e-7 and 1e-8, Richardson extrapolants within 5 % (§13.4.1) |
 | Perturbed solves in parallel | `parameter_sweep(base, pts; modify = p_inject, extract)` (§13.5) |
-| Global/Sobol | sample → `pmap`/`parameter_sweep` → PCE or SRRC (see examples) |
+| Global/Sobol | sample → `pmap`/`parameter_sweep` → PCE or SRRC (§13.8) |
 
 **Defaults to remember.** Start from `relstep = 1e-4` and check it with steps
 ten times larger and smaller (§13.4); qualify a derivative you rely on, and any
@@ -10142,11 +10127,8 @@ A roadmap of what each example demonstrates:
 | `convergence_douglas_fir.jl` | Grid-convergence study | as 07 at 50 kW/m², swept over `n_cells` | 14.3 |
 | `08_pressure_treated_wood_cone.jl` | Treated wood transcribed from ThermaKin, its one-way drying step, lumped gas transport | ALE, SURFACE_ABSORPTION, LumpedTransfer | 14.4 |
 | `08_gas_transport.jl` | Lumped and dusty-gas transport, finite film | Moving mesh, both transport models | 14.5 |
-| `moisture_hos_comparison.jl` | State-dependent heat of sorption | ALE, SURFACE_ABSORPTION, LumpedTransfer | 14.6 |
-| `macfp/macfp_gasification.jl` | MaCFP-4 white-pine gasification targets (10/30/60 kW/m², 6/18 mm), the calibrated model of §14.7 at a constant cross section | ALE, SURFACE_ABSORPTION, threads | — |
-| `inverse_analysis/inverse_white_pine.jl` (with `validate_thickness.jl`, `plot_diagnostics.jl`, `plot_stage2_theta.jl`) | Parameter estimation from data | ALE, optimization | 14.7 |
-| `sensitivity_analysis/sensitivity_douglas_fir.jl`, `sensitivity_analysis/sensitivity_sobol.jl`, `sensitivity_analysis/compare_degrees.jl` | Uncertainty / Sobol | parameter sweep, post-process | 14.8 |
-| `literature_comparison/literature_comparison.jl` | Property-variant comparison | as 07 at 50 kW/m², swept over property sets | 14.9 |
+| `macfp/macfp_gasification.jl` | MaCFP-4 white-pine gasification targets (10/30/60 kW/m², 6/18 mm), the calibrated model of §14.6 at a constant cross section | ALE, SURFACE_ABSORPTION, threads | — |
+| `inverse_analysis/inverse_white_pine.jl` (with `validate_thickness.jl`, `plot_diagnostics.jl`, `plot_stage2_theta.jl`) | Parameter estimation from data | ALE, optimization | 14.6 |
 
 ---
 
@@ -10301,7 +10283,7 @@ mlr_l2 = norm(r.mlr_curve .- ref.mlr_curve) / norm(ref.mlr_curve) * 100   # [%]
 
 Cross-reference: the same kind of distributed sweep is also available through the
 package's `parameter_sweep` helper, with a `modify` that replaces the mesh
-(§12.6 and §14.8.3); this script calls `pmap` over its own
+(§12.6 and §14.7); this script calls `pmap` over its own
 `build_and_solve(n_cells)`, which builds the whole problem at each resolution.
 
 ---
@@ -10392,65 +10374,7 @@ from total species flow, which includes wall/molecular transport.
 
 ---
 
-## 14.6 Moisture heat-of-sorption study (`moisture_hos_comparison.jl`)
-
-### What it models
-
-A controlled study of how the *form* of the moisture heat of sorption affects a
-Douglas fir cone simulation (50 kW/m², the solve of §14.3 on 240 cells). Two HoS
-models are compared at four initial moisture contents (3, 6, 9, 12% dry
-basis):
-
-1. **Exponential (state-dependent):** `HoS(MC) = (a + b·exp(−c·MC))·1e3` J/kg —
-   the energy cost rises as moisture depletes (tightly-bound water).
-2. **Constant average:** a single value equal to the analytical integral average
-   of the exponential model over `[0, MC₀]` — same total energy, uniform in time.
-
-This isolates a single modeling choice (8 runs = 4 MC × 2 models, solved one
-after another) and is the template for any "does this property form matter?"
-investigation. The script writes CSVs and figures to
-`examples/moisture_hos_comparison_results/`.
-
-### The one thing that changes
-
-Everything is identical between the two models except the `h` passed to the
-moisture-evaporation reaction. The state-dependent case uses a
-`StateDependentProperty`; the constant case passes a plain `Float64`, which is
-auto-converted to a `ConstantProperty`:
-
-```julia
-if hos_model == :exponential
-    h_evap = StateDependentProperty((T, ξ) -> begin
-        MC = 100.0 * ξ[MOISTURE_IDX] / max(sum(ξ[j] for j in SOLID_IDX), 1e-12)
-        return (HOS_A + HOS_B * exp(-HOS_C * MC)) * 1e3   # J/kg
-    end)
-elseif hos_model == :constant
-    avg_kJ = compute_average_hos_kJ(HOS_A, HOS_B, HOS_C, mc_pct)   # mc_pct = 100 mc_db
-    h_evap = avg_kJ * 1e3        # Float64 -> ConstantProperty automatically
-end
-
-Reaction(:moisture_evaporation, 7 => 13; A = 2.997e5, E = 5.0e4, h = h_evap, n = 1.0)
-```
-
-This is the general rule for reaction heats and property fields: pass a number
-for a constant, or any of the property-function types (`CallableProperty`,
-`LinearProperty`, `PolynomialProperty`, `ArrheniusProperty`, `TableProperty`,
-`StateDependentProperty`) for richer dependence (Technical Reference §4).
-
-### What to look at
-
-The script extracts per-model scalar metrics (peak MLR, time to ignition, time to
-moisture depletion, back temperature at 100 s) and percent differences, plus
-difference curves `exp − const` for MLR and temperatures. The physically
-interesting result is that matching the *integrated* energy is not enough — the
-temporal distribution of the sorption sink shifts the drying-front passage and
-hence the early MLR. The back temperature at a fixed time (`T_back_100s`) is a
-sensitive indicator of how fast the drying front advances. Technical Reference §6
-(state-dependent heats) and §16 (energy bookkeeping) cover the underlying physics.
-
----
-
-## 14.7 Inverse analysis: parameter estimation (`inverse_analysis/inverse_white_pine.jl`)
+## 14.6 Inverse analysis: parameter estimation (`inverse_analysis/inverse_white_pine.jl`)
 
 ### What it models
 
@@ -10566,80 +10490,7 @@ res = optimize(loss_fn, g!, lower, upper, θ0, Fminbox(LBFGS()))
 
 ---
 
-## 14.8 Sensitivity studies
-
-Three scripts under `examples/sensitivity_analysis/` build a full
-uncertainty-quantification pipeline around the Douglas fir cone case.
-
-### 14.8.1 Forward uncertainty propagation (`sensitivity_douglas_fir.jl`)
-
-Propagates uncertainty in 16 thermophysical inputs (instrument biases, heat-
-capacity regression coefficients, heat-of-sorption parameters, and five heats of
-reaction) through the simulation using Sobol quasi-random sampling. The inputs are
-grouped into seven correlated blocks, each sampled jointly from a multivariate
-Normal or scaled Student-t distribution with the appropriate covariance.
-
-The structure mirrors §14.3 and §14.7: a single `build_and_solve(θ::Vector)`
-(here `θ` has length 16) that maps the sampled parameters into property closures
-and reaction heats, then solves with the standard ALE + surface-absorption stack
-(`abstol = 1e-9`, `reltol = 1e-7`, `dtmin = 1e-14`, `min_thickness = 0.5e-3`,
-`progress = false`, the default integrator). The 8192 samples are evaluated in
-parallel, over the sample ids that have no result on disk yet, each solve in a
-`try`/`catch` so that a failed sample does not stop the study:
-
-```julia
-using Distributed
-@everywhere begin
-    using Pyrolysis
-    using Pyrolysis: get_boundary_exchange
-end
-
-samples = generate_samples(CORR_GROUPS, N_SAMPLES)   # 16 × 8192 parameter matrix
-remaining_ids = [i for i = 1:N_SAMPLES if i ∉ completed_ids]
-results = pmap(remaining_ids) do i
-    try
-        result = extract_qois(build_and_solve(samples[:, i]))
-        # ... write the run's curves to results/ at once ...
-        (i, result)
-    catch err
-        (i, nothing)
-    end
-end
-```
-
-```bash
-julia -p 8 --project=examples examples/sensitivity_analysis/sensitivity_douglas_fir.jl   # 8 workers
-```
-
-An existing `results/` directory is reloaded and completed, so an interrupted
-study resumes. The smoke run makes one forward solve at the nominal parameters
-over 10 s and writes no files.
-
-Each run is reduced to scalar QoIs (peak MLR, time to ignition, surface/back
-temperature rise times, combustible-only burning metrics, etc.) and a few
-curves; the script then computes Standardized Rank Regression Coefficients
-(SRRC) for the sensitivity ranking and prediction-envelope percentiles. Note the
-public `get_boundary_exchange` accessor: the script sums the assembled
-species fluxes over combustible gases, with the current face area and
-geometry already accounted for.
-
-### 14.8.2 Global Sobol indices (`sensitivity_sobol.jl`, `compare_degrees.jl`)
-
-`sensitivity_sobol.jl` consumes the `parameters.csv` and `scalar_qois.csv` written
-by §14.8.1, fits an adaptive-degree (2–4) Polynomial Chaos Expansion surrogate to
-each QoI, and reads off first-order and total group Sobol indices analytically
-from the PCE coefficients, with BCa-bootstrap confidence intervals. It does not
-re-run the solver — it is pure post-processing of the sampled outputs.
-`compare_degrees.jl` is a companion that settles the PCE degree choice (2 vs 3 vs
-4) by a convergence rule on the inter-degree change in the Sobol indices.
-
-These two are statistical post-processing of the §14.8.1 outputs; the only
-Pyrolysis-specific dependency is the QoI/parameter CSVs produced by the sampling
-run. They need `PolyChaos`, which `examples/Project.toml` does not list: add it
-to your environment before running them. The variance-decomposition theory is
-Technical Reference §17.
-
-### 14.8.3 The `parameter_sweep` helper
+## 14.7 The `parameter_sweep` helper
 
 For sweeps that do not need a fully bespoke driver, the package provides
 `parameter_sweep(problem, grid; modify, extract)`. The `modify` closure builds a
@@ -10657,7 +10508,8 @@ grid = [(A = a, E = e) for a in (1e12, 1e13), e in (1.5e5, 2.0e5)]
     m = prob.material
     new_rxn = Reaction(:decomp, 1 => 2; A = p.A, E = p.E, h = 200e3)
     new_mat = Material(; name = m.name, components = m.components,
-                       reactions = (new_rxn,), mixing = m.mixing,
+                       reactions = (new_rxn,), phase_changes = m.phase_changes,
+                       mixing = m.mixing,
                        gas_viscosity = m.gas_viscosity, gas_transport = m.gas_transport)
     return PyrolysisProblem(mesh = prob.mesh, material = new_mat, bc_set = prob.bc_set,
                             T_initial = prob.T_initial, ξ_initial = prob.ξ_initial,
@@ -10679,65 +10531,7 @@ Chapter 12 for the full contract.
 
 ---
 
-## 14.9 Literature property comparison (`literature_comparison/literature_comparison.jl`)
-
-### What it models
-
-Nine runs of the Douglas fir cone case at 50 kW/m² (one baseline plus eight
-variants), each substituting one category of property — virgin `c_p`, char
-`c_p`, heats of reaction, or heat of sorption — with a value sourced from the
-literature, holding everything else fixed (method and sources in
-`literature_comparison_plan.md` beside the script). It quantifies how much each
-property choice moves the predicted MLR and temperatures, and is a model for any
-"which published property set should I trust?" study.
-
-### The pattern: serializable run specs
-
-Because the variants run on parallel workers, the script avoids serializing
-closures across processes. It encodes each run as a plain struct of *symbols*
-that index into worker-local dispatch dictionaries of property functions:
-
-```julia
-struct LitCompRunSpec
-    label::String
-    virgin_cp_key::Symbol      # :baseline / :harada / :dupont
-    char_cp_key::Symbol        # :baseline / :hostikka / :edrich
-    hrxn_scale::Float64        # uniform multiplier on all nominal heats of reaction
-    hrxn_scale_secondary::Float64  # two-zone secondary scale; NaN -> use hrxn_scale
-    hos_key::Symbol            # :baseline / :free_water
-end
-
-const VIRGIN_CP_DISPATCH = Dict{Symbol,Function}(:baseline => baseline_virgin_cp,
-                                                :harada   => harada_virgin_cp,
-                                                :dupont   => dupont_virgin_cp)
-# build_and_solve(spec) looks up the function by key, wraps it in CallableProperty,
-# builds the material on uniform_mesh(12.0e-3, 240), and solves with the
-# standard ALE + SURFACE_ABSORPTION stack.
-```
-
-This symbol-dispatch idiom is the recommended way to vary functional properties
-across a distributed sweep, since `Function` values do not serialize cleanly to
-workers.
-
-### How to run it
-
-```bash
-julia -p 9 --project=examples examples/literature_comparison/literature_comparison.jl
-julia --project=examples examples/literature_comparison/literature_comparison.jl   # serial
-```
-
-### What to look at
-
-Per-run CSVs (`{label}_results.csv`: time, MLR, surface/back temperature, total
-mass, thickness) and a summary QoI table (`literature_comparison_qois.csv`), in
-`examples/literature_comparison/results/`. The comparison reveals which property categories dominate the spread in predicted
-burning behavior — typically the heats of reaction and the high-temperature
-char/virgin `c_p` — which feeds back into prioritizing measurement effort.
-Technical Reference §18 frames this as validation against alternative inputs.
-
----
-
-## 14.10 Common patterns across the examples
+## 14.8 Common patterns across the examples
 
 Reading the examples together, a few idioms recur and are worth internalizing:
 

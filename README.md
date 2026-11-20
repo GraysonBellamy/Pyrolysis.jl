@@ -151,8 +151,8 @@ End-to-end studies under [`examples/`](examples/) cover:
 - Pressure-treated wood, transcribed from ThermaKin
 - Lumped and dusty-gas transport demonstration
 - Inverse analysis of white-pine kinetics
-- Sensitivity analysis (Latin Hypercube + Sobol indices)
-- Literature comparison and validation
+- Grid convergence of the Douglas fir case
+- The MaCFP gasification targets
 
 ## Benchmarks
 

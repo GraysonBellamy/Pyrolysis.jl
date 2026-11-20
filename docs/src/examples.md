@@ -21,14 +21,13 @@ through the physics and the code of the main studies in detail.
 | Script | What it models |
 |:---|:---|
 | [`08_gas_transport.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/08_gas_transport.jl) | Lumped and dusty-gas transport through a charring slab, with atmospheric reservoir exchange and species diagnostics. |
-| [`moisture_hos_comparison.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/moisture_hos_comparison.jl) | Effect of the moisture heat-of-sorption model on drying and pyrolysis. |
 | [`convergence_douglas_fir.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/convergence_douglas_fir.jl) | Grid-convergence study over mesh resolutions (uses `Distributed`). |
 
 ## Comparison and validation studies
 
 | Script | What it models |
 |:---|:---|
-| [`literature_comparison/literature_comparison.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/literature_comparison/literature_comparison.jl) | Runs the cone cases across literature property sets via serialisable run specs. |
+| [`ptw_comparison.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/ptw_comparison.jl) | Pressure-treated wood at 50 kW/m²: Pyrolysis.jl against ThermaKin, from the results `08_pressure_treated_wood_cone.jl` writes. |
 
 ## Inverse analysis
 
@@ -39,14 +38,6 @@ quantification, and plotting/diagnostic helpers. See the
 [inverse-analysis walkthrough](guide/user_guide/14_worked-examples.md) and the
 [sensitivity-analysis chapter](guide/user_guide/13_sensitivity-analysis.md)
 for the underlying pattern.
-
-## Sensitivity analysis
-
-[`sensitivity_analysis/`](https://github.com/GraysonBellamy/Pyrolysis.jl/tree/main/examples/sensitivity_analysis)
-contains forward uncertainty propagation via Latin Hypercube sampling
-(`sensitivity_douglas_fir.jl`), global Sobol indices via polynomial chaos
-expansion (`sensitivity_sobol.jl`), and a PCE degree-selection study
-(`compare_degrees.jl`), together with write-ups of the results.
 
 ## Saving results to a file
 
