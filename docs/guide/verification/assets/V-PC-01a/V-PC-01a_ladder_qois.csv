@@ -1,0 +1,6 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+4,"vapour at five times / quadrature",1.1559739832023297e-9,NaN,1.1559739832023297e-9,7.2e-9,true
+4,"vapour at the end / quadrature",3.2089886303765525e-12,NaN,3.2089886303765525e-12,1.0e-11,true
+4,"|p_v/p_eq − 1| at the end",7.192100248687439e-10,NaN,7.192100248687439e-10,2.2e-9,true
+4,"temperature drift [K]",0.0,NaN,0.0,1.0e-10,true
+4,"accepted steps (|log₂(steps/50)|)",47.0,50.0,0.08926733809708741,0.5,true

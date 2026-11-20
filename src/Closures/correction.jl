@@ -200,7 +200,9 @@ component every consuming reaction gasifies; one for an inert component, a
 residue no reaction consumes and the components of a cycle that yields
 condensed mass only. A reaction that yields part of its own reactant back is
 read by the rest of its products, renormalized; one that yields the whole of
-it back consumes nothing. A gas component reads zero.
+it back consumes nothing. A gas component reads zero, and so does the liquid
+of a phase change, which can leave completely as vapour whatever reactions
+also consume it: the values a one-way drying reaction would give.
 """
 residues(material::Material{NC}) where {NC} = _left_by_conversion(
     material,
@@ -214,7 +216,7 @@ The volume [m³/kg] each condensed component of `material` leaves per unit of it
 mass once the reactions have converted it completely, at the densities at `T`:
 the [`residues`](@ref) rule with each component that no reaction consumes
 counted by its volume. A low-density char keeps far more of a cell than its mass
-suggests. A gas component reads zero.
+suggests. A gas component reads zero, and so does the liquid of a phase change.
 """
 retained_volumes(material::Material{NC}, T::Real) where {NC} = _left_by_conversion(
     material,
@@ -226,9 +228,11 @@ retained_volumes(material::Material{NC}, T::Real) where {NC} = _left_by_conversi
 )
 
 # What each condensed component leaves once converted, a component no reaction
-# consumes leaving `left_alone[j]` per unit of its mass.
+# consumes leaving `left_alone[j]` per unit of its mass, and the liquid of a
+# phase change nothing: it starts at zero and stays there.
 function _left_by_conversion(material::Material{NC}, left_alone::NTuple{NC}) where {NC}
-    condensed = ntuple(j -> !is_gas(material.components[j]), Val(NC))
+    vaporized = ntuple(j -> any(pc -> pc.liquid == j, material.phase_changes), Val(NC))
+    condensed = ntuple(j -> !is_gas(material.components[j]) && !vaporized[j], Val(NC))
     returned(rxn, j) = sum((last(p) for p in rxn.products if first(p) == j); init = 0.0)
     consumes(rxn, j) = rxn.reactant == j && returned(rxn, j) < 1
     left(rxn, j, r) =

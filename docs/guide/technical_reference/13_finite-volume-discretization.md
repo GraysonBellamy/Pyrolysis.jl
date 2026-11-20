@@ -285,7 +285,7 @@ $$
 $$
 
 with $\omega_{j,i}\tilde V_i$ [kg s⁻¹] the cell's reaction source (plus an external
-mass source, §13.5.3). The face fluxes $F_{j,f}$ are those of the gas transport
+mass source, §13.5.4). The face fluxes $F_{j,f}$ are those of the gas transport
 (gas components only, §13.7) and, under a correction, the relative fluxes (every
 component, §13.8). On a mesh that rides the skeleton, a condensed component has
 no face flux and its row is its reaction source. Because the masses are the
@@ -356,7 +356,7 @@ reaction heats are quoted at the local temperature (§6.6.3). The two forms are 
 same balance, $dH_i/dt=C_i\,dT_i/dt+\sum_jh_j(T_i)\,dm_{j,i}/dt$. The enthalpy form is
 a linear invariant every Runge–Kutta step conserves to round-off; the temperature
 form conserves energy to the integrator's order (§16.5.2). $S_{T,i}$ is an external
-temperature-rate source (§13.5.3), zero in a production solve.
+temperature-rate source (§13.5.4), zero in a production solve.
 
 ### 13.3.5 Dead rows
 
@@ -408,20 +408,21 @@ kernels run; the assembler zeroes `M_flux`; `T_face` and `gradient` are overwrit
 `src/Integration/setup.jl`):
 
 1. `ReactionKernel`, when the material has reactions (§13.5.1).
-2. `GasTransportKernel{M}`, for mobile gas, with the declared `LumpedTransfer`
+2. `PhaseChangeKernel`, when the material has phase changes (§13.5.2).
+3. `GasTransportKernel{M}`, for mobile gas, with the declared `LumpedTransfer`
    or `DustyGas`. Gas-bearing sealed materials still evaluate their EOS;
    `NoGasTransport` is reserved for materials without gas components.
-3. `RadiativeTransferKernel`, under `RADIATIVE_TRANSFER` (§13.5.2).
-4. `ConductionKernel`, always (§13.7.1).
-5. `ThermalBoundaryKernel`, always (§13.7.5).
-6. `RelativeFluxKernel`, when the correction is not `NoCorrection`: the
+4. `RadiativeTransferKernel`, under `RADIATIVE_TRANSFER` (§13.5.3).
+5. `ConductionKernel`, always (§13.7.1).
+6. `ThermalBoundaryKernel`, always (§13.7.5).
+7. `RelativeFluxKernel`, when the correction is not `NoCorrection`: the
    equidistribution correction or a prescribed mesh velocity (§13.8).
 
 One residual evaluation (§15.3) runs `derive!` (the state mapping, §13.10), then
 `correction!` (the node corrections $c_n$, §11.7), `reset!`, the kernels in this
-order, `closure_rows!` (the strain rates $\theta_i$ from the reaction mass sources
-at the trial temperature, the history sources and the velocity-row residuals,
-§11.3), `add_sources!` (§13.5.3), and `assemble_rows!` (§13.3). The order matters in
+order, `closure_rows!` (the strain rates $\theta_i$ from the reaction and phase-change mass
+sources at the trial temperature, the history sources and the velocity-row residuals,
+§11.3), `add_sources!` (§13.5.4), and `assemble_rows!` (§13.3). The order matters in
 three places:
 
 - **Coupled boundary exchange.** The thermal boundary kernel solves and stores
@@ -450,7 +451,7 @@ columns in both energy forms).
 
 ---
 
-## 13.5 Cell Sources: Reactions, In-Depth Radiation, External Sources
+## 13.5 Cell Sources: Reactions, Phase Changes, In-Depth Radiation, External Sources
 
 ### 13.5.1 Reaction sources
 
@@ -473,7 +474,31 @@ below zero concentration is skipped: its rates and every derivative of them are
 exactly zero. The mass sources are also what the mesh closure reads for the strain
 rates (§11.3.1).
 
-### 13.5.2 Radiative transfer: the face fluxes
+### 13.5.2 Phase-change sources
+
+`PhaseChangeKernel` (`src/Kernels/phase_change.jl`), present only for a material with
+phase changes, follows the reaction kernel. For each live cell and each phase change
+(§6.7) it reads, from the derived state, the signed concentrations $\xi_w$, $\xi_v$ of
+the liquid and its vapour, the positive-part concentrations $\xi^{+}_s$ of the sorbing
+solids, the trial temperature $\tilde T_i$, the guarded pore fraction $\varphi_i$ and the
+sensible enthalpies $h_w$, $h_v$ of the two components at $\tilde T_i$; it forms the
+moisture content (6.10), the rate (6.15) and the heat (6.16), and adds
+
+$$
+S_{\text{mass},w,i}\mathrel{-}=r_{\text{pc}}\tilde V_i,\qquad
+S_{\text{mass},v,i}\mathrel{+}=r_{\text{pc}}\tilde V_i,\qquad
+S_{E,i}\mathrel{-}=h_{\text{pc}}\,r_{\text{pc}}\tilde V_i .
+$$
+
+The signed liquid and vapour make both ends restoring (§6.7.3); a dead cell
+contributes nothing. The kernel holds no per-cell table. Its mass sources are
+the liquid's mass source is a condensed source, which the strain rate of a moving mesh
+reads like a reaction's (§10.2), and the heat is built from the same $h_w$, $h_v$ that the formation
+term of the inventory form uses, which cancels them (§6.7.4). `phase_change_exchange`
+reads the gross evaporation and condensation of a cell through the kernel's own rate,
+for the solution's `evaporation_rate` and `condensation_rate` extras.
+
+### 13.5.3 Radiative transfer: the face fluxes
 
 Under `RADIATIVE_TRANSFER` the radiation field is carried as algebraic unknowns of the state:
 the two hemispherical fluxes $I^-_f$, $I^+_f$ of every face and one beam $I_{h,f}$ per
@@ -511,7 +536,7 @@ nothing to the surface balance; convection and prescribed fluxes stay at the sur
 `setup` refuses radiative transfer off planar coordinates, where the fluxes per unit
 face area and the face areas would disagree. The model and its limits are §8.
 
-### 13.5.3 External sources
+### 13.5.4 External sources
 
 `VolumetricSources(mass, energy)` (`src/Assembly/definition.jl`) adds external
 sources for verification by manufactured solutions (§18.2): `mass(z, t)` returns

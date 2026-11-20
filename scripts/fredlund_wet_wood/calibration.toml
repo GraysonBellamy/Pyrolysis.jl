@@ -1,0 +1,6 @@
+# Written by calibrate_dry.jl: the factors on the solids' conductivity of the
+# least rms over the oven-dry spruce (F88 Fig. 9.8, 20-60 mm, the 10 mm record
+# as the boundary) among the pairs in results/calibration_scan.csv.
+k_scale = 0.600
+kc_scale = 4.500
+rms_K = 30.166

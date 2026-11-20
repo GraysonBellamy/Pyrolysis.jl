@@ -1,0 +1,6 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"front position, mean error (relative)",-0.0004884535746778924,NaN,0.0004884535746778924,0.0015,true,"observed −4.885e-4 in both forms"
+"slope of the front against √t (relative)",-0.00045944026815047945,NaN,0.00045944026815047945,0.0014,true,"observed −4.594e-4 in both forms"
+"temperature, largest error [K]",0.4777241143192441,NaN,0.4777241143192441,1.43,true,"observed 0.478 K in both forms"
+"energy ledger closure",6.221192953469443e-6,NaN,6.221192953469443e-6,1.9e-5,true,"observed 6.2e-6 (temperature) and 4.7e-6 (enthalpy); 2.7e-3 at a relative tolerance of 1e-6"
+"accepted steps / the reference count",10059.0,10059.0,1.0,1.5,true,"a separate implementation of the model took 10 059; observed 10 059 (temperature) and 10 221 (enthalpy)"

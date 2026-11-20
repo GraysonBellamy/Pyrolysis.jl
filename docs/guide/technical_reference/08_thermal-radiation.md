@@ -429,7 +429,7 @@ source $Q_{\text{rad}}$ on its right-hand side:
 $$
 \rho c_p^{\text{eff}}\,\frac{\partial T}{\partial t}
 = -\nabla\!\cdot\!\mathbf{q}_{\text{cond}} - \sum_j \mathbf{J}_j\!\cdot\!\nabla h_j
-+ Q_{\text{rad}} + Q_{\text{rxn}} .
++ Q_{\text{rad}} + Q_{\text{rxn}} + Q_{\text{pc}} .
 $$
 
 Discretely, every source and face flux of cell $i$ is collected in its energy

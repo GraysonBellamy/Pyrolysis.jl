@@ -42,7 +42,7 @@ The solver is designed for, and validated against, the following experiment and 
 - **Cone calorimetry.** A sample is irradiated at a controlled flux (commonly 25–75 kW·m⁻²) while surface temperature, mass-loss rate (MLR), and a heat-release-rate proxy are recorded. The exposed top face takes a radiative-plus-convective boundary condition; the back face is typically adiabatic or a lumped loss, and impermeable. Examples `06_cone_calorimeter.jl` (5.8 mm of PMMA under 25 kW·m⁻² on a moving mesh, with cell deactivation) and `07_douglas_fir_cone.jl` (12 mm of charring Douglas fir under 75 kW·m⁻² on a moving mesh, with gas transport and surface absorption) are the reference configurations.
 - **Idealized thermal-analysis experiments.** Thermogravimetric analysis (TGA), differential scanning calorimetry (DSC), and microscale combustion calorimetry (MCC) can be idealized as a thin, thermally-thin sample with a prescribed heating rate. In the limit of a single well-mixed cell, the species equations reduce to the 0-D Arrhenius mass-loss ODE that TGA inversion assumes; this idealization underpins the single-reaction verification case in §18 (Verification & Validation).
 - **Charring, non-charring, and intumescent solids.** Non-charring polymers (PMMA) leave essentially no residue; charring solids (wood) form an insulating char layer with conductivity and porosity that differ sharply from the virgin material; intumescent coatings swell by orders of magnitude. The component/reaction/property-function machinery (§4) plus the bulk-density volume law and lateral-shrinkage law (§10) span all three.
-- **Pressure-treated and wet wood / moisture transport.** Hygroscopic materials carry liquid water that evaporates endothermically and migrates as vapor under pressure gradients. gas transport (§9, Gas-Phase Mass Transport & Pressure; declared by the material) and the `StateDependentProperty` heat-of-sorption closure (§4) handle these; examples `08_pressure_treated_wood_cone.jl` and `moisture_hos_comparison.jl` demonstrate these models.
+- **Pressure-treated and wet wood / moisture transport.** Hygroscopic materials hold water that desorbs and evaporates endothermically, migrates as vapour under pressure and concentration gradients, and condenses or is resorbed wherever the vapour stands above its equilibrium pressure. The phase change of a liquid toward sorption equilibrium with its vapour (§6.7) and gas transport (§9, Gas-Phase Mass Transport & Pressure; declared by the material) handle these; `07_douglas_fir_cone.jl` and the moist-wood validation suites (§18.6.3) exercise them, and `08_pressure_treated_wood_cone.jl` carries ThermaKin's one-way drying step.
 
 ### 1.2.2 What is **not** modeled
 
@@ -50,7 +50,7 @@ The scope boundary is as important as the scope itself. The following are explic
 
 - **Multi-dimensional geometry.** Full solves are one-dimensional in $z$. The cross-section $A$ is a scalar gauge, not a resolved 2-D/3-D field; lateral shrinkage is a column-global area scaling driven by an empirical law (§10), not a resolved lateral transport. Meshes of two and three dimensions (`box_mesh`, `cell_mesh`) exist at the residual level — a potential closure of the mesh motion, conductivity tensors and element death are implemented and tested there (§11.3.5, §14.5) — but `setup` refuses gas transport, in-depth radiation, the variable cross section, the equidistribution correction and cell deactivation on them, and they are not a supported path for full solves.
 - **Full two-temperature gas.** The gas phase is *not* given its own energy equation with a separate gas temperature. Gas is assumed to be in local thermal equilibrium with the matrix at the cell temperature $T$: it stores sensible heat like every other phase, and its flux relative to the skeleton carries its sensible enthalpy across the cell faces (§1.4.3, §7).
-- **Liquid-water transport.** Moisture is water bound in the cell wall: it rides the skeleton and leaves only by evaporation. Below the fibre saturation point (a moisture content of about 0.3, dry basis) bound water is immobile, as modeled; above it, capillary flow is missing. At every moisture content the recondensation of the vapour driven inward from the drying front is missing (§1.8.1, §3.2.3).
+- **Liquid-water transport.** Moisture is water held in the cell wall: it rides the skeleton and leaves or arrives only through its vapour, by the phase change of §6.7, which also condenses and resorbs the vapour driven inward from the drying front. Below the fibre saturation point (a moisture content of about 0.3, dry basis) the bound water itself is immobile; its diffusion along the column, across the grain or along it, is what the vapour transfer coefficient of virgin wood stands for, as a constant. Across the grain its measured size rises from about $0.05$ to $2\times10^{-6}$ m²/s between 5 and 18 % moisture; along the grain it is 2–100 times larger (§9.2.1). Above fibre saturation, capillary flow of free water is missing (§1.8.1).
 - **Multi-reactant reactions.** A `Reaction` has one reactant by construction: its `reactant` field is one component index. The reactant is consumed with unit mass stoichiometry and products are explicit yields summing to 1.0 (§6). ThermaKin supports bimolecular reactions and Gpyro V2 supports gas-consuming oxidative schemes; these cannot generally be reproduced by sequences of single-reactant steps. Several reactants, each with its own order and mass stoichiometry, are an open item (§1.8.1).
 - **Pressure- or oxygen-dependent kinetics, and distributed activation energy.** The Arrhenius pre-exponential $A_i$ is temperature-independent, the rate has no explicit pressure or oxygen factor, and there is no built-in distributed-activation-energy (DAEM) tooling (§6). A reaction order other than one acts on the conversion of the reactant against its lineage inventory (§6.4); the networks with no such inventory are refused (§6.5.5).
 
@@ -76,7 +76,7 @@ The organizing principle of Pyrolysis.jl is a **single generalized model with op
 | Cross section | the material's `lateral_shrinkage_law` | the conversion-history pair per cell and the global rows of $A$ and $\theta_A$ (`LateralShrinkage`, §10); needs `use_ale = true` |
 | Burnout | `deactivation`, `threshold`, `band` | `CellDeactivation`: an event that removes cells whose reactive inventory falls below the threshold (§14) |
 
-The kernels run in a fixed order, each present only when its physics is: `ReactionKernel`, `GasTransportKernel`, `RadiativeTransferKernel`, `ConductionKernel`, `ThermalBoundaryKernel`, `RelativeFluxKernel` (`_kernels`, `src/Integration/setup.jl`). The order matters where one kernel reads another's output: the surface energy balance of the thermal boundary kernel reads the outward gas fluxes of the gas transport for its blowing models and for the enthalpy those fluxes carry (§7.6, §15.3).
+The kernels run in a fixed order, each present only when its physics is: `ReactionKernel`, `PhaseChangeKernel`, `GasTransportKernel`, `RadiativeTransferKernel`, `ConductionKernel`, `ThermalBoundaryKernel`, `RelativeFluxKernel` (`_kernels`, `src/Integration/setup.jl`). The order matters where one kernel reads another's output: the surface energy balance of the thermal boundary kernel reads the outward gas fluxes of the gas transport for its blowing models and for the enthalpy those fluxes carry (§7.6, §15.3).
 
 The layout's type parameters are read by `@inline` accessors with zero runtime cost:
 
@@ -137,11 +137,11 @@ Subtracting $h_j^0$ times each species balance leaves the formation term $-\sum_
 
 $$
 \partial_t\Big(\sum_j \xi_j h_j\Big) + \nabla\!\cdot\Big(\mathbf v_s \sum_j \xi_j h_j\Big) + \nabla\!\cdot\Big(\sum_g h_g \mathbf J_g\Big)
-= -\nabla\!\cdot\mathbf q_{\text{cond}} + Q_{\text{rad}} + Q_{\text{rxn}} + \sum_j \omega_j\,h_j ,
+= -\nabla\!\cdot\mathbf q_{\text{cond}} + Q_{\text{rad}} + Q_{\text{rxn}} + Q_{\text{pc}} + \sum_j \omega_j\,h_j ,
 \tag{1.1}
 $$
 
-with $Q_{\text{rxn}} = -\sum_r h_r r_r$ the reaction heat (§1.5.3). The last term converts the heat of reaction, quoted at the local temperature, to the sensible-enthalpy datum. Equation (1.1) is what the cell rows of the code integrate (§1.4.4).
+with $Q_{\text{rxn}} = -\sum_r h_r r_r$ the reaction heat (§1.5.3) and $Q_{\text{pc}} = -\sum h_{\text{pc}} r_{\text{pc}}$ the heat of the phase changes (§6.7). The last term converts the heat of reaction, quoted at the local temperature, to the sensible-enthalpy datum. Equation (1.1) is what the cell rows of the code integrate (§1.4.4).
 
 **The temperature equation.** The storage coefficient is the **mixture volumetric heat capacity**
 
@@ -155,7 +155,7 @@ summed over **every** component, gas included (discretely, the cell's heat-capac
 
 $$
 \Big(\sum_j \xi_j c_{p,j}\Big)\frac{D_s T}{Dt}
-= -\nabla\!\cdot\mathbf q_{\text{cond}} - \sum_g c_{p,g}\,\mathbf J_g\!\cdot\!\nabla T + Q_{\text{rad}} + Q_{\text{rxn}},
+= -\nabla\!\cdot\mathbf q_{\text{cond}} - \sum_g c_{p,g}\,\mathbf J_g\!\cdot\!\nabla T + Q_{\text{rad}} + Q_{\text{rxn}} + Q_{\text{pc}},
 \qquad \frac{D_s}{Dt} \equiv \partial_t + \mathbf v_s\!\cdot\!\nabla ,
 \tag{1.3}
 $$
@@ -205,13 +205,13 @@ and pressure equations and specifies each boundary's control surface.
 Integrating (1.1) over a finite-volume cell $i$ gives the rows the integrator advances (`_energy_row`, `src/Assembly/residual.jl`). With $s_{if} = +1$ when the normal of face $f$ points out of cell $i$ and $-1$ otherwise, the cell's energy right-hand side is
 
 $$
-E_i = \big(Q_{\text{rxn},i} + Q_{\text{rad},i}\big)V_i - \sum_{f\in\partial i} s_{if}\,A_f\,F^{E}_{f},
+E_i = \big(Q_{\text{rxn},i} + Q_{\text{pc},i} + Q_{\text{rad},i}\big)V_i - \sum_{f\in\partial i} s_{if}\,A_f\,F^{E}_{f},
 \qquad
 F^{E}_{f} = q_f + \sum_j F_{j,f}\,h_j(T_f),
 \tag{1.4}
 $$
 
-with $F_{j,f}$ the mass flux of component $j$ through face $f$ along its normal and $F^E_f$ the face's energy flux: conduction plus the sensible enthalpy its mass fluxes carry. The energy row is then
+with $F_{j,f}$ the mass flux of component $j$ through face $f$ along its normal, $F^E_f$ the face's energy flux (conduction plus the sensible enthalpy its mass fluxes carry) and $Q_{	ext{pc},i} = -\sum h_{\text{pc}}\,r_{\text{pc}}$ the heat of the cell's phase changes (§6.7), zero for a material without one. The energy row is then
 
 $$
 \text{temperature form:}\quad C_i\,\frac{dT_i}{dt} = E_i - \sum_j h_j(T_i)\,\dot M_{j,i},
@@ -231,7 +231,7 @@ $$
 
 with $d_o$, $d_n$ the distances of the two cell centers from the face. The face conductivity $k_f$ is the **distance-weighted harmonic mean** (resistance-in-series) of the two cell conductivities, derived from flux continuity across the interface (the total thermal resistance $R = d_o/(k_o A) + d_n/(k_n A)$ inverts to it); it reduces to $2k_ok_n/(k_o+k_n)$ on a uniform mesh, and the guard $\eta = 10^{-20}$ W·m⁻¹·K⁻¹ makes it vanish continuously, with a finite derivative, as either side's conductivity does (`guarded_harmonic_mean`, `src/Properties/effective_properties.jl`). Gas transport instead matches total species flux across half-cell interface states (§9); independent averaging of its two channels cannot represent all legal material pairs.
 
-> **Implementation note.** Each kernel adds its face fluxes, per unit area along the face normal, and its cell sources to the contributions: conduction in `ConductionKernel` (`src/Kernels/conduction.jl`), the gas mass fluxes and the enthalpy they carry in `GasTransportKernel` (`src/Kernels/gas_transport.jl`), the boundary energy fluxes with outgoing enthalpy at $T_s$ and incoming reservoir enthalpy in `ThermalBoundaryKernel` (`src/Kernels/thermal_boundary.jl`), and the reaction sources in `ReactionKernel`. The row assembly `assemble_rows!` (`src/Assembly/residual.jl`) is the only writer of the derivative: it scatters each face flux as $-F_fA_f$ into the owner and $+F_fA_f$ into the neighbour and forms (1.5). The kernel order and the full residual sequence are documented in §7.6 and §15.3.
+> **Implementation note.** Each kernel adds its face fluxes, per unit area along the face normal, and its cell sources to the contributions: conduction in `ConductionKernel` (`src/Kernels/conduction.jl`), the gas mass fluxes and the enthalpy they carry in `GasTransportKernel` (`src/Kernels/gas_transport.jl`), the boundary energy fluxes with outgoing enthalpy at $T_s$ and incoming reservoir enthalpy in `ThermalBoundaryKernel` (`src/Kernels/thermal_boundary.jl`), the reaction sources in `ReactionKernel` and the phase-change sources in `PhaseChangeKernel` (`src/Kernels/phase_change.jl`). The row assembly `assemble_rows!` (`src/Assembly/residual.jl`) is the only writer of the derivative: it scatters each face flux as $-F_fA_f$ into the owner and $+F_fA_f$ into the neighbour and forms (1.5). The kernel order and the full residual sequence are documented in §7.6 and §15.3.
 
 The species equation is solved in conservative form, the cell masses being the unknowns:
 
@@ -239,11 +239,11 @@ $$
 \frac{dm_{j,i}}{dt}
 = \omega_{j,i}\,V_i + \dot M_{j,i},
 \qquad
-\omega_{j,i}=\sum_r \nu_{r,j}\,r_{r,i},
+\omega_{j,i}=\sum_r \nu_{r,j}\,r_{r,i} \pm r_{\text{pc},i},
 \tag{1.7}
 $$
 
-where the face fluxes of the gas transport carry gas components only, and where the equidistribution correction moves the mesh relative to the skeleton, every component also crosses the faces at the relative velocity (§3.2.3, §11.6).
+where $r_{\text{pc},i}$ is the rate of a phase change (§6.7), added to the source of its vapour and taken from that of its liquid, the face fluxes of the gas transport carry gas components only, and where the equidistribution correction moves the mesh relative to the skeleton, every component also crosses the faces at the relative velocity (§3.2.3, §11.6).
 
 ---
 
@@ -274,9 +274,9 @@ Q_{\text{rxn}} = -\sum_r h_r\,r_r,
 \tag{1.8}
 $$
 
-verified verbatim in `reaction_heat_source` (`src/Physics/kinetics.jl`, `Q -= heats[i]*rates[i]`). Hence an endothermic reaction ($h>0$, $r>0$) gives $Q_{\text{rxn}}<0$ (cooling), and an exothermic reaction ($h<0$) gives $Q_{\text{rxn}}>0$ (heating).
+verified verbatim in `reaction_heat_source` (`src/Physics/kinetics.jl`, `Q -= heats[i]*rates[i]`). Hence an endothermic reaction ($h>0$, $r>0$) gives $Q_{\text{rxn}}<0$ (cooling), and an exothermic reaction ($h<0$) gives $Q_{\text{rxn}}>0$ (heating). The phase change of a liquid (§6.7) adds $Q_{\text{pc}} = -h_{\text{pc}}\,r_{\text{pc}}$ under the same convention: its heat $h_{\text{pc}}>0$ is per kilogram evaporated, so evaporation ($r_{\text{pc}}>0$) cools and condensation ($r_{\text{pc}}<0$) heats.
 
-> **Overload caution (binding).** ThermaKin *publishes* the opposite sign — in its manual $h>0$ denotes an exothermic reaction — so a heat of reaction taken from ThermaKin input is entered in Pyrolysis.jl with its sign flipped and its reaction-extent basis normalized (§6.9.1). Gpyro V2 and FDS use the same convention as Pyrolysis.jl ($h>0$ endothermic; §6.9.2), but their heat basis, units and temperature datum must also be converted when necessary (§6.9). This is overload resolution H1 of the nomenclature (§2); the minus sign in (1.8) is what turns the stored heat into the volumetric source.
+> **Overload caution (binding).** ThermaKin *publishes* the opposite sign — in its manual $h>0$ denotes an exothermic reaction — so a heat of reaction taken from ThermaKin input is entered in Pyrolysis.jl with its sign flipped and its reaction-extent basis normalized (§6.10.1). Gpyro V2 and FDS use the same convention as Pyrolysis.jl ($h>0$ endothermic; §6.10.2), but their heat basis, units and temperature datum must also be converted when necessary (§6.10). This is overload resolution H1 of the nomenclature (§2); the minus sign in (1.8) is what turns the stored heat into the volumetric source.
 
 Two further nomenclature overloads that recur in this guide and are worth flagging here (full list in §2): the symbol $A$ denotes **cross-sectional area** in the physics chapters (and $A_f$ the area of face $f$), while the Arrhenius pre-exponential is always written subscripted, $A_i$ (or $A_{\alpha\beta}$); and $\chi$ always denotes **pyrolysis progress**, never a cross-section ratio (the area ratio is $A/A_0=\mathrm{law}(\bar\chi)$).
 
@@ -317,7 +317,7 @@ the heat convention, deformation and radiation terms. ThermaKin2Ds permits one
 or two reactants; a Pyrolysis.jl `Reaction` has one. TK uses
 positive reaction heat for exothermic reactions; Pyrolysis.jl uses positive
 heat for endothermic reactions. Porting also requires matching the reaction
-extent and mass basis (§6.9.1).
+extent and mass basis (§6.10.1).
 
 ### 1.6.2 Gpyro V2
 
@@ -454,31 +454,30 @@ The physics below is absent from the model. It is ordered by its expected effect
 **Likely to bias the validation cases**
 
 1. **Flame heat-flux feedback.** There is no ignition-triggered flame heat-flux boundary condition. After ignition a cone-calorimeter flame returns roughly 20–30 kW·m⁻² (PMMA) or 10–15 kW·m⁻² (wood) to the surface, 40–60 % on top of a 50 kW·m⁻² exposure, so parameters calibrated without it absorb that net-flux bias. The natural form is a flame-flux BC switched on by a critical-MLR or critical-$T_s$ callback. Flame feedback and the blowing reduction of the convective coefficient (the `blowing` model of `ConvectiveBC`, §12.3.3) both raise the net surface flux when the film temperature is the ambient one the examples use, since blowing cuts a loss; they offset each other only when the film temperature is the flame's, so that blowing suppresses the flame's convective heating. Enabling a blowing model alone on a cone example calibrated without either therefore raises $T_s$ and MLR. Both belong in place before the cone examples are recalibrated.
-2. **Multi-reactant kinetics** (item 3 above). A `Reaction` holds one reactant index and one order. This blocks char oxidation, recondensation, and autocatalysis (Prout–Tompkins fits cannot be represented). Several reactants, each with its own order and mass stoichiometry, would touch the reaction type, the kinetics, the volumetric strain rate, and the reaction kernel (the colored Jacobian differentiates whatever the kernel computes).
+2. **Multi-reactant kinetics** (item 3 above). A `Reaction` holds one reactant index and one order. This blocks char oxidation and autocatalysis (Prout–Tompkins fits cannot be represented). Several reactants, each with its own order and mass stoichiometry, would touch the reaction type, the kinetics, the volumetric strain rate, and the reaction kernel (the colored Jacobian differentiates whatever the kernel computes).
 3. **Thermal expansion and swelling of PMMA.** A PMMA slab is taken to stay flat, dense and at its cold specific volume. Thermal expansion, about 18 % of the local volume at the surface and 5–10 % of the slab thickness, is absent (§10.12), and so is the swelling of bubbles and curl: unrestrained cast PMMA rises by millimetres in cone tests before recession takes over, more at low heat flux, while extruded PMMA bubbles without swelling. Expansion reaches the computed temperature through $k\rho$ of the hot layer only, and a conductivity fitted with this model to samples of known cold thickness already holds it. Swelling acts mainly on the experiment: it moves the surface toward the heater, which raises the absorbed flux and the mass loss rate, and it detaches a back-face thermocouple. Restrained or non-swelling samples are the ones to compare with.
 
 **Relevant to near-term applications**
 
 4. **Oxidative pyrolysis and char oxidation with O₂ ingress** (about 32.8 MJ per kg of carbon). It dominates at sub-critical fluxes, after flameout, and in smoldering, and it controls the late-time MLR tail and the residue mass of the Douglas-fir case. It needs multi-reactant kinetics (item 2) and an explicit reservoir composition supplied by `GasReservoir`. The upwind Darcy outflow suppresses ingress at high MLR.
-5. **Equilibrium (pressure-dependent) moisture evaporation and recondensation.** Drying is a pressure-independent Arrhenius reaction; no saturation pressure $P_{\text{sat}}(T)$ appears anywhere. Vapor recondensation ahead of the drying front (which raises the local moisture content by 30–50 %) is absent, and at the 1.5–2 atm pore pressure of pressure-treated wood the boiling point shifts to 112–121 °C, which Arrhenius drying cannot represent. The vapour driven inward from the front stays in the cold pores at many times its saturation pressure, whatever the drying kinetics, and the latent heat it would release there is not delivered. The cold side of wet wood shows a plateau near 373 K (Bilbao et al. 1996; Lee et al. 2025); a model with an Arrhenius drying step shows no plateau and lies 30–50 K below the measured bottom-surface temperature of 9 mm pressure-treated pine while it dries (Lee et al. 2025, Fig. 6). The cold-side temperature of wet wood during drying, and the pore pressure and composition of any material with a kinetic drying step, are therefore outside the model, and a conductivity fitted to a back-face history of wet wood absorbs the missing plateau. An Arrhenius drying step is also only admissible while its rate at ambient temperature is negligible over the test; the wood examples' parameters are not (§6.10 item 11). It needs item 2 and a smooth $r \propto (P_v - P_{\text{sat}}(T))$ closure; the pressure is evaluated for all gas-bearing materials.
-6. **Backing layer and contact resistance at the back face.** There is no contact-resistance or substrate model. An adiabatic back face over-predicts late-time back-half temperatures (the missing loss is about 0.7–3 kW·m⁻² for 25 mm of wood over 10–20 min); a lumped Robin condition on the bottom face (radiative + convective, as in example `06_cone_calorimeter.jl`) is the available approximation. A contact conductance plus a semi-infinite-substrate $h(t)$ would close the gap. The back face is also taken gas-tight (`ImpermeableBC`), which the standard foil wrap is not at the pore pressures pyrolysis generates; a leaky back is represented by `ConvectivePressureBC` with a board or leak resistance, and a predicted pore pressure is a mean over a cracked char, credible to about 2 bar overpressure (§9.4.3).
-7. **Kinetics expressiveness.** A $T^n$ pre-factor and DAEM-style stacking are absent. Any real order $n \ge 0$ acts on the conversion of the reactant against its lineage inventory, on fixed and moving meshes alike (§6.4); a lineage fed through the gas is refused, and a lineage whose reference would depend on the rates needs an explicit `basis` (§6.5.5).
-8. **Transport-closure accuracy** (item 5 above). The gas viscosity is a material curve without composition-dependent mixing. Binary diffusivity and pore geometry must be supplied for the dusty-gas model. Both closures exclude thermal diffusion and gravity; donor advection is first order. A matrix endpoint supplies finite porous resistance, not a free-flow momentum model (§9).
+5. **Backing layer and contact resistance at the back face.** There is no contact-resistance or substrate model. An adiabatic back face over-predicts late-time back-half temperatures (the missing loss is about 0.7–3 kW·m⁻² for 25 mm of wood over 10–20 min); a lumped Robin condition on the bottom face (radiative + convective, as in example `06_cone_calorimeter.jl`) is the available approximation. A contact conductance plus a semi-infinite-substrate $h(t)$ would close the gap. The back face is also taken gas-tight (`ImpermeableBC`), which the standard foil wrap is not at the pore pressures pyrolysis generates; a leaky back is represented by `ConvectivePressureBC` with a board or leak resistance, and a predicted pore pressure is a mean over a cracked char, credible to about 2 bar overpressure (§9.4.3).
+6. **Kinetics expressiveness.** A $T^n$ pre-factor and DAEM-style stacking are absent. Any real order $n \ge 0$ acts on the conversion of the reactant against its lineage inventory, on fixed and moving meshes alike (§6.4); a lineage fed through the gas is refused, and a lineage whose reference would depend on the rates needs an explicit `basis` (§6.5.5).
+7. **Transport-closure accuracy** (item 5 above). The gas viscosity is a material curve without composition-dependent mixing. Binary diffusivity and pore geometry must be supplied for the dusty-gas model. Both closures exclude thermal diffusion and gravity; donor advection is first order. A matrix endpoint supplies finite porous resistance, not a free-flow momentum model (§9).
 
-9. **Attenuation of the incident flux by the pyrolysate plume.** The flux the
+8. **Attenuation of the incident flux by the pyrolysate plume.** The flux the
    surface receives is the set flux; the volatiles above the face absorb
    $6$–$14\,\%$ of it before ignition and $20$–$27\,\%$ at steady outgassing in
    a cone-type geometry (Zhou et al. 2009, 2010), $35\,\%$ under a coil heater
    (Kashiwagi 1979), while a cone flame lets more than $95\,\%$ through (Rhodes
    and Quintiere 1996). The effect depends on the apparatus and its extraction
    flow, so it is left to the calibration of $h$ and $a_s$ (§12.12).
-10. **Free water.** A liquid component is a bound liquid that holds its own volume (§10.2), so above the fibre saturation point (a moisture content of about 0.3, dry basis) drying shrinkage is overstated, and liquid migration is missing there as well (§1.2.2). Wet wood is in scope below that point.
+9. **Free water and the vapour transport of wet wood.** Above the fibre saturation point (a moisture content of about 0.3, dry basis) water is free: it evaporates and condenses at $p_{\text{sat}}(T)$ through the cap of the activity law (§6.7.2), but it has no capillary flow (§1.2.2), and as one inventory with the bound water it holds its own volume (§10.2), so drying shrinkage is overstated and condensation above the cap swells a moving mesh. Below that point the drying rate is set by the vapour transport, whose coefficient is a deck input (§9.2.1), and the interior of a cracked or side-vented specimen can heat sooner than a one-dimensional model gives: no variant reproduces the early heating at 9 mm in the 20 % runs of Bilbao et al. (1996), and the bottom face of the 9 mm disks of Lee et al. (2025) heats as fast as measured at 63 kW·m⁻² only with a transfer coefficient about 200 times the measured one (§18.6.3). Wet wood is in scope below fibre saturation.
 
 **Niche or future**
 
 - Spectral (banded) radiation and a refractive index in the radiative transfer rows: each band would repeat the rows of §8.3 with its own absorption coefficient and share of the emission, and a refractive index would change the interface's reflectivities (§8.10).
 - Substrate reflection; scattering ($\sigma_s$ is not modeled); view-factor edge fall-off.
 - Species-pair-dependent molecular diffusivities and thermal-transpiration effects beyond the declared common-diffusivity dusty-gas closure.
-- Liquid free-water capillarity (relevant only above the fiber-saturation point, about 30 % moisture content) and bound-water diffusion ($\sqrt{Dt} \approx 0.25$ mm over a cone test, negligible at fire heating rates).
+- Liquid free-water capillarity (relevant only above the fiber-saturation point, about 30 % moisture content). Bound-water diffusion is carried by the vapour transfer coefficient as a constant (§9.2.1); a coefficient that rises with the moisture content would be a property law on the existing transport.
 - Flux-dependent swelling: strain is a function of composition alone, so a product density fitted at one heat flux does not predict the expansion of an intumescent or foaming material at another (§10.2).
 - Mechanics (char cracking, delamination, spalling), anisotropic conductivity (about 2× along the wood grain), melting and dripping, and 2-D/3-D edge burning (about a 10–20 % effect on late-time MLR in cone tests; item 1 above).

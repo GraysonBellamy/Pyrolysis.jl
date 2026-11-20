@@ -100,6 +100,42 @@ function _many_gases()
     )
 end
 
+# Wood holding water, with its vapour and the pyrolysis gas: the phase change
+# beside the pyrolysis, under the CAST spruce isotherm or an activity function,
+# whose heat takes a nested derivative.
+function _wet(activity)
+    wood = SolidComponent(
+        :wood,
+        ρ = 500.0,
+        ρ_intrinsic = 1500.0,
+        c = (1500.0, 0.5),
+        k = 0.15,
+        ε = 0.9,
+        κ = 1e-14,
+        λ = 1e-5,
+    )
+    water = LiquidComponent(:water, ρ = 1000.0, c = 4180.0, k = 0.6)
+    vapour = GaseousComponent(:vapour, M = 0.018015, c = 1900.0, k = 0.025)
+    gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03)
+    return Material(
+        name = :wet,
+        components = (wood, water, vapour, gas),
+        reactions = (Reaction(:pyrolysis, 1 => 4, A = 1e10, E = 150e3, h = -300e3),),
+        phase_changes = (PhaseChange(:moisture, 2 => 3; activity, sorbents = (1,)),),
+    )
+end
+
+_wet_column(activity) = PyrolysisProblem(
+    mesh = uniform_mesh(0.01, N_CELLS),
+    material = _wet(activity),
+    bc_set = BoundaryConditionSet(
+        thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()),
+    ),
+    T_initial = z -> 300.0 + 1e4 * z,
+    ξ_initial = [z -> 450.0, z -> 45.0, z -> 0.01, z -> 0.0],
+    tspan = (0.0, 100.0),
+)
+
 _column(mat; top, stretch = nothing) = PyrolysisProblem(
     mesh = stretch === nothing ? uniform_mesh(0.01, N_CELLS) :
            stretched_mesh(0.01, N_CELLS, stretch),
@@ -109,9 +145,10 @@ _column(mat; top, stretch = nothing) = PyrolysisProblem(
 )
 
 # The configurations of `test/perf/perf_helpers.jl`, a variable cross section,
-# inventory fluxes relative to a prescribed mesh velocity, and the
+# inventory fluxes relative to a prescribed mesh velocity, the
 # equidistribution correction active at every node of a stretched mesh, with a
-# second estimate's shift (set in the testset). The wood's
+# second estimate's shift (set in the testset), and a phase change on a fixed
+# and a moving mesh. The wood's
 # heat capacity depends on the temperature, so the per-component tuples mix
 # constants and functions of it under automatic differentiation.
 const _incident = RadiativeFluxBC(50e3)
@@ -156,6 +193,13 @@ const _configurations = (
                 activation = (2.0, 0.5),
             ),
         ),
+    ),
+    phase_change = (problem = () -> _wet_column(CAST_SPRUCE), options = (;)),
+    phase_change_moving = (
+        problem = () -> _wet_column(
+            ActivityFunction((X, T) -> 4X * exp(300 * (1 / 298.15 - 1 / T))),
+        ),
+        options = (use_ale = true,),
     ),
 )
 

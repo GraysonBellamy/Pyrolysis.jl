@@ -73,7 +73,7 @@ The solver is designed for, and validated against, the following experiment and 
 - **Cone calorimetry.** A sample is irradiated at a controlled flux (commonly 25–75 kW·m⁻²) while surface temperature, mass-loss rate (MLR), and a heat-release-rate proxy are recorded. The exposed top face takes a radiative-plus-convective boundary condition; the back face is typically adiabatic or a lumped loss, and impermeable. Examples `06_cone_calorimeter.jl` (5.8 mm of PMMA under 25 kW·m⁻² on a moving mesh, with cell deactivation) and `07_douglas_fir_cone.jl` (12 mm of charring Douglas fir under 75 kW·m⁻² on a moving mesh, with gas transport and surface absorption) are the reference configurations.
 - **Idealized thermal-analysis experiments.** Thermogravimetric analysis (TGA), differential scanning calorimetry (DSC), and microscale combustion calorimetry (MCC) can be idealized as a thin, thermally-thin sample with a prescribed heating rate. In the limit of a single well-mixed cell, the species equations reduce to the 0-D Arrhenius mass-loss ODE that TGA inversion assumes; this idealization underpins the single-reaction verification case in §18 (Verification & Validation).
 - **Charring, non-charring, and intumescent solids.** Non-charring polymers (PMMA) leave essentially no residue; charring solids (wood) form an insulating char layer with conductivity and porosity that differ sharply from the virgin material; intumescent coatings swell by orders of magnitude. The component/reaction/property-function machinery (§4) plus the bulk-density volume law and lateral-shrinkage law (§10) span all three.
-- **Pressure-treated and wet wood / moisture transport.** Hygroscopic materials carry liquid water that evaporates endothermically and migrates as vapor under pressure gradients. gas transport (§9, Gas-Phase Mass Transport & Pressure; declared by the material) and the `StateDependentProperty` heat-of-sorption closure (§4) handle these; examples `08_pressure_treated_wood_cone.jl` and `moisture_hos_comparison.jl` demonstrate these models.
+- **Pressure-treated and wet wood / moisture transport.** Hygroscopic materials hold water that desorbs and evaporates endothermically, migrates as vapour under pressure and concentration gradients, and condenses or is resorbed wherever the vapour stands above its equilibrium pressure. The phase change of a liquid toward sorption equilibrium with its vapour (§6.7) and gas transport (§9, Gas-Phase Mass Transport & Pressure; declared by the material) handle these; `07_douglas_fir_cone.jl` and the moist-wood validation suites (§18.6.3) exercise them, and `08_pressure_treated_wood_cone.jl` carries ThermaKin's one-way drying step.
 
 ### 1.2.2 What is **not** modeled
 
@@ -81,7 +81,7 @@ The scope boundary is as important as the scope itself. The following are explic
 
 - **Multi-dimensional geometry.** Full solves are one-dimensional in $z$. The cross-section $A$ is a scalar gauge, not a resolved 2-D/3-D field; lateral shrinkage is a column-global area scaling driven by an empirical law (§10), not a resolved lateral transport. Meshes of two and three dimensions (`box_mesh`, `cell_mesh`) exist at the residual level — a potential closure of the mesh motion, conductivity tensors and element death are implemented and tested there (§11.3.5, §14.5) — but `setup` refuses gas transport, in-depth radiation, the variable cross section, the equidistribution correction and cell deactivation on them, and they are not a supported path for full solves.
 - **Full two-temperature gas.** The gas phase is *not* given its own energy equation with a separate gas temperature. Gas is assumed to be in local thermal equilibrium with the matrix at the cell temperature $T$: it stores sensible heat like every other phase, and its flux relative to the skeleton carries its sensible enthalpy across the cell faces (§1.4.3, §7).
-- **Liquid-water transport.** Moisture is water bound in the cell wall: it rides the skeleton and leaves only by evaporation. Below the fibre saturation point (a moisture content of about 0.3, dry basis) bound water is immobile, as modeled; above it, capillary flow is missing. At every moisture content the recondensation of the vapour driven inward from the drying front is missing (§1.8.1, §3.2.3).
+- **Liquid-water transport.** Moisture is water held in the cell wall: it rides the skeleton and leaves or arrives only through its vapour, by the phase change of §6.7, which also condenses and resorbs the vapour driven inward from the drying front. Below the fibre saturation point (a moisture content of about 0.3, dry basis) the bound water itself is immobile; its diffusion along the column, across the grain or along it, is what the vapour transfer coefficient of virgin wood stands for, as a constant. Across the grain its measured size rises from about $0.05$ to $2\times10^{-6}$ m²/s between 5 and 18 % moisture; along the grain it is 2–100 times larger (§9.2.1). Above fibre saturation, capillary flow of free water is missing (§1.8.1).
 - **Multi-reactant reactions.** A `Reaction` has one reactant by construction: its `reactant` field is one component index. The reactant is consumed with unit mass stoichiometry and products are explicit yields summing to 1.0 (§6). ThermaKin supports bimolecular reactions and Gpyro V2 supports gas-consuming oxidative schemes; these cannot generally be reproduced by sequences of single-reactant steps. Several reactants, each with its own order and mass stoichiometry, are an open item (§1.8.1).
 - **Pressure- or oxygen-dependent kinetics, and distributed activation energy.** The Arrhenius pre-exponential $A_i$ is temperature-independent, the rate has no explicit pressure or oxygen factor, and there is no built-in distributed-activation-energy (DAEM) tooling (§6). A reaction order other than one acts on the conversion of the reactant against its lineage inventory (§6.4); the networks with no such inventory are refused (§6.5.5).
 
@@ -107,7 +107,7 @@ The organizing principle of Pyrolysis.jl is a **single generalized model with op
 | Cross section | the material's `lateral_shrinkage_law` | the conversion-history pair per cell and the global rows of $A$ and $\theta_A$ (`LateralShrinkage`, §10); needs `use_ale = true` |
 | Burnout | `deactivation`, `threshold`, `band` | `CellDeactivation`: an event that removes cells whose reactive inventory falls below the threshold (§14) |
 
-The kernels run in a fixed order, each present only when its physics is: `ReactionKernel`, `GasTransportKernel`, `RadiativeTransferKernel`, `ConductionKernel`, `ThermalBoundaryKernel`, `RelativeFluxKernel` (`_kernels`, `src/Integration/setup.jl`). The order matters where one kernel reads another's output: the surface energy balance of the thermal boundary kernel reads the outward gas fluxes of the gas transport for its blowing models and for the enthalpy those fluxes carry (§7.6, §15.3).
+The kernels run in a fixed order, each present only when its physics is: `ReactionKernel`, `PhaseChangeKernel`, `GasTransportKernel`, `RadiativeTransferKernel`, `ConductionKernel`, `ThermalBoundaryKernel`, `RelativeFluxKernel` (`_kernels`, `src/Integration/setup.jl`). The order matters where one kernel reads another's output: the surface energy balance of the thermal boundary kernel reads the outward gas fluxes of the gas transport for its blowing models and for the enthalpy those fluxes carry (§7.6, §15.3).
 
 The layout's type parameters are read by `@inline` accessors with zero runtime cost:
 
@@ -168,11 +168,11 @@ Subtracting $h_j^0$ times each species balance leaves the formation term $-\sum_
 
 $$
 \partial_t\Big(\sum_j \xi_j h_j\Big) + \nabla\!\cdot\Big(\mathbf v_s \sum_j \xi_j h_j\Big) + \nabla\!\cdot\Big(\sum_g h_g \mathbf J_g\Big)
-= -\nabla\!\cdot\mathbf q_{\text{cond}} + Q_{\text{rad}} + Q_{\text{rxn}} + \sum_j \omega_j\,h_j ,
+= -\nabla\!\cdot\mathbf q_{\text{cond}} + Q_{\text{rad}} + Q_{\text{rxn}} + Q_{\text{pc}} + \sum_j \omega_j\,h_j ,
 \tag{1.1}
 $$
 
-with $Q_{\text{rxn}} = -\sum_r h_r r_r$ the reaction heat (§1.5.3). The last term converts the heat of reaction, quoted at the local temperature, to the sensible-enthalpy datum. Equation (1.1) is what the cell rows of the code integrate (§1.4.4).
+with $Q_{\text{rxn}} = -\sum_r h_r r_r$ the reaction heat (§1.5.3) and $Q_{\text{pc}} = -\sum h_{\text{pc}} r_{\text{pc}}$ the heat of the phase changes (§6.7). The last term converts the heat of reaction, quoted at the local temperature, to the sensible-enthalpy datum. Equation (1.1) is what the cell rows of the code integrate (§1.4.4).
 
 **The temperature equation.** The storage coefficient is the **mixture volumetric heat capacity**
 
@@ -186,7 +186,7 @@ summed over **every** component, gas included (discretely, the cell's heat-capac
 
 $$
 \Big(\sum_j \xi_j c_{p,j}\Big)\frac{D_s T}{Dt}
-= -\nabla\!\cdot\mathbf q_{\text{cond}} - \sum_g c_{p,g}\,\mathbf J_g\!\cdot\!\nabla T + Q_{\text{rad}} + Q_{\text{rxn}},
+= -\nabla\!\cdot\mathbf q_{\text{cond}} - \sum_g c_{p,g}\,\mathbf J_g\!\cdot\!\nabla T + Q_{\text{rad}} + Q_{\text{rxn}} + Q_{\text{pc}},
 \qquad \frac{D_s}{Dt} \equiv \partial_t + \mathbf v_s\!\cdot\!\nabla ,
 \tag{1.3}
 $$
@@ -236,13 +236,13 @@ and pressure equations and specifies each boundary's control surface.
 Integrating (1.1) over a finite-volume cell $i$ gives the rows the integrator advances (`_energy_row`, `src/Assembly/residual.jl`). With $s_{if} = +1$ when the normal of face $f$ points out of cell $i$ and $-1$ otherwise, the cell's energy right-hand side is
 
 $$
-E_i = \big(Q_{\text{rxn},i} + Q_{\text{rad},i}\big)V_i - \sum_{f\in\partial i} s_{if}\,A_f\,F^{E}_{f},
+E_i = \big(Q_{\text{rxn},i} + Q_{\text{pc},i} + Q_{\text{rad},i}\big)V_i - \sum_{f\in\partial i} s_{if}\,A_f\,F^{E}_{f},
 \qquad
 F^{E}_{f} = q_f + \sum_j F_{j,f}\,h_j(T_f),
 \tag{1.4}
 $$
 
-with $F_{j,f}$ the mass flux of component $j$ through face $f$ along its normal and $F^E_f$ the face's energy flux: conduction plus the sensible enthalpy its mass fluxes carry. The energy row is then
+with $F_{j,f}$ the mass flux of component $j$ through face $f$ along its normal, $F^E_f$ the face's energy flux (conduction plus the sensible enthalpy its mass fluxes carry) and $Q_{	ext{pc},i} = -\sum h_{\text{pc}}\,r_{\text{pc}}$ the heat of the cell's phase changes (§6.7), zero for a material without one. The energy row is then
 
 $$
 \text{temperature form:}\quad C_i\,\frac{dT_i}{dt} = E_i - \sum_j h_j(T_i)\,\dot M_{j,i},
@@ -262,7 +262,7 @@ $$
 
 with $d_o$, $d_n$ the distances of the two cell centers from the face. The face conductivity $k_f$ is the **distance-weighted harmonic mean** (resistance-in-series) of the two cell conductivities, derived from flux continuity across the interface (the total thermal resistance $R = d_o/(k_o A) + d_n/(k_n A)$ inverts to it); it reduces to $2k_ok_n/(k_o+k_n)$ on a uniform mesh, and the guard $\eta = 10^{-20}$ W·m⁻¹·K⁻¹ makes it vanish continuously, with a finite derivative, as either side's conductivity does (`guarded_harmonic_mean`, `src/Properties/effective_properties.jl`). Gas transport instead matches total species flux across half-cell interface states (§9); independent averaging of its two channels cannot represent all legal material pairs.
 
-> **Implementation note.** Each kernel adds its face fluxes, per unit area along the face normal, and its cell sources to the contributions: conduction in `ConductionKernel` (`src/Kernels/conduction.jl`), the gas mass fluxes and the enthalpy they carry in `GasTransportKernel` (`src/Kernels/gas_transport.jl`), the boundary energy fluxes with outgoing enthalpy at $T_s$ and incoming reservoir enthalpy in `ThermalBoundaryKernel` (`src/Kernels/thermal_boundary.jl`), and the reaction sources in `ReactionKernel`. The row assembly `assemble_rows!` (`src/Assembly/residual.jl`) is the only writer of the derivative: it scatters each face flux as $-F_fA_f$ into the owner and $+F_fA_f$ into the neighbour and forms (1.5). The kernel order and the full residual sequence are documented in §7.6 and §15.3.
+> **Implementation note.** Each kernel adds its face fluxes, per unit area along the face normal, and its cell sources to the contributions: conduction in `ConductionKernel` (`src/Kernels/conduction.jl`), the gas mass fluxes and the enthalpy they carry in `GasTransportKernel` (`src/Kernels/gas_transport.jl`), the boundary energy fluxes with outgoing enthalpy at $T_s$ and incoming reservoir enthalpy in `ThermalBoundaryKernel` (`src/Kernels/thermal_boundary.jl`), the reaction sources in `ReactionKernel` and the phase-change sources in `PhaseChangeKernel` (`src/Kernels/phase_change.jl`). The row assembly `assemble_rows!` (`src/Assembly/residual.jl`) is the only writer of the derivative: it scatters each face flux as $-F_fA_f$ into the owner and $+F_fA_f$ into the neighbour and forms (1.5). The kernel order and the full residual sequence are documented in §7.6 and §15.3.
 
 The species equation is solved in conservative form, the cell masses being the unknowns:
 
@@ -270,11 +270,11 @@ $$
 \frac{dm_{j,i}}{dt}
 = \omega_{j,i}\,V_i + \dot M_{j,i},
 \qquad
-\omega_{j,i}=\sum_r \nu_{r,j}\,r_{r,i},
+\omega_{j,i}=\sum_r \nu_{r,j}\,r_{r,i} \pm r_{\text{pc},i},
 \tag{1.7}
 $$
 
-where the face fluxes of the gas transport carry gas components only, and where the equidistribution correction moves the mesh relative to the skeleton, every component also crosses the faces at the relative velocity (§3.2.3, §11.6).
+where $r_{\text{pc},i}$ is the rate of a phase change (§6.7), added to the source of its vapour and taken from that of its liquid, the face fluxes of the gas transport carry gas components only, and where the equidistribution correction moves the mesh relative to the skeleton, every component also crosses the faces at the relative velocity (§3.2.3, §11.6).
 
 ---
 
@@ -305,9 +305,9 @@ Q_{\text{rxn}} = -\sum_r h_r\,r_r,
 \tag{1.8}
 $$
 
-verified verbatim in `reaction_heat_source` (`src/Physics/kinetics.jl`, `Q -= heats[i]*rates[i]`). Hence an endothermic reaction ($h>0$, $r>0$) gives $Q_{\text{rxn}}<0$ (cooling), and an exothermic reaction ($h<0$) gives $Q_{\text{rxn}}>0$ (heating).
+verified verbatim in `reaction_heat_source` (`src/Physics/kinetics.jl`, `Q -= heats[i]*rates[i]`). Hence an endothermic reaction ($h>0$, $r>0$) gives $Q_{\text{rxn}}<0$ (cooling), and an exothermic reaction ($h<0$) gives $Q_{\text{rxn}}>0$ (heating). The phase change of a liquid (§6.7) adds $Q_{\text{pc}} = -h_{\text{pc}}\,r_{\text{pc}}$ under the same convention: its heat $h_{\text{pc}}>0$ is per kilogram evaporated, so evaporation ($r_{\text{pc}}>0$) cools and condensation ($r_{\text{pc}}<0$) heats.
 
-> **Overload caution (binding).** ThermaKin *publishes* the opposite sign — in its manual $h>0$ denotes an exothermic reaction — so a heat of reaction taken from ThermaKin input is entered in Pyrolysis.jl with its sign flipped and its reaction-extent basis normalized (§6.9.1). Gpyro V2 and FDS use the same convention as Pyrolysis.jl ($h>0$ endothermic; §6.9.2), but their heat basis, units and temperature datum must also be converted when necessary (§6.9). This is overload resolution H1 of the nomenclature (§2); the minus sign in (1.8) is what turns the stored heat into the volumetric source.
+> **Overload caution (binding).** ThermaKin *publishes* the opposite sign — in its manual $h>0$ denotes an exothermic reaction — so a heat of reaction taken from ThermaKin input is entered in Pyrolysis.jl with its sign flipped and its reaction-extent basis normalized (§6.10.1). Gpyro V2 and FDS use the same convention as Pyrolysis.jl ($h>0$ endothermic; §6.10.2), but their heat basis, units and temperature datum must also be converted when necessary (§6.10). This is overload resolution H1 of the nomenclature (§2); the minus sign in (1.8) is what turns the stored heat into the volumetric source.
 
 Two further nomenclature overloads that recur in this guide and are worth flagging here (full list in §2): the symbol $A$ denotes **cross-sectional area** in the physics chapters (and $A_f$ the area of face $f$), while the Arrhenius pre-exponential is always written subscripted, $A_i$ (or $A_{\alpha\beta}$); and $\chi$ always denotes **pyrolysis progress**, never a cross-section ratio (the area ratio is $A/A_0=\mathrm{law}(\bar\chi)$).
 
@@ -348,7 +348,7 @@ the heat convention, deformation and radiation terms. ThermaKin2Ds permits one
 or two reactants; a Pyrolysis.jl `Reaction` has one. TK uses
 positive reaction heat for exothermic reactions; Pyrolysis.jl uses positive
 heat for endothermic reactions. Porting also requires matching the reaction
-extent and mass basis (§6.9.1).
+extent and mass basis (§6.10.1).
 
 ### 1.6.2 Gpyro V2
 
@@ -485,32 +485,31 @@ The physics below is absent from the model. It is ordered by its expected effect
 **Likely to bias the validation cases**
 
 1. **Flame heat-flux feedback.** There is no ignition-triggered flame heat-flux boundary condition. After ignition a cone-calorimeter flame returns roughly 20–30 kW·m⁻² (PMMA) or 10–15 kW·m⁻² (wood) to the surface, 40–60 % on top of a 50 kW·m⁻² exposure, so parameters calibrated without it absorb that net-flux bias. The natural form is a flame-flux BC switched on by a critical-MLR or critical-$T_s$ callback. Flame feedback and the blowing reduction of the convective coefficient (the `blowing` model of `ConvectiveBC`, §12.3.3) both raise the net surface flux when the film temperature is the ambient one the examples use, since blowing cuts a loss; they offset each other only when the film temperature is the flame's, so that blowing suppresses the flame's convective heating. Enabling a blowing model alone on a cone example calibrated without either therefore raises $T_s$ and MLR. Both belong in place before the cone examples are recalibrated.
-2. **Multi-reactant kinetics** (item 3 above). A `Reaction` holds one reactant index and one order. This blocks char oxidation, recondensation, and autocatalysis (Prout–Tompkins fits cannot be represented). Several reactants, each with its own order and mass stoichiometry, would touch the reaction type, the kinetics, the volumetric strain rate, and the reaction kernel (the colored Jacobian differentiates whatever the kernel computes).
+2. **Multi-reactant kinetics** (item 3 above). A `Reaction` holds one reactant index and one order. This blocks char oxidation and autocatalysis (Prout–Tompkins fits cannot be represented). Several reactants, each with its own order and mass stoichiometry, would touch the reaction type, the kinetics, the volumetric strain rate, and the reaction kernel (the colored Jacobian differentiates whatever the kernel computes).
 3. **Thermal expansion and swelling of PMMA.** A PMMA slab is taken to stay flat, dense and at its cold specific volume. Thermal expansion, about 18 % of the local volume at the surface and 5–10 % of the slab thickness, is absent (§10.12), and so is the swelling of bubbles and curl: unrestrained cast PMMA rises by millimetres in cone tests before recession takes over, more at low heat flux, while extruded PMMA bubbles without swelling. Expansion reaches the computed temperature through $k\rho$ of the hot layer only, and a conductivity fitted with this model to samples of known cold thickness already holds it. Swelling acts mainly on the experiment: it moves the surface toward the heater, which raises the absorbed flux and the mass loss rate, and it detaches a back-face thermocouple. Restrained or non-swelling samples are the ones to compare with.
 
 **Relevant to near-term applications**
 
 4. **Oxidative pyrolysis and char oxidation with O₂ ingress** (about 32.8 MJ per kg of carbon). It dominates at sub-critical fluxes, after flameout, and in smoldering, and it controls the late-time MLR tail and the residue mass of the Douglas-fir case. It needs multi-reactant kinetics (item 2) and an explicit reservoir composition supplied by `GasReservoir`. The upwind Darcy outflow suppresses ingress at high MLR.
-5. **Equilibrium (pressure-dependent) moisture evaporation and recondensation.** Drying is a pressure-independent Arrhenius reaction; no saturation pressure $P_{\text{sat}}(T)$ appears anywhere. Vapor recondensation ahead of the drying front (which raises the local moisture content by 30–50 %) is absent, and at the 1.5–2 atm pore pressure of pressure-treated wood the boiling point shifts to 112–121 °C, which Arrhenius drying cannot represent. The vapour driven inward from the front stays in the cold pores at many times its saturation pressure, whatever the drying kinetics, and the latent heat it would release there is not delivered. The cold side of wet wood shows a plateau near 373 K (Bilbao et al. 1996; Lee et al. 2025); a model with an Arrhenius drying step shows no plateau and lies 30–50 K below the measured bottom-surface temperature of 9 mm pressure-treated pine while it dries (Lee et al. 2025, Fig. 6). The cold-side temperature of wet wood during drying, and the pore pressure and composition of any material with a kinetic drying step, are therefore outside the model, and a conductivity fitted to a back-face history of wet wood absorbs the missing plateau. An Arrhenius drying step is also only admissible while its rate at ambient temperature is negligible over the test; the wood examples' parameters are not (§6.10 item 11). It needs item 2 and a smooth $r \propto (P_v - P_{\text{sat}}(T))$ closure; the pressure is evaluated for all gas-bearing materials.
-6. **Backing layer and contact resistance at the back face.** There is no contact-resistance or substrate model. An adiabatic back face over-predicts late-time back-half temperatures (the missing loss is about 0.7–3 kW·m⁻² for 25 mm of wood over 10–20 min); a lumped Robin condition on the bottom face (radiative + convective, as in example `06_cone_calorimeter.jl`) is the available approximation. A contact conductance plus a semi-infinite-substrate $h(t)$ would close the gap. The back face is also taken gas-tight (`ImpermeableBC`), which the standard foil wrap is not at the pore pressures pyrolysis generates; a leaky back is represented by `ConvectivePressureBC` with a board or leak resistance, and a predicted pore pressure is a mean over a cracked char, credible to about 2 bar overpressure (§9.4.3).
-7. **Kinetics expressiveness.** A $T^n$ pre-factor and DAEM-style stacking are absent. Any real order $n \ge 0$ acts on the conversion of the reactant against its lineage inventory, on fixed and moving meshes alike (§6.4); a lineage fed through the gas is refused, and a lineage whose reference would depend on the rates needs an explicit `basis` (§6.5.5).
-8. **Transport-closure accuracy** (item 5 above). The gas viscosity is a material curve without composition-dependent mixing. Binary diffusivity and pore geometry must be supplied for the dusty-gas model. Both closures exclude thermal diffusion and gravity; donor advection is first order. A matrix endpoint supplies finite porous resistance, not a free-flow momentum model (§9).
+5. **Backing layer and contact resistance at the back face.** There is no contact-resistance or substrate model. An adiabatic back face over-predicts late-time back-half temperatures (the missing loss is about 0.7–3 kW·m⁻² for 25 mm of wood over 10–20 min); a lumped Robin condition on the bottom face (radiative + convective, as in example `06_cone_calorimeter.jl`) is the available approximation. A contact conductance plus a semi-infinite-substrate $h(t)$ would close the gap. The back face is also taken gas-tight (`ImpermeableBC`), which the standard foil wrap is not at the pore pressures pyrolysis generates; a leaky back is represented by `ConvectivePressureBC` with a board or leak resistance, and a predicted pore pressure is a mean over a cracked char, credible to about 2 bar overpressure (§9.4.3).
+6. **Kinetics expressiveness.** A $T^n$ pre-factor and DAEM-style stacking are absent. Any real order $n \ge 0$ acts on the conversion of the reactant against its lineage inventory, on fixed and moving meshes alike (§6.4); a lineage fed through the gas is refused, and a lineage whose reference would depend on the rates needs an explicit `basis` (§6.5.5).
+7. **Transport-closure accuracy** (item 5 above). The gas viscosity is a material curve without composition-dependent mixing. Binary diffusivity and pore geometry must be supplied for the dusty-gas model. Both closures exclude thermal diffusion and gravity; donor advection is first order. A matrix endpoint supplies finite porous resistance, not a free-flow momentum model (§9).
 
-9. **Attenuation of the incident flux by the pyrolysate plume.** The flux the
+8. **Attenuation of the incident flux by the pyrolysate plume.** The flux the
    surface receives is the set flux; the volatiles above the face absorb
    $6$–$14\,\%$ of it before ignition and $20$–$27\,\%$ at steady outgassing in
    a cone-type geometry (Zhou et al. 2009, 2010), $35\,\%$ under a coil heater
    (Kashiwagi 1979), while a cone flame lets more than $95\,\%$ through (Rhodes
    and Quintiere 1996). The effect depends on the apparatus and its extraction
    flow, so it is left to the calibration of $h$ and $a_s$ (§12.12).
-10. **Free water.** A liquid component is a bound liquid that holds its own volume (§10.2), so above the fibre saturation point (a moisture content of about 0.3, dry basis) drying shrinkage is overstated, and liquid migration is missing there as well (§1.2.2). Wet wood is in scope below that point.
+9. **Free water and the vapour transport of wet wood.** Above the fibre saturation point (a moisture content of about 0.3, dry basis) water is free: it evaporates and condenses at $p_{\text{sat}}(T)$ through the cap of the activity law (§6.7.2), but it has no capillary flow (§1.2.2), and as one inventory with the bound water it holds its own volume (§10.2), so drying shrinkage is overstated and condensation above the cap swells a moving mesh. Below that point the drying rate is set by the vapour transport, whose coefficient is a deck input (§9.2.1), and the interior of a cracked or side-vented specimen can heat sooner than a one-dimensional model gives: no variant reproduces the early heating at 9 mm in the 20 % runs of Bilbao et al. (1996), and the bottom face of the 9 mm disks of Lee et al. (2025) heats as fast as measured at 63 kW·m⁻² only with a transfer coefficient about 200 times the measured one (§18.6.3). Wet wood is in scope below fibre saturation.
 
 **Niche or future**
 
 - Spectral (banded) radiation and a refractive index in the radiative transfer rows: each band would repeat the rows of §8.3 with its own absorption coefficient and share of the emission, and a refractive index would change the interface's reflectivities (§8.10).
 - Substrate reflection; scattering ($\sigma_s$ is not modeled); view-factor edge fall-off.
 - Species-pair-dependent molecular diffusivities and thermal-transpiration effects beyond the declared common-diffusivity dusty-gas closure.
-- Liquid free-water capillarity (relevant only above the fiber-saturation point, about 30 % moisture content) and bound-water diffusion ($\sqrt{Dt} \approx 0.25$ mm over a cone test, negligible at fire heating rates).
+- Liquid free-water capillarity (relevant only above the fiber-saturation point, about 30 % moisture content). Bound-water diffusion is carried by the vapour transfer coefficient as a constant (§9.2.1); a coefficient that rises with the moisture content would be a property law on the existing transport.
 - Flux-dependent swelling: strain is a function of composition alone, so a product density fitted at one heat flux does not predict the expansion of an intumescent or foaming material at another (§10.2).
 - Mechanics (char cracking, delamination, spalling), anisotropic conductivity (about 2× along the wood grain), melting and dripping, and 2-D/3-D edge burning (about a 10–20 % effect on late-time MLR in cone tests; item 1 above).
 
@@ -585,9 +584,11 @@ Conventions:
 | $a$, $a_s$ | Absorptivity applied to the incident flux of a `RadiativeFluxBC`: the condition's own `absorptivity` when it has one, otherwise $a_{\text{eff}}$ of the outermost live cell; at the face under surface absorption, to the beams under radiative transfer (§8.2, §8.4.2, §12.3.5) | – |
 | $a_i$, $a_n$ | Activation switch of cell *i* / node *n* of the equidistribution correction (§11; overload A9) | – |
 | $a^{\text{lo}}_i$, $a^{\text{lo}}_n$ | Second switch of cell *i* / node *n*, through which a layer's second estimate enters the correction (§11.7.5; overload A9) | – |
+| $a(X,T)$ | Activity of the liquid of a phase change, $p_{\text{eq}}/p_{\text{sat}}$, always written with its arguments (§6.7.2; overload A9) | – |
 | $B$ | Spalding blowing number $\dot m''c_{p,g}/h$ of the convective blowing models (§12.3.3) | – |
 | $B_{\lambda}$, $B_{\Gamma}$ | Film parameters of the blowing models: $B_{\lambda} = 2\lambda \sum_j N_j c_{p,j}(T_s)/h$ (`CouetteFilm`, $\lambda$ its film constant, overload A6); $B_{\Gamma} = (\dot m'' c_{p,\infty}/h)(\Gamma_{\infty}/\Gamma_g)^{n_{\Gamma}}$ (`PropertyRatioFilm`, `PoolingFilm`) (§12.3.3; overload B1) | – |
 | $\mathcal B_i$ | Emissive power of cell *i*, $\sigma\tilde T_i^4$ at its trial temperature (§8.3.2) | W·m⁻² |
+| $b_1,\dots,b_6$ | Coefficients of the saturation curve of water, (6.12) | – |
 | $C_i$ | Heat-capacity sum of cell *i*, $\sum_j m_{j,i} c_{p,j}(\tilde T_i)$ at the trial temperature, smoothly floored at $C_{\text{floor},i}$ | J·K⁻¹ |
 | $C_{\text{floor},i}$ | Capacity floor of cell *i*, $\rho c_{p,\text{floor}} V_i(0)$ (§5.4.3, §13.10.4) | J·K⁻¹ |
 | $C_{\text{reg},i}$ | Regularizing capacity of the extended caloric relation: zero while the cell's guaranteed heat capacity is at least $2C_{\text{floor},i}$, rising to $C_{\text{floor},i}$ as that capacity vanishes (§5.4.3, §13.10.4, §16.4) | J·K⁻¹ |
@@ -627,6 +628,7 @@ Conventions:
 | $H^{\text{lost}}_e$, $H^{\text{reg}}_e$ | Sensible enthalpy deactivation event *e* removes from the live region without passing it to the receiver (vented gas, the last cell's inventory) / caloric regularization the merged cells held that the receiver does not (§16.7) | J |
 | $h$ (kinetics), $h_r$ | Heat of reaction, per kg of reactant | J·kg⁻¹ |
 | $h_j(T)$ | Sensible enthalpy of component *j* on the $T_{\text{ref}}$ datum, $\int_{T_{\text{ref}}}^T c_{p,j} dT$ (overload H1) | J·kg⁻¹ |
+| $h_{\text{pc}}$ | Heat a phase change takes per kg of liquid evaporated, (6.16) (overload H1) | J·kg⁻¹ |
 | $h_{\text{conv}}$ | Convective heat-transfer coefficient (bare $h$ inside §12.3.3); $h_{\text{eff}} = R_b h_{\text{conv}}$ the coefficient under blowing | W·m⁻²·K⁻¹ |
 | $h_m$ | External mass-transfer (film) coefficient | m·s⁻¹ |
 | $h_P$ | Pressure-transfer coefficient (convective pressure BC) | m·Pa⁻¹·s⁻¹ |
@@ -639,6 +641,7 @@ Conventions:
 | $J_{\text{bc},j}$ | Outward flux of component *j* prescribed at a boundary face (§12.4, §13.7.5) | kg·m⁻²·s⁻¹ |
 | $\kappa$ | Effective condensed-matrix permeability | m² |
 | $K_j$ | Species wall diffusivity in the gas-friction equations | m²·s⁻¹ |
+| $K_{\text{pc}}$ | Exchange rate of a phase change, the inverse relaxation time of its pore vapour (`exchange_rate`, default $10^3$; §6.7.3; overload A4) | s⁻¹ |
 | $k$, $k_j$ | Thermal conductivity (of component *j*) | W·m⁻¹·K⁻¹ |
 | $k_{\text{eff}}$, $k_f$ | Effective (mixture) / face-averaged thermal conductivity | W·m⁻¹·K⁻¹ |
 | $k_B$ | Boltzmann constant (reduced temperature $T^* = k_B T/\varepsilon$) | J·K⁻¹ |
@@ -676,7 +679,11 @@ Conventions:
 | $n_{\Gamma}$, $n_D$ | Exponents of the property-ratio film ($n_{\Gamma}$ on $\Gamma_{\infty}/\Gamma_g$, default 0.6) and of the pooling film's diffusivity ratio ($n_D$, default 0.6) (§12.3.3) | – |
 | $P$ | Gas pressure in the porous medium | Pa |
 | $P_{\text{ref}}$ | Reference pressure (= 101325) | Pa |
+| $p_j$, $p_v$ | Partial pressure of gas component *j* in the pores, $P = \sum_j p_j$; $p_v$ that of the vapour of a phase change | Pa |
+| $p_{\text{sat}}(T)$, $p_{\text{eq}}(X,T)$ | Saturation pressure of a liquid / partial pressure of its vapour in sorption equilibrium, $a\,p_{\text{sat}}$, (6.11)–(6.12) | Pa |
+| $p_c$, $T_c$ | Critical pressure and temperature of water (22.064 MPa, 647.096 K), (6.12) | Pa; K |
 | $Q_{\text{rxn}}$ | Volumetric reaction heat source, $-\sum h_r r_r$ | W·m⁻³ |
+| $Q_{\text{pc}}$ | Volumetric heat source of the phase changes, $-\sum h_{\text{pc}} r_{\text{pc}}$, (6.17) | W·m⁻³ |
 | $Q_{\text{rad}}$ | Volumetric radiative source, absorption less emission, (8.2) | W·m⁻³ |
 | $q$, $q_{\text{cond}}$, $q_f$ | (Conductive) heat flux; at face *f*, along its normal | W·m⁻² |
 | $q_{\text{BC}}$ | Boundary-condition heat flux (positive into domain) | W·m⁻² |
@@ -685,13 +692,16 @@ Conventions:
 | $q_{\text{scale}}$, $q^{\text{arr}}$ | Scale of the radiation rows' tolerance, and the radiation arriving from outside at the exposed face and an open back that sets it (§8.7.3) | W·m⁻² |
 | $R_b$ | Blowing ratio $h_{\text{eff}}/h$ of a convective condition's blowing model, 1 at zero species fluxes (§12.3.3; the code's $\chi$, overload B1) | – |
 | $R_g$ ($R$, $R_{\text{gas}}$) | Universal gas constant (= 8.31446261815324) | J·mol⁻¹·K⁻¹ |
+| $\mathrm{RH}$ | Relative humidity of a reservoir, $x_{v,\infty}P/p_{\text{sat}}(T_\infty)$ (§6.7.6, §12.4) | – |
 | $r$, $r_i$ | Reaction rate (per unit volume) of reaction *i* | kg·m⁻³·s⁻¹ |
+| $r_{\text{pc}}$ | Rate of a phase change, liquid to vapour per unit volume, positive on evaporation or desorption, (6.15) (the code's `ω_v`) | kg·m⁻³·s⁻¹ |
 | $r_{\text{hi}}$, $r_{\text{lo}}$ | Activation bounds of the equidistribution correction, fractions of a cell's initial thickness (defaults 0.3, 0.1) | – |
 | $S$ | Sutherland constant (= 110.4 K, air) in the viscosity law | K |
-| $S_j$, $S_{j,i}$ | Species source term for component *j* (in cell *i*), $\sum_r \nu_{r,j} r_r$ (= $\omega_{j,i}$); the rows carry the cell's reaction source $\omega_{j,i} \tilde V_i$ [kg·s⁻¹] | kg·m⁻³·s⁻¹ |
+| $S_j$, $S_{j,i}$ | Species source term for component *j* (in cell *i*), $\sum_r \nu_{r,j} r_r \pm r_{\text{pc}}$ (= $\omega_{j,i}$); the rows carry the cell's reaction source $\omega_{j,i} \tilde V_i$ [kg·s⁻¹] | kg·m⁻³·s⁻¹ |
 | $S_{\text{dry},i}$ | Dry-pyrolysis-gas source term in cell *i* (source of $G_i$) | kg·m⁻³·s⁻¹ |
-| $S_{E,i}$ | Energy source of cell *i*: its reaction heat $Q_{\text{rxn},i} \tilde V_i$ plus its radiative source $S^{\text{rad}}_i$ (§7.3.3, §13.3.4, §16.5.1) | W |
-| $S_T$, $S_{T,i}$ | External temperature-rate source (manufactured solutions): $S_T$ on the temperature row, $C_i S_T$ on the enthalpy row (§7.3.3, §13.5.3) | K·s⁻¹ |
+| $\mathcal S$ | Set of the sorbing solids of a phase change (§6.7.1) | – |
+| $S_{E,i}$ | Energy source of cell *i*: its reaction heat $Q_{\text{rxn},i} \tilde V_i$ and phase-change heat $Q_{\text{pc},i} \tilde V_i$ plus its radiative source $S^{\text{rad}}_i$ (§7.3.3, §13.3.4, §16.5.1) | W |
+| $S_T$, $S_{T,i}$ | External temperature-rate source (manufactured solutions): $S_T$ on the temperature row, $C_i S_T$ on the enthalpy row (§7.3.3, §13.5.4) | K·s⁻¹ |
 | $S^{\text{rad}}_i$ | Radiation absorbed by cell *i* less what it emits, under radiative transfer, (8.6) (§8.3.3) | W |
 | $s_{if}$ | Orientation of face *f* relative to cell *i* (written $s_{if}$ or $s_{i,f}$; $s_f$ in §6, where *i* is the reaction index and the cell carries no index): +1 when its normal points out of *i* (*i* its owner), −1 otherwise | – |
 | $s_k$, $s_v$ | Diffusivity ratio $D_{k,\infty}/\alpha_{\text{th},\infty}$ of species *k* in the pooling film; $s_v$ that of the one volatile a solved film carries (§9.4.2, §12.3.3) | – |
@@ -724,11 +734,12 @@ Conventions:
 | $w$, $w_n$ | Mesh node velocity (at node *n*), $w = v_s + c$; an algebraic unknown on a moving mesh (overload W1) | m·s⁻¹ |
 | $w_k$ | Weight $\lvert\mathbf{d}_k\rvert^{-2}$ of neighbour *k* in the least-squares gradient (§13.6.4); a quadrature weight in §16.5.3 (overload W1) | m⁻²; – |
 | $w_h$ | Share of a collimated or cone heater's flux carried by beam *h*, $\sum_h w_h = 1$ (§8.4.2; overload W1) | – |
-| $X_{\alpha}$ | Volume fraction (FDS/Gpyro V2 comparison notation; internally $v_j$) | – |
+| $X$, $X_0$ | Moisture content of a phase change's liquid over its weighted sorbing solids, (6.10) / the activity laws' vanishing scale (`X0`, default $10^{-4}$) | kg·kg⁻¹ |
+| $X_{\alpha}$ | Volume fraction (FDS/Gpyro V2 comparison notation, Greek subscript; internally $v_j$) | – |
 | $x$, $y$ | Transverse/lateral coordinates (multi-dimensional meshes and comparison text) | m |
 | $x_a$ | Conversion of reactant $a$ against its reference, $\xi_a/\xi_{\text{ref}}$ (§6.4) | – |
 | $x_J$ | Join of the depletion limiter's onset, in units of its threshold (`join`, default 1; §6.3.2) | – |
-| $x_j$, $x_{j,s}$, $x_{j,\infty}$ | Mole fraction of gas component *j* in the pooling film, at the face and in the reservoir (§9.4.2, §12.3.3) | – |
+| $x_j$, $x_{j,s}$, $x_{j,\infty}$ | Mole fraction of gas component *j* in the pooling film, at the face and in the reservoir (§9.4.2, §12.3.3); $x_{v,\infty}$ that of the vapour of a phase change in the reservoir (§6.7.6) | – |
 | $x_{\text{th}}$, $\delta_x$ | Conversion scales of the depletion limiter's onset and finite base (`conversion_threshold`, `conversion_base`; §6.3.2) | – |
 | $Y_j$ | Mass fraction of component *j*, $\xi_j/\rho$ ($Y_k$ of species *k* at the face in the pooling film, §12.3.3) | – |
 | $Z$ | Pre-exponential factor (Gpyro V2 notation; FDS uses $A_{\alpha\beta}$; internally $A$) | varies |
@@ -748,13 +759,19 @@ Conventions:
 | $\alpha_{\text{conv}}$ | Conversion / extent variable (Gpyro V2 kinetics comparison) | – |
 | $\alpha_{\text{th},\infty}$ | Thermal diffusivity of the free stream (pooling film, §12.3.3; overload A5) | m²·s⁻¹ |
 | $\beta$ | Weighting parameter of the WEIGHTED mixing rule, $k = \beta k_{\parallel} + (1-\beta)k_{\text{series}}$ | – |
+| $\beta_1,\dots,\beta_6$ | Parameters of the CAST isotherm, (6.13) | K, kg·kg⁻¹, kJ·mol⁻¹ as the terms require |
 | $\gamma_{\text{RK}}$ | Stage coefficient of the integrator in $W = J - M/(\gamma_{\text{RK}} \Delta t)$ | – |
+| $\gamma_s$ | Weight of the sorbing solid *s* in the moisture content, (6.10) | – |
 | $\Gamma$ | Thermal property ratio $k/c_p$ of a gas (property-ratio and pooling films, §12.3.3; overload G1) | kg·m⁻¹·s⁻¹ |
 | $\Gamma_i$ | Volume rate the node corrections sweep through the faces of cell *i*, $A_{i+1} c_{i+1} - A_i c_i$ on a line (§11.5.2; overload G1) | m³·s⁻¹ |
 | $\Delta$ | Forward-difference / change operator (prefix) | varies |
+| $\Delta\bar g$ | Differential Gibbs energy of sorption of the CAST isotherm, (6.13) | kJ·mol⁻¹ |
+| $\Delta h_{\text{vap}}(T)$, $\Delta h^{\text{ref}}_{\text{vap}}$ | Latent heat of a phase change at $T$, by Kirchhoff's law, and at $T_{\text{ref}}$ (`latent_heat`), (6.16) (overload H1) | J·kg⁻¹ |
+| $\Delta h_{\text{sorp}}(X,T)$ | Differential heat of sorption of an activity law, (6.18) (overload H1) | J·kg⁻¹ |
 | $\delta_{ij}$ | Kronecker delta | – |
 | $\delta_i$ | Positive-part mass scale of cell *i*, $\text{reltol} \cdot \varepsilon_m \cdot m^s_i(0)$ (its mass tolerance) | kg |
 | $\delta_b$ | Scale of the softplus finite base of the depletion limiter (`base_scale`, default 10⁻⁸; §6.3.2) | kg·m⁻³ |
+| $\delta_a$ | Width of the soft cap at one of an activity law (`δ`, default 0.01; §6.7.2) | – |
 | $\delta_{\text{mov}}$, $\delta_{\chi}$ | Configuration flags of the state layout: one on a moving mesh / under a lateral-shrinkage law, zero otherwise (§3.1.2, §15.1.1) | – |
 | $\varepsilon$, $\varepsilon_j$ | Emissivity (of component *j*) | – |
 | $\varepsilon_{\text{eff}}$ | Effective (composition-weighted) emissivity | – |
@@ -788,10 +805,13 @@ Conventions:
 | $\xi_{\text{ref},i}$ | Reference concentration of reaction *i*, its reference over the cell volume (§6.1, §6.4) | kg·m⁻³ |
 | $\xi_{\text{th}}$ | Concentration scale of the depletion limiter (`DepletionLimiter` `threshold`, default 1 kg·m⁻³) | kg·m⁻³ |
 | $\xi_{\text{tol},i}$ | Mass tolerance of cell *i* over its initial volume, the positivity scale of the relative-flux face states (§11.6.2, §11.6.3) | kg·m⁻³ |
+| $\xi^{\text{eq}}_v$ | Bulk concentration of the vapour of a phase change in equilibrium with its liquid, (6.15) | kg·m⁻³ |
+| $\xi_{\mathcal S}$, $\xi_{\text{floor}}$ | Weighted concentration of a phase change's sorbing solids, $\sum_s \gamma_s\xi^{+}_s$, and its floor (`SORBENT_FLOOR`, $10^{-3}$), (6.10) | kg·m⁻³ |
 | $\rho$ | Bulk density ($\sum \xi_j$ for the total inventory density) | kg·m⁻³ |
 | $\rho_j$ | Bulk (apparent) density of component *j*, its own pores included | kg·m⁻³ |
 | $\rho_{i,j}$ | Intrinsic / skeletal density of component *j* (skeletal volume fraction only) | kg·m⁻³ |
 | $\rho_g$ | Gas-phase density (ideal-gas law) | kg·m⁻³ |
+| $\rho_{v,\text{sat}}$ | Density of the saturated vapour of a phase change, $M_v p_{\text{sat}}/(R_g T)$ (§6.7.3) | kg·m⁻³ |
 | $\rho_{s,j}$ ($\rho_{s,\alpha}$) | FDS component density: the condensed-component mass concentration $\xi_j = m_j/V$ | kg·m⁻³ |
 | $\rho_s$ (FDS comparisons) | Total condensed-material density, $\sum_{S,L} \xi_j$ | kg·m⁻³ |
 | $\rho c_p^{\text{eff}}$ | Effective (mixture) volumetric heat capacity, every component, $\sum_j \xi_j c_{p,j}$ (discretely $C_i/V_i$) | J·m⁻³·K⁻¹ |
@@ -802,7 +822,9 @@ Conventions:
 | $\tau_{\text{eq},1}$, $\tau_{\text{eq},2}$ | A layer's first and second estimate of its equidistribution time under `ActivationTime` (§11.7.5; overload T1) | s |
 | $\tau_i$ | Optical thickness of cell *i*, $\alpha_i \Delta z_i$ (always subscripted or called optical; overload T1) | – |
 | $\tau_L$ | Optical thickness of a whole layer or slab, $\int\alpha\,\mathrm dz$ over it (§8; overload T1) | – |
+| $\tau_w$ | Time in which bound water follows a change in its surroundings under a phase change (§6.7.3; overload T1) | s |
 | $\varphi$ | Porosity (gas void fraction), $1 - \sum_{S,L} \xi_j/\rho_{i,j}$ (U+03C6, LaTeX `\varphi`; overload A8) | – |
+| $\vartheta$ | Reduced temperature $1 - T/T_c$ of the saturation curve of water, (6.12) | – |
 | $\phi_i$ | Multiplier of cell *i* in the potential closure (multi-dimensional meshes only; U+03D5, LaTeX `\phi`; overload A8) | m²·s⁻¹ |
 | $\chi$, $\chi_i$ | **Pyrolysis progress** in cell *i*, $G_i/m_{\text{dry},i}$ (cumulative dry-gas mass released per unit initial dry-solid mass) | – |
 | $\bar{\chi}$ | Column conversion, $\sum_i G_i / \sum_i m_{\text{dry},i}$ (the $m_{\text{dry}}$-weighted mean of $\chi_i$) | – |
@@ -812,7 +834,7 @@ Conventions:
 | $\Phi$ | Generic cell field in the two-point gradient, where the face index $f$ shares the formula (§13.6.1); $\Phi_a(v)$ the reach of reactant *a* from node *v* of a reaction network, the mass of *a* one unit of *v*'s inventory can become (§6.5.5); in §17 the terminal part of a loss | varies |
 | $\Omega(t)$, $\Omega_i(t)$ | Live region of the column (§16.2); region of cell *i* (§7.2, §11.2.1) | – |
 | $\Omega_D$ | Diffusion collision integral (Neufeld) | – |
-| $\omega_{j,i}$ | Net volumetric production rate of component *j* by reaction in cell *i*, $\sum_r \nu_{r,j} r_r$ (= $S_{j,i}$; the code's $\omega$); the cell's reaction source is $\omega_{j,i} \tilde V_i$ | kg·m⁻³·s⁻¹ |
+| $\omega_{j,i}$ | Net volumetric production rate of component *j* by reactions and phase changes in cell *i*, $\sum_r \nu_{r,j} r_r \pm r_{\text{pc}}$ (= $S_{j,i}$; the code's $\omega$); the cell's source is $\omega_{j,i} \tilde V_i$ | kg·m⁻³·s⁻¹ |
 | $\dot{\omega}'''$ | Volumetric reaction rate (Gpyro V2 comparison notation; internally $r$) | kg·m⁻³·s⁻¹ |
 
 ---
@@ -973,13 +995,15 @@ below is authoritative; writers must use the disambiguating subscript/context.
   area** and $A_f$ the area of face $f$; the Arrhenius pre-exponential is $A_i$ /
   $A_{\alpha\beta}$ (always subscripted by reaction). **Resolution:** bare $A$ = area in
   physics chapters; $A_f$ = face area; $A_i$ = pre-exponential (kinetics). The
-  Gpyro V2 pre-exponential $Z$ and FDS $A_{\alpha\beta}$ are compared with $A_i$; copying values requires matching the rate basis (§6.9). In the
+  Gpyro V2 pre-exponential $Z$ and FDS $A_{\alpha\beta}$ are compared with $A_i$; copying values requires matching the rate basis (§6.10). In the
   mesh-motion rows on a line (§10, §11, §15) a face is named by its node, so
   $A_i$ and $A_{i+1}$ there are the areas of the faces at nodes $i$ and $i + 1$,
   the two faces of cell $i$; a reaction subscript never appears in those rows.
 
 - **κ vs. K — A4 [permeability].** Use **$\kappa$** for permeability throughout.
   $K$ (Gpyro V2 permeability) appears only in comparison text and is mapped to $\kappa$.
+  $K_{\text{pc}}$ (label pc) is the exchange rate of a phase change (§6.7.3) and $K_j$ a
+  species wall diffusivity; neither is a permeability.
 
 - **α — A5 [absorption vs. conversion vs. absorptivity].** $\alpha$ (or $\alpha_{\text{eff}}$) =
   **volumetric absorption coefficient** (m⁻¹); $\alpha_j$ = mass-basis absorption
@@ -1013,7 +1037,9 @@ below is authoritative; writers must use the disambiguating subscript/context.
   $\int_{T_{\text{ref}}}^T c_{p,j} dT$; the two never share a subscript ($r$ reaction, $j$
   component). The sensible enthalpy on the datum is always $h_j(T)$, never
   $\Delta h_j(T)$; $\Delta h$ is reserved for a difference between two stated temperatures
-  ($\Delta h_g(T_s, T_{\infty})$) and for the effective heat of combustion $\Delta h_{c,\text{eff}}$. The
+  ($\Delta h_g(T_s, T_{\infty})$), for the effective heat of combustion $\Delta h_{c,\text{eff}}$, and for
+  the latent heat $\Delta h_{\text{vap}}$ and heat of sorption $\Delta h_{\text{sorp}}$ of a phase
+  change, whose heat per kg evaporated is $h_{\text{pc}}$ (§6.7.4). The
   convective coefficient is $h_{\text{conv}}$, the mass coefficient $h_m$, the pressure coefficient
   $h_P$, all subscripted (inside §12.3.3 the convective coefficient of the
   blowing formulas is the bare $h$, and $h_{\text{eff}} = R_b h$). A cell thickness is
@@ -1075,7 +1101,8 @@ below is authoritative; writers must use the disambiguating subscript/context.
   time [s], and $\tau_{\text{eq},1}$, $\tau_{\text{eq},2}$ its two estimates
   ($\tau_{\text{eq},k}$ for either; the subscript after "eq" counts the estimates,
   never a cell). $\tau_L$ is the optical thickness of a whole layer or slab, $\int\alpha\,\mathrm dz$
-  over it (§8). A time variable of integration is written $t$, never $\tau$.
+  over it (§8). $\tau_w$ (liquid subscript, §6.7.3) is the time in which bound water
+  follows its surroundings. A time variable of integration is written $t$, never $\tau$.
 
 - **M — M1 [molar mass vs. mass matrix vs. history].** $M$, $M_j$
   (and $M_{\text{face}}$, $M_{\infty}$) is molar mass; $M$ in the linear-algebra context of §15
@@ -1092,7 +1119,8 @@ below is authoritative; writers must use the disambiguating subscript/context.
   effective or surface subscript) are surface absorptivities; $a_i$, $a_n$ (cell
   or node subscript, correction context only) are the correction's activation
   switches, and $a^{\text{lo}}_i$, $a^{\text{lo}}_n$ its second switches. A row's absolute tolerance is written $\text{atol}_r$ (§15.5.4), never
-  $a_r$.
+  $a_r$. The activity of a phase change's liquid is written with its arguments,
+  $a(X,T)$, and the cap's width $\delta_a$ (§6.7.2).
 
 - **N — N1 [species fluxes vs. counts].** $N_j$ is species mass flux and
   $n_j$ is species molar flux. Total pressure is $P = \sum_j p_j$.
@@ -1200,7 +1228,9 @@ the type level (`SolidComponent`, `LiquidComponent`, `GaseousComponent`) so that
 phase-specific behaviour is decided when the problem is set up, not in the inner loops
 (§4). Solids and liquids form the load-bearing *matrix*; gases are decomposition
 products that percolate through the matrix pores and ultimately escape. Reactions
-convert a single reactant component into one or more product components (§6).
+convert a single reactant component into one or more product components (§6), and a
+liquid held in sorbing solids exchanges mass with its vapour through a two-way phase
+change (§6.7).
 
 ### 3.1.2 Primary and auxiliary state variables
 
@@ -1310,7 +1340,7 @@ $$
 &\text{Energy:}\quad
 \partial_t\Big(\sum_j\xi_j h_j\Big) + \nabla\cdot\Big(\mathbf v_s\sum_j\xi_j h_j\Big)
 + \nabla\cdot\Big(\sum_g h_g\mathbf J_g\Big)
-= -\nabla\cdot\mathbf q_{\mathrm{cond}} + Q_{\mathrm{rad}} + Q_{\mathrm{rxn}}
+= -\nabla\cdot\mathbf q_{\mathrm{cond}} + Q_{\mathrm{rad}} + Q_{\mathrm{rxn}} + Q_{\mathrm{pc}}
 + \sum_j\omega_j h_j, \\[4pt]
 &\text{Gas species:}\quad
 \partial_t\xi_j + \nabla\cdot(\mathbf v_s\xi_j)
@@ -1381,15 +1411,18 @@ $$
 where $\mathbf J_j$ is the **mass flux** of component $j$ *relative to the skeleton*.
 The decisive modeling choice is *which components transport*. In Pyrolysis.jl the
 matrix is rigid relative to itself: solids and liquids do **not** flux between cells
-— they are consumed/produced in place by reactions and (on a moving mesh) carried by
-the mesh, never by molecular transport. A liquid component is water bound in the
-cell wall: it rides the skeleton and leaves only by evaporation. Below the fibre
-saturation point (a moisture content of about 0.3 on a dry basis) the bound water is
-immobile to that approximation, its diffusion spreading only
-$\sqrt{D_bt}\approx0.1$–$0.3$ mm over a cone test; above it, capillary water flows. At
-any moisture content the vapour driven inward recondenses a few millimetres ahead of
-the drying front, which an irreversible evaporation reaction cannot represent
-(§1.8.1). Only gas components diffuse and advect through
+— they are consumed/produced in place by reactions and phase changes and (on a moving
+mesh) carried by the mesh, never by molecular transport. A liquid component is water
+held in the cell wall: it rides the skeleton and changes only through its sources.
+Below the fibre saturation point (a moisture content of about 0.3 on a dry basis) the
+bound water is immobile to that approximation, its diffusion spreading only
+$\sqrt{D_bt}\approx0.1$–$0.3$ mm over a cone test; that diffusion, in series with the
+vapour in the lumens, across the grain or along it, is what the vapour transfer
+coefficient of the wood stands for (§9.2.1). Above it, capillary water flows, which the model leaves out
+(§1.8.1). The phase change of §6.7 is two-way: the water evaporates where its vapour
+stands below the equilibrium pressure and the vapour driven inward from a drying front
+condenses back into it, a few millimetres ahead of the front, where it stands above.
+Only gas components diffuse and advect through
 the pore network, and they do so *relative to the skeleton*: the wall-friction, molecular-friction and Darcy closures return fluxes relative to the
 pore walls, so the laboratory-frame gas flux is $\xi_g\mathbf v_s + \mathbf J_g$ and the
 pore gas is carried with the pores it occupies (§11.1.2). Hence the **gas-vs-solid
@@ -1410,13 +1443,14 @@ $$
 The continuous gas flux $\mathbf J_j$ follows the selected lumped or dusty-gas closure in §3.4,
 §3.5 and detailed in §9; the reaction source $\omega_j = \sum_r \nu_{r,j}\,r_r$ is the
 stoichiometry-weighted sum of reaction rates ($\nu_{r,j}<0$ reactant, $>0$ product;
-§6). The discrete realization is one mass row per component and cell,
+§6), and for the liquid $w$ and the vapour $v$ of a phase change it also carries
+$-r_{\text{pc}}$ and $+r_{\text{pc}}$ (6.15). The discrete realization is one mass row per component and cell,
 
 $$
 \frac{dm_{j,i}}{dt} = \omega_{j,i}\,V_i + \dot M_{j,i},
 \qquad
 \dot M_{j,i} = -\sum_{f\in\partial i} s_{if}\,A_f\,F_{j,f},
-\qquad \omega_{j,i} = \sum_r \nu_{r,j}\,r_{r,i},
+\qquad \omega_{j,i} = \sum_r \nu_{r,j}\,r_{r,i} \pm r_{\text{pc},i},
 $$
 
 where the face flux $F_{j,f}$ is the gas-transport flux for a gas component and zero
@@ -1435,7 +1469,8 @@ absent.
 > $\omega_{j,i}V_i$ are added by `ReactionKernel` (`src/Kernels/reactions.jl`) from
 > `species_source_terms!` in `src/Physics/kinetics.jl`; the per-reaction application
 > applies the single-reactant mass-balance convention in `_apply_reaction_source!`
-> (same file). The row assembly `assemble_rows!` (`src/Assembly/residual.jl`) scatters
+> (same file). The phase-change sources $\mp r_{\text{pc},i}V_i$ are added by
+> `PhaseChangeKernel` (`src/Kernels/phase_change.jl`). The row assembly `assemble_rows!` (`src/Assembly/residual.jl`) scatters
 > every face flux as $-F_{j,f}A_f$ into its owner and $+F_{j,f}A_f$ into its neighbour
 > and writes the mass rows.
 
@@ -1455,7 +1490,7 @@ $$
 = -\,\nabla\cdot \mathbf q_{\mathrm{cond}}
 -\nabla\cdot\Big(\sum_g h_g\mathbf J_g\Big)
 + Q_{\mathrm{rad}}
-+ Q_{\mathrm{rxn}}
++ Q_{\mathrm{rxn}} + Q_{\mathrm{pc}}
 + \sum_j\omega_j h_j .
 \;}
 $$
@@ -1469,6 +1504,7 @@ The terms, with sign conventions, are:
 | $-\nabla\cdot(\sum_g h_g\mathbf J_g)$ | sensible enthalpy carried by the gas flux | assembled at the faces; temperature-form reading $-\sum_g c_{p,g}\mathbf J_g\!\cdot\!\nabla T$ | W·m⁻³ |
 | $Q_{\mathrm{rad}}$ | volumetric radiation absorption | model-dependent | W·m⁻³ |
 | $Q_{\mathrm{rxn}}$ | reaction heat, at the local temperature | $-\sum_r h_r r_r$ | W·m⁻³ |
+| $Q_{\mathrm{pc}}$ | phase-change heat, at the local temperature | $-\sum h_{\mathrm{pc}} r_{\mathrm{pc}}$ (§6.7) | W·m⁻³ |
 | $\sum_j\omega_jh_j$ | formation term | converts $h_r(T)$ to the sensible-enthalpy datum | W·m⁻³ |
 
 Its product-rule expansion (§3.3.2) is the **temperature equation**
@@ -1476,7 +1512,7 @@ Its product-rule expansion (§3.3.2) is the **temperature equation**
 $$
 \rho c_p^{\mathrm{eff}}(T,\xi)\,\frac{D_sT}{Dt}
 = -\nabla\cdot\mathbf q_{\mathrm{cond}} - \sum_g c_{p,g}\,\mathbf J_g\!\cdot\!\nabla T
-+ Q_{\mathrm{rad}} + Q_{\mathrm{rxn}},
++ Q_{\mathrm{rad}} + Q_{\mathrm{rxn}} + Q_{\mathrm{pc}},
 \qquad
 \rho c_p^{\mathrm{eff}} = \sum_j\xi_jc_{p,j}(T).
 $$
@@ -1644,15 +1680,31 @@ cell) and an endothermic reaction ($h_r>0$) gives $Q_{\mathrm{rxn}}<0$ (cools it
 units check: $h_r$ [J·kg⁻¹ of reactant] $\times$ $r_r$ [kg·m⁻³·s⁻¹] gives
 W·m⁻³. The implementing loop literally accumulates `Q -= heats[i] * rates[i]`. The heat
 of reaction $h_r$ may itself be temperature- or state-dependent (e.g. a
-moisture-sorption heat $h(T,\xi)$ via `StateDependentProperty`); the rate law $r_r$ is
-the smoothly-gated Arrhenius form of §6, evaluated at the trial temperature.
+conversion-dependent pyrolysis heat $h(T,\xi)$ via `StateDependentProperty`); the rate
+law $r_r$ is the smoothly-gated Arrhenius form of §6, evaluated at the trial temperature.
+
+**Phase-change heat.** A liquid held in sorbing solids evaporates and condenses through
+the phase change of §6.7, whose heat enters beside the reaction heat with the same sign
+convention,
+
+$$
+Q_{\mathrm{pc}} = -h_{\mathrm{pc}}\,r_{\mathrm{pc}},
+\qquad
+h_{\mathrm{pc}} = \Delta h^{\mathrm{ref}}_{\mathrm{vap}} + h_v(T) - h_w(T) + \Delta h_{\mathrm{sorp}}(X,T),
+$$
+
+positive $h_{\mathrm{pc}}$ per kilogram evaporated, so evaporation cools and condensation
+heats. The latent heat follows the components' own enthalpies (Kirchhoff's law), so the
+formation term $\sum_j\omega_jh_j$ cancels $h_v - h_w$ and the latent heat carried by the
+vapour is the one at $T_{\mathrm{ref}}$ plus the heat of sorption.
 
 > **Implementation notes.** $Q_{\mathrm{rxn}} = -\sum_r h_r r_r$ is
 > `reaction_heat_source` in `src/Physics/kinetics.jl`, with the negative
 > sign documented in-source ("Note the negative sign!"). Reaction rates and heats are
 > evaluated together by `evaluate_reactions!` (same file), called per cell by
 > `ReactionKernel` (`src/Kernels/reactions.jl`), which adds $Q_{\mathrm{rxn},i}V_i$ to the
-> cell's energy source. The radiative transfer rows and cell sources are formed by
+> cell's energy source; `PhaseChangeKernel` (`src/Kernels/phase_change.jl`) adds
+> $Q_{\mathrm{pc},i}V_i$. The radiative transfer rows and cell sources are formed by
 > `RadiativeTransferKernel` (`src/Kernels/radiative_transfer.jl`).
 
 ### 3.3.4 Gas enthalpy flux and surface energy
@@ -1908,8 +1960,9 @@ where $(G_i, m_{\mathrm{dry},i})$ is the **conversion-history pair** of §3.1.2:
 cumulative dry pyrolysis gas cell $i$ has produced, and $m_{\mathrm{dry},i}$ the cell's
 initial solid mass, which has no source. The cell's pyrolysis progress is
 $\chi_i = G_i/m_{\mathrm{dry},i}$, so $\bar\chi$ is the $m_{\mathrm{dry}}$-weighted mean
-of the $\chi_i$. Water vapour is excluded from the dry-gas sum (it is
-sorption/desorption, not pyrolysis; §4.6.4). Where an equidistribution correction moves
+of the $\chi_i$. The vapour of the moisture is excluded from the dry-gas sum (it comes
+from the liquid, not from the solids, whether a reaction or a phase change produces it;
+§4.6.4). Where an equidistribution correction moves
 the mesh, the pair crosses the faces with the solid's mass flux (§11.6), so that it stays
 attached to the material that produced it. The area and the **column-global radial
 strain rate** $\theta_A = (1/A)\,dA/dt$ are algebraic unknowns with two rows,
@@ -1958,8 +2011,10 @@ This is the contract that makes the residual a *pure function* of the state.
 | Sensible enthalpy $h_j$ | caloric law | $\int_{T_{\mathrm{ref}}}^{T}c_{p,j}\,dT'$, closed form or tabulated | §4.4.10 |
 | Conductive flux $\mathbf q_{\mathrm{cond}}$ | Fourier + mixing | $-k_{\mathrm{eff}}(T,\xi)\nabla T$, guarded harmonic-mean face $k$ | §5, §7 |
 | Reaction rate $r_r$ | Arrhenius | $A_r e^{-E_r/R_gT}\prod_j\xi_j^{n_{r,j}}$, tanh gates, one-sided limiter, at the trial temperature | §6 |
-| Species source $\omega_j$ | stoichiometry | $\sum_r\nu_{r,j}r_r$ | §6 |
+| Species source $\omega_j$ | stoichiometry | $\sum_r\nu_{r,j}r_r$, and $\mp r_{\mathrm{pc}}$ on a phase change's liquid and vapour | §6 |
 | Reaction heat $Q_{\mathrm{rxn}}$ | enthalpy of reaction at the local temperature | $-\sum_r h_r(T,\xi)\,r_r$ | §6 |
+| Phase-change rate $r_{\mathrm{pc}}$ | relaxation toward sorption equilibrium | $K_{\mathrm{pc}}(\xi^{\mathrm{eq}}_v - \xi_v)$, $\xi^{\mathrm{eq}}_v = \varphi M_v a(X,T)\,p_{\mathrm{sat}}(T)/(R_gT)$, activity law and saturation curve | §6.7 |
+| Phase-change heat $Q_{\mathrm{pc}}$ | Kirchhoff latent heat plus heat of sorption | $-\big(\Delta h^{\mathrm{ref}}_{\mathrm{vap}} + h_v - h_w + \Delta h_{\mathrm{sorp}}\big)\,r_{\mathrm{pc}}$ | §6.7 |
 | Radiation source $Q_{\mathrm{rad}}$ | radiation model | surface balance / gray two-stream face fluxes with exact cell integration | §8 |
 | Gas enthalpy flux | conservative face flux | interior face-temperature closure; outward surface enthalpy and specified incoming reservoir enthalpy | §7, §12 |
 | Wall and molecular gas flux | lumped transfer or dusty-gas friction | partial-pressure driving force, one consistent face pressure, total-flux interface matching | §9 |
@@ -1968,7 +2023,7 @@ This is the contract that makes the residual a *pure function* of the state.
 | Porosity $\varphi$ | intrinsic density | $1-\sum_{S/L}\xi_j/\rho_{i,j}$, smoothly floored at $10^{-12}$ where divided by | §5 |
 | Gas velocity $v_g$ | Darcy | $-(\kappa/\mu)\nabla P$, half-cell mobility $\kappa/\mu$, interface pressure from total species-flux continuity | §9 |
 | Effective $k_{\mathrm{eff}},\lambda_{\mathrm{eff}},\kappa_{\mathrm{eff}},\varepsilon_{\mathrm{eff}},a_{\mathrm{eff}},\alpha_{\mathrm{eff}}$ | mixing rules | parallel/series/weighted/Bruggeman/Carman–Kozeny | §5 |
-| Volume-change rate $\theta$ | condensed-volume continuity | $\sum_{S\cup L}\omega_j/\rho_j$, constant $\rho_j$, reaction sources only | §10 |
+| Volume-change rate $\theta$ | condensed-volume continuity | $\sum_{S\cup L}\omega_j/\rho_j$, constant $\rho_j$, reaction and phase-change sources only | §10 |
 | Node velocity $w$ | balance rows | $0=A_{i+1}(w-c)_{i+1}-A_i(w-c)_i-(\theta_i-\theta_A)V_i$, $0 = w_1$ | §11.3.2, (11.9)–(11.10) |
 | Node correction $c$ | equidistribution | installed by `setup`'s rule, or given | §11.7 |
 | Cross-section $A$, $\theta_A$ | algebraic rows | $A=A_0\,\mathrm{law}(\bar\chi_c)$, $\theta_A = \frac{d}{dt}\log\mathrm{law}(\bar\chi_c)$ | §10, §11.3.3 |
@@ -2010,6 +2065,7 @@ ThermaKin2Ds, and concentrations in FDS.
 | Gas release | finite-rate transport | finite-rate volume-fraction-gradient transfer | Darcy and mass-fraction diffusion when enabled | instantaneous release |
 | Energy state | temperature or sensible-enthalpy inventory | element temperature | condensed sensible enthalpy | solid temperature |
 | Material geometry | coupled moving mesh | changing elements with size adjustment | mass/density volume reconstruction | thickness update and remapping |
+| Drying | two-way phase change toward sorption equilibrium, vapour stored and transported in the pores | one-way reaction of the liquid, vapour transported | one-way reaction of the liquid, vapour transported | one-way reaction of the moisture, vapour released at once |
 | Match before comparing | gas-transport model, energy state and mesh motion | gas-transfer law, reaction extent and heat basis | condensed and pore-gas inventories separately; thermal closure | negligible gas storage and release delay in ours |
 
 ### 3.8.1 ThermaKin2Ds
@@ -2024,7 +2080,10 @@ The gas-transfer potential is a volume fraction (TK Eq. 13), whereas our
 models use partial-pressure transfer or dusty-gas friction with optional
 Darcy flow. The restricted correspondence is derived in §9.12.1. Match
 that flux law, reaction extent and heat basis before treating two material
-descriptions as the same governing problem (§6.9.1).
+descriptions as the same governing problem (§6.10.1). Drying is a reaction of the
+liquid component (TK Eqs. 5–6), one way; its vapour moves like any other gas and never
+condenses, so the vapour driven inward from a drying front stays in the pores where
+ours is resorbed (§6.7).
 
 ### 3.8.2 Gpyro V2
 
@@ -2038,7 +2097,10 @@ separate gas-enthalpy solve. In thermal equilibrium, `FULL_QSG` retains both
 gas heat storage and gas conduction, so keeping gas heat capacity alone
 does not reproduce that option (§7.8.2). Compare condensed and gaseous
 inventories separately and select the same thermal closure before interpreting
-differences in total mass or temperature.
+differences in total mass or temperature. Drying in V2 is one of its reactions, one way:
+its solid model has no saturation pressure and no condensation. Rahimi Borujerdi et
+al. (2019) evaporated moisture in a research version of Gpyro at the equilibrium vapour
+pressure instead, by operator splitting.
 
 ### 3.8.3 FDS
 
@@ -2050,7 +2112,11 @@ gas/solid enthalpy accounting still enter its thermal problem (§7.8.3).
 Its solid grid changes thickness and can be remapped as composition changes
 (§10.11.3). Turning off our gas transport traps generated gas; it does not
 reproduce this instantaneous-release assumption. Any rapid-transport
-approximation must establish negligible storage and delay (§9.12.3).
+approximation must establish negligible storage and delay (§9.12.3). Moisture in a
+solid is a material with an Arrhenius reaction to water vapour, released at once; a
+liquid material (`BOILING_TEMPERATURE`) evaporates from its surface layer toward the
+Clausius–Clapeyron vapour fraction of the adjacent gas, and an interior layer above its
+boiling point boils off through the surface.
 
 ### 3.8.4 Sources and numerical evidence
 
@@ -2058,7 +2124,11 @@ TK Eqs. 6, 13–18 and §3 support the ThermaKin2Ds description. GP §§4.1, 6.5
 and 6.8 are checked against the V2 mass, mesh and thermal paths linked in
 §§3.6.2 and 7.8.2. FDS's [solid-phase equations](https://github.com/firemodels/fds/blob/FDS-6.11.0/Manuals/FDS_Technical_Reference_Guide/Solid_Chapter.tex)
 and [`wall.f90`](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90) establish the wall inventory and
-gas-release scope. Our state and balance assembly are described in §§3.1–3.6.
+gas-release scope. The drying descriptions rest on TK's reaction input (TK §1.1 and the components file of §4.1), on the
+absence of a saturation pressure from V2's solid-phase source (`src/common` at the linked
+commit), and on FDS Technical Reference §7.2.4 with the User Guide's moisture `MATL`
+lines. Our state and balance assembly are described in §§3.1–3.6, the phase change in
+§6.7.
 
 The analytical and manufactured-solution checks in §18.2 test specified
 Pyrolysis.jl balances. They do not establish whole-model agreement among
@@ -2327,6 +2397,12 @@ radiation (Chapter 8), at the positive-part concentrations. Condensed
 superficial transfer is explicit under the lumped model and uses condensed
 matrix weights. Its value is constitutive data, independent of gas loading.
 
+A phase change (§4.6.6) reads these fields and no others of its own: the liquid's and
+the vapour's heat capacities through their sensible enthalpies (its latent heat at the
+local temperature, §6.7.4), the vapour's `molar_mass` and the sorbents' concentrations.
+Its activity law, saturation curve, latent heat and exchange rate belong to the
+declaration, not to a component.
+
 ### 4.2.2 Bulk density, matrix occupancy and gas loading
 
 The bulk mixture mass density is $\rho_{tot}=\sum_j\xi_j$. Matrix transport
@@ -2515,15 +2591,16 @@ that every curve a material may carry is protected rather than just this one.
 
 A property that depends on **both** temperature and the full concentration tuple,
 $p(T,\xi)=f(T,\xi)$. Calling it with $T$ alone raises an error (state is
-mandatory). Its canonical use is a moisture-dependent heat of sorption: the heat
-released/absorbed when water desorbs depends on the current moisture content, so
+mandatory). Its canonical use is a heat of reaction that changes with the conversion:
 
 $$
-h(T,\xi) = f\!\left(T,\; \mathrm{MC}(\xi)\right),
+h(T,\xi) = f\!\left(T,\; x(\xi)\right),
 $$
 
-where $\mathrm{MC}$ is, e.g., the moisture content reconstructed from the
-concentration tuple. The kinetics evaluator always passes $\xi$ to the heat
+where $x$ is, e.g., the mass a solid has lost, reconstructed from the concentration
+tuple (§6.6.2). The heat of a liquid's evaporation and sorption is not one of these: it
+belongs to the phase change of §6.7, whose heat of sorption comes from its activity law.
+The kinetics evaluator always passes $\xi$ to the heat
 property (§4.5, Chapter 6), so a `StateDependentProperty` heat is evaluated with
 the live composition.
 
@@ -2642,8 +2719,8 @@ $p(T, \xi)$ ignores $\xi$, so $\partial p/\partial \xi_j = 0$ exactly. For a
 `StateDependentProperty` the derivative is $\partial f/\partial \xi_j$, propagated by
 AD through $f(T, \xi)$ with the concentration tuple carrying `Dual` entries. The
 kinetics evaluator passes the cell's concentrations to every heat-of-reaction
-property, so a moisture-dependent heat of sorption contributes its composition
-derivative to the rows of the cell's energy source.
+property, so a composition-dependent heat contributes its composition derivative to
+the rows of the cell's energy source.
 
 > **Implementation note.** The call methods `(p)(T)` and `(p)(T, ξ)` are in
 > `src/Materials/property_functions.jl`. The heats are evaluated with the rates by
@@ -2809,8 +2886,11 @@ dry gas j  ⇔  is_gas(c_j) && j ∈ L
 ```
 
 Water released by decomposition is dry gas, whatever its name; the vapour of an
-evaporating liquid (moisture) is not, because its reactant never enters
-$\mathcal L$; a gas that no reaction produces (a background gas) is not. A gas
+evaporating liquid (moisture) is not, whether a reaction or a phase change (§6.7)
+produces it, because the liquid never enters $\mathcal L$; a gas that no reaction
+produces (a background gas) is not. A gas in $\mathcal L$ that is also the vapour of a
+phase change is refused, naming the gas and the phase change: pyrolysis water is then a
+species of its own. A gas
 in $\mathcal L$ that a reaction without a reactant in $\mathcal L$ also produces
 has no single origin: the set-up throws an `ArgumentError` naming the gas and
 both groups of reactions, and the gas must be modeled as one species per
@@ -2857,6 +2937,54 @@ evaluation: all composition-dependent dispatch is resolved at compile time, all
 intermediate tuples are statically sized, and there are no dictionary lookups in
 hot paths. `test/jacobian/test_allocations.jl` asserts zero bytes for one
 residual and one colored-Jacobian evaluation on every configuration it builds.
+
+### 4.6.6 Phase changes
+
+A material's `phase_changes` tuple holds its two-way phase changes, each declared as
+
+```julia
+PhaseChange(:moisture, :water => :vapour; activity = CAST_SPRUCE, sorbents = (:wood,),
+            saturation = WATER_SATURATION, latent_heat = 2.4417e6, exchange_rate = 1e3)
+```
+
+with the liquid and its vapour named, or given as indices, like a reaction's
+components. The declaration carries the rest of the closures of §6.7:
+
+- **the sorbents**, the solids whose concentrations carry the liquid in the moisture
+  content (6.10): a tuple of names or indices (weight one) or of `name => weight`
+  pairs. There is no default, because a char, say, does not hold water as the wood it
+  comes from does; at least one weight must be positive;
+- **the activity law** `a(X, T)`, an `AbstractActivity`: `CASTIsotherm` with its six
+  parameters and the two fitted sets `CAST_SPRUCE` and `CAST_BEECH`, `FreeLiquid` for
+  a liquid the solid does not hold, or `ActivityFunction(f)` for an isotherm given as a
+  function (§6.7.2). Every law answers `activity(law, X, T)` and
+  `sorption_heat(law, X, T, M)`, generic in the number type;
+- **the saturation curve** $p_{\text{sat}}(T)$, any property function of temperature,
+  by default `WATER_SATURATION`, the vapour-pressure equation of IAPWS-95 (6.12);
+- **the latent heat** at $T_{\text{ref}}$ and **the exchange rate** $K_{\text{pc}}$
+  (§6.7.4, §6.7.5).
+
+The constructor returns a pending form, resolved when the `Material` is built: the
+names become indices and the vapour's molar mass is copied in. The `Material` refuses,
+naming the phase change, a liquid that is not a `LiquidComponent`, a vapour that is not
+a `GaseousComponent` with a positive molar mass, a sorbent that is not a
+`SolidComponent` or is named twice, and two phase changes of one liquid; the
+constructor refuses a negative or non-finite weight, sorbents none of which has a
+positive weight, an exchange rate that is not positive and finite and a latent heat
+that is not finite. A liquid may also be the reactant or a product of a `Reaction`.
+
+The resolved tuple is the `Material` type parameter `PC`, so the kernel specialises on
+it as on the reactions (§4.6.5); a material with an empty tuple builds no phase-change
+kernel. `n_phase_changes(material)` counts them. Several rules read the phase changes
+beside the reactions: the vapour of a phase change is not dry gas (§4.6.4), its liquid
+is not reactive inventory and leaves no residue (§11.7.4, §14.3.2), and the strain rate
+of a moving mesh reads its mass sources (§10.2).
+
+> **Implementation note.** `PhaseChange` and its resolution:
+> `src/Materials/phase_changes.jl`. The activity laws: `src/Materials/activity.jl`.
+> `WATER_SATURATION`: `src/Materials/saturation.jl`. The rate, heat and moisture content
+> forward from the resolved `PhaseChange` to functions of scalars and law objects
+> (`src/Physics/phase_change.jl`), so every caller evaluates one statement of the law.
 
 ---
 
@@ -2988,7 +3116,7 @@ FDS accepts temperature ramps for thermal properties. Its
 and constructs component enthalpies. A Pyrolysis.jl function or table must
 match the units, interpolation and enthalpy datum over the temperature
 range used. Reaction heat can also vary with temperature through FDS's
-enthalpy accounting (§6.9.3); it is not generally a transferable scalar.
+enthalpy accounting (§6.10.3); it is not generally a transferable scalar.
 
 ### 4.8.4 Sources and numerical evidence
 
@@ -3030,7 +3158,9 @@ revisited where the relevant physics is developed.
    segment by segment, so its derivative jumps at every knot and the integrator
    sees a kink in the Jacobian there. `CallableProperty` and `StateDependentProperty`
    are differentiated by propagating `ForwardDiff.Dual` numbers through the user's
-   function, which must therefore be generic in its argument types (§4.5).
+   function, which must therefore be generic in its argument types (§4.5). The function
+   of an `ActivityFunction` is differentiated in $T$ for its heat of sorption inside the
+   dual numbers of the Jacobian, so it must accept nested dual numbers (§6.7.4).
 
 5. **Heterogeneous-tuple compilation cost.** Preserving the exact component and
    reaction tuple types yields allocation-free, type-stable hot paths, but at the
@@ -3047,7 +3177,7 @@ revisited where the relevant physics is developed.
    endothermic ($Q_\mathrm{rxn}=-\sum_r h_r r_r$), whereas ThermaKin publishes
    $h>0$ as exothermic. Users porting parameters from ThermaKin must flip the
    sign; Gpyro V2 and FDS use the same convention as Pyrolysis.jl, and their heats
-   are entered as published (Chapter 2, overload note H1; Chapter 6, §6.9.2).
+   are entered as published (Chapter 2, overload note H1; Chapter 6, §6.10.2).
 
 ---
 
@@ -3176,8 +3306,9 @@ summed over every component with no phase branch, so **gas sensible storage is
 part of the left-hand side of the energy equation**. The units check:
 $[\text{kg}\,\text{m}^{-3}]\cdot[\text{J}\,\text{kg}^{-1}\,\text{K}^{-1}] = [\text{J}\,\text{m}^{-3}\,\text{K}^{-1}]$.
 
-Each $c_{p,j}$ is the *sensible* heat capacity of its component. The reaction and
-latent heats are carried by the source terms (§3.3.3, §6), so a law that includes
+Each $c_{p,j}$ is the *sensible* heat capacity of its component. The reaction heats and
+the latent heat and heat of sorption of a phase change are carried by the source terms
+(§3.3.3, §6, §6.7), so a law that includes
 them, such as the apparent heat capacity a DSC or STA records while the sample
 decomposes, counts that heat twice. Two checks bound a law over the temperatures
 a solve reaches. The Dulong–Petit limit, $3R$ per mole of atoms, is about
@@ -4274,7 +4405,7 @@ is the collision/attempt frequency (modulated by an entropic steric factor), and
 $\exp(-E_i/R_g T)$ is the Boltzmann fraction of molecular configurations that
 surmount the activation barrier $E_i$. Both $A_i$ and $E_i$ are stored as plain
 `Float64` scalars on the `Reaction` struct (src/Materials/reactions.jl), so
-they are temperature-independent constants — see §6.10 for the consequences.
+they are temperature-independent constants — see §6.11 for the consequences.
 
 **Mass-concentration (not molar) basis.** The composition dependence in (6.1) is
 written in terms of the **mass concentration** $\xi_j$ (kg of component $j$ per m³
@@ -4287,7 +4418,7 @@ need for a molar mass of the solid, makes $r_i$ directly the mass conversion rat
 and lets the stoichiometric coefficients $\nu_{i,j}$ be pure **mass** yields that
 sum to unity (§6.5). ThermaKin and FDS also use mass-based
 rates, but their factors and stoichiometric bases differ; Gpyro V2's conversion
-rate includes a cumulative-mass normalization (§6.9).
+rate includes a cumulative-mass normalization (§6.10).
 
 ### 6.1.2 Discrete (per-cell) form
 
@@ -4334,7 +4465,7 @@ space); all spatial coupling enters through transport (conduction §7, gas
 diffusion/Darcy §9) and through the mesh motion (§11). This is the
 cell-as-batch-reactor view: each control volume behaves, kinetically, like an
 isolated TGA sample. This local evaluation is also used in Gpyro V2 and FDS,
-although their oxygen factors and rate normalization differ (§6.9).
+although their oxygen factors and rate normalization differ (§6.10).
 
 The single-reaction function is `reaction_rate` (src/Physics/kinetics.jl). It
 is fully scalar-type-generic (`<:Real` arguments), so the dual numbers of the
@@ -4448,7 +4579,9 @@ represents solidification as a $T_{\max}$-gated reaction, measures the effect:
 at the default 1 K width a 5 K driving temperature difference shifts the
 effective freezing point by about 20 % of the driving force (the front runs
 19 % slow), so the case drives with ±50 K, where the gate is a 1–2 % effect
-(`test/verification/cases/V-CPL-01.jl`).
+(`test/verification/cases/V-CPL-01.jl`). A gate is not a moisture model: water held in
+a solid evaporates and condenses with its vapour pressure, through the phase change of
+§6.7.
 
 > **Implementation note.** Temperature gates: `reaction_rate`,
 > src/Physics/kinetics.jl. `gate_width` field, validation, and the default
@@ -4768,7 +4901,7 @@ path never forms a conversion, and any other order requires a finite positive
 
 **The reference.** $M_{\mathrm{ref},r,i}$ is computed at `setup` for every reaction of
 order other than one (§6.5.5) and stays a constant of the cell: at such an order the
-cells keep their material, since `setup` refuses any correction (§6.10). The reference concentration is $\xi_{\mathrm{ref},r,i} = M_{\mathrm{ref},r,i}/V_i$.
+cells keep their material, since `setup` refuses any correction (§6.11). The reference concentration is $\xi_{\mathrm{ref},r,i} = M_{\mathrm{ref},r,i}/V_i$.
 The reference adds no row to the state and no entry to the Jacobian's pattern.
 
 > **Implementation note.** Detection: `needs_lineage`, src/Materials/materials.jl.
@@ -4968,8 +5101,8 @@ competitive networks are unaffected.
 
 **A worked lineage.** The Douglas fir chain with 94.3 mg of wood and 5.7 mg of
 water in a 100 mg cell, yields 0.95, 0.80, 0.37, 0.79 and 0.74, has the references
-94.3, 89.585, 71.668, 26.517, 20.949 and 15.502 mg along the chain, and 5.7 mg for
-the water. A step of order 2 holding 35 mg of the second intermediate runs at
+94.3, 89.585, 71.668, 26.517, 20.949 and 15.502 mg along the chain; the water,
+which a phase change evaporates rather than a reaction, has none. A step of order 2 holding 35 mg of the second intermediate runs at
 $k\,(35)^2/71.668 = 17.09\,k$ mg/s, against $35\,k$ mg/s at first order.
 
 **Importing fitted parameters.** A Kinetics Neo fit is on these lineage
@@ -4978,7 +5111,7 @@ mass (the Aria/Sierra members of a parallel or series scheme) takes `basis = 1.0
 which reproduces the bare and the limited law; the alternative
 $A \leftarrow A\,c_a^{\,n-1}$ reproduces the bare law only. A fit on wet mass of a
 dry-lineage reactant takes `basis = 1.0`. A Gpyro single step carries $A$ over; a
-Gpyro series scheme with $n \ne 1$ on an intermediate differs by convention (§6.9.2).
+Gpyro series scheme with $n \ne 1$ on an intermediate differs by convention (§6.10.2).
 An order other than one on an intermediate is a fitting convention in every one of
 these codes, not a mechanism: the fraction reacted of a material that is generated and
 consumed at the same time has no single value, which is why the ICTAC multi-step
@@ -5094,25 +5227,28 @@ Reaction(:decomp, 1 => 2; A=8.5e12, E=188e3, h=(870e3, 100.0)) # LinearProperty
 (Positive `h` = endothermic, the storage convention of §6.6.1; PMMA-style
 depolymerization absorbs ≈870 kJ·kg⁻¹.)
 
-The principal use of `StateDependentProperty` is the **heat of moisture sorption**
-in hygroscopic materials, where the differential heat depends on the current
-moisture content $MC$. A representative closure (the form used in the moisture
-examples) is
+The principal use of `StateDependentProperty` is a heat that changes with the progress
+of the reaction, such as a pyrolysis heat that is endothermic while the wood
+decomposes and turns exothermic as the char forms. A closure over the reactant's index
+reads the conversion from $\boldsymbol{\xi}$; the Bilbao wet-wood suite's pyrolysis heat
+(`scripts/bilbao_wet_wood/BilbaoWetWood.jl`) is
 
 $$
-h_{\mathrm{sorp}}(T,\boldsymbol{\xi}) =
-\Bigl(2275 + 860\,e^{-0.120\,MC}\Bigr)\times 10^{3}\ \text{J}\,\text{kg}^{-1},
-\qquad MC = 100\,\frac{\xi_{\mathrm{moist}}}{\sum_{k}\xi_k},
+h(T,\boldsymbol{\xi}) = (1-\gamma)\bigl[(1-s)\,h_1 + s\,h_2\bigr],
+\qquad
+s = \tfrac12\Bigl[1 + \tanh\frac{x - x_s}{0.01}\Bigr],
+\qquad
+x = (1-\gamma)\Bigl(1 - \frac{\xi_{\text{wood}}}{\rho_{\text{dry}}}\Bigr),
 $$
 
-encoded as a closure over the moisture index (src/Materials/property_functions.jl).
-Because the closure is passed $\boldsymbol{\xi}$ at evaluation, the
-sorption heat self-consistently rises as the wood dries — a behaviour impossible
-to represent with a temperature-only property. A heat that depends on the composition
-makes the enthalpy of the liquid depend on the drying path; the accounting stays exact
-because the reaction runs one way, so the path is monotone. Under the local-temperature
-convention of §6.6.3 the base of an evaporation heat is the latent heat at the evaporation
-temperature, about 2.26 MJ·kg⁻¹ at 373 K, with the differential heat of sorption added to it. Calling a `StateDependentProperty`
+with $\gamma$ the char yield, $x$ the mass the wood has lost per unit of its initial dry
+mass and $h_1$, $h_2$ the early and late heats, switched at $x_s$. Because the closure is
+passed $\boldsymbol{\xi}$ at evaluation, the heat follows the conversion, which a
+temperature-only property cannot represent. The energy ledger books the heat as the
+kernel gives it, whatever its form (§16.2). Under the local-temperature convention of
+§6.6.3 a one-way drying `Reaction` takes its heat at the evaporation temperature, about
+2.26 MJ·kg⁻¹ at 373 K; the phase change of a liquid (§6.7) builds its own from the
+components' enthalpies. Calling a `StateDependentProperty`
 with only $T$ raises an error (src/Materials/property_functions.jl),
 guaranteeing the state argument is never silently dropped.
 
@@ -5132,7 +5268,7 @@ A heat of reaction is only defined relative to a **datum**: $h_i$ may be quoted
 
 - **at the local reaction temperature** — $h_i(T) = \sum_j \nu_{i,j}\,h_j(T)$,
   the reaction-temperature convention used here; an imported DSC or fitted
-  heat needs its units, reaction basis and datum checked explicitly (§6.9); or
+  heat needs its units, reaction basis and datum checked explicitly (§6.10); or
 - **at the fixed ambient datum** $T_{\text{ref}} = 298.15$ K —
   $h_i = \sum_j \nu_{i,j}\,h_j(T_{\text{ref}})$, the formation-enthalpy style.
 
@@ -5169,7 +5305,291 @@ reaction endotherm by that integral.
 
 ---
 
-## 6.7 Allocation-Free Evaluation
+## 6.7 Phase Change of a Liquid
+
+A liquid held in sorbing solids, water in wood, exchanges mass with its vapour through
+a two-way cell source that relaxes the pore vapour toward sorption equilibrium with the
+liquid. Evaporation and desorption, condensation and sorption are one source with one
+sign: the liquid evaporates where its vapour stands below the equilibrium pressure, and
+the vapour condenses where it stands above, so the vapour driven inward from a drying
+front is resorbed in the cooler material ahead of it. The step is declared on the
+material as a `PhaseChange` (§4.6.6) beside its reactions and evaluated by its own
+kernel (§13.5.2); it carries no Arrhenius rate, temperature gate or depletion limiter.
+
+### 6.7.1 Moisture content and equilibrium pressure
+
+For a phase change of the liquid $w$ into the gas component $v$, held in the sorbing
+solids $s\in\mathcal S$ that the deck declares with weights $\gamma_s$, the moisture
+content of a cell [kg·kg⁻¹] is
+
+$$
+X = \frac{\xi_w}{\sum_{s\in\mathcal S}\gamma_s\,\xi^{+}_s + \xi_{\text{floor}}},
+\qquad \xi_{\text{floor}} = 10^{-3}\ \text{kg}\,\text{m}^{-3},
+\tag{6.10}
+$$
+
+the liquid's signed concentration over the weighted positive-part concentrations of the
+sorbents. The deck names the sorbents: virgin wood and its intermediates hold water, a
+char holds little or none unless measured, so no solid is a sorbent by default. The floor (`SORBENT_FLOOR`) keeps $X$ finite in a cell whose sorbing solids are
+gone; whatever liquid such a cell holds then reads as free. The vapour in equilibrium
+with the liquid has the partial pressure
+
+$$
+p_{\text{eq}}(X,T) = a(X,T)\,p_{\text{sat}}(T),
+\tag{6.11}
+$$
+
+with $a$ the activity of the liquid (§6.7.2) and $p_{\text{sat}}$ its saturation curve.
+For water this is the vapour-pressure equation of the IAPWS-95 formulation (Wagner and
+Pruß 2002), with $\vartheta = 1 - T/T_c$, $T_c = 647.096$ K and $p_c = 22.064$ MPa,
+
+$$
+\ln\frac{p_{\text{sat}}}{p_c} = \frac{T_c}{T}\left(b_1\vartheta + b_2\vartheta^{1.5} + b_3\vartheta^{3}
++ b_4\vartheta^{3.5} + b_5\vartheta^{4} + b_6\vartheta^{7.5}\right),
+\tag{6.12}
+$$
+
+$b = (-7.85951783,\ 1.84408259,\ -11.7866497,\ 22.6807411,\ -15.9618719,\ 1.80122502)$
+(`WATER_SATURATION`). It gives 611.66 Pa at the triple point, 3169.8 Pa at 298.15 K and
+101 418 Pa at 373.15 K, $3.3\times10^{-5}$ below the full formulation at 25 °C. The
+temperature is held in $[255, 640]$ K by a smooth clamp with 1 K transitions, so the
+curve is $C^1$ at every trial temperature. Another liquid's saturation curve is any
+property function of temperature.
+
+### 6.7.2 Activity laws
+
+The activity is the ratio $p_{\text{eq}}/p_{\text{sat}}$ of the liquid at moisture content
+$X$ and temperature $T$. Every law is defined at every real $X$, negative trial values
+included, is zero at $X = 0$ and stays at or below one.
+
+**CAST isotherm.** The Comprehensive Analytical Sorption Thermodynamic isotherm of
+Dietenberger, Glass and Boardman (2024, their eqs 18 and 27) writes the differential
+Gibbs energy of sorption, in kJ·mol⁻¹, and the activity as
+
+$$
+\Delta\bar g(X,T) = \bigl[u\,(\beta_1 e^{-\beta_2/T} + \beta_3) + \beta_4\bigr]^{-\beta_5} - \beta_6,
+\qquad
+a_{\text{CAST}} = \exp\!\left(-\frac{\Delta\bar g}{R_g T}\right),
+\qquad u = \max(X, 0),
+\tag{6.13}
+$$
+
+with $\Delta\bar g$ in J·mol⁻¹ in the exponent. Two additions make it a law for every
+state:
+
+$$
+a(X,T) = \operatorname{smin}_{\delta_a}\!\left(a_{\text{CAST}}\,\frac{X}{\lvert X\rvert + X_0}\right),
+\qquad
+\operatorname{smin}_{\delta_a}(x) = 1 - \delta_a\ln\!\left(1 + e^{(1-x)/\delta_a}\right),
+\tag{6.14}
+$$
+
+with $X_0 = 10^{-4}$ and $\delta_a = 0.01$ (keywords `X0`, `δ`).
+
+- The factor $X/(\lvert X\rvert + X_0)$ takes the activity to zero with the water, where
+  the printed law keeps $a \approx 0.002$–$0.024$ between 25 and 150 °C, and makes it
+  negative below, so a negative trial mass of liquid draws vapour back. The activity is
+  $C^1$ through $X = 0$. Against the steam sorption data above 100 °C the law with the
+  factor holds 0.002–0.03 % more water than the printed one.
+- The soft cap at one is free water: above the moisture content at which
+  $\Delta\bar g = 0$ (their eq. 25: 29 % at 25 °C, 19 % at 100 °C and 14 % at 150 °C
+  for spruce) the vapour is saturated.
+- The fugacity correction of their eq. 27 is left out, so $a$ is read as
+  $p_v/p_{\text{sat}}$. At saturation the correction is 1.5 % at 100 °C and 4 % at
+  150 °C, inside the scatter of the sorption data above 100 °C.
+
+Two fits of their Table 3 are provided. `CAST_SPRUCE`,
+$\beta = (304.2,\ 1661,\ 3.520,\ 0.3895,\ 2.886,\ 0.2006)$, fitted to Weichert's isotherms
+at 25–100 °C and Volbehr's heats of wetting, is the softwood set. `CAST_BEECH`,
+$\beta = (46.33,\ 777.6,\ 2.028,\ 0.2210,\ 1.725,\ 0.3664)$, adds Engelhardt's isotherms at
+110–170 °C and is the hardwood set.
+
+**Free liquid.** `FreeLiquid` is a liquid the solid does not hold:
+$a = X/(\lvert X\rvert + X_0)$, one to within $X_0/X$ (0.04 % at $X = 0.25$, 1 % at
+$X = 0.01$), never above one, with no cap and no heat of sorption.
+
+**A measured law.** `ActivityFunction(f)` takes an isotherm $f(X,T)$ given as a
+function through the same factor and cap as (6.14). A law independent of temperature has
+no heat of sorption, which is how an isothermal problem is posed (V-PC-01, V-PC-05).
+
+### 6.7.3 Rate
+
+With $\varphi$ the cell's pore fraction, $M_v$ the vapour's molar mass and $\xi_v$ its
+bulk concentration, the step converts liquid to vapour at the rate per unit volume
+[kg·m⁻³·s⁻¹]
+
+$$
+r_{\text{pc}} = K_{\text{pc}}\left(\xi^{\text{eq}}_v - \xi_v\right),
+\qquad
+\xi^{\text{eq}}_v = \frac{\varphi\,M_v\,p_{\text{eq}}(X,T)}{R_g T},
+\tag{6.15}
+$$
+
+taken from the liquid's source and added to the vapour's (the code's `ω_v`).
+$r_{\text{pc}}>0$ is evaporation or desorption, $r_{\text{pc}}<0$ condensation or
+sorption. The exchange rate $K_{\text{pc}}$ (`exchange_rate`, $10^3$ s⁻¹ by default,
+§6.7.5) is the inverse of the pore vapour's relaxation time.
+
+- **Second law.** Since $\xi_v = \varphi M_v p_v/(R_g T)$, the sign of $r_{\text{pc}}$ is
+  that of $p_{\text{eq}} - p_v$, which is the sign of the difference between the
+  chemical potentials of the liquid and the vapour. The step produces entropy in every
+  state: it cannot evaporate into vapour above its equilibrium pressure, nor condense
+  vapour below it.
+- **Restoring ends.** A negative trial vapour concentration raises the rate, and a
+  negative trial liquid concentration gives a negative activity, which draws vapour back.
+- **The stiff limit.** For large $K_{\text{pc}}$ the vapour sits at its equilibrium
+  pressure. The bound water then follows a change in its surroundings in
+  $\tau_w = \xi_{\mathcal S}/(K_{\text{pc}}\,\varphi\,\rho_{v,\text{sat}}\,\partial a/\partial X)$,
+  with $\xi_{\mathcal S}$ the weighted sorbent concentration and
+  $\rho_{v,\text{sat}} = M_v p_{\text{sat}}/(R_g T)$: for wood about
+  $300/K_{\text{pc}}$ s at 100 °C and $5000$–$10\,000/K_{\text{pc}}$ s at 25 °C. For
+  $\tau_w$ short against the heating time the step is the local-equilibrium closure of
+  Stanish et al. (1986), Di Blasi (1998) and Melaaen and Grønli (1997), with the
+  free-water form of Fredlund (1988) as its $a = 1$ case.
+
+### 6.7.4 Heat
+
+Per kilogram of liquid that becomes vapour the step takes
+
+$$
+h_{\text{pc}}(X,T) = \Delta h_{\text{vap}}(T) + \Delta h_{\text{sorp}}(X,T),
+\qquad
+\Delta h_{\text{vap}}(T) = \Delta h^{\text{ref}}_{\text{vap}} + h_v(T) - h_w(T),
+\tag{6.16}
+$$
+
+and the cell's energy source gains, beside $Q_{\text{rxn}}$ of (1.8),
+
+$$
+Q_{\text{pc}} = -h_{\text{pc}}\,r_{\text{pc}};
+\tag{6.17}
+$$
+
+condensation returns the same heat. $h_v$ and $h_w$ are the sensible enthalpies of the
+two components on the datum $T_{\text{ref}} = 298.15$ K, read in the cell, and
+$\Delta h^{\text{ref}}_{\text{vap}}$ (`latent_heat`) is the latent heat at
+$T_{\text{ref}}$: by default water's, $2.4417\times10^{6}$ J·kg⁻¹, the enthalpy difference
+of the saturated phases of IAPWS-95 at 25 °C (an ideal-gas vapour would make it 0.06 %
+larger).
+
+- **Kirchhoff's law.** $\Delta h_{\text{vap}}(T)$ is the latent heat at the local
+  temperature converted from the $T_{\text{ref}}$ datum (§6.6.3), built from the
+  components' own enthalpies. In the inventory form the formation term of (1.5) adds
+  $r_{\text{pc}}V_i(h_v - h_w)$ and cancels them, so the step changes $H_i$ by
+  $-(\Delta h^{\text{ref}}_{\text{vap}} + \Delta h_{\text{sorp}})\,r_{\text{pc}}V_i$, and
+  for free water the total enthalpy is a state function whatever path the water takes.
+- **Heat of sorption.** The isotherm's own,
+
+  $$
+  \Delta h_{\text{sorp}} = \frac{R_g T^2}{M_v}\left(\frac{\partial\ln a}{\partial T}\right)_X ,
+  \tag{6.18}
+  $$
+
+  which for CAST is their eq. 19 times the logarithmic slope of the cap,
+
+  $$
+  M_v\,\Delta h_{\text{sorp}} = \left[\Delta\bar g + \frac{\Delta\bar g + \beta_6}{T}\,
+  \frac{u\,\beta_1\beta_2\beta_5\,e^{-\beta_2/T}}{u\,(\beta_1 e^{-\beta_2/T} + \beta_3) + \beta_4}\right]
+  \frac{\mathrm{d}\ln\operatorname{smin}_{\delta_a}(x)}{\mathrm{d}\ln x},
+  \tag{6.19}
+  $$
+
+  with $x$ the argument of the cap in (6.14). It falls to zero with the cap, so free
+  water has none. `ActivityFunction` differentiates $\ln f$ in $T$ by forward-mode
+  automatic differentiation; `FreeLiquid` has no heat of sorption.
+- **Excess heat capacity.** For bound water $\Delta h_{\text{sorp}}$ depends on $X$, and
+  the total enthalpy is a state function only up to the excess heat capacity
+  $-\xi_{\mathcal S}\,\partial W/\partial T$ of the sorbed water,
+  $W(X,T) = \int_0^X \Delta h_{\text{sorp}}\,\mathrm{d}X'$, which the inventory leaves
+  out. A closed cycle of sorption and desorption therefore leaves a small residual: on
+  V-PC-03b it is 1.71 % of the heat of sorption exchanged, in both energy forms
+  (§18.1.3).
+- **The measured pair.** With an ideal-gas vapour the measured saturation curve and
+  latent heat do not satisfy the Clausius–Clapeyron relation exactly:
+  $R_g T^2\,(\mathrm{d}\ln p_{\text{sat}}/\mathrm{d}T)/M_v$ is 2293 kJ·kg⁻¹ at 100 °C
+  against the measured 2257, and 2215 against 2114 at 150 °C (1.6 % and 4.8 %). The step
+  keeps the measured latent heat, so energy is exact, and the slope of the equilibrium
+  curve differs from what that heat implies by these amounts.
+
+### 6.7.5 The exchange rate
+
+Local equilibrium is the model, so $K_{\text{pc}}$ has only to be large enough that the
+results no longer depend on it. How fast wood exchanges at fire temperatures is not
+measured; at room temperature a humidity step above 60 % relaxes over $10^2$–$10^5$ s
+(Thybring et al. 2019), $K_{\text{pc}}$ of about 0.05–2 s⁻¹ in this form. The default is
+$10^3$ s⁻¹. On the Douglas fir example (`examples/07_douglas_fir_cone.jl`: 12 mm,
+75 kW·m⁻², 240 cells, moving mesh, 600 s):
+
+| $K_{\text{pc}}$ (s⁻¹) | back face at 120 / 170 / 300 s (K) | peak mass-loss rate (g·m⁻²·s⁻¹) | largest $p_v/p_{\text{eq}}$ | condensed / evaporated | accepted steps |
+|:---|:---|:---|:---|:---|:---|
+| $10^2$ | 368.38 / 414.23 / 853.53 | 33.530 | 1.588 | 37.0 % | 2785 |
+| $10^3$ | 368.26 / 414.21 / 853.22 | 33.530 | 1.114 | 39.9 % | 3275 |
+| $10^4$ | 368.25 / 414.21 / 853.17 | 33.530 | 1.015 | 40.5 % | 4193 |
+
+Over two decades the back face moves by at most 0.36 K, the peak mass-loss rate and the
+mass lost agree to five digits and the pore pressure to 0.2 kPa; $K_{\text{pc}}$ sets how
+far the vapour runs above equilibrium and the cost. On the drying front of V-PC-04
+(400 cells) the front's error is −1.18 %, −0.14 % and +0.06 % at $10^2$, $10^3$ and
+$10^4$ s⁻¹, and on the moist-wood validation suites (§18.6.3) the same range moves no
+score by more than 0.01 K. The rate matters where a diffusion time is short against
+$\tau_w$: in the sorption case V-PC-05, at a Fourier number of 0.02, the lag of the water
+at the default costs 1 % of the uptake under the lumped transfer closure and 10 % under
+the dusty-gas closure, whose coefficient is nine times larger. A deck in that regime, or
+one that takes $K_{\text{pc}}$ near the room-temperature values, needs its own
+convergence check.
+
+### 6.7.6 Volume, start and boundaries
+
+The liquid holds $\xi_w/\rho_w$ of the cell's volume like any condensed component, so on
+a moving mesh sorption swells the cell and desorption shrinks it by the water's own
+volume (§10.2); on a fixed mesh the pore fraction takes up the difference. Free water
+above the isotherm's capacity would fill pores without swelling the cell; with one water
+inventory it swells it, by up to 4 % of the cell volume where a 20 % Bilbao run condenses
+to 28 % moisture.
+
+The vapour of a phase change is not dry pyrolysis gas and does not enter the pyrolysis
+progress (§4.6.4); a gas that is both the vapour of a phase change and a product of the
+solids' reactions is refused, and pyrolysis water is then a species of its own. The
+liquid is not part of a cell's reactive inventory and leaves no residue or retained volume,
+since it can leave completely as vapour (§11.7.4, §14.3.2).
+
+An open face exchanges vapour with its reservoir through the species film, in both
+directions (§12.4). For a relative humidity $\mathrm{RH}$ the reservoir's vapour mole
+fraction is $x_{v,\infty} = \mathrm{RH}\,p_{\text{sat}}(T_\infty)/P$; `setup` warns when a
+mass condition's reservoir does not name the vapour, which makes the face a perfectly dry
+sink. The pore gas starts in equilibrium with the water,
+$\xi_v = \xi^{\text{eq}}_v\bigl(X(0), T(0)\bigr)$, with the background gas making up the
+pressure to $P - p_{\text{eq}}$: `equilibrium_vapour_concentration` and
+`equilibrium_vapour_pressure` of a material and a condensed composition give the first
+two, `background_gas_concentration` at $P - p_{\text{eq}}$ the third. A start off
+equilibrium is admissible and relaxes in about $1/K_{\text{pc}}$; `setup` warns when the
+start is more than 1 % off equilibrium, naming the cell farthest from it.
+
+### 6.7.7 What the step leaves out
+
+- **Hysteresis.** One curve serves sorption and desorption.
+- **Capillary flow** of free water above fibre saturation (§1.2.2): free water moves
+  only as vapour.
+- **A separate free-water inventory.** Free and bound water are one component, so free
+  water swells a moving mesh (§6.7.6).
+- **Bound-water diffusion** as a flux of its own: across the grain or along it, it is what
+  the vapour transfer coefficient of virgin wood stands for (§9.2.1).
+- The excess heat capacity of sorbed water (§6.7.4) and CAST's fugacity correction
+  (§6.7.2).
+
+> **Implementation note.** Declaration and resolution: `PhaseChange`
+> (src/Materials/phase_changes.jl). Activity laws: `CASTIsotherm`, `CAST_SPRUCE`,
+> `CAST_BEECH`, `FreeLiquid`, `ActivityFunction`, `activity`, `sorption_heat`
+> (src/Materials/activity.jl). Saturation curve: `WATER_SATURATION`
+> (src/Materials/saturation.jl). Moisture content, equilibrium, rate and heat:
+> `moisture_content`, `equilibrium_vapour_pressure`, `equilibrium_vapour_concentration`,
+> `phase_change_rate`, `phase_change_heat` (src/Physics/phase_change.jl); the material
+> methods of the two equilibrium functions are in src/Physics/pressure.jl. Kernel:
+> `PhaseChangeKernel` (src/Kernels/phase_change.jl, §13.5.2).
+
+---
+
+## 6.8 Allocation-Free Evaluation
 
 The reaction model sits in the innermost loop of every residual and Jacobian
 evaluation, so it is engineered to allocate nothing and to specialise completely
@@ -5211,7 +5631,7 @@ evaluation uses the dual twin of the buffer (§7.7).
 
 ---
 
-## 6.8 Validation
+## 6.9 Validation
 
 Stoichiometry errors are caught when a reaction is built (§6.5.3).
 `validate_problem`, which `solve` always runs first, checks among other
@@ -5223,7 +5643,8 @@ and checks initial physical pore volume and gas-boundary data (§9).
 
 Reactions given by name are resolved to integer indices by `resolve_reaction`
 against the names of the components when the `Material` is built, so a reaction
-that names a non-existent component errors with a clear message before any solve.
+that names a non-existent component errors with a clear message before any solve. A
+`PhaseChange` is resolved and checked there too (§4.6.6).
 
 > **Implementation note.** `_validate_stoichiometry`, `resolve_reaction`:
 > src/Materials/reactions.jl. `validate_problem`:
@@ -5231,7 +5652,7 @@ that names a non-existent component errors with a clear message before any solve
 
 ---
 
-## 6.9 Comparison with reference solvers
+## 6.10 Comparison with reference solvers
 
 Reaction parameters can be transferred only after the reaction rate and heat
 have been put on the same mass basis. The versions in §1.6.5 differ in
@@ -5244,9 +5665,10 @@ state the restricted cases in which a mapping exists.
 | Bare reactant factor | $\xi$ at first order; $\xi_{\mathrm{ref}}x^n$ on the lineage inventory otherwise | one or two concentrations | conversion model times cumulative available mass/volume | $\rho_{s,\alpha}^{n_s}=\xi_\alpha^{n_s}$ |
 | Extra rate factors | smooth gates and depletion limiter | hard temperature limits | oxygen dependence and critical temperature | oxygen and temperature powers, rate limits |
 | Positive heat | endothermic | exothermic | endothermic | endothermic |
+| Drying | two-way phase change toward $p_{\text{eq}}$, heat at the local temperature (§6.7) | one-way reaction, optional temperature limits | one-way reaction | one-way Arrhenius reaction; liquid model at the surface layer |
 | Match before comparing | unit reactant consumption | normalized stoichiometry and flipped heat sign | conversion normalization and heat basis | units, rate options and enthalpy datum |
 
-### 6.9.1 ThermaKin2Ds
+### 6.10.1 ThermaKin2Ds
 
 TK Eqs. 5–6 define $\theta_1 C_1+\theta_2 C_2\to\theta_3 C_3+
 \theta_4 C_4+h$ and
@@ -5276,9 +5698,11 @@ $r=\theta_1r_{\mathrm{TK}}$, $A=\theta_1A_{\mathrm{TK}}$,
 $\nu_j=\theta_j/\theta_1$, and $h=-h_{\mathrm{TK}}/\theta_1$.
 This is an algebraic mapping of TK Eqs. 5–6 to our unit-consumption source,
 not an implementation of two-reactant chemistry. Pyrolysis.jl validates the
-product-yield sum when a reaction is built.
+product-yield sum when a reaction is built. A TK drying step is such a reaction and
+transfers as a one-way `Reaction` out of a liquid; its Arrhenius parameters have no
+counterpart in a `PhaseChange`, whose rate follows the vapour pressure.
 
-### 6.9.2 Gpyro V2
+### 6.10.2 Gpyro V2
 
 For the default reaction-order model with cumulative reactant accounting,
 V2 uses the mass $m_\Sigma$ initially present plus that subsequently formed
@@ -5325,7 +5749,12 @@ in the opposite order under the same minus sign. Use the implemented
 correction and its enthalpy datum when converting this option; the fixed
 heat formula alone is insufficient.
 
-### 6.9.3 FDS
+V2 dries by one of these reactions, which transfers as a `Reaction` like any other. The
+equilibrium closure of Rahimi Borujerdi et al. (2019) took the evaporation rate from the
+vapour balance with the vapour held at its equilibrium pressure, the limit
+$K_{\text{pc}}\to\infty$ of (6.15).
+
+### 6.10.3 FDS
 
 The FDS 6.11.0 solid-phase chapter and `PYROLYSIS` routine use
 
@@ -5365,23 +5794,33 @@ These are starting estimates, not an exact fit to a measured TGA peak.
 User Guide §4.9 shows their use to construct a Pyrolysis.jl `Reaction`;
 there is no automatic FDS input importer.
 
-### 6.9.4 Sources and numerical evidence
+An FDS moisture `MATL` evaporates by an Arrhenius reaction (the User Guide's vegetation
+example: $A = 6\times10^{5}$ s⁻¹, $E = 48.2$ kJ·mol⁻¹, $n_t = -0.5$), which transfers as
+a `Reaction` without its temperature power (§6.11 item 3). The liquid model's
+`HEAT_OF_REACTION` is the latent heat at the boiling temperature, where ours is quoted at
+$T_{\text{ref}}$ and carried to the local temperature by (6.16).
+
+### 6.10.4 Sources and numerical evidence
 
 TK Eqs. 1, 5–6 describe the documented rate and heat basis. GP §§3.1–3.5
 and V2 user guide §11 are checked against the linked V2 rate and heat-source
 routines. The FDS solid-phase reaction equations and Appendix P are checked
 against [`PYROLYSIS`](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L3184-L3580) and the parameter
-recovery path linked above. Our rate and source assembly are in
-`src/Physics/kinetics.jl`.
+recovery path linked above. The drying steps follow TK's reaction input (TK §1.1; §4.1, Fig. 1),
+V2's solid-phase source at the linked commit, which holds no saturation pressure, and FDS
+Technical Reference §7.2.4 with the User Guide's moisture `MATL` lines. Our rate and
+source assembly are in `src/Physics/kinetics.jl`, the phase change in
+`src/Physics/phase_change.jl`.
 
-V-RX-01 and V-RX-02 test specified reaction networks; the retained external
-overlays have the version scope in §18.1.3. They do not establish agreement
-for oxygen-dependent kinetics or arbitrary reaction-heat conventions.
+V-RX-01 and V-RX-02 test specified reaction networks, and V-PC-01 to V-PC-05 the phase
+change against exact solutions; the retained external overlays have the version scope in
+§18.1.3. They do not establish agreement for oxygen-dependent kinetics, arbitrary
+reaction-heat conventions or any other code's drying.
 User Guide §§4.4–4.9 covers the practical parameter and heat conversions.
 
 ---
 
-## 6.10 Limitations and Open Issues
+## 6.11 Limitations and Open Issues
 
 The kinetics model is deliberately the simplest one that covers the target
 applications (cone calorimetry, TGA/DSC/MCC idealisation, charring/non-charring/
@@ -5398,8 +5837,9 @@ intumescent solids, moisture). Its boundaries, with the source-of-truth guards:
    condensed-phase mass concentrations. There is no $g(Y_{\mathrm{O_2}})$ (Gpyro V2)
    or $X_{\mathrm{O_2}}^{n_{\mathrm{O_2}}}$ (FDS) factor and no partial-pressure
    term, so oxidative pyrolysis and pressure-enhanced decomposition cannot be
-   modelled directly. Pressure effects enter only through the separate gas
-   transport/permeability block (§9), never the rate constant.
+   modelled directly. Pressure effects enter the reactions only through the separate
+   gas transport/permeability block (§9), never the rate constant. The phase change of
+   a liquid (§6.7) is the one source with a partial-pressure term, $p_{\text{eq}} - p_v$.
 
 3. **Constant pre-exponential and activation energy.** $A_i$ and $E_i$ are scalar
    `Float64` fields (src/Materials/reactions.jl). There is no
@@ -5481,24 +5921,17 @@ intumescent solids, moisture). Its boundaries, with the source-of-truth guards:
    30–50 %: within the decomposition window the kinetics are only as good as the
    temperature.
 
-11. **Evaporation has no equilibrium limit.** A liquid modelled as a reactant
-   evaporates one way at $k(T)\,\xi_w$ whatever the vapour partial pressure (§1.8.1
-   item 4). The step is admissible only while $k(T_{\rm ambient})\,t_{\rm test} \ll 1$ and
-   the pore pressure stays near the one at which its onset was placed ($T_{\rm sat}$ is
-   384 K at 1.5 bar and 393 K at 2 bar). The wood examples do not meet the first
-   condition: their parameters give $k(300\ {\rm K})\,t = 0.35$ (`examples/07`) and
-   $0.25$ (`examples/08`) over a 600 s test, so the cold interior dries before it
-   reaches 330 K. Measured on `examples/07` against the same deck with the water step
-   gated at 373 K, the back-face temperature differs by up to 20 K during the heating
-   phase, while the mass loss rate and the surface temperature move by less than 1 %
-   and 4 K. A parameter set with a negligible ambient rate and an onset near
-   $T_{\rm sat}$ removes two thirds of the difference; the factor
-   $\max(0, 1 - p_v/p_{\rm sat}(T))$ on the water step would remove the rest and hold at
-   any pore pressure without a new material parameter.
+11. **A one-way reaction out of a liquid is not a moisture model.** A `Reaction` whose
+   reactant is a liquid evaporates at $k(T)\,\xi_w$ whatever the vapour partial pressure:
+   it has no equilibrium limit and never condenses, and it is admissible only while
+   $k(T_{\text{ambient}})\,t_{\text{test}} \ll 1$ and the pore pressure stays near the one
+   at which its onset was placed. Water held in a solid is the phase change of §6.7; a
+   one-way drying step serves to transcribe another code's deck
+   (`examples/08_pressure_treated_wood_cone.jl` carries ThermaKin's).
 
 These limitations are consistent across the kinetics and materials chapters; where a richer model is required (bimolecular oxidation, oxygen-sensitive
 char burnout, DAEM), the present architecture's chief virtue is that the
-allocation-free, AD-clean, compile-time-specialised kernels of §6.7 provide a
+allocation-free, AD-clean, compile-time-specialised kernels of §6.8 provide a
 clean foundation onto which the additional factors can be grafted without
 disturbing the surrounding finite-volume and Jacobian machinery (§13, §15).
 
@@ -5829,14 +6262,15 @@ $$
 \boxed{\;
 \frac{\partial}{\partial t}\Big(\sum_j \xi_j h_j\Big)
 + \nabla\!\cdot\Big(\mathbf q_{\text{cond}} + \sum_g h_g\,\mathbf J_g\Big)
-\;=\; Q_{\text{rad}} + Q_{\text{rxn}} + \sum_j S_j\,h_j
+\;=\; Q_{\text{rad}} + Q_{\text{rxn}} + Q_{\text{pc}} + \sum_j S_j\,h_j
 \;}
 \tag{7.5}
 $$
 
 with $\mathbf J_g$ the mass flux of gas component $g$ relative to the skeleton,
 $Q_{\text{rxn}} = -\sum_r h_r r_r$ the reaction heat with the heats quoted at the local
-temperature (§6.6), and $S_j = \sum_r \nu_{r,j} r_r$ the reaction source of component $j$;
+temperature (§6.6), $Q_{\text{pc}} = -\sum h_{\text{pc}} r_{\text{pc}}$ the heat of the phase
+changes (§6.7), and $S_j = \sum_r \nu_{r,j} r_r \pm r_{\text{pc}}$ the source of component $j$;
 the last term converts the heat of reaction to the sensible-enthalpy datum (§6.6.3).
 Subtracting $h_j$ times each species balance
 $\partial_t\xi_j + \nabla\!\cdot\mathbf J_j = S_j$ ($\mathbf J_j \equiv 0$ for condensed
@@ -5849,7 +6283,7 @@ $$
 -\,\nabla\!\cdot\mathbf{q}_{\text{cond}}
 \;-\; \sum_g c_{p,g}\,\mathbf J_g\!\cdot\!\nabla T
 \;+\; Q_{\text{rad}}
-\;+\; Q_{\text{rxn}}
+\;+\; Q_{\text{rxn}} + Q_{\text{pc}}
 \;}
 \tag{7.6}
 $$
@@ -5862,6 +6296,7 @@ with, term by term,
 | $-\sum_g c_{p,g}\,\mathbf J_g\!\cdot\!\nabla T$ | temperature-form reading of $-\nabla\!\cdot(\sum_g h_g\mathbf J_g)$ | gas sensible-enthalpy transport | 7.4 |
 | $Q_{\text{rad}}$ | model-dependent | volumetric radiation absorption | 7.5, §8 |
 | $Q_{\text{rxn}}$ | $-\sum_r h_r r_r$ | reaction heat | 7.5 |
+| $Q_{\text{pc}}$ | $-\sum h_{\text{pc}} r_{\text{pc}}$ | phase-change heat | 6.7 |
 
 The subscript $g$ runs over the **gas** components only. The storage coefficient
 $\rho c_p^{\text{eff}}$ is the **mixture** volumetric heat capacity, defined next. The code
@@ -6204,10 +6639,10 @@ reactions, so an exothermic reaction ($h_r<0$) produces $Q>0$.
 
 > **Caution on external conventions.** ThermaKin publishes $h>0=$ *exothermic*, the opposite
 > of the internal storage convention here; Gpyro V2 and FDS use the same sign as Pyrolysis.jl
-> ($h>0$ endothermic, §6.9). With ThermaKin's published $h$ one would write
+> ($h>0$ endothermic, §6.10). With ThermaKin's published $h$ one would write
 > $Q_{\text{rxn}}=+\sum h r$; Pyrolysis.jl stores $h$ with $h>0=$ endothermic and forms
 > $Q_{\text{rxn}}=-\sum h r$, so a user porting a ThermaKin heat of reaction must flip its
-> sign (§6.9.1).
+> sign (§6.10.1).
 
 > **Implementation note.** `reaction_heat_source(rates, heats)` in `src/Physics/kinetics.jl`
 > performs the negated sum. The reaction kernel (`ReactionKernel`, `src/Kernels/reactions.jl`)
@@ -6400,7 +6835,7 @@ exchange retains gas temperature advection but omits gas storage and gas
 conduction. `FULL_QSG` retains both omitted terms (GP Eq. 65;
 [`GAS_SOLID_THERMAL_EXCHANGE`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L579-L713)).
 Our gas heat storage alone therefore does not make the energy equations
-identical. Reaction-heat basis (§6.9.2), transported enthalpy and boundary
+identical. Reaction-heat basis (§6.10.2), transported enthalpy and boundary
 exchange must also match.
 
 V2 user guide §4.2 describes these exchange choices using `QSG_MODEL`.
@@ -6906,7 +7341,7 @@ source $Q_{\text{rad}}$ on its right-hand side:
 $$
 \rho c_p^{\text{eff}}\,\frac{\partial T}{\partial t}
 = -\nabla\!\cdot\!\mathbf{q}_{\text{cond}} - \sum_j \mathbf{J}_j\!\cdot\!\nabla h_j
-+ Q_{\text{rad}} + Q_{\text{rxn}} .
++ Q_{\text{rad}} + Q_{\text{rxn}} + Q_{\text{pc}} .
 $$
 
 Discretely, every source and face flux of cell $i$ is collected in its energy
@@ -7613,6 +8048,38 @@ resident gas, and the pressure needed to carry a given release scales as
 $1/\Lambda$. That pressure is a transfer potential, and the pore composition
 is meaningful only with $\kappa>0$.
 
+**Wet wood.** Across the grain moisture crosses the cell walls as bound water, in
+series with the vapour in the lumens (Siau 1984, ch. 6). Under the phase change of §6.7
+the water and its vapour stay near sorption equilibrium, so a moisture diffusion
+coefficient $D_X$ carries the same flux as a vapour transfer coefficient
+$\Lambda_{\text{eq}} = \xi_{\mathcal S}\,D_X\,(\partial X/\partial a)/\rho_{v,\text{sat}}$.
+With the slope of `CAST_SPRUCE`, the measured sizes are, in $10^{-6}$ m²·s⁻¹:
+
+| source | 5 % | 10 % | 12 % | 15 % | 18 % |
+|:---|:---|:---|:---|:---|:---|
+| Siau's model (his eqs 6.14, 6.22), specific gravity 0.5, 25–120 °C | 0.05–0.09 | 0.17–0.23 | – | 0.56–0.87 | – |
+| Choong 1965, western fir, 40–60 °C (Keey et al. 2000) | 0.07 | – | – | 1.0–1.3 | – |
+| Biggerstaff 1965, eastern hemlock, 50 and 120 °C (Keey et al. 2000) | – | – | 0.6–0.7 | 1.1 | 1.6–1.9 |
+| Stamm and Nelson 1961, loblolly pine, 50–120 °C (Keey et al. 2000) | – | – | 0.6–1.2 | 1.0–2.2 | – |
+
+The last two are single coefficients fitted to drying from near fibre saturation and
+set against a moisture content by assignment. The coefficient hardly changes with
+temperature and rises about thirtyfold from 5 to 18 % moisture, and Siau notes that his
+equations tend to give low values for drying. The transfer coefficient $\lambda$ of the
+virgin wood in a wet deck stands for this flux, as a constant: $5\times10^{-7}$ m²·s⁻¹
+suits about 10–12 % moisture and is two to four times low at 15–20 %. Along the grain
+the coefficient is 50–100 times larger at 5 % and 2–4 times larger at 30 % (Siau 1984),
+so the end grain of a small block vents more than its one-dimensional path across the
+grain does. The LEMTA blocks dried along the grain lose the measured water at ten times
+the across-grain coefficient, Siau's ratio near 20 % moisture, and fall short at the
+across-grain value by as much as the blocks dried across it (§18.6.3); the drying is set
+by $\lambda$ in both directions, not by the permeability. A
+vapour-pressure gradient is also not quite the driving force of bound water: in sealed
+specimens under a temperature gradient the steady state keeps a higher vapour pressure
+on the warm side (Siau 1984), so this form overstates the hot-to-cold flux there. A
+coefficient that rises with the moisture content would be a property law on this
+transport.
+
 ### 9.2.2 Dusty-gas friction
 
 `DustyGas(...)` distinguishes collisions of molecules with pore walls from
@@ -7696,7 +8163,10 @@ $\mathcal T$ has zero matrix weight but still occupies physical volume. Gas
 components have zero matrix weight and carry neither $\lambda$ nor $\kappa$.
 
 For every component of $\mathcal T$, the lumped model requires explicit
-$\lambda$ data; $\kappa$ defaults to zero. For either coefficient $a_j$, the mixture
+$\lambda$ data; $\kappa$ defaults to zero. In wet wood the virgin component's
+$\lambda$ stands for the bound-water diffusion along the column, across the grain or along
+it, with the measured sizes
+of §9.2.1; the char's is its own. For either coefficient $a_j$, the mixture
 rules are
 
 $$
@@ -7840,6 +8310,13 @@ A deck whose kinetics depend on oxygen should therefore give
 `mole_fractions` as a function of time that removes the oxygen after
 ignition; for inert kinetics the composition at the surface reaches nothing
 the test measures.
+
+The reservoir of a wet material names the vapour of its phase change (§6.7). At a
+relative humidity $\mathrm{RH}$ its mole fraction is
+$x_{v,\infty} = \mathrm{RH}\,p_{\text{sat}}(T_\infty)/P$; a deck that starts in
+equilibrium with its surroundings takes $x_{v,\infty} = p_{\text{eq}}(X(0),T_\infty)/P$.
+A reservoir that leaves the vapour out is a perfectly dry sink for it, and `setup` warns
+about it.
 
 ### 9.4.2 The external mass-transfer film
 
@@ -8774,7 +9251,7 @@ Each condensed component holds the volume $\xi_j/\rho_j$ of its bulk density, an
 | Phase | Volume held | Effect on $\theta$ |
 |---|---|---|
 | Solid | $\xi_j/\rho_j$; depletion frees that volume | $\theta<0$ when solid is consumed |
-| Liquid | $\xi_j/\rho_j$, like a solid | $\theta<0$ when it evaporates or reacts away |
+| Liquid | $\xi_j/\rho_j$, like a solid | $\theta<0$ when it evaporates or reacts away, $\theta>0$ when its vapour condenses |
 | Gas | none; it escapes through the pores and does not set matrix dimensions | none |
 
 > **Implementation note.** The rule is the phase type: `volume_change_rate` skips every `GaseousComponent` and uses the bulk `density` of each `SolidComponent` and `LiquidComponent`. The same bulk occupancy $\xi_j/\rho_j$ of every condensed component weights the conductivity, the surface emissivity and the absorptivity (`condensed_volume_fractions`, §5.1.2); the transport matrix uses it for the solids and the liquids that declare $\lambda$ or $\kappa$ (§9.3.1).
@@ -8784,7 +9261,7 @@ Each condensed component holds the volume $\xi_j/\rho_j$ of its bulk density, an
 - **Non-charring shrinkage (e.g. a polymer converting to gas):** as the solid converts to gas, $\theta<0$ and the column recedes — the classic shrinking-slab picture.
 - **Charring:** a char of bulk density $\rho_c$ produced with yield $y_c$ from a virgin of bulk density $\rho_v$ leaves $V_f/V_0=y_c\rho_v/\rho_c$ of the volume. A char that keeps the virgin volume has $\rho_c=y_c\rho_v$; a denser char shrinks the column.
 - **The char's bulk density is set by the residue thickness.** Without a lateral law the volume ratio is the thickness ratio, so a char whose measured thickness is the fraction $f_c$ of the virgin's has $\rho_c=y_c\rho_v/f_c$, with $f_c$ taken at the heat flux of interest: measured contraction of softwood chars spans roughly 0.44–0.86 and rises with flux. A handbook density of char does not give $\rho_c$. The thermal problem sees a layer's thickness only through the product $k\rho$ (in the mass coordinate conduction reads $\partial_M(k\rho\,\partial_M T)$), so a char conductivity fitted with the model belongs to the $\rho_c$ it was fitted with, and changing $\rho_c$ afterwards changes the char's conductance in proportion. The choice is first-rank: on a 12 mm Douglas-fir slab at 75 kW/m², a char that shrinks the slab to 0.58 of its thickness instead of a rigid one raises the plateau mass loss rate by 4–14 % and the burnout peak by 20 %, and lowers the surface temperature by about 20 K.
-- **Drying:** bound moisture is a liquid at the density of water, so the wood shrinks by the volume of the water it loses, and the water conducts and emits by its volume share while it remains. A liquid component is a bound liquid: every liquid holds its own volume at its density. That is how bound water behaves below the fibre saturation point (a moisture content of about 0.3, dry basis), where wood shrinks by the volume of water removed. Free water above it fills existing lumens and shrinks nothing as it leaves, so above the fibre saturation point the model overstates drying shrinkage: wood of 530 kg/m³ at 0.6 would shrink by 24 % of its wet volume, against about 12 % measured. In one dimension the whole drying shrinkage goes to the thickness, a few per cent at the moisture contents of the cone examples, where real wood shrinks 1–2.5 % in each transverse direction.
+- **Drying and sorption:** bound moisture is a liquid at the density of water, so the wood shrinks by the volume of the water it loses and swells by the volume of the water its vapour condenses or is resorbed into (§6.7), and the water conducts and emits by its volume share while it remains. A liquid component is a bound liquid: every liquid holds its own volume at its density. That is how bound water behaves below the fibre saturation point (a moisture content of about 0.3, dry basis), where wood shrinks by the volume of water removed. Free water above it fills existing lumens and shrinks nothing as it leaves, so above the fibre saturation point the model overstates drying shrinkage: wood of 530 kg/m³ at 0.6 would shrink by 24 % of its wet volume, against about 12 % measured. For the same reason vapour that condenses above the isotherm's capacity swells a moving mesh, by up to 4 % of the cell volume where a 20 % Bilbao run condenses to 28 % moisture. In one dimension the whole drying shrinkage goes to the thickness, a few per cent at the moisture contents of the cone examples, where real wood shrinks 1–2.5 % in each transverse direction.
 - **Intumescence (expansion):** give the condensed product a bulk density below its yield times the reactant's, $\rho_p<y_p\rho_A$ — a light char or foam. Its formation contributes $\theta>0$, i.e. the matrix *inflates*. Combined with a swelling lateral law (§10.5) this reproduces the order-of-magnitude expansion of intumescent coatings. Axial intumescence (through-thickness swell) is captured by $\theta>0$ in (10.2); radial intumescence (lateral swell of the column) is captured by $\mathrm{law}(\bar\chi)>1$ in (10.8). The strain is a function of composition alone, while the measured expansion of intumescent and foaming materials depends on the heating, so a product density fitted at one heat flux does not predict the expansion at another.
 - **Fixed mesh:** with `use_ale = false`, the default, every node is pinned and (10.2) is not used: the skeleton keeps its volume whatever the densities imply, and a reaction whose condensed products hold a different volume from its reactant changes the porosity instead of the thickness. `setup` says so once a session. The densities still weight the mixing and set the occupancy of the transport matrix, so the porosity, and with it when a gas-bearing solve reaches the end of its transport domain, depends on the mesh option.
 
@@ -8835,7 +9312,7 @@ $$
 
 ### 10.3.3 Dry-gas identification by lineage
 
-The index set $\{j\in\mathrm{dry\ gas}\}$ collects the gases the solids give off through the reaction graph. Its *lineage* $\mathcal L$ starts with every solid component; until $\mathcal L$ stops growing, each reaction with a reactant in $\mathcal L$ adds its products of positive yield. The dry gases are the gases in $\mathcal L$. Water that the wood releases on decomposition is therefore dry gas whatever its name, while the vapour of evaporating moisture is not (its reactant, a liquid outside $\mathcal L$, never enters), and neither is a background gas no reaction produces. A product reached through an intermediate liquid (solid → melt → monomer) belongs to $\mathcal L$.
+The index set $\{j\in\mathrm{dry\ gas}\}$ collects the gases the solids give off through the reaction graph. Its *lineage* $\mathcal L$ starts with every solid component; until $\mathcal L$ stops growing, each reaction with a reactant in $\mathcal L$ adds its products of positive yield. The dry gases are the gases in $\mathcal L$. Water that the wood releases on decomposition is therefore dry gas whatever its name, while the vapour of evaporating moisture is not (its reactant, a liquid outside $\mathcal L$, never enters), whether a reaction or a phase change (§6.7) evaporates it, and neither is a background gas no reaction produces. A product reached through an intermediate liquid (solid → melt → monomer) belongs to $\mathcal L$.
 
 A gas in $\mathcal L$ that a reaction with no reactant in $\mathcal L$ also produces would make $G_i$ ambiguous; the set-up refuses it with an `ArgumentError` that names the gas and both groups of reactions, and the remedy is one species per lineage.
 
@@ -9271,11 +9748,11 @@ The following limitations are documented in the source and should guide use and 
 
 4. **$\bar\chi$ weighting choice.** The column average (10.7) is mass-weighted by *initial* dry-solid mass. Strongly non-uniform decomposition (e.g. a thin, fully-charred surface over an intact interior) is reduced to a single scalar $\bar\chi$, so the lateral law cannot represent depth-dependent cross-section change. A different weighting (or a depth-resolved area) would be required for that regime.
 
-5. **Single-reactant kinetics.** Volume change inherits the single-reactant restriction of the kinetics (§6.5, §6.10): a `Reaction` has one reactant, so $\theta$ and the history pair are built from single-reactant sources only. Bimolecular or multi-reactant stoichiometry (e.g. char oxidation consuming both char and O₂) would require extending the source-term machinery before $\theta$ and $G_i$ could account for it.
+5. **Single-reactant kinetics.** Volume change inherits the single-reactant restriction of the kinetics (§6.5, §6.11): a `Reaction` has one reactant, so $\theta$ and the history pair are built from single-reactant sources only. Bimolecular or multi-reactant stoichiometry (e.g. char oxidation consuming both char and O₂) would require extending the source-term machinery before $\theta$ and $G_i$ could account for it.
 
 6. **Interaction with deactivation.** A deactivated cell's history pair goes to the receiver (§10.3.4, §14.3.3), which keeps $\bar\chi$ and $A$ continuous across the event; the conversion is a column quantity, so how the pair of a burned-out surface cell is attributed among the live cells does not matter to the area. The last live cell, lost with no receiver, takes its pair with it.
 
-7. **Dry gas by lineage only.** The dry-gas set is the gas the solids give off through the reaction graph (§10.3.3). A species that both a solid lineage and another reactant produce (decomposition water and moisture vapour as one species) is refused and must be split, and a gas produced from a solid that the user means to treat as moisture-derived cannot be excluded except by its reaction graph.
+7. **Dry gas by lineage only.** The dry-gas set is the gas the solids give off through the reaction graph (§10.3.3). A species that both a solid lineage and another reactant or a phase change produce (decomposition water and moisture vapour as one species) is refused and must be split, and a gas produced from a solid that the user means to treat as moisture-derived cannot be excluded except by its reaction graph.
 
 8. **One lateral strain for the whole column.** The axial (node-motion) and lateral (cross-section) channels are rows of one DAE, solved together, but the lateral channel is a single column-global $\theta_A$ subtracted from every cell's $\theta_i$. A cross-section that varies with depth, or lateral motion that differs between layers, would need a multi-dimensional model; the variable cross section is a line's (planar coordinates, one-dimensional mesh). A cell with no reaction has $\theta_i=0$ and axial strain $-\theta_A$, so while the area shrinks the unreacted layer below a front thickens to keep its volume: its conduction path lengthens by $A_0/A$ before it has reacted, and the absorbed power falls with the area over the whole column. The law suits modest area changes, a final loss of roughly 15 % or less, and back-face temperatures before full conversion carry this bias.
 
@@ -9473,11 +9950,12 @@ $(\xi_j\mathbf v_s + \mathbf J_j)\,h_j$, and (11.2) with $\mathbf w = \mathbf v_
 $$
 \frac{dH_i}{dt}
 = -\oint_{\partial\Omega_i}\Big[\mathbf q + \sum_j \big(\mathbf J_j - \xi_j\,\mathbf c\big)\,h_j\Big]\cdot\hat{\mathbf n}\,dA
-+ \int_{\Omega_i}\Big(Q_{\text{rxn}} + Q_{\text{rad}} + \sum_j S_j\,h_j\Big)\,dV ,
++ \int_{\Omega_i}\Big(Q_{\text{rxn}} + Q_{\text{pc}} + Q_{\text{rad}} + \sum_j S_j\,h_j\Big)\,dV ,
 \tag{11.3}
 $$
 with $\mathbf q$ the conductive flux, $Q_{\text{rxn}} = -\sum_r h_r r_r$ the reaction
-heat at the local temperature, $Q_{\text{rad}}$ the absorbed radiation and $S_j$ the
+heat at the local temperature, $Q_{\text{pc}}$ the heat of the phase changes (§6.7),
+$Q_{\text{rad}}$ the absorbed radiation and $S_j$ the
 reaction mass source of component $j$ (the last term converts the heat of reaction,
 quoted at the local temperature, to the sensible-enthalpy datum; Chapter 7). This is
 the row of the **inventory form** (`energy_state = :enthalpy`). The **temperature
@@ -9488,7 +9966,7 @@ counterpart, per unit volume, is
 $$
 \boxed{\;
 \rho c_p^{\text{eff}}\left.\frac{\partial T}{\partial t}\right|_{\chi}
-= -\nabla\cdot\mathbf q - \sum_g c_{p,g}\,\mathbf J_g\cdot\nabla T + Q_{\text{rxn}} + Q_{\text{rad}}
+= -\nabla\cdot\mathbf q - \sum_g c_{p,g}\,\mathbf J_g\cdot\nabla T + Q_{\text{rxn}} + Q_{\text{pc}} + Q_{\text{rad}}
 \;+\; \rho c_p^{\text{eff}}\,(\mathbf w - \mathbf v_s)\cdot\nabla T
 \;}
 \tag{11.4}
@@ -10150,8 +10628,8 @@ $\varepsilon_m$ of it once its components are converted completely (`vanishes`).
 fraction each condensed component leaves (`residues`) is the condensed yield of a
 reaction that consumes it, each product weighted by its own residue, the largest over
 the reactions that consume it (competing reactions: the least gasifying bounds what is
-left); it is zero for a component every consuming reaction gasifies and one for an
-inert component. `layers = :all` moves every layer, for decks that exercise the
+left); it is zero for a component every consuming reaction gasifies, and for the liquid of
+a phase change, which can leave completely as vapour, and one for an inert component. `layers = :all` moves every layer, for decks that exercise the
 correction on layers that cannot vanish.
 
 ### 11.7.5 The layer time
@@ -10977,6 +11455,14 @@ permits only donor bulk flow, infinite conductance fixes composition.
 are solved consistently. These conditions do not combine with `+`; one closure
 is assigned to each tag.
 
+For a material with a phase change the film exchanges its vapour in both directions:
+the face dries toward a reservoir drier than the pores and takes up vapour from a
+wetter one. A humid reservoir names the vapour at
+$x_{v,\infty} = \mathrm{RH}\,p_{\text{sat}}(T_\infty)/P$ (§9.4.1); `setup` warns when the
+reservoir of an open condition (`AmbientGasBC`, `ConvectivePressureBC`) on such a material
+does not name it, since the face is then a perfectly dry sink. A reservoir that names it
+at a mole fraction of zero is dry on purpose.
+
 ---
 
 ## 12.5 Pressure-gradient and hydraulic-resistance boundaries
@@ -11145,6 +11631,13 @@ equally spaced times from $t_{\text{start}}$ to $t_{\text{end}}$. Profile helper
 (`step_profile`, `linear_profile`, `gaussian_profile`, `tanh_profile`, in
 `Pyrolysis.Problem`, not exported at the top level) are provided for non-uniform
 seeds (e.g. a pre-heated layer).
+
+A wet material's pore gas is not defaulted: a deck gives the vapour of each phase change
+in equilibrium with its liquid and the background gas at the rest of the pressure,
+with `equilibrium_vapour_concentration`, `equilibrium_vapour_pressure` and
+`background_gas_concentration` of the material and the condensed composition (§6.7.6).
+`setup` warns when the start is more than 1 % off equilibrium; such a start relaxes in
+about $1/K_{\text{pc}}$.
 
 ### 12.8.3 The dry-solid mass denominator $m_{\text{dry},i}$
 
@@ -11672,7 +12165,7 @@ $$
 $$
 
 with $\omega_{j,i}\tilde V_i$ [kg s⁻¹] the cell's reaction source (plus an external
-mass source, §13.5.3). The face fluxes $F_{j,f}$ are those of the gas transport
+mass source, §13.5.4). The face fluxes $F_{j,f}$ are those of the gas transport
 (gas components only, §13.7) and, under a correction, the relative fluxes (every
 component, §13.8). On a mesh that rides the skeleton, a condensed component has
 no face flux and its row is its reaction source. Because the masses are the
@@ -11743,7 +12236,7 @@ reaction heats are quoted at the local temperature (§6.6.3). The two forms are 
 same balance, $dH_i/dt=C_i\,dT_i/dt+\sum_jh_j(T_i)\,dm_{j,i}/dt$. The enthalpy form is
 a linear invariant every Runge–Kutta step conserves to round-off; the temperature
 form conserves energy to the integrator's order (§16.5.2). $S_{T,i}$ is an external
-temperature-rate source (§13.5.3), zero in a production solve.
+temperature-rate source (§13.5.4), zero in a production solve.
 
 ### 13.3.5 Dead rows
 
@@ -11795,20 +12288,21 @@ kernels run; the assembler zeroes `M_flux`; `T_face` and `gradient` are overwrit
 `src/Integration/setup.jl`):
 
 1. `ReactionKernel`, when the material has reactions (§13.5.1).
-2. `GasTransportKernel{M}`, for mobile gas, with the declared `LumpedTransfer`
+2. `PhaseChangeKernel`, when the material has phase changes (§13.5.2).
+3. `GasTransportKernel{M}`, for mobile gas, with the declared `LumpedTransfer`
    or `DustyGas`. Gas-bearing sealed materials still evaluate their EOS;
    `NoGasTransport` is reserved for materials without gas components.
-3. `RadiativeTransferKernel`, under `RADIATIVE_TRANSFER` (§13.5.2).
-4. `ConductionKernel`, always (§13.7.1).
-5. `ThermalBoundaryKernel`, always (§13.7.5).
-6. `RelativeFluxKernel`, when the correction is not `NoCorrection`: the
+4. `RadiativeTransferKernel`, under `RADIATIVE_TRANSFER` (§13.5.3).
+5. `ConductionKernel`, always (§13.7.1).
+6. `ThermalBoundaryKernel`, always (§13.7.5).
+7. `RelativeFluxKernel`, when the correction is not `NoCorrection`: the
    equidistribution correction or a prescribed mesh velocity (§13.8).
 
 One residual evaluation (§15.3) runs `derive!` (the state mapping, §13.10), then
 `correction!` (the node corrections $c_n$, §11.7), `reset!`, the kernels in this
-order, `closure_rows!` (the strain rates $\theta_i$ from the reaction mass sources
-at the trial temperature, the history sources and the velocity-row residuals,
-§11.3), `add_sources!` (§13.5.3), and `assemble_rows!` (§13.3). The order matters in
+order, `closure_rows!` (the strain rates $\theta_i$ from the reaction and phase-change mass
+sources at the trial temperature, the history sources and the velocity-row residuals,
+§11.3), `add_sources!` (§13.5.4), and `assemble_rows!` (§13.3). The order matters in
 three places:
 
 - **Coupled boundary exchange.** The thermal boundary kernel solves and stores
@@ -11837,7 +12331,7 @@ columns in both energy forms).
 
 ---
 
-## 13.5 Cell Sources: Reactions, In-Depth Radiation, External Sources
+## 13.5 Cell Sources: Reactions, Phase Changes, In-Depth Radiation, External Sources
 
 ### 13.5.1 Reaction sources
 
@@ -11860,7 +12354,31 @@ below zero concentration is skipped: its rates and every derivative of them are
 exactly zero. The mass sources are also what the mesh closure reads for the strain
 rates (§11.3.1).
 
-### 13.5.2 Radiative transfer: the face fluxes
+### 13.5.2 Phase-change sources
+
+`PhaseChangeKernel` (`src/Kernels/phase_change.jl`), present only for a material with
+phase changes, follows the reaction kernel. For each live cell and each phase change
+(§6.7) it reads, from the derived state, the signed concentrations $\xi_w$, $\xi_v$ of
+the liquid and its vapour, the positive-part concentrations $\xi^{+}_s$ of the sorbing
+solids, the trial temperature $\tilde T_i$, the guarded pore fraction $\varphi_i$ and the
+sensible enthalpies $h_w$, $h_v$ of the two components at $\tilde T_i$; it forms the
+moisture content (6.10), the rate (6.15) and the heat (6.16), and adds
+
+$$
+S_{\text{mass},w,i}\mathrel{-}=r_{\text{pc}}\tilde V_i,\qquad
+S_{\text{mass},v,i}\mathrel{+}=r_{\text{pc}}\tilde V_i,\qquad
+S_{E,i}\mathrel{-}=h_{\text{pc}}\,r_{\text{pc}}\tilde V_i .
+$$
+
+The signed liquid and vapour make both ends restoring (§6.7.3); a dead cell
+contributes nothing. The kernel holds no per-cell table. Its mass sources are
+the liquid's mass source is a condensed source, which the strain rate of a moving mesh
+reads like a reaction's (§10.2), and the heat is built from the same $h_w$, $h_v$ that the formation
+term of the inventory form uses, which cancels them (§6.7.4). `phase_change_exchange`
+reads the gross evaporation and condensation of a cell through the kernel's own rate,
+for the solution's `evaporation_rate` and `condensation_rate` extras.
+
+### 13.5.3 Radiative transfer: the face fluxes
 
 Under `RADIATIVE_TRANSFER` the radiation field is carried as algebraic unknowns of the state:
 the two hemispherical fluxes $I^-_f$, $I^+_f$ of every face and one beam $I_{h,f}$ per
@@ -11898,7 +12416,7 @@ nothing to the surface balance; convection and prescribed fluxes stay at the sur
 `setup` refuses radiative transfer off planar coordinates, where the fluxes per unit
 face area and the face areas would disagree. The model and its limits are §8.
 
-### 13.5.3 External sources
+### 13.5.4 External sources
 
 `VolumetricSources(mass, energy)` (`src/Assembly/definition.jl`) adds external
 sources for verification by manufactured solutions (§18.2): `mass(z, t)` returns
@@ -12956,8 +13474,11 @@ over the reactions $r$ with a condensed reactant $a(r)$, $M_{\mathrm{ref},r,i}$ 
 reactant's initial mass in the cell for a first-order reaction and the reaction's
 lineage reference (§6.5.5) at any other order (`reactive_mass`,
 `CellDeactivation.reactive`), with the slack $s=0$ except at a located event
-(§14.3.5) (`below_threshold`). The measure is the same at every order: the order
-shapes the tail of a cell's conversion, not what spent means. A residue
+(§14.3.5) (`below_threshold`). A phase change (§6.7) adds nothing to the reactive
+inventory, which reads the reactions' reactants alone: water that can condense back
+neither holds a spent cell live nor empties a live one by drying. The measure is the
+same at every order: the order shapes the tail of a cell's conversion, not what spent
+means. A residue
 therefore never holds a spent cell live, and what a receiver took from the
 residues of the cells above it does not count against it. Under a test on the
 condensed mass a receiver of $\varepsilon_m/y$ tails of char at yield $y$ could
@@ -12972,7 +13493,7 @@ Only a cell that **vanishes** is tested. Its reference $R_i$ is zero when the ce
 keep $V^{\rm kept}_i/V_i(0)\ge10^{-2}$ of its volume once fully converted
 (`VANISHING_VOLUME`, `retained_volumes`), the volume each component leaves following the
 reactions to the products no reaction consumes, at the densities of the initial
-temperature. Such a cell is a layer the front burns beneath. Merged into its
+temperature; the liquid of a phase change leaves none. Such a cell is a layer the front burns beneath. Merged into its
 neighbour it stops being resolved: the receiver grows to the thickness of the layer, its
 temperature is the temperature of the middle of the layer, and the reactant it then
 takes burns there, so the top of the reaction zone moves inward cell by cell. The test is
@@ -13914,7 +14435,7 @@ $$
 $$
 
 with $\omega_{j,i}\tilde V_i$ [kg s⁻¹] the cell's reaction source ($\tilde V_i$
-the smoothly floored cell volume, §13.10.3; an external mass source, §13.5.3,
+the smoothly floored cell volume, §13.10.3; an external mass source, §13.5.4,
 adds to it here and in the formation term below), $\dot M_{j,i}$ the face-flux
 part of its mass rate and $s_{if}=\pm1$ the orientation of face $f$ relative to
 cell $i$. With $E_i$ [W] the cell's energy sources plus its face energy fluxes
@@ -14920,15 +15441,16 @@ $H=\int_{\Omega}\sum_j \xi_j\,h_j(T)\,dV$. Its balance is
 $$
 \frac{dH}{dt}
 = -\oint_{\partial\Omega}\Big(q_\mathrm{cond}+\sum_j h_j(T)\,J_j\Big)\hat{\mathbf n}\cdot d\mathbf A
-\;+\; \int_{\Omega}\Big(Q_\mathrm{rxn}+Q_\mathrm{rad}+\sum_j \omega_j\,h_j(T)\Big)dV ,
+\;+\; \int_{\Omega}\Big(Q_\mathrm{rxn}+Q_\mathrm{pc}+Q_\mathrm{rad}+\sum_j \omega_j\,h_j(T)\Big)dV ,
 $$
 
 with $q_\mathrm{cond}=-k_\mathrm{eff}\,\partial T/\partial z$ the conducted
 flux, $\sum_j h_j J_j$ the sensible enthalpy the mass fluxes carry,
 $Q_\mathrm{rxn}=-\sum_r h_r r_r$ the reaction heat with each $h_r$ quoted at
-the local temperature (§6.6.3), $\sum_j \omega_j\,h_j(T)$ the **formation
-term** (the sensible enthalpy a reaction moves from its reactant to its
-products at the local temperature), and $Q_\mathrm{rad}$ the radiation the cells
+the local temperature (§6.6.3), $Q_\mathrm{pc}=-\sum h_\mathrm{pc}r_\mathrm{pc}$ the heat
+of the phase changes (§6.7), $\sum_j \omega_j\,h_j(T)$ the **formation
+term** (the sensible enthalpy a reaction or phase change moves from its reactant to
+its products at the local temperature), and $Q_\mathrm{rad}$ the radiation the cells
 absorb less what they emit (nonzero under `RADIATIVE_TRANSFER` only; under
 `SURFACE_ABSORPTION` the absorbed flux is part of the boundary condition's
 flux). At a boundary the signed donor sum $H_r$ uses the surface temperature
@@ -14941,6 +15463,14 @@ conserved quantity: the change of composition at fixed temperature (the term
 $\sum_j h_j\,\partial\xi_j/\partial t$ of the product-rule expansion of
 $\partial_t\sum_j\xi_j h_j$) is part of it through the formation and
 carried terms, and nothing is approximated.
+
+The ledger books the heats of the reactions and phase changes as the kernels give them,
+so it closes whatever heat a deck declares; it does not test that the heat is a state
+function. A closed cycle does: a phase change that evaporates water at a hot face and
+condenses it again at a cooler one must return the column to the enthalpy it started
+from. V-PC-03a holds that on free water to $10^{-4}$ of the peak enthalpy rise, and
+V-PC-03b leaves 1.71 % of the heat of sorption exchanged on bound water, the excess heat
+capacity of §6.7.4.
 
 ---
 
@@ -16024,7 +16554,7 @@ Common $\boldsymbol{\theta}$ entries and how they enter the model:
   matrix is typically ill-conditioned in $(A,E)$ — see §17.7.4. Perturb
   $\log_{10}A_r$, not $A_r$ (§17.2.1).
 - **Heat of reaction** $h_r$ (or a `LinearProperty` $a+bT$, or a
-  `StateDependentProperty` for moisture sorption). It enters only the energy
+  `StateDependentProperty` for a conversion-dependent heat). It enters only the energy
   source $Q_{\text{rxn}}=-\sum_r h_r r_r$ linearly, so
   $\partial Q_{\text{rxn}}/\partial h_r = -r_r$. With the sign convention
   $h>0$ endothermic, increasing $h_r$ *cools* the cell, lowering $T_s$ — the
@@ -16123,14 +16653,13 @@ $\theta_q$ has no interactions.
 
 Pyrolysis.jl does not bundle a Sobol estimator into the core solver; instead the
 global workflow is built on the **parameter-sweep harness** (§17.5.3) plus a
-*surrogate* fitted to the swept solutions. The shipped reference implementation
-is `examples/sensitivity_analysis/sensitivity_sobol.jl`, which for the
-Douglas-fir cone problem:
+*surrogate* fitted to the swept solutions. For a cone problem with correlated
+material data, such a study:
 
-1. Draws correlated parameter samples (16 uncertain parameters in 7
-   *independent* groups — calibration biases, low/high-T virgin $c_p$, char
-   $c_p$, heat of sorption, heats of reaction). Correlations are *within-group
-   only*, so the standard Sobol formulas (17.4) apply at the group level without
+1. Draws correlated parameter samples, the uncertain parameters in *independent*
+   groups (by the measurement that supplied them: calibration biases, heat
+   capacities, heats of reaction). Correlations are *within-group only*, so the
+   standard Sobol formulas (17.4) apply at the group level without
    correlated-input extensions.
 2. Transforms the correlated draws to independent standard normals (Cholesky
    inverse for Gaussian groups; Rosenblatt sequential conditioning for
@@ -16150,9 +16679,8 @@ Douglas-fir cone problem:
 The PCE surrogate is the practical enabler: it converts an
 $\mathcal{O}(N_{\text{samples}})$ *solve* budget into closed-form indices,
 avoiding the $\mathcal{O}((p{+}2)N)$ solves of a raw Saltelli/Sobol pick-freeze
-estimator. The degree-selection rationale is documented in
-`examples/sensitivity_analysis/pce_degree_selection.md`; `compare_degrees.jl`
-sweeps the degree explicitly.
+estimator. The degree is a choice to check: the indices should change little
+between consecutive degrees.
 
 ### 17.5.3 Relation to the parameter-sweep harness
 
@@ -16430,7 +16958,7 @@ nor an apparently good fit guarantees parameter identifiability.
 ### 17.8.3 FDS
 
 Its reference-temperature/rate prescription estimates Arrhenius
-parameters (§6.9.3). That feature is distinct from whole-solve parameter
+parameters (§6.10.3). That feature is distinct from whole-solve parameter
 sensitivities. It is not evidence for a blanket absence of sensitivity or
 optimization workflows around FDS.
 
@@ -16439,7 +16967,7 @@ optimization workflows around FDS.
 TK's model and examples support its use of fitted parameters, without
 establishing a universal optimizer. GP §7 and V2 user guide §14 are checked
 against the linked property-estimation driver. FDS's kinetic-parameter
-prescription is checked against `READ_MATL` (§6.9.3).
+prescription is checked against `READ_MATL` (§6.10.3).
 Our qualified finite differences are described in §17.2; the white-pine
 inverse example uses Nelder–Mead in
 `examples/inverse_analysis/inverse_white_pine.jl`.
@@ -16484,10 +17012,10 @@ practical sensitivity and fitting checks.
    residual; responsibility for a clean, non-mutating, $C^1$ injection rests with
    the user (§17.4.1).
 
-6. **Global-sensitivity tooling lives in examples, not the core.** Sobol/PCE is
-   implemented in `examples/sensitivity_analysis/`, not as a packaged function;
-   the design and degree-selection choices (PCE order, BCa bootstrap,
-   group-correlation handling) are reference recipes rather than a stable API.
+6. **Global-sensitivity tooling is not in the package.** Sobol/PCE is not a packaged
+   function: a study builds it on `parameter_sweep` (§17.5.3), and the design and
+   degree-selection choices (PCE order, BCa bootstrap, group-correlation handling)
+   are recipes rather than a stable API.
 
 Cross-references: the colored Jacobian that an exact forward or adjoint
 sensitivity would reuse, and the mass-matrix system it belongs to, are §15
@@ -16702,6 +17230,7 @@ against an exact or manufactured solution; the burnout cases V-BO-01, 02, 03 and
 | Radiative transfer | V-RAD-01 – V-RAD-07 | closed forms of the two-stream rows, exact gray transfer, an independent method-of-lines solution of the same rows | equilibrium in an enclosure at the slab's temperature (V-RAD-01), a diffuse, collimated or cone heater through a slab (V-RAD-02), an isothermal slab's emission (V-RAD-03), a linear emissive power (V-RAD-04), the two-stream closure against exact transfer on burning profiles (V-RAD-05), the radiative energy ledger through burnout (V-RAD-06), in-depth heating with emission and a sub-surface temperature peak (V-RAD-07) |
 | Gas transport | V-GT-01 – V-GT-09 | Gaussian plane source, integrated wall/Darcy resistance, binary dusty-gas exchange, coupled thermal-film solution, Robin diffusion, prescribed-inflow Darcy $P^2$ profile, linear trace friction equation | wall transport and conservation, pressure closure and upwinding, interfaces and flow reversal, binary exchange, nonisothermal transport, transient mass-film uptake, imposed gas inflow and pressure outflow, multicomponent exchange with trace and absent species |
 | Coupled physics | V-CPL-01 – V-CPL-05 | Neumann two-phase Stefan solution, Landau ablation wave, exact shrink/swell endpoints, Frank-Kamenetskii slab, 0D TGA curve | a latent-heat front (apparent heat capacity, V-CPL-01; gated reaction, V-CPL-01b), surface regression on a moving mesh (V-CPL-02, 02b), volume change and the lateral-shrinkage law, the reaction–conduction bifurcation, the boundary and volume coupling of the kinetics |
+| Phase change | V-PC-01 – V-PC-05 | quadrature and Runge–Kutta integration of the uniform sealed cell, the total enthalpy of a closed cycle, the Neumann drying front with Kirchhoff's latent heat, Crank's uptake by a plane sheet | relaxation to the isotherm without (V-PC-01) and with its heat (V-PC-02), the energy of a heating and cooling cycle on free and bound water (V-PC-03a, b), a drying front of free water against the exchange rate and from the boiling point (V-PC-04a–c), sorption from a humid reservoir under lumped and dusty-gas transfer (V-PC-05) |
 | Manufactured solutions | V-MMS-01 – V-MMS-05 | the manufactured-solution driver of §18.2 | design order of the coupled residual on a fixed mesh in space and time, free-stream preservation under prescribed motion, order under prescribed and reaction-driven motion, order with radiative transfer on a moving mesh (V-MMS-05) |
 | Burnout | V-BO-01 – V-BO-12 | exact exponential thickness (V-BO-04); otherwise exact mass and thickness budgets, conservation ledgers and termination constraints | deactivation through complete burnout on a moving mesh under radiative transfer (V-BO-01) and on a fixed mesh under surface absorption (V-BO-02); the radiation leaving through a transparent substrate (V-BO-03); the interior-void stop (V-BO-05, `expected_retcode = :Terminated`); a graded mesh (V-BO-06), a layer of mixed composition (V-BO-07) and a thin layer on a deep substrate (V-BO-08); burnout through the event path on the exact conversion at orders 0.5 and 1.2 (V-BO-09a, b); heated burnout without a residue at orders 0, 0.5 and 1.2 with its threshold and mesh pairs (V-BO-10a–c); a cell that dies under a live one at order one against the corrected default (V-BO-11) |
 
@@ -16786,7 +17315,7 @@ fluxes' free stream, isothermal advection and convergence order
 (`test/kernels/test_relative_flux.jl`); and the closures of `test/physics/`. Two
 conventions matter when a case transcribes literature parameters: $h>0$ is
 endothermic here, the opposite of ThermaKin's published sign (Gpyro V2 and FDS use the
-same sign as Pyrolysis.jl, §6.9.2); and most exact-kinetics cases disable the
+same sign as Pyrolysis.jl, §6.10.2); and most exact-kinetics cases disable the
 depletion limiter (`DepletionLimiter(enabled = false)`) and leave the temperature
 gates open (§18.2.2), while V-RX-02d keeps the limiter on as a guard.
 
@@ -16840,7 +17369,7 @@ fluxes), and `solve_mms`. `solve_mms` passes the sources to `solve` through its
 $S_\xi V$, the temperature-rate source on the energy row (times the heat-capacity
 sum in the enthalpy form), both functions of the cell-centre position and the time,
 which the colored Jacobian differentiates with the rest of the residual, so the
-Jacobian stays exact with the sources active (§13.5.3). The cases are V-MMS-01
+Jacobian stays exact with the sources active (§13.5.4). The cases are V-MMS-01
 (the coupled system on a fixed mesh), V-MMS-02 (free-stream preservation under
 prescribed motion), V-MMS-03 (order under prescribed motion) and V-MMS-04 (order
 under reaction-driven motion).
@@ -16965,7 +17494,7 @@ $$
 $$
 
 the FDS-style recipe for recovering $(A_1,E_1)$ from a measured $T_p$ and peak rate
-(§6.9, §18.6.2). The module tests drive a 0.1 mm cell between two faces whose
+(§6.10, §18.6.2). The module tests drive a 0.1 mm cell between two faces whose
 temperature follows the ramp: the mass-loss rate peaks within 2 K of the exact $T_p$
 at 10 K/min, and the Kissinger slope over 5, 10, 20 and 40 K/min recovers $E_1$ within
 5 % (`test/kernels/test_kinetics.jl`). V-CPL-05 makes the chain exact: the 0D curve
@@ -17543,7 +18072,8 @@ quantitative agreement and are themselves verified:
 
 `examples/07_douglas_fir_cone.jl` is the most fully featured validation case:
 multi-step wood decomposition kinetics (five sequential steps through four
-intermediates to char, and moisture evaporation), surface absorption of the incident flux (wood is opaque),
+intermediates to char), the two-way phase change of the moisture on `CAST_SPRUCE`
+with its vapour starting in equilibrium and a humid ambient (§6.7), surface absorption of the incident flux (wood is opaque),
 gas gas transport with the pore gas initialized at ambient pressure
 (`background_gas_concentration`; the species molar masses enter the pressure
 closure, and all gases share one diffusive transfer coefficient, §5.11), and a
@@ -17572,12 +18102,97 @@ solid develops an internal pressure $P=\sum_g\xi_jR_gT/(M_j\varphi)$ (§9.1), an
 Darcy velocity $v_g=-(\kappa/\mu)\,\partial P/\partial z$ (§9.2) advects the pyrolysis
 gases outward. Diagnostics include the MLR change and the internal-pressure
 history relative to a lumped wall-only run; `08_gas_transport.jl` isolates the
-pressure-driven transport for a controlled check. Moisture transport
-(`moisture_hos_comparison.jl`) demonstrates the state-dependent heat-of-sorption path:
-the evaporation reaction carries a `StateDependentProperty` heat $h(T,\xi)$ that
-depends on the local moisture concentration (§6.6), and the moisture front, the
-evaporation plateau in $T(t)$ (the constant-temperature stall while water boils
-off) and the dried-mass profile are the comparison targets.
+pressure-driven transport for a controlled check. Its water step is ThermaKin's one-way
+reaction, transcribed for the comparison.
+
+Four suites run the phase change of §6.7 against measurements; each README
+(`scripts/lemta_moist_wood/`, `scripts/bilbao_wet_wood/`, `scripts/lee_ptw_capa/`,
+`scripts/fredlund_wet_wood/`) gives the deck, its sources and the one-way drying laws scored
+beside it.
+
+- **LEMTA cone-heater drying** (Diarra et al. 2026; data of Terrei, Diarra and Parent,
+  and the authors' along-grain records and slice values, L. Terrei, personal
+  communication). Blocks of 10 × 10 × 5 cm of five species at 0–30 % moisture, the grain
+  across or along the flux, heated at 4 kW·m⁻² for 2.5 h and then cooled, with
+  thermocouples from 2 to 40 mm and the mass, and spruce blocks at about 10 and 30 %
+  sliced after 0.5, 1 and 2 h. The decks take `CAST_SPRUCE` for the softwoods and
+  `CAST_BEECH` for oak and poplar, an ambient of 50 % relative humidity, and for the virgin
+  wood $\lambda = 1.5\times10^{-6}$ m²·s⁻¹ across
+  the grain and ten times that along it, Siau's ratio near 20 % moisture (§9.2.1), with
+  the along-grain densities of Diarra et al. (2026) and conductivities of Flity et al.
+  (2024).
+  - *Across the grain*, on the eleven long runs, the thermocouples are matched to 5.6 K
+    rms (5.8 K on all 22 runs), the passage from 85 to 115 °C comes 4.9 min late on
+    average, the ratio of the heating rates at 100 and 70 °C is the measured 0.30, and
+    the sign of the mass change after the heater is withdrawn is right in all eleven.
+    The water lost is 0.67 of the measured, with the deep thermocouples 4–7 K warm.
+  - *Along the grain*, on ten moist runs (temperatures on six), the water lost is 0.99 of
+    the measured (0.78–1.25), the thermocouples are matched to 5.4 K rms, the passage
+    from 85 to 115 °C at 10 mm comes 3.9 min late, the heating-rate ratio is 0.59 against
+    0.53 measured, and the samples at about 10 % regain water after the withdrawal, as
+    measured, in five of five. At the across-grain $\lambda$ the same runs keep 0.61 of
+    the water, the across-grain shortfall, and the across-grain permeability in place of
+    the along-grain one leaves the water at 0.97: the drying is set by $\lambda$. The
+    across-grain shortfall is therefore consistent with water leaving those blocks through
+    their end grain, which a one-dimensional column across the grain does not carry.
+  - *The moisture profiles.* The water driven inward builds a bank in every slice set,
+    the wettest slice at 1.17–1.24 times the unexposed moisture across the grain and
+    1.16–1.22 along it, against 1.02–1.05 measured (`profiles.jl`); a larger $\lambda$
+    shrinks it without removing it. No constant $\lambda$ matches the water lost and the
+    temperatures together in either direction, so the case does not validate moisture
+    transport; the bank is open.
+- **Bilbao et al. (1996)**, *Pinus pinaster* slabs of 19 mm at 0, 9 and 20 % moisture,
+  heated by a radiant panel in nitrogen, with thermocouples at 1, 9 and 19 mm and the
+  mass: the case under pyrolysis, with vapour driven inward against a sealed back. The
+  back face passes 373 K within 1–2 min of the measurement, the later plateau at 9 mm sits
+  at 380–382 K against 375–378 K measured, the moisture ahead of the front rises 1.3–1.4
+  times and the pore pressure reaches 144–158 kPa gauge. The early heating at 9 mm in the
+  20 % runs (375 K measured at 8 min, when the 1 mm record is at 440 K, against 339–343 K computed) is
+  reproduced by no one-dimensional variant (§1.8.1 item 9).
+- **Lee et al. (2025)**, disks of pressure-treated southern pine 9.0 mm thick at 6.2 %
+  moisture, heated in nitrogen at 29 and 63 kW·m⁻² in the Controlled Atmosphere Pyrolysis
+  Apparatus II, with the temperature of the bottom face (an IR camera on a painted copper
+  foil) and the mass loss rate, three tests at each flux, read from the paper's Figs 6 and
+  7. The deck is the material of `examples/08` under the boundary conditions of the
+  authors' ThermaKin2Ds model; with the paper's one-way water step it reproduces that
+  model, each passage of 340, 360, 375 and 400 K within 6 s. The measured bottom face holds
+  a shoulder at 375–385 K for 69 s at 63 kW·m⁻² and 129 s at 29 kW·m⁻², and reaches 340 K at
+  34 s at 63 kW·m⁻², where the one-way step needs 79 s. Under the phase change the vapour
+  driven to the cold back condenses there and the back reaches 340 K at 57 s, but at the
+  deck's permeability, $10^{-15}$ m², its pore pressure rises to 2–3 bar and the shoulder
+  sits at 405–410 K. With $\kappa = 10^{-14}$ m² the 29 kW·m⁻² history is matched to 4.4 K
+  rms, the shoulder's 118 s against 129 s included; at 63 kW·m⁻² only
+  $\lambda = 2\times10^{-5}$ m²·s⁻¹, about 200 times the measured bound-water transfer at
+  6 % (§9.2.1), heats the back as fast as measured, and that value runs 36 s early at
+  29 kW·m⁻². No constant pair of $\lambda$ and $\kappa$ fits both fluxes. The mass lost,
+  3.6 and 3.4 kg·m⁻², is the pyrolysis model's and lies within the tests' (the rig's records,
+  S. Lee, personal communication).
+- **Fredlund (1988, 1985)**, cubes of spruce at 14.5 % and pine at 24 % moisture, 135 mm,
+  heated across the grain at 90 kW·m⁻² in air with flaming, with thermocouples and gauge
+  pore-pressure needles at 10–70 mm, and a pine cube at 14 % with resistive moisture
+  sensors, read from the reports' figures. The deck takes the inputs of Fredlund's model
+  with its permeability, $0.88\times10^{-16}$ m². The flame and the char's oxidation are
+  outside the deck, so the cubes are solved below their measured 10 mm thermocouple, with
+  the conductivities fitted to the oven-dry cube (wood ×0.6, char ×2.7), which leaves 30 K
+  rms there. In the pine the passages of 150 and 200 °C at 20–40 mm are matched within
+  1.5 min. The measured interior waits between 100 and 150 °C for 5.5–19.5 min, two to three
+  times as long as the dry one; the phase change waits half that, the gated one-way law a
+  sixth to a quarter. The measured pressure peaks, 106–113 kPa gauge at 30–50 mm in the
+  spruce and 188 kPa at 20 mm in the pine, come when the needle's depth is at 280–400 °C, in
+  the pyrolysis zone, where the deck holds less than 10 kPa; while the moisture passes, the
+  measured pressure rises to at most 35 kPa in the spruce and about 80 kPa in the pine, and
+  the phase change gives 70 and 68–88 kPa. The moisture rises ahead of the front to
+  1.18–1.22 times its start against 1.31–1.47 in the 1985 record, which peaks 1.4–5 min
+  before the local 100 °C at 40–85 °C (uncorrected resistance readings); ten times the
+  transfer coefficient gives 1.34, ahead of 100 °C. The wet spruce stays 30–64 K cold at depth (its 70 mm thermocouple reads 69 °C
+  at 40 min, the model 24 °C): the case's thermal side does not carry, and its plateau
+  lengths may hold the thermal model's error.
+
+Over the exchange rates $10^2$–$10^4$ s⁻¹ (§6.7.5) the LEMTA and Bilbao scores move by at
+most 0.01 K, the Lee and Fredlund ones by at most 0.2 K and 0.2 min. At the default
+tolerance the four cases' energy and mass closures, up to $4\times10^{-4}$, are the
+integration error of the trace vapour multiplied by $K_{\text{pc}}$; at reltol $10^{-8}$
+they fall below $2\times10^{-7}$ (mass) and $2\times10^{-5}$ (energy).
 
 ### 18.6.4 Comparison to ThermaKin2Ds, Gpyro V2, and FDS
 
@@ -17587,7 +18202,7 @@ separate modeling differences from numerical errors. Remaining disagreement
 can arise from either, from input transcription, or from output definitions.
 
 - **ThermaKin2Ds:** match reaction extent, heat sign, component properties,
-  gas-transport and radiation algorithms (§§6.9, 8.9, 9.2). Its bimolecular
+  gas-transport and radiation algorithms (§§6.10, 8.9, 9.2). Its bimolecular
   kinetics and general 2D configurations are not represented by our
   single-reactant 1D solves. Replacing a bimolecular reaction by a sequence
   is a new model, not an exact conversion. The ThermaKin2Ds 7 overlays
@@ -17806,7 +18421,7 @@ dependence.
 ### 18.8.5 Stale-flux regression
 
 One silent failure mode carries a standing regression guard. The incident radiative flux
-is evaluated at *every* residual evaluation with no constancy detection (§8.4, §13.5.2),
+is evaluated at *every* residual evaluation with no constancy detection (§8.4, §13.5.3),
 so a time-varying flux can never be frozen at its initial value. A regression would be
 silent, so the modulated-flux comparison under $q_0(1+\sin2\pi t)$ against a constant
 $q_0$ (§18.2.3) is kept as a permanent check in `test/kernels/test_boundary_conditions.jl`.
@@ -17938,7 +18553,18 @@ The V&V coverage above has gaps that a user should weigh:
    estimates and the empirical shrinkage laws are unvalidated or simplified, and cases that
    lean on them inherit that uncertainty.
 
-7. **Cross-code coverage.** ThermaKin2Ds cannot express V-CPL-01,
+7. **Moisture transport is not validated** (§18.6.3): the phase change matches the
+   temperatures of the LEMTA drying tests, the water lost along the grain, the cold-side
+   plateau of Bilbao et al. and the bottom-face shoulder of Lee et al. at 29 kW·m⁻² (with a
+   permeability ten times the deck's), but no constant transfer coefficient matches the
+   water lost and the temperatures together in either grain direction, nor the Lee
+   shoulder at both fluxes; the model builds a moisture
+   bank (1.16–1.24 times the unexposed moisture) that no slice profile shows, while Fredlund's
+   resistive record shows a larger and wider one (1.31–1.47 times) than the model's
+   (1.18–1.22); and the early interior heating of the wettest Bilbao runs and of the Lee
+   disks at 63 kW·m⁻² is open.
+
+8. **Cross-code coverage.** ThermaKin2Ds cannot express V-CPL-01,
    V-RX-02a/c or the pressure-driven gas cases, and its runs can be reproduced
    only where its non-redistributable source is available. FDS has no
    gas-transport comparison. The MaCFP-2 PMMA community submissions, committed under

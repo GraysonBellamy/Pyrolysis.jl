@@ -522,6 +522,14 @@ permits only donor bulk flow, infinite conductance fixes composition.
 are solved consistently. These conditions do not combine with `+`; one closure
 is assigned to each tag.
 
+For a material with a phase change the film exchanges its vapour in both directions:
+the face dries toward a reservoir drier than the pores and takes up vapour from a
+wetter one. A humid reservoir names the vapour at
+$x_{v,\infty} = \mathrm{RH}\,p_{\text{sat}}(T_\infty)/P$ (§9.4.1); `setup` warns when the
+reservoir of an open condition (`AmbientGasBC`, `ConvectivePressureBC`) on such a material
+does not name it, since the face is then a perfectly dry sink. A reservoir that names it
+at a mole fraction of zero is dry on purpose.
+
 ---
 
 ## 12.5 Pressure-gradient and hydraulic-resistance boundaries
@@ -690,6 +698,13 @@ equally spaced times from $t_{\text{start}}$ to $t_{\text{end}}$. Profile helper
 (`step_profile`, `linear_profile`, `gaussian_profile`, `tanh_profile`, in
 `Pyrolysis.Problem`, not exported at the top level) are provided for non-uniform
 seeds (e.g. a pre-heated layer).
+
+A wet material's pore gas is not defaulted: a deck gives the vapour of each phase change
+in equilibrium with its liquid and the background gas at the rest of the pressure,
+with `equilibrium_vapour_concentration`, `equilibrium_vapour_pressure` and
+`background_gas_concentration` of the material and the condensed composition (§6.7.6).
+`setup` warns when the start is more than 1 % off equilibrium; such a start relaxes in
+about $1/K_{\text{pc}}$.
 
 ### 12.8.3 The dry-solid mass denominator $m_{\text{dry},i}$
 

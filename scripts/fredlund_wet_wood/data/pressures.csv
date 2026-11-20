@@ -1,0 +1,23 @@
+# Fredlund (1988), TVBB-1003: measured peak pore pressures, gauge (the plotted
+# total pressure less the 10 mWG ambient; 1 mWG = 9.79 kPa), from the lower
+# panels of Fig. 9.3 (spruce at 14.5 %, the 1993 paper's test 9) and
+# Fig. 9.12 (pine at 24 %), read by hand from 200 dpi renders (printed
+# pp. 225 and 234), +-0.3 mWG and +-1 min, data clock (exposure from about
+# 8 min). Each depth has a pair of oil-filled needles (open and closed), so
+# the reading is gauge; transducers +-1 % (thesis Tables 6.3-6.4). The author
+# blames local cracking for the flat records (spruce 20 and 60 mm) and the low
+# pine readings at 30-40 mm (pp. 200, 224). status: peak = a maximum;
+# end = still rising when the record ends; cracked = flat or cut short.
+case,depth_mm,p_peak_mWG,t_peak_min_from,t_peak_min_to,status
+spruce14,10,13.5,19.7,24.4,peak
+spruce14,20,1.0,,,cracked
+spruce14,30,11.4,42.0,48.0,peak
+spruce14,40,10.8,61.0,67.0,peak
+spruce14,50,11.5,74.0,78.0,peak
+spruce14,60,0.5,,,cracked
+spruce14,70,9.7,80.0,80.0,end
+pine24,10,18.6,18.0,18.0,peak
+pine24,20,19.2,35.7,35.7,peak
+pine24,30,6.0,,,cracked
+pine24,40,7.2,,,cracked
+pine24,50,6.3,75.0,75.0,end

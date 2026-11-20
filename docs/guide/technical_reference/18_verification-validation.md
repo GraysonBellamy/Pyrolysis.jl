@@ -198,6 +198,7 @@ against an exact or manufactured solution; the burnout cases V-BO-01, 02, 03 and
 | Radiative transfer | V-RAD-01 – V-RAD-07 | closed forms of the two-stream rows, exact gray transfer, an independent method-of-lines solution of the same rows | equilibrium in an enclosure at the slab's temperature (V-RAD-01), a diffuse, collimated or cone heater through a slab (V-RAD-02), an isothermal slab's emission (V-RAD-03), a linear emissive power (V-RAD-04), the two-stream closure against exact transfer on burning profiles (V-RAD-05), the radiative energy ledger through burnout (V-RAD-06), in-depth heating with emission and a sub-surface temperature peak (V-RAD-07) |
 | Gas transport | V-GT-01 – V-GT-09 | Gaussian plane source, integrated wall/Darcy resistance, binary dusty-gas exchange, coupled thermal-film solution, Robin diffusion, prescribed-inflow Darcy $P^2$ profile, linear trace friction equation | wall transport and conservation, pressure closure and upwinding, interfaces and flow reversal, binary exchange, nonisothermal transport, transient mass-film uptake, imposed gas inflow and pressure outflow, multicomponent exchange with trace and absent species |
 | Coupled physics | V-CPL-01 – V-CPL-05 | Neumann two-phase Stefan solution, Landau ablation wave, exact shrink/swell endpoints, Frank-Kamenetskii slab, 0D TGA curve | a latent-heat front (apparent heat capacity, V-CPL-01; gated reaction, V-CPL-01b), surface regression on a moving mesh (V-CPL-02, 02b), volume change and the lateral-shrinkage law, the reaction–conduction bifurcation, the boundary and volume coupling of the kinetics |
+| Phase change | V-PC-01 – V-PC-05 | quadrature and Runge–Kutta integration of the uniform sealed cell, the total enthalpy of a closed cycle, the Neumann drying front with Kirchhoff's latent heat, Crank's uptake by a plane sheet | relaxation to the isotherm without (V-PC-01) and with its heat (V-PC-02), the energy of a heating and cooling cycle on free and bound water (V-PC-03a, b), a drying front of free water against the exchange rate and from the boiling point (V-PC-04a–c), sorption from a humid reservoir under lumped and dusty-gas transfer (V-PC-05) |
 | Manufactured solutions | V-MMS-01 – V-MMS-05 | the manufactured-solution driver of §18.2 | design order of the coupled residual on a fixed mesh in space and time, free-stream preservation under prescribed motion, order under prescribed and reaction-driven motion, order with radiative transfer on a moving mesh (V-MMS-05) |
 | Burnout | V-BO-01 – V-BO-12 | exact exponential thickness (V-BO-04); otherwise exact mass and thickness budgets, conservation ledgers and termination constraints | deactivation through complete burnout on a moving mesh under radiative transfer (V-BO-01) and on a fixed mesh under surface absorption (V-BO-02); the radiation leaving through a transparent substrate (V-BO-03); the interior-void stop (V-BO-05, `expected_retcode = :Terminated`); a graded mesh (V-BO-06), a layer of mixed composition (V-BO-07) and a thin layer on a deep substrate (V-BO-08); burnout through the event path on the exact conversion at orders 0.5 and 1.2 (V-BO-09a, b); heated burnout without a residue at orders 0, 0.5 and 1.2 with its threshold and mesh pairs (V-BO-10a–c); a cell that dies under a live one at order one against the corrected default (V-BO-11) |
 
@@ -282,7 +283,7 @@ fluxes' free stream, isothermal advection and convergence order
 (`test/kernels/test_relative_flux.jl`); and the closures of `test/physics/`. Two
 conventions matter when a case transcribes literature parameters: $h>0$ is
 endothermic here, the opposite of ThermaKin's published sign (Gpyro V2 and FDS use the
-same sign as Pyrolysis.jl, §6.9.2); and most exact-kinetics cases disable the
+same sign as Pyrolysis.jl, §6.10.2); and most exact-kinetics cases disable the
 depletion limiter (`DepletionLimiter(enabled = false)`) and leave the temperature
 gates open (§18.2.2), while V-RX-02d keeps the limiter on as a guard.
 
@@ -336,7 +337,7 @@ fluxes), and `solve_mms`. `solve_mms` passes the sources to `solve` through its
 $S_\xi V$, the temperature-rate source on the energy row (times the heat-capacity
 sum in the enthalpy form), both functions of the cell-centre position and the time,
 which the colored Jacobian differentiates with the rest of the residual, so the
-Jacobian stays exact with the sources active (§13.5.3). The cases are V-MMS-01
+Jacobian stays exact with the sources active (§13.5.4). The cases are V-MMS-01
 (the coupled system on a fixed mesh), V-MMS-02 (free-stream preservation under
 prescribed motion), V-MMS-03 (order under prescribed motion) and V-MMS-04 (order
 under reaction-driven motion).
@@ -461,7 +462,7 @@ $$
 $$
 
 the FDS-style recipe for recovering $(A_1,E_1)$ from a measured $T_p$ and peak rate
-(§6.9, §18.6.2). The module tests drive a 0.1 mm cell between two faces whose
+(§6.10, §18.6.2). The module tests drive a 0.1 mm cell between two faces whose
 temperature follows the ramp: the mass-loss rate peaks within 2 K of the exact $T_p$
 at 10 K/min, and the Kissinger slope over 5, 10, 20 and 40 K/min recovers $E_1$ within
 5 % (`test/kernels/test_kinetics.jl`). V-CPL-05 makes the chain exact: the 0D curve
@@ -1039,7 +1040,8 @@ quantitative agreement and are themselves verified:
 
 `examples/07_douglas_fir_cone.jl` is the most fully featured validation case:
 multi-step wood decomposition kinetics (five sequential steps through four
-intermediates to char, and moisture evaporation), surface absorption of the incident flux (wood is opaque),
+intermediates to char), the two-way phase change of the moisture on `CAST_SPRUCE`
+with its vapour starting in equilibrium and a humid ambient (§6.7), surface absorption of the incident flux (wood is opaque),
 gas gas transport with the pore gas initialized at ambient pressure
 (`background_gas_concentration`; the species molar masses enter the pressure
 closure, and all gases share one diffusive transfer coefficient, §5.11), and a
@@ -1068,12 +1070,97 @@ solid develops an internal pressure $P=\sum_g\xi_jR_gT/(M_j\varphi)$ (§9.1), an
 Darcy velocity $v_g=-(\kappa/\mu)\,\partial P/\partial z$ (§9.2) advects the pyrolysis
 gases outward. Diagnostics include the MLR change and the internal-pressure
 history relative to a lumped wall-only run; `08_gas_transport.jl` isolates the
-pressure-driven transport for a controlled check. Moisture transport
-(`moisture_hos_comparison.jl`) demonstrates the state-dependent heat-of-sorption path:
-the evaporation reaction carries a `StateDependentProperty` heat $h(T,\xi)$ that
-depends on the local moisture concentration (§6.6), and the moisture front, the
-evaporation plateau in $T(t)$ (the constant-temperature stall while water boils
-off) and the dried-mass profile are the comparison targets.
+pressure-driven transport for a controlled check. Its water step is ThermaKin's one-way
+reaction, transcribed for the comparison.
+
+Four suites run the phase change of §6.7 against measurements; each README
+(`scripts/lemta_moist_wood/`, `scripts/bilbao_wet_wood/`, `scripts/lee_ptw_capa/`,
+`scripts/fredlund_wet_wood/`) gives the deck, its sources and the one-way drying laws scored
+beside it.
+
+- **LEMTA cone-heater drying** (Diarra et al. 2026; data of Terrei, Diarra and Parent,
+  and the authors' along-grain records and slice values, L. Terrei, personal
+  communication). Blocks of 10 × 10 × 5 cm of five species at 0–30 % moisture, the grain
+  across or along the flux, heated at 4 kW·m⁻² for 2.5 h and then cooled, with
+  thermocouples from 2 to 40 mm and the mass, and spruce blocks at about 10 and 30 %
+  sliced after 0.5, 1 and 2 h. The decks take `CAST_SPRUCE` for the softwoods and
+  `CAST_BEECH` for oak and poplar, an ambient of 50 % relative humidity, and for the virgin
+  wood $\lambda = 1.5\times10^{-6}$ m²·s⁻¹ across
+  the grain and ten times that along it, Siau's ratio near 20 % moisture (§9.2.1), with
+  the along-grain densities of Diarra et al. (2026) and conductivities of Flity et al.
+  (2024).
+  - *Across the grain*, on the eleven long runs, the thermocouples are matched to 5.6 K
+    rms (5.8 K on all 22 runs), the passage from 85 to 115 °C comes 4.9 min late on
+    average, the ratio of the heating rates at 100 and 70 °C is the measured 0.30, and
+    the sign of the mass change after the heater is withdrawn is right in all eleven.
+    The water lost is 0.67 of the measured, with the deep thermocouples 4–7 K warm.
+  - *Along the grain*, on ten moist runs (temperatures on six), the water lost is 0.99 of
+    the measured (0.78–1.25), the thermocouples are matched to 5.4 K rms, the passage
+    from 85 to 115 °C at 10 mm comes 3.9 min late, the heating-rate ratio is 0.59 against
+    0.53 measured, and the samples at about 10 % regain water after the withdrawal, as
+    measured, in five of five. At the across-grain $\lambda$ the same runs keep 0.61 of
+    the water, the across-grain shortfall, and the across-grain permeability in place of
+    the along-grain one leaves the water at 0.97: the drying is set by $\lambda$. The
+    across-grain shortfall is therefore consistent with water leaving those blocks through
+    their end grain, which a one-dimensional column across the grain does not carry.
+  - *The moisture profiles.* The water driven inward builds a bank in every slice set,
+    the wettest slice at 1.17–1.24 times the unexposed moisture across the grain and
+    1.16–1.22 along it, against 1.02–1.05 measured (`profiles.jl`); a larger $\lambda$
+    shrinks it without removing it. No constant $\lambda$ matches the water lost and the
+    temperatures together in either direction, so the case does not validate moisture
+    transport; the bank is open.
+- **Bilbao et al. (1996)**, *Pinus pinaster* slabs of 19 mm at 0, 9 and 20 % moisture,
+  heated by a radiant panel in nitrogen, with thermocouples at 1, 9 and 19 mm and the
+  mass: the case under pyrolysis, with vapour driven inward against a sealed back. The
+  back face passes 373 K within 1–2 min of the measurement, the later plateau at 9 mm sits
+  at 380–382 K against 375–378 K measured, the moisture ahead of the front rises 1.3–1.4
+  times and the pore pressure reaches 144–158 kPa gauge. The early heating at 9 mm in the
+  20 % runs (375 K measured at 8 min, when the 1 mm record is at 440 K, against 339–343 K computed) is
+  reproduced by no one-dimensional variant (§1.8.1 item 9).
+- **Lee et al. (2025)**, disks of pressure-treated southern pine 9.0 mm thick at 6.2 %
+  moisture, heated in nitrogen at 29 and 63 kW·m⁻² in the Controlled Atmosphere Pyrolysis
+  Apparatus II, with the temperature of the bottom face (an IR camera on a painted copper
+  foil) and the mass loss rate, three tests at each flux, read from the paper's Figs 6 and
+  7. The deck is the material of `examples/08` under the boundary conditions of the
+  authors' ThermaKin2Ds model; with the paper's one-way water step it reproduces that
+  model, each passage of 340, 360, 375 and 400 K within 6 s. The measured bottom face holds
+  a shoulder at 375–385 K for 69 s at 63 kW·m⁻² and 129 s at 29 kW·m⁻², and reaches 340 K at
+  34 s at 63 kW·m⁻², where the one-way step needs 79 s. Under the phase change the vapour
+  driven to the cold back condenses there and the back reaches 340 K at 57 s, but at the
+  deck's permeability, $10^{-15}$ m², its pore pressure rises to 2–3 bar and the shoulder
+  sits at 405–410 K. With $\kappa = 10^{-14}$ m² the 29 kW·m⁻² history is matched to 4.4 K
+  rms, the shoulder's 118 s against 129 s included; at 63 kW·m⁻² only
+  $\lambda = 2\times10^{-5}$ m²·s⁻¹, about 200 times the measured bound-water transfer at
+  6 % (§9.2.1), heats the back as fast as measured, and that value runs 36 s early at
+  29 kW·m⁻². No constant pair of $\lambda$ and $\kappa$ fits both fluxes. The mass lost,
+  3.6 and 3.4 kg·m⁻², is the pyrolysis model's and lies within the tests' (the rig's records,
+  S. Lee, personal communication).
+- **Fredlund (1988, 1985)**, cubes of spruce at 14.5 % and pine at 24 % moisture, 135 mm,
+  heated across the grain at 90 kW·m⁻² in air with flaming, with thermocouples and gauge
+  pore-pressure needles at 10–70 mm, and a pine cube at 14 % with resistive moisture
+  sensors, read from the reports' figures. The deck takes the inputs of Fredlund's model
+  with its permeability, $0.88\times10^{-16}$ m². The flame and the char's oxidation are
+  outside the deck, so the cubes are solved below their measured 10 mm thermocouple, with
+  the conductivities fitted to the oven-dry cube (wood ×0.6, char ×2.7), which leaves 30 K
+  rms there. In the pine the passages of 150 and 200 °C at 20–40 mm are matched within
+  1.5 min. The measured interior waits between 100 and 150 °C for 5.5–19.5 min, two to three
+  times as long as the dry one; the phase change waits half that, the gated one-way law a
+  sixth to a quarter. The measured pressure peaks, 106–113 kPa gauge at 30–50 mm in the
+  spruce and 188 kPa at 20 mm in the pine, come when the needle's depth is at 280–400 °C, in
+  the pyrolysis zone, where the deck holds less than 10 kPa; while the moisture passes, the
+  measured pressure rises to at most 35 kPa in the spruce and about 80 kPa in the pine, and
+  the phase change gives 70 and 68–88 kPa. The moisture rises ahead of the front to
+  1.18–1.22 times its start against 1.31–1.47 in the 1985 record, which peaks 1.4–5 min
+  before the local 100 °C at 40–85 °C (uncorrected resistance readings); ten times the
+  transfer coefficient gives 1.34, ahead of 100 °C. The wet spruce stays 30–64 K cold at depth (its 70 mm thermocouple reads 69 °C
+  at 40 min, the model 24 °C): the case's thermal side does not carry, and its plateau
+  lengths may hold the thermal model's error.
+
+Over the exchange rates $10^2$–$10^4$ s⁻¹ (§6.7.5) the LEMTA and Bilbao scores move by at
+most 0.01 K, the Lee and Fredlund ones by at most 0.2 K and 0.2 min. At the default
+tolerance the four cases' energy and mass closures, up to $4\times10^{-4}$, are the
+integration error of the trace vapour multiplied by $K_{\text{pc}}$; at reltol $10^{-8}$
+they fall below $2\times10^{-7}$ (mass) and $2\times10^{-5}$ (energy).
 
 ### 18.6.4 Comparison to ThermaKin2Ds, Gpyro V2, and FDS
 
@@ -1083,7 +1170,7 @@ separate modeling differences from numerical errors. Remaining disagreement
 can arise from either, from input transcription, or from output definitions.
 
 - **ThermaKin2Ds:** match reaction extent, heat sign, component properties,
-  gas-transport and radiation algorithms (§§6.9, 8.9, 9.2). Its bimolecular
+  gas-transport and radiation algorithms (§§6.10, 8.9, 9.2). Its bimolecular
   kinetics and general 2D configurations are not represented by our
   single-reactant 1D solves. Replacing a bimolecular reaction by a sequence
   is a new model, not an exact conversion. The ThermaKin2Ds 7 overlays
@@ -1302,7 +1389,7 @@ dependence.
 ### 18.8.5 Stale-flux regression
 
 One silent failure mode carries a standing regression guard. The incident radiative flux
-is evaluated at *every* residual evaluation with no constancy detection (§8.4, §13.5.2),
+is evaluated at *every* residual evaluation with no constancy detection (§8.4, §13.5.3),
 so a time-varying flux can never be frozen at its initial value. A regression would be
 silent, so the modulated-flux comparison under $q_0(1+\sin2\pi t)$ against a constant
 $q_0$ (§18.2.3) is kept as a permanent check in `test/kernels/test_boundary_conditions.jl`.
@@ -1434,7 +1521,18 @@ The V&V coverage above has gaps that a user should weigh:
    estimates and the empirical shrinkage laws are unvalidated or simplified, and cases that
    lean on them inherit that uncertainty.
 
-7. **Cross-code coverage.** ThermaKin2Ds cannot express V-CPL-01,
+7. **Moisture transport is not validated** (§18.6.3): the phase change matches the
+   temperatures of the LEMTA drying tests, the water lost along the grain, the cold-side
+   plateau of Bilbao et al. and the bottom-face shoulder of Lee et al. at 29 kW·m⁻² (with a
+   permeability ten times the deck's), but no constant transfer coefficient matches the
+   water lost and the temperatures together in either grain direction, nor the Lee
+   shoulder at both fluxes; the model builds a moisture
+   bank (1.16–1.24 times the unexposed moisture) that no slice profile shows, while Fredlund's
+   resistive record shows a larger and wider one (1.31–1.47 times) than the model's
+   (1.18–1.22); and the early interior heating of the wettest Bilbao runs and of the Lee
+   disks at 63 kW·m⁻² is open.
+
+8. **Cross-code coverage.** ThermaKin2Ds cannot express V-CPL-01,
    V-RX-02a/c or the pressure-driven gas cases, and its runs can be reproduced
    only where its non-redistributable source is available. FDS has no
    gas-transport comparison. The MaCFP-2 PMMA community submissions, committed under

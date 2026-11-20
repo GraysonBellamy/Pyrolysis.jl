@@ -252,11 +252,13 @@ _new_nodes(cl::BalanceRowClosure, k::Int) =
 """
 	closure_rows!(c, closure, ds, topology, material, t)
 
-Fill, from the kernels' reaction mass sources in `c.S_mass`, the cell strain
-rates `c.θ` and, under a variable cross section, the history sources
+Fill, from the kernels' mass sources in `c.S_mass`, the cell strain rates
+`c.θ` and, under a variable cross section, the history sources
 `c.S_carried`; then the residuals `c.r_velocity` of the velocity rows. Runs
 after the kernels and before any external source, so the strain rates are the
-reactions' alone. A fixed mesh (`closure = nothing`) has none of these.
+reactions' and phase changes' alone: a liquid that evaporates shrinks the
+cell by its volume, and one that condenses swells it. A fixed mesh
+(`closure = nothing`) has none of these.
 """
 @inline closure_rows!(c, ::Nothing, ds, topo, material, t) = nothing
 

@@ -67,9 +67,11 @@ Conventions:
 | $a$, $a_s$ | Absorptivity applied to the incident flux of a `RadiativeFluxBC`: the condition's own `absorptivity` when it has one, otherwise $a_{\text{eff}}$ of the outermost live cell; at the face under surface absorption, to the beams under radiative transfer (§8.2, §8.4.2, §12.3.5) | – |
 | $a_i$, $a_n$ | Activation switch of cell *i* / node *n* of the equidistribution correction (§11; overload A9) | – |
 | $a^{\text{lo}}_i$, $a^{\text{lo}}_n$ | Second switch of cell *i* / node *n*, through which a layer's second estimate enters the correction (§11.7.5; overload A9) | – |
+| $a(X,T)$ | Activity of the liquid of a phase change, $p_{\text{eq}}/p_{\text{sat}}$, always written with its arguments (§6.7.2; overload A9) | – |
 | $B$ | Spalding blowing number $\dot m''c_{p,g}/h$ of the convective blowing models (§12.3.3) | – |
 | $B_{\lambda}$, $B_{\Gamma}$ | Film parameters of the blowing models: $B_{\lambda} = 2\lambda \sum_j N_j c_{p,j}(T_s)/h$ (`CouetteFilm`, $\lambda$ its film constant, overload A6); $B_{\Gamma} = (\dot m'' c_{p,\infty}/h)(\Gamma_{\infty}/\Gamma_g)^{n_{\Gamma}}$ (`PropertyRatioFilm`, `PoolingFilm`) (§12.3.3; overload B1) | – |
 | $\mathcal B_i$ | Emissive power of cell *i*, $\sigma\tilde T_i^4$ at its trial temperature (§8.3.2) | W·m⁻² |
+| $b_1,\dots,b_6$ | Coefficients of the saturation curve of water, (6.12) | – |
 | $C_i$ | Heat-capacity sum of cell *i*, $\sum_j m_{j,i} c_{p,j}(\tilde T_i)$ at the trial temperature, smoothly floored at $C_{\text{floor},i}$ | J·K⁻¹ |
 | $C_{\text{floor},i}$ | Capacity floor of cell *i*, $\rho c_{p,\text{floor}} V_i(0)$ (§5.4.3, §13.10.4) | J·K⁻¹ |
 | $C_{\text{reg},i}$ | Regularizing capacity of the extended caloric relation: zero while the cell's guaranteed heat capacity is at least $2C_{\text{floor},i}$, rising to $C_{\text{floor},i}$ as that capacity vanishes (§5.4.3, §13.10.4, §16.4) | J·K⁻¹ |
@@ -109,6 +111,7 @@ Conventions:
 | $H^{\text{lost}}_e$, $H^{\text{reg}}_e$ | Sensible enthalpy deactivation event *e* removes from the live region without passing it to the receiver (vented gas, the last cell's inventory) / caloric regularization the merged cells held that the receiver does not (§16.7) | J |
 | $h$ (kinetics), $h_r$ | Heat of reaction, per kg of reactant | J·kg⁻¹ |
 | $h_j(T)$ | Sensible enthalpy of component *j* on the $T_{\text{ref}}$ datum, $\int_{T_{\text{ref}}}^T c_{p,j} dT$ (overload H1) | J·kg⁻¹ |
+| $h_{\text{pc}}$ | Heat a phase change takes per kg of liquid evaporated, (6.16) (overload H1) | J·kg⁻¹ |
 | $h_{\text{conv}}$ | Convective heat-transfer coefficient (bare $h$ inside §12.3.3); $h_{\text{eff}} = R_b h_{\text{conv}}$ the coefficient under blowing | W·m⁻²·K⁻¹ |
 | $h_m$ | External mass-transfer (film) coefficient | m·s⁻¹ |
 | $h_P$ | Pressure-transfer coefficient (convective pressure BC) | m·Pa⁻¹·s⁻¹ |
@@ -121,6 +124,7 @@ Conventions:
 | $J_{\text{bc},j}$ | Outward flux of component *j* prescribed at a boundary face (§12.4, §13.7.5) | kg·m⁻²·s⁻¹ |
 | $\kappa$ | Effective condensed-matrix permeability | m² |
 | $K_j$ | Species wall diffusivity in the gas-friction equations | m²·s⁻¹ |
+| $K_{\text{pc}}$ | Exchange rate of a phase change, the inverse relaxation time of its pore vapour (`exchange_rate`, default $10^3$; §6.7.3; overload A4) | s⁻¹ |
 | $k$, $k_j$ | Thermal conductivity (of component *j*) | W·m⁻¹·K⁻¹ |
 | $k_{\text{eff}}$, $k_f$ | Effective (mixture) / face-averaged thermal conductivity | W·m⁻¹·K⁻¹ |
 | $k_B$ | Boltzmann constant (reduced temperature $T^* = k_B T/\varepsilon$) | J·K⁻¹ |
@@ -158,7 +162,11 @@ Conventions:
 | $n_{\Gamma}$, $n_D$ | Exponents of the property-ratio film ($n_{\Gamma}$ on $\Gamma_{\infty}/\Gamma_g$, default 0.6) and of the pooling film's diffusivity ratio ($n_D$, default 0.6) (§12.3.3) | – |
 | $P$ | Gas pressure in the porous medium | Pa |
 | $P_{\text{ref}}$ | Reference pressure (= 101325) | Pa |
+| $p_j$, $p_v$ | Partial pressure of gas component *j* in the pores, $P = \sum_j p_j$; $p_v$ that of the vapour of a phase change | Pa |
+| $p_{\text{sat}}(T)$, $p_{\text{eq}}(X,T)$ | Saturation pressure of a liquid / partial pressure of its vapour in sorption equilibrium, $a\,p_{\text{sat}}$, (6.11)–(6.12) | Pa |
+| $p_c$, $T_c$ | Critical pressure and temperature of water (22.064 MPa, 647.096 K), (6.12) | Pa; K |
 | $Q_{\text{rxn}}$ | Volumetric reaction heat source, $-\sum h_r r_r$ | W·m⁻³ |
+| $Q_{\text{pc}}$ | Volumetric heat source of the phase changes, $-\sum h_{\text{pc}} r_{\text{pc}}$, (6.17) | W·m⁻³ |
 | $Q_{\text{rad}}$ | Volumetric radiative source, absorption less emission, (8.2) | W·m⁻³ |
 | $q$, $q_{\text{cond}}$, $q_f$ | (Conductive) heat flux; at face *f*, along its normal | W·m⁻² |
 | $q_{\text{BC}}$ | Boundary-condition heat flux (positive into domain) | W·m⁻² |
@@ -167,13 +175,16 @@ Conventions:
 | $q_{\text{scale}}$, $q^{\text{arr}}$ | Scale of the radiation rows' tolerance, and the radiation arriving from outside at the exposed face and an open back that sets it (§8.7.3) | W·m⁻² |
 | $R_b$ | Blowing ratio $h_{\text{eff}}/h$ of a convective condition's blowing model, 1 at zero species fluxes (§12.3.3; the code's $\chi$, overload B1) | – |
 | $R_g$ ($R$, $R_{\text{gas}}$) | Universal gas constant (= 8.31446261815324) | J·mol⁻¹·K⁻¹ |
+| $\mathrm{RH}$ | Relative humidity of a reservoir, $x_{v,\infty}P/p_{\text{sat}}(T_\infty)$ (§6.7.6, §12.4) | – |
 | $r$, $r_i$ | Reaction rate (per unit volume) of reaction *i* | kg·m⁻³·s⁻¹ |
+| $r_{\text{pc}}$ | Rate of a phase change, liquid to vapour per unit volume, positive on evaporation or desorption, (6.15) (the code's `ω_v`) | kg·m⁻³·s⁻¹ |
 | $r_{\text{hi}}$, $r_{\text{lo}}$ | Activation bounds of the equidistribution correction, fractions of a cell's initial thickness (defaults 0.3, 0.1) | – |
 | $S$ | Sutherland constant (= 110.4 K, air) in the viscosity law | K |
-| $S_j$, $S_{j,i}$ | Species source term for component *j* (in cell *i*), $\sum_r \nu_{r,j} r_r$ (= $\omega_{j,i}$); the rows carry the cell's reaction source $\omega_{j,i} \tilde V_i$ [kg·s⁻¹] | kg·m⁻³·s⁻¹ |
+| $S_j$, $S_{j,i}$ | Species source term for component *j* (in cell *i*), $\sum_r \nu_{r,j} r_r \pm r_{\text{pc}}$ (= $\omega_{j,i}$); the rows carry the cell's reaction source $\omega_{j,i} \tilde V_i$ [kg·s⁻¹] | kg·m⁻³·s⁻¹ |
 | $S_{\text{dry},i}$ | Dry-pyrolysis-gas source term in cell *i* (source of $G_i$) | kg·m⁻³·s⁻¹ |
-| $S_{E,i}$ | Energy source of cell *i*: its reaction heat $Q_{\text{rxn},i} \tilde V_i$ plus its radiative source $S^{\text{rad}}_i$ (§7.3.3, §13.3.4, §16.5.1) | W |
-| $S_T$, $S_{T,i}$ | External temperature-rate source (manufactured solutions): $S_T$ on the temperature row, $C_i S_T$ on the enthalpy row (§7.3.3, §13.5.3) | K·s⁻¹ |
+| $\mathcal S$ | Set of the sorbing solids of a phase change (§6.7.1) | – |
+| $S_{E,i}$ | Energy source of cell *i*: its reaction heat $Q_{\text{rxn},i} \tilde V_i$ and phase-change heat $Q_{\text{pc},i} \tilde V_i$ plus its radiative source $S^{\text{rad}}_i$ (§7.3.3, §13.3.4, §16.5.1) | W |
+| $S_T$, $S_{T,i}$ | External temperature-rate source (manufactured solutions): $S_T$ on the temperature row, $C_i S_T$ on the enthalpy row (§7.3.3, §13.5.4) | K·s⁻¹ |
 | $S^{\text{rad}}_i$ | Radiation absorbed by cell *i* less what it emits, under radiative transfer, (8.6) (§8.3.3) | W |
 | $s_{if}$ | Orientation of face *f* relative to cell *i* (written $s_{if}$ or $s_{i,f}$; $s_f$ in §6, where *i* is the reaction index and the cell carries no index): +1 when its normal points out of *i* (*i* its owner), −1 otherwise | – |
 | $s_k$, $s_v$ | Diffusivity ratio $D_{k,\infty}/\alpha_{\text{th},\infty}$ of species *k* in the pooling film; $s_v$ that of the one volatile a solved film carries (§9.4.2, §12.3.3) | – |
@@ -206,11 +217,12 @@ Conventions:
 | $w$, $w_n$ | Mesh node velocity (at node *n*), $w = v_s + c$; an algebraic unknown on a moving mesh (overload W1) | m·s⁻¹ |
 | $w_k$ | Weight $\lvert\mathbf{d}_k\rvert^{-2}$ of neighbour *k* in the least-squares gradient (§13.6.4); a quadrature weight in §16.5.3 (overload W1) | m⁻²; – |
 | $w_h$ | Share of a collimated or cone heater's flux carried by beam *h*, $\sum_h w_h = 1$ (§8.4.2; overload W1) | – |
-| $X_{\alpha}$ | Volume fraction (FDS/Gpyro V2 comparison notation; internally $v_j$) | – |
+| $X$, $X_0$ | Moisture content of a phase change's liquid over its weighted sorbing solids, (6.10) / the activity laws' vanishing scale (`X0`, default $10^{-4}$) | kg·kg⁻¹ |
+| $X_{\alpha}$ | Volume fraction (FDS/Gpyro V2 comparison notation, Greek subscript; internally $v_j$) | – |
 | $x$, $y$ | Transverse/lateral coordinates (multi-dimensional meshes and comparison text) | m |
 | $x_a$ | Conversion of reactant $a$ against its reference, $\xi_a/\xi_{\text{ref}}$ (§6.4) | – |
 | $x_J$ | Join of the depletion limiter's onset, in units of its threshold (`join`, default 1; §6.3.2) | – |
-| $x_j$, $x_{j,s}$, $x_{j,\infty}$ | Mole fraction of gas component *j* in the pooling film, at the face and in the reservoir (§9.4.2, §12.3.3) | – |
+| $x_j$, $x_{j,s}$, $x_{j,\infty}$ | Mole fraction of gas component *j* in the pooling film, at the face and in the reservoir (§9.4.2, §12.3.3); $x_{v,\infty}$ that of the vapour of a phase change in the reservoir (§6.7.6) | – |
 | $x_{\text{th}}$, $\delta_x$ | Conversion scales of the depletion limiter's onset and finite base (`conversion_threshold`, `conversion_base`; §6.3.2) | – |
 | $Y_j$ | Mass fraction of component *j*, $\xi_j/\rho$ ($Y_k$ of species *k* at the face in the pooling film, §12.3.3) | – |
 | $Z$ | Pre-exponential factor (Gpyro V2 notation; FDS uses $A_{\alpha\beta}$; internally $A$) | varies |
@@ -230,13 +242,19 @@ Conventions:
 | $\alpha_{\text{conv}}$ | Conversion / extent variable (Gpyro V2 kinetics comparison) | – |
 | $\alpha_{\text{th},\infty}$ | Thermal diffusivity of the free stream (pooling film, §12.3.3; overload A5) | m²·s⁻¹ |
 | $\beta$ | Weighting parameter of the WEIGHTED mixing rule, $k = \beta k_{\parallel} + (1-\beta)k_{\text{series}}$ | – |
+| $\beta_1,\dots,\beta_6$ | Parameters of the CAST isotherm, (6.13) | K, kg·kg⁻¹, kJ·mol⁻¹ as the terms require |
 | $\gamma_{\text{RK}}$ | Stage coefficient of the integrator in $W = J - M/(\gamma_{\text{RK}} \Delta t)$ | – |
+| $\gamma_s$ | Weight of the sorbing solid *s* in the moisture content, (6.10) | – |
 | $\Gamma$ | Thermal property ratio $k/c_p$ of a gas (property-ratio and pooling films, §12.3.3; overload G1) | kg·m⁻¹·s⁻¹ |
 | $\Gamma_i$ | Volume rate the node corrections sweep through the faces of cell *i*, $A_{i+1} c_{i+1} - A_i c_i$ on a line (§11.5.2; overload G1) | m³·s⁻¹ |
 | $\Delta$ | Forward-difference / change operator (prefix) | varies |
+| $\Delta\bar g$ | Differential Gibbs energy of sorption of the CAST isotherm, (6.13) | kJ·mol⁻¹ |
+| $\Delta h_{\text{vap}}(T)$, $\Delta h^{\text{ref}}_{\text{vap}}$ | Latent heat of a phase change at $T$, by Kirchhoff's law, and at $T_{\text{ref}}$ (`latent_heat`), (6.16) (overload H1) | J·kg⁻¹ |
+| $\Delta h_{\text{sorp}}(X,T)$ | Differential heat of sorption of an activity law, (6.18) (overload H1) | J·kg⁻¹ |
 | $\delta_{ij}$ | Kronecker delta | – |
 | $\delta_i$ | Positive-part mass scale of cell *i*, $\text{reltol} \cdot \varepsilon_m \cdot m^s_i(0)$ (its mass tolerance) | kg |
 | $\delta_b$ | Scale of the softplus finite base of the depletion limiter (`base_scale`, default 10⁻⁸; §6.3.2) | kg·m⁻³ |
+| $\delta_a$ | Width of the soft cap at one of an activity law (`δ`, default 0.01; §6.7.2) | – |
 | $\delta_{\text{mov}}$, $\delta_{\chi}$ | Configuration flags of the state layout: one on a moving mesh / under a lateral-shrinkage law, zero otherwise (§3.1.2, §15.1.1) | – |
 | $\varepsilon$, $\varepsilon_j$ | Emissivity (of component *j*) | – |
 | $\varepsilon_{\text{eff}}$ | Effective (composition-weighted) emissivity | – |
@@ -270,10 +288,13 @@ Conventions:
 | $\xi_{\text{ref},i}$ | Reference concentration of reaction *i*, its reference over the cell volume (§6.1, §6.4) | kg·m⁻³ |
 | $\xi_{\text{th}}$ | Concentration scale of the depletion limiter (`DepletionLimiter` `threshold`, default 1 kg·m⁻³) | kg·m⁻³ |
 | $\xi_{\text{tol},i}$ | Mass tolerance of cell *i* over its initial volume, the positivity scale of the relative-flux face states (§11.6.2, §11.6.3) | kg·m⁻³ |
+| $\xi^{\text{eq}}_v$ | Bulk concentration of the vapour of a phase change in equilibrium with its liquid, (6.15) | kg·m⁻³ |
+| $\xi_{\mathcal S}$, $\xi_{\text{floor}}$ | Weighted concentration of a phase change's sorbing solids, $\sum_s \gamma_s\xi^{+}_s$, and its floor (`SORBENT_FLOOR`, $10^{-3}$), (6.10) | kg·m⁻³ |
 | $\rho$ | Bulk density ($\sum \xi_j$ for the total inventory density) | kg·m⁻³ |
 | $\rho_j$ | Bulk (apparent) density of component *j*, its own pores included | kg·m⁻³ |
 | $\rho_{i,j}$ | Intrinsic / skeletal density of component *j* (skeletal volume fraction only) | kg·m⁻³ |
 | $\rho_g$ | Gas-phase density (ideal-gas law) | kg·m⁻³ |
+| $\rho_{v,\text{sat}}$ | Density of the saturated vapour of a phase change, $M_v p_{\text{sat}}/(R_g T)$ (§6.7.3) | kg·m⁻³ |
 | $\rho_{s,j}$ ($\rho_{s,\alpha}$) | FDS component density: the condensed-component mass concentration $\xi_j = m_j/V$ | kg·m⁻³ |
 | $\rho_s$ (FDS comparisons) | Total condensed-material density, $\sum_{S,L} \xi_j$ | kg·m⁻³ |
 | $\rho c_p^{\text{eff}}$ | Effective (mixture) volumetric heat capacity, every component, $\sum_j \xi_j c_{p,j}$ (discretely $C_i/V_i$) | J·m⁻³·K⁻¹ |
@@ -284,7 +305,9 @@ Conventions:
 | $\tau_{\text{eq},1}$, $\tau_{\text{eq},2}$ | A layer's first and second estimate of its equidistribution time under `ActivationTime` (§11.7.5; overload T1) | s |
 | $\tau_i$ | Optical thickness of cell *i*, $\alpha_i \Delta z_i$ (always subscripted or called optical; overload T1) | – |
 | $\tau_L$ | Optical thickness of a whole layer or slab, $\int\alpha\,\mathrm dz$ over it (§8; overload T1) | – |
+| $\tau_w$ | Time in which bound water follows a change in its surroundings under a phase change (§6.7.3; overload T1) | s |
 | $\varphi$ | Porosity (gas void fraction), $1 - \sum_{S,L} \xi_j/\rho_{i,j}$ (U+03C6, LaTeX `\varphi`; overload A8) | – |
+| $\vartheta$ | Reduced temperature $1 - T/T_c$ of the saturation curve of water, (6.12) | – |
 | $\phi_i$ | Multiplier of cell *i* in the potential closure (multi-dimensional meshes only; U+03D5, LaTeX `\phi`; overload A8) | m²·s⁻¹ |
 | $\chi$, $\chi_i$ | **Pyrolysis progress** in cell *i*, $G_i/m_{\text{dry},i}$ (cumulative dry-gas mass released per unit initial dry-solid mass) | – |
 | $\bar{\chi}$ | Column conversion, $\sum_i G_i / \sum_i m_{\text{dry},i}$ (the $m_{\text{dry}}$-weighted mean of $\chi_i$) | – |
@@ -294,7 +317,7 @@ Conventions:
 | $\Phi$ | Generic cell field in the two-point gradient, where the face index $f$ shares the formula (§13.6.1); $\Phi_a(v)$ the reach of reactant *a* from node *v* of a reaction network, the mass of *a* one unit of *v*'s inventory can become (§6.5.5); in §17 the terminal part of a loss | varies |
 | $\Omega(t)$, $\Omega_i(t)$ | Live region of the column (§16.2); region of cell *i* (§7.2, §11.2.1) | – |
 | $\Omega_D$ | Diffusion collision integral (Neufeld) | – |
-| $\omega_{j,i}$ | Net volumetric production rate of component *j* by reaction in cell *i*, $\sum_r \nu_{r,j} r_r$ (= $S_{j,i}$; the code's $\omega$); the cell's reaction source is $\omega_{j,i} \tilde V_i$ | kg·m⁻³·s⁻¹ |
+| $\omega_{j,i}$ | Net volumetric production rate of component *j* by reactions and phase changes in cell *i*, $\sum_r \nu_{r,j} r_r \pm r_{\text{pc}}$ (= $S_{j,i}$; the code's $\omega$); the cell's source is $\omega_{j,i} \tilde V_i$ | kg·m⁻³·s⁻¹ |
 | $\dot{\omega}'''$ | Volumetric reaction rate (Gpyro V2 comparison notation; internally $r$) | kg·m⁻³·s⁻¹ |
 
 ---
@@ -455,13 +478,15 @@ below is authoritative; writers must use the disambiguating subscript/context.
   area** and $A_f$ the area of face $f$; the Arrhenius pre-exponential is $A_i$ /
   $A_{\alpha\beta}$ (always subscripted by reaction). **Resolution:** bare $A$ = area in
   physics chapters; $A_f$ = face area; $A_i$ = pre-exponential (kinetics). The
-  Gpyro V2 pre-exponential $Z$ and FDS $A_{\alpha\beta}$ are compared with $A_i$; copying values requires matching the rate basis (§6.9). In the
+  Gpyro V2 pre-exponential $Z$ and FDS $A_{\alpha\beta}$ are compared with $A_i$; copying values requires matching the rate basis (§6.10). In the
   mesh-motion rows on a line (§10, §11, §15) a face is named by its node, so
   $A_i$ and $A_{i+1}$ there are the areas of the faces at nodes $i$ and $i + 1$,
   the two faces of cell $i$; a reaction subscript never appears in those rows.
 
 - **κ vs. K — A4 [permeability].** Use **$\kappa$** for permeability throughout.
   $K$ (Gpyro V2 permeability) appears only in comparison text and is mapped to $\kappa$.
+  $K_{\text{pc}}$ (label pc) is the exchange rate of a phase change (§6.7.3) and $K_j$ a
+  species wall diffusivity; neither is a permeability.
 
 - **α — A5 [absorption vs. conversion vs. absorptivity].** $\alpha$ (or $\alpha_{\text{eff}}$) =
   **volumetric absorption coefficient** (m⁻¹); $\alpha_j$ = mass-basis absorption
@@ -495,7 +520,9 @@ below is authoritative; writers must use the disambiguating subscript/context.
   $\int_{T_{\text{ref}}}^T c_{p,j} dT$; the two never share a subscript ($r$ reaction, $j$
   component). The sensible enthalpy on the datum is always $h_j(T)$, never
   $\Delta h_j(T)$; $\Delta h$ is reserved for a difference between two stated temperatures
-  ($\Delta h_g(T_s, T_{\infty})$) and for the effective heat of combustion $\Delta h_{c,\text{eff}}$. The
+  ($\Delta h_g(T_s, T_{\infty})$), for the effective heat of combustion $\Delta h_{c,\text{eff}}$, and for
+  the latent heat $\Delta h_{\text{vap}}$ and heat of sorption $\Delta h_{\text{sorp}}$ of a phase
+  change, whose heat per kg evaporated is $h_{\text{pc}}$ (§6.7.4). The
   convective coefficient is $h_{\text{conv}}$, the mass coefficient $h_m$, the pressure coefficient
   $h_P$, all subscripted (inside §12.3.3 the convective coefficient of the
   blowing formulas is the bare $h$, and $h_{\text{eff}} = R_b h$). A cell thickness is
@@ -557,7 +584,8 @@ below is authoritative; writers must use the disambiguating subscript/context.
   time [s], and $\tau_{\text{eq},1}$, $\tau_{\text{eq},2}$ its two estimates
   ($\tau_{\text{eq},k}$ for either; the subscript after "eq" counts the estimates,
   never a cell). $\tau_L$ is the optical thickness of a whole layer or slab, $\int\alpha\,\mathrm dz$
-  over it (§8). A time variable of integration is written $t$, never $\tau$.
+  over it (§8). $\tau_w$ (liquid subscript, §6.7.3) is the time in which bound water
+  follows its surroundings. A time variable of integration is written $t$, never $\tau$.
 
 - **M — M1 [molar mass vs. mass matrix vs. history].** $M$, $M_j$
   (and $M_{\text{face}}$, $M_{\infty}$) is molar mass; $M$ in the linear-algebra context of §15
@@ -574,7 +602,8 @@ below is authoritative; writers must use the disambiguating subscript/context.
   effective or surface subscript) are surface absorptivities; $a_i$, $a_n$ (cell
   or node subscript, correction context only) are the correction's activation
   switches, and $a^{\text{lo}}_i$, $a^{\text{lo}}_n$ its second switches. A row's absolute tolerance is written $\text{atol}_r$ (§15.5.4), never
-  $a_r$.
+  $a_r$. The activity of a phase change's liquid is written with its arguments,
+  $a(X,T)$, and the cap's width $\delta_a$ (§6.7.2).
 
 - **N — N1 [species fluxes vs. counts].** $N_j$ is species mass flux and
   $n_j$ is species molar flux. Total pressure is $P = \sum_j p_j$.

@@ -341,8 +341,11 @@ over the reactions $r$ with a condensed reactant $a(r)$, $M_{\mathrm{ref},r,i}$ 
 reactant's initial mass in the cell for a first-order reaction and the reaction's
 lineage reference (§6.5.5) at any other order (`reactive_mass`,
 `CellDeactivation.reactive`), with the slack $s=0$ except at a located event
-(§14.3.5) (`below_threshold`). The measure is the same at every order: the order
-shapes the tail of a cell's conversion, not what spent means. A residue
+(§14.3.5) (`below_threshold`). A phase change (§6.7) adds nothing to the reactive
+inventory, which reads the reactions' reactants alone: water that can condense back
+neither holds a spent cell live nor empties a live one by drying. The measure is the
+same at every order: the order shapes the tail of a cell's conversion, not what spent
+means. A residue
 therefore never holds a spent cell live, and what a receiver took from the
 residues of the cells above it does not count against it. Under a test on the
 condensed mass a receiver of $\varepsilon_m/y$ tails of char at yield $y$ could
@@ -357,7 +360,7 @@ Only a cell that **vanishes** is tested. Its reference $R_i$ is zero when the ce
 keep $V^{\rm kept}_i/V_i(0)\ge10^{-2}$ of its volume once fully converted
 (`VANISHING_VOLUME`, `retained_volumes`), the volume each component leaves following the
 reactions to the products no reaction consumes, at the densities of the initial
-temperature. Such a cell is a layer the front burns beneath. Merged into its
+temperature; the liquid of a phase change leaves none. Such a cell is a layer the front burns beneath. Merged into its
 neighbour it stops being resolved: the receiver grows to the thickness of the layer, its
 temperature is the temperature of the middle of the layer, and the reactant it then
 takes burns there, so the top of the reaction zone moves inward cell by cell. The test is

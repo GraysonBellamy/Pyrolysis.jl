@@ -12,6 +12,8 @@ and conservative lumped or dusty-gas transport.
 
 - Multi-component materials with temperature-dependent properties
 - Single-step and multi-step Arrhenius decomposition kinetics
+- Moisture that evaporates, condenses and is resorbed toward sorption equilibrium
+  with its vapour, on measured wood isotherms
 - Gas generation, pore pressure and conservative lumped or dusty-gas transport
 - Radiative transfer through the solid, absorbed and emitted in depth (or absorption at the surface)
 - Material volume changes — shrinkage, swelling, intumescence
@@ -87,6 +89,7 @@ advanced users. Highlights:
 | Materials | `Material`, `SolidComponent`, `GaseousComponent`, `LiquidComponent`, `Reaction`, `MaterialMixing`, `MixingSpec`, `PARALLEL`, `SERIES`, `WEIGHTED`, `BRUGGEMAN` |
 | Properties | `ConstantProperty`, `LinearProperty`, `PolynomialProperty`, `ArrheniusProperty`, `TableProperty`, `CallableProperty`, `SutherlandProperty`, `StateDependentProperty` |
 | Boundary conditions | `HeatFluxBC`, `ConvectiveBC`, `RadiativeBC`, `RadiativeFluxBC`, `CombinedThermalBC`, `DirichletThermalBC`, `AdiabaticBC`, `ImpermeableBC`, `MassFluxBC`, `GasReservoir`, `AmbientGasBC`, `MassTransferFilm`, `NeumannPressureBC`, `ConvectivePressureBC`, `BoundaryConditionSet` |
+| Phase changes | `PhaseChange`, `CASTIsotherm`, `CAST_SPRUCE`, `CAST_BEECH`, `FreeLiquid`, `ActivityFunction`, `WATER_SATURATION`, `equilibrium_vapour_pressure`, `equilibrium_vapour_concentration` |
 | Gas model | `LumpedTransfer`, `DustyGas`, `LumpedEndpoint`, `DustyEndpoint` |
 | Radiation | `RadiationModel`, `SURFACE_ABSORPTION`, `RADIATIVE_TRANSFER`, `Diffuse`, `Collimated`, `Cone` |
 | Mesh | `uniform_mesh`, `stretched_mesh`, `line_mesh`, `box_mesh`, `cell_mesh`, `Planar`, `Cylindrical`, `Spherical` |
@@ -144,12 +147,12 @@ results = parameter_sweep(problem, grid; modify, extract, use_ale = true)
 End-to-end studies under [`examples/`](examples/) cover:
 
 - PMMA cone calorimeter
-- Douglas fir cone calorimeter
-- Pressure-treated wood with moisture
+- Douglas fir cone calorimeter, with the two-way phase change of its moisture
+- Pressure-treated wood, transcribed from ThermaKin
 - Lumped and dusty-gas transport demonstration
 - Inverse analysis of white-pine kinetics
-- Sensitivity analysis (Latin Hypercube + Sobol indices)
-- Literature comparison and validation
+- Grid convergence of the Douglas fir case
+- The MaCFP gasification targets
 
 ## Benchmarks
 

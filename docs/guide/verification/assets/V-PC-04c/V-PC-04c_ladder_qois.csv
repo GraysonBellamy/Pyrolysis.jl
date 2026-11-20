@@ -1,0 +1,10 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+200,"front position, mean error (relative)",0.000832185992422291,NaN,0.000832185992422291,0.0015,true
+200,"slope of the front against √t (relative)",0.0008089802921718015,NaN,0.0008089802921718015,0.0014,true
+200,"temperature, largest error [K]",1.0138984020858288,NaN,1.0138984020858288,1.43,true
+200,"energy ledger closure",7.176156960294784e-6,NaN,7.176156960294784e-6,1.9e-5,true
+400,"front position, mean error (relative)",-0.0004884535746778924,NaN,0.0004884535746778924,0.0015,true
+400,"slope of the front against √t (relative)",-0.00045944026815047945,NaN,0.00045944026815047945,0.0014,true
+400,"temperature, largest error [K]",0.4777241143192441,NaN,0.4777241143192441,1.43,true
+400,"energy ledger closure",6.221192953469443e-6,NaN,6.221192953469443e-6,1.9e-5,true
+400,"accepted steps / the reference count",10059.0,10059.0,1.0,1.5,true

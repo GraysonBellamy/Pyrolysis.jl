@@ -383,7 +383,7 @@ of the peak at 72 cells, 0.03 % at 144, 0.01 % integrated at both. Above order o
 cells decay algebraically and may reach the thickness stop before this default, which
 is not an error; a larger `threshold` makes them leave earlier. At order zero the
 mass-loss rate is a staircase of single-cell burnouts, so its pointwise difference from
-any neighbouring run is a whole step (Technical Reference §6.10).
+any neighbouring run is a whole step (Technical Reference §6.11).
 
 | Keyword | Default | Constraint |
 |---|---|---|

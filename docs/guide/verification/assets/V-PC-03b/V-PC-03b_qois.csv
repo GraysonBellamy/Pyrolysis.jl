@@ -1,0 +1,3 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"|∫q dt − ΔH − ∫Q_s ω V dt| / peak rise of H, five times and the end",1.2690466754349847e-8,NaN,1.2690466754349847e-8,3.9e-8,true,"observed 1.27e-8 (temperature) and 2.37e-9 (enthalpy)"
+"cycle residual / heat of sorption exchanged",0.01710546065711974,NaN,0.01710546065711974,0.05,true,"the limit of the excess heat capacity; observed 0.0171 in both forms"

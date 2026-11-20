@@ -1,0 +1,16 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+200,"front position, mean error (relative)",0.00021698302207756327,NaN,0.00021698302207756327,0.0042,true
+200,"slope of the front against √t (relative)",0.00026580944333787215,NaN,0.00026580944333787215,0.004,true
+200,"temperature, largest error [K]",1.2579224194758467,NaN,1.2579224194758467,1.5,true
+200,"energy ledger closure",1.681455798689215e-6,NaN,1.681455798689215e-6,2.0e-6,true
+200,"accepted steps / the reference count",4666.0,4661.0,1.0010727311735679,1.5,true
+400,"front position, mean error (relative)",-0.0014125255936556567,NaN,0.0014125255936556567,0.0042,true
+400,"slope of the front against √t (relative)",-0.0013279848309871722,NaN,0.0013279848309871722,0.004,true
+400,"temperature, largest error [K]",1.0145145469790577,NaN,1.0145145469790577,1.5,true
+400,"energy ledger closure",2.589646122496204e-7,NaN,2.589646122496204e-7,2.0e-6,true
+400,"accepted steps / the reference count",8193.0,8193.0,1.0,1.5,true
+800,"front position, mean error (relative)",-0.0022600217425133005,NaN,0.0022600217425133005,0.0042,true
+800,"slope of the front against √t (relative)",-0.0021212039382884074,NaN,0.0021212039382884074,0.004,true
+800,"temperature, largest error [K]",1.0110789927680344,NaN,1.0110789927680344,1.5,true
+800,"energy ledger closure",4.6564447002696264e-7,NaN,4.6564447002696264e-7,2.0e-6,true
+800,"accepted steps / the reference count",12662.0,12661.0,1.000078982702788,1.5,true

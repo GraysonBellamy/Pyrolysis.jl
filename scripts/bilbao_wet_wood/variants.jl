@@ -40,12 +40,18 @@ function calibrated(family)
 end
 
 """
-A variant's keywords for `simulate`: `family/law[/tag]`, e.g. `deck/gated`,
-`deck/arrhenius/kappa10`. Tags: `kappa0.1`, `kappa10` (both solids'
-permeability), `sorption0`, `sorption2` (the sorption part of the heat of
-desorption), `kseries` (the water adds nothing to k), `cells200`, `tight`
-(reltol 1e-8, dtmax 2 s), `hfront10` (convective loss 10 W/(m² K) at the
-exposed face), `flux0.9`, `flux1.1` (the calibrated factor ×0.9, ×1.1).
+A variant's keywords for `simulate`: `family/law[/tag]`, e.g. `tc1/sorption`,
+`tc1/sorption/lambda10`, `deck/gated`, `deck/arrhenius/kappa10`. The law is
+`sorption` or `freewater` (the phase change) or a one-way law of `LAWS`, which
+runs at the deck's transfer coefficient whatever the run's moisture. Tags:
+`kappa0.1`, `kappa10`, `kappa100` (both solids' permeability), `lambda1`,
+`lambda3`, `lambda10` (the wood's transfer coefficient, times the deck's),
+`K1e2`, `K1e4` (the phase change's exchange rate [1/s]), `dusty4`, `dusty12`
+(the dusty-gas closure at that tortuosity), `sorption0`, `sorption2` (the
+sorption part of a one-way law's heat of desorption), `kseries` (the water
+adds nothing to k), `cells200`, `tight` (reltol 1e-8, dtmax 2 s), `hfront10`
+(convective loss 10 W/(m² K) at the exposed face), `flux0.9`, `flux1.1` (the
+calibrated factor ×0.9, ×1.1).
 """
 function variant_kwargs(name::AbstractString)
     parts = split(name, '/')
@@ -57,8 +63,17 @@ function variant_kwargs(name::AbstractString)
     kw[:law] = law
     kw[:flux_factor] = cal.flux_factor
     kw[:k_scale] = cal.k_scale
+    law in PHASE_CHANGE_LAWS || (kw[:λ_scale] = 1.0)
     tag == "kappa0.1" && (kw[:κ_scale] = 0.1)
     tag == "kappa10" && (kw[:κ_scale] = 10.0)
+    tag == "kappa100" && (kw[:κ_scale] = 100.0)
+    tag == "lambda1" && (kw[:λ_scale] = 1.0)
+    tag == "lambda3" && (kw[:λ_scale] = 3.0)
+    tag == "lambda10" && (kw[:λ_scale] = 10.0)
+    tag == "K1e2" && (kw[:exchange_rate] = 1e2)
+    tag == "K1e4" && (kw[:exchange_rate] = 1e4)
+    tag == "dusty4" && (kw[:tortuosity] = 4.0)
+    tag == "dusty12" && (kw[:tortuosity] = 12.0)
     tag == "sorption0" && (kw[:sorption] = 0.0)
     tag == "sorption2" && (kw[:sorption] = 2.0)
     tag == "kseries" && (kw[:k_rule] = SERIES)

@@ -5,7 +5,8 @@ CurrentModule = Pyrolysis
 # Deactivation
 
 A cell whose reactive inventory, the mass of every reaction's condensed
-reactant, falls below a fraction of its reference is deactivated in an event:
+reactant, falls below a fraction of its reference is deactivated in an event (the
+liquid of a phase change is no part of it, since it can condense back):
 its inventories go to the live cell beside it, on a moving mesh the live cells
 above move down a slot, the outermost slot's rows are masked and the boundary
 conditions move to the face of the outermost live cell. See the User Guide's

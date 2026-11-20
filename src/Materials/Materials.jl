@@ -15,11 +15,16 @@ This module provides:
 - Temperature-dependent property functions
 - Component and material type definitions
 - Reaction type definitions
+- Phase changes of a liquid component and its vapour
+- The saturation pressure of water and the activity laws of a liquid held in
+  sorbing solids
 - The abstract boundary-condition supertypes (concretes live in
   `BoundaryConditions`)
 - The `RadiationModel` enum
 """
 module Materials
+
+using ForwardDiff: ForwardDiff
 
 # ============================================================================
 # Abstract Type Hierarchy (must be defined BEFORE includes)
@@ -41,8 +46,11 @@ abstract type AbstractMassBC end
 include("constants.jl")
 include("guards.jl")
 include("property_functions.jl")
+include("saturation.jl")
+include("activity.jl")
 include("components.jl")
 include("reactions.jl")
+include("phase_changes.jl")
 include("gas_transport.jl")
 include("materials.jl")
 include("radiation_types.jl")
@@ -68,6 +76,11 @@ export StateDependentProperty  # For state-dependent heats of reaction
 export evaluate_param, evaluate_param_T  # Unified parameter evaluation (defined in property_functions.jl)
 export property_temperature  # Argument clamp shared by every temperature-dependent law
 export identically_zero  # Structural zero test of a property law
+export WaterSaturation, WATER_SATURATION  # Saturation pressure of water
+
+# Activity laws of a liquid held in sorbing solids
+export AbstractActivity, CASTIsotherm, CAST_SPRUCE, CAST_BEECH, FreeLiquid, ActivityFunction
+export activity, sorption_heat
 
 # Components
 export Phase, SOLID, LIQUID, GAS
@@ -87,10 +100,13 @@ export gas_property_temperature
 # Reactions
 export Reaction, DepletionLimiter
 
+# Phase changes
+export PhaseChange
+
 # Materials
 export Material, MixingRule, PARALLEL, SERIES, WEIGHTED, BRUGGEMAN, CARMAN_KOZENY
 export MixingSpec, MaterialMixing
-export n_components, n_reactions
+export n_components, n_reactions, n_phase_changes
 export dry_gas_flags
 export needs_lineage, lineage_graph, LineageGraph
 

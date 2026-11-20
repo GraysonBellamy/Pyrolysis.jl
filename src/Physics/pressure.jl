@@ -6,7 +6,7 @@ where φ is the local porosity (gas volume fraction). The porosity divisor is
 required; omitting it underestimates gas pressure at low porosity.
 """
 
-using ..Materials: R_GAS, GAS, is_gas, molar_mass, component_index
+using ..Materials: R_GAS, GAS, is_gas, molar_mass, component_index, n_phase_changes
 
 const POROSITY_FLOOR = 1e-12
 
@@ -117,4 +117,94 @@ function background_gas_concentration(
     φ >= 2POROSITY_FLOOR ||
         throw(ArgumentError("background gas requires positive physical pore volume"))
     return P * M * φ / (R_GAS * T)
+end
+
+"""
+	equilibrium_vapour_concentration(material, ξ, T; phase_change = 1) -> ξ_v [kg/m³]
+
+Bulk concentration of the vapour in equilibrium with the liquid of the phase
+change `phase_change` (an index into `material.phase_changes` or its name) in
+the pore space of composition `ξ` at temperature `T`:
+
+	ξ_v = φ M a(X, T) p_sat(T)/(R T),   φ = 1 − skeletal_volume_fraction(ξ, T),
+
+with `X` the moisture content of `ξ` ([`moisture_content`](@ref)). Like
+[`background_gas_concentration`](@ref), it reads the condensed entries of `ξ`
+only, so a deck writes the vapour first and the background gas second, at the
+pressure `P − p_eq` ([`equilibrium_vapour_pressure`](@ref)), for a pore gas in
+equilibrium with the liquid at the start. A skeleton that leaves no pore space
+is refused.
+
+# Example
+```julia
+ξc = (ξ_wood, X₀ * ξ_wood, 0.0, 0.0)   # wood, water, vapour, air
+ξ_v = equilibrium_vapour_concentration(material, ξc, 300.0)
+p_v = equilibrium_vapour_pressure(material, ξc, 300.0)
+ξ_air = background_gas_concentration(material, :AIR, ξc, 300.0; P = 101325.0 - p_v)
+```
+"""
+function equilibrium_vapour_concentration(
+    material::Material{NC},
+    ξ::NTuple{NC,<:Real},
+    T::Real;
+    phase_change::Union{Integer,Symbol} = 1,
+) where {NC}
+    pc = _phase_change(material, phase_change)
+    φ = _start_pore_fraction(material, ξ, T, "equilibrium_vapour_concentration")
+    return equilibrium_vapour_concentration(pc, moisture_content(pc, ξ, ξ), T, φ)
+end
+
+"""
+	equilibrium_vapour_pressure(material, ξ, T; phase_change = 1) -> p_eq [Pa]
+
+Partial pressure of the vapour in equilibrium with the liquid of the phase
+change `phase_change` (an index into `material.phase_changes` or its name) at
+the composition `ξ` and temperature `T`, `a(X, T) p_sat(T)` with `X` the
+moisture content of `ξ`; it reads the condensed entries of `ξ` only. The
+partial pressure of the vapour of
+[`equilibrium_vapour_concentration`](@ref).
+"""
+function equilibrium_vapour_pressure(
+    material::Material{NC},
+    ξ::NTuple{NC,<:Real},
+    T::Real;
+    phase_change::Union{Integer,Symbol} = 1,
+) where {NC}
+    pc = _phase_change(material, phase_change)
+    (isfinite(T) && T > 0) || throw(
+        ArgumentError(
+            "equilibrium_vapour_pressure: the temperature must be finite and positive",
+        ),
+    )
+    return equilibrium_vapour_pressure(pc, moisture_content(pc, ξ, ξ), T)
+end
+
+# The phase change of `material` named or indexed by `k`.
+function _phase_change(material::Material, k::Integer)
+    n = n_phase_changes(material)
+    1 <= k <= n || throw(
+        ArgumentError(
+            "material $(material.name) has $n phase changes; phase_change = $k is " *
+            "not one of them",
+        ),
+    )
+    return material.phase_changes[k]
+end
+
+function _phase_change(material::Material, name::Symbol)
+    k = findfirst(pc -> pc.name === name, material.phase_changes)
+    k === nothing &&
+        throw(ArgumentError("material $(material.name) has no phase change :$name"))
+    return material.phase_changes[k]
+end
+
+# The pore fraction of the condensed entries of `ξ`, refused where it leaves
+# no pore space.
+function _start_pore_fraction(material, ξ, T, caller)
+    (isfinite(T) && T > 0) ||
+        throw(ArgumentError("$caller: the temperature must be finite and positive"))
+    φ = 1 - skeletal_volume_fraction(ξ, T, material)
+    φ >= 2POROSITY_FLOOR ||
+        throw(ArgumentError("$caller: the composition leaves no pore volume"))
+    return φ
 end

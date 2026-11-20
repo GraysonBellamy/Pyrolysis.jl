@@ -7,8 +7,9 @@
 #          skeletal density);
 #   CHAR   Flity, Jannot, Acem & Parent, "Thermal conductivity of wood char up
 #          to 800 °C", SSRN preprint 6137656 (char k, pooled law).
-# The evaporation laws, the heat of desorption and the water and vapour
-# properties are those of scripts/lemta_moist_wood (LemtaMoistWood.jl).
+# The moisture model, the one-way evaporation laws compared with it, their heat
+# of desorption and the water and vapour properties are those of
+# scripts/lemta_moist_wood (LemtaMoistWood.jl).
 
 # Specimen: 110 × 110 × 19 mm, one face exposed, the others in fibreglass
 # (B96 p.83). Heated across the grain (a 19 mm slab; not stated).
@@ -75,8 +76,20 @@ n2_k = 0.026                  # W/(m K)
 # Darcy permeability and lumped transfer coefficient. Wood across the grain:
 # 1e-15 m², the LEMTA moist decks' value (pine sapwood is quoted at 1e-16 to
 # 1e-14 across the grain). Char: 1e-11 m² (fissured, B96 p.93), and 1e-5 m²/s.
+# The wood's transfer coefficient stands for the bound water's diffusion
+# across the grain: as a moisture diffusion coefficient it is about 5e-7 m²/s
+# near 10-12 % moisture and two to four times that at 15-20 % (Siau 1984
+# ch. 6; the drying data of Choong, Biggerstaff and Stamm & Nelson in Keey et
+# al. 2000), so a run at `wet_moisture` or more takes it times
+# `transfer_wet_scale` (`problem(...; λ_scale)`).
 kappa_wood = 1.0e-15          # m²
 kappa_char = 1.0e-11          # m²
 transfer_wood = 5.0e-7        # m²/s
 transfer_char = 1.0e-5        # m²/s
+wet_moisture = 0.15           # dry basis
+transfer_wet_scale = 3.0
 skeletal_density = 1450.0     # kg/m³ (Th p.25)
+
+# Sorption isotherm of the phase change: the CAST set of Dietenberger, Glass &
+# Boardman (2024) fitted to spruce, taken for this softwood.
+isotherm = "CAST_SPRUCE"

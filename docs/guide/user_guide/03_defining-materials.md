@@ -127,7 +127,7 @@ solid's radiation travels through the radiation rows at the components' `α`, so
 is the conductive part: do not also add a Rosseland term for that band, and nothing
 is subtracted for you. Radiation across pores smaller than a cell, as in a char,
 is not resolved by the rows and stays in `k` (Technical Reference §5.5, §8.6). Heat capacities `c` are sensible: reaction and latent heats go into
-the reactions, and a `c` law must stay physical over the temperatures a solve
+the reactions and phase changes, and a `c` law must stay physical over the temperatures a solve
 reaches, so continue a fit beyond its measured window at its low-temperature
 slope or hold it constant (Technical Reference §5.4).
 
@@ -149,7 +149,9 @@ melt = LiquidComponent(:melt; ρ=900., φ=.02, c=2000., k=.2,
 
 Bound moisture declares neither, so it carries no matrix transport weight; it
 shrinks the wood as it dries, conducts and emits by its volume share, occupies
-skeletal volume and stores heat. The melt declares `λ`, so it joins the
+skeletal volume and stores heat. It leaves and returns through a phase change
+(§4.14), which evaporates it into its vapour and condenses or resorbs the vapour
+toward sorption equilibrium. The melt declares `λ`, so it joins the
 transport matrix and its `λ` enters the gas-transfer mixture. The initialized
 sum of all condensed skeletal volumes must leave resolved positive gas pore
 volume.
@@ -164,6 +166,16 @@ dry-basis moisture content, initialize
 ξ_water = MC * ξ_wood
 ```
 
+and give the pore vapour its equilibrium with the water, the air making up the rest
+of the pressure (§4.14):
+
+```julia
+ξc    = (ξ_wood, ξ_water, 0.0, 0.0)            # wood, water, vapour, air
+ξ_v   = equilibrium_vapour_concentration(material, ξc, T₀)
+p_v   = equilibrium_vapour_pressure(material, ξc, T₀)
+ξ_air = background_gas_concentration(material, :air, ξc, T₀; P = 101325.0 - p_v)
+```
+
 Setting `ξ_wood = ρ` and adding the water on top overfills the cell: the slab
 holds more mass than its thickness admits, and it dries to a wood denser than
 `ρ`. On a moving mesh `setup` warns when the condensed occupancies `Σ ξ_j/ρ_j`
@@ -173,7 +185,21 @@ condensed volume.
 A liquid is a bound liquid: it holds its own volume, as bound water does below
 the fibre saturation point (a dry-basis moisture content of about 0.3). Above
 it, free water fills existing pores and shrinks nothing as it leaves, so the
-model overstates drying shrinkage there.
+model overstates drying shrinkage there, and vapour that condenses above the
+isotherm's capacity swells a moving mesh.
+
+The moisture model has these limits. Below fibre saturation it is tested by the
+moist-wood suites as far as they go: the temperatures of drying wood, the cold-side
+plateau, the water lost along the grain, the back-face shoulder of thin treated-pine disks
+at one flux, and the pore pressure while the water leaves wet cubes, within a factor of two.
+Across the grain the water lost
+falls short, consistent with the water the end grain of the test blocks carries; the model
+builds a moisture bank that the sliced profiles do not show and that is smaller than a
+resistive record shows; and no single transfer coefficient, or pair of transfer
+coefficient and permeability, matches all the measurements of one case together (Technical
+Reference §18.6.3). Above fibre saturation
+free water evaporates and condenses at the saturation pressure but has no
+capillary flow. One isotherm serves sorption and desorption, with no hysteresis.
 
 ---
 
@@ -320,17 +346,19 @@ k = CallableProperty(T -> 0.10 + 3.0e-4 * (T - 300.0))
 
 **`StateDependentProperty(func)`** — a property that depends on both temperature and
 the full cell concentration vector, `f(T, ξ) -> value`. This is the mechanism for
-**composition-dependent heats of reaction**, most importantly the moisture heat of
-sorption, where the sorption enthalpy rises as moisture content falls.
+**composition-dependent heats of reaction**, such as a pyrolysis heat that changes
+as the char forms. (The heat of a liquid's evaporation and sorption is not one of
+these: it belongs to the liquid's phase change, §4.14.)
 
 ```julia
-# Heat of sorption as a function of moisture content (%); ξ is the full
-# mass-concentration tuple, so you index the moisture component yourself.
-MOISTURE_IDX = 3
-heat_sorption = StateDependentProperty((T, ξ) -> begin
-    ξ_solid = ξ[1] + ξ[2]                              # dry-solid concentration
-    MC = 100.0 * ξ[MOISTURE_IDX] / max(ξ_solid, 1.0)   # moisture content [%]
-    (2275.0 + 860.0 * exp(-0.120 * MC)) * 1e3          # [J/kg], endothermic (h > 0)
+# A pyrolysis heat that switches from h₁ to h₂ once the wood has lost the mass
+# fraction x_s; ξ is the full mass-concentration tuple, so you index the wood yourself.
+WOOD_IDX, ρ_dry, γ = 1, 430.0, 0.25            # wood index, oven-dry density, char yield
+h₁, h₂, x_s = 400e3, -200e3, 0.40
+heat_pyrolysis = StateDependentProperty((T, ξ) -> begin
+    x = (1 - γ) * (1 - ξ[WOOD_IDX] / ρ_dry)    # mass lost per kg of dry wood
+    s = 0.5 * (1 + tanh((x - x_s) / 0.01))
+    (1 - γ) * ((1 - s) * h₁ + s * h₂)          # [J/kg], h > 0 endothermic
 end)
 ```
 
@@ -420,7 +448,9 @@ suits kinetics that turn on over tens of kelvin; for gates that must act
 nearly as hard switches (melting fronts, phase-change surrogates) use a
 narrower width (e.g. `gate_width = 0.1`) and expect a stiffer Jacobian near
 the gate. On a driving ΔT of only a few kelvin, a 1 K ramp visibly shifts
-the effective switching temperature — narrow the gate accordingly.
+the effective switching temperature — narrow the gate accordingly. A gate is
+not a moisture model: water held in a solid evaporates and condenses with its
+vapour pressure, through a `PhaseChange` (§4.14).
 
 ### 3.4.2 Symbolic vs. index references
 
@@ -449,7 +479,7 @@ Pyrolysis.jl uses the **storage convention `h > 0 = endothermic`** (cools the
 material). The volumetric source is `Q_rxn = −Σ h_r r_r`, so an endothermic reaction
 produces `Q_rxn < 0`. This is the *opposite* of the ThermaKin publication
 convention (`h > 0 = exothermic`); when you transcribe ThermaKin parameters, flip
-the sign and normalize the reaction extent (Technical Reference §6.9.1).
+the sign and normalize the reaction extent (Technical Reference §6.10.1).
 Gpyro V2 and FDS use the convention of this package but still require basis and
 unit checks. Examples:
 
@@ -462,7 +492,7 @@ When transferring a Gpyro V2 reaction with `CONSTANT_DHVOL=.TRUE.`, combine
 its solid-product and volatile heats on a per-reactant basis; equal `DHS`
 and `DHV` are one simple case. The other setting adds a temperature-dependent
 sensible-enthalpy correction whose sign differs between the V2 user guide
-and source. Technical Reference §6.9.2 gives the implemented conversion.
+and source. Technical Reference §6.10.2 gives the implemented conversion.
 
 See the overload note H1 in the nomenclature and Technical Reference §6.6.
 
@@ -483,20 +513,18 @@ Only **single-reactant** reactions are supported (the reactant is consumed with 
 stoichiometry 1.0). Multi-step schemes are modelled as *sequences* of single-reactant
 reactions sharing intermediate components — see Chapter 4.
 
-### 3.4.5 State-dependent heat (moisture sorption)
+### 3.4.5 State-dependent heat
 
 Pass a `StateDependentProperty` (§3.3.2) as `h` to make the heat depend on local
-composition. This is the standard way to model the moisture heat of sorption:
+composition, such as the conversion-dependent pyrolysis heat above:
 
 ```julia
-heat_sorption = StateDependentProperty((T, ξ) -> begin
-    MC = 100.0 * ξ[3] / max(ξ[1] + ξ[2], 1.0)
-    (2275.0 + 860.0 * exp(-0.120 * MC)) * 1e3
-end)
-
-drying = Reaction(:drying, :moisture => :H2O,
-                  A = 5.6e8, E = 43e3, h = heat_sorption)
+pyrolysis = Reaction(:pyrolysis, :wood => (:char, :gas);
+                     A = 1e10, E = 150e3, h = heat_pyrolysis, yields = (0.25, 0.75))
 ```
+
+Moisture is not dried by a reaction: its evaporation, condensation and heat of
+sorption are a `PhaseChange` on the material (§4.14).
 
 ### 3.4.6 Verifying reactions
 
@@ -682,6 +710,7 @@ Two physics notes worth remembering (both in Technical Reference §5):
 Material(; name::Symbol,
            components::Tuple,
            reactions::Tuple = (),
+           phase_changes::Tuple = (),
            mixing = MaterialMixing(),
            lateral_shrinkage_law = nothing,
            depletion_limiter = DepletionLimiter(),
@@ -694,6 +723,7 @@ Material(; name::Symbol,
 | `name` | material identifier (`Symbol`) | required |
 | `components` | tuple of components | required |
 | `reactions` | tuple of reactions (may be empty `()`) | `()` |
+| `phase_changes` | tuple of phase changes of liquids into their vapours (§4.14; may be empty) | `()` |
 | `mixing` | the `MaterialMixing`, with fields `k`, `λ`, `κ` | `MaterialMixing()` |
 | `lateral_shrinkage_law` | `A(t)/A_0 = law(χ̄)` or `nothing` (identity) | `nothing` |
 | `depletion_limiter` | `DepletionLimiter` applied to every reaction-rate evaluation (a C¹ rate factor that is zero at and below zero concentration and joins `tanh(ξ/threshold)` above it; §4.10) | `DepletionLimiter()` (`threshold = 1.0` kg·m⁻³, `join = 1.0`, `base_scale = 1e-8` kg·m⁻³, enabled) |
@@ -738,7 +768,10 @@ Material(; name::Symbol,
 A wood with virgin solid, char solid, liquid moisture, a dry pyrolysis gas, and water
 vapour. The solids carry permeabilities, so the material will run in lumped gas transport mode;
 it uses `WEIGHTED` conductivity and `CARMAN_KOZENY` permeability, with porosity set
-on the solids via `φ`.
+on the solids via `φ`. The moisture dries and condenses through a phase change on the
+softwood isotherm, held by the virgin wood alone; the virgin wood's transfer coefficient
+is the size measured for bound-water diffusion across the grain at about 10 % moisture
+(Technical Reference §9.2.1).
 
 ```julia
 using Pyrolysis
@@ -746,7 +779,7 @@ using Pyrolysis
 # --- Components -----------------------------------------------------------
 virgin = SolidComponent(:virgin,
     ρ = 530.0, c = (1500.0, 1.0), k = 0.12,
-    ε = 0.88, λ = 2e-5,
+    ε = 0.88, λ = 5e-7,  # bound-water diffusion across the grain, ~10 % moisture
     κ = 1e-15,           # tight virgin matrix (trips Darcy mode)
     φ = 0.55)            # pure-phase porosity → intrinsic density set internally
 
@@ -766,19 +799,18 @@ pyrolysis = Reaction(:pyrolysis, :virgin => (:char, :gas),
                      A = 1e10, E = 140e3, h = 500e3,     # endothermic
                      yields = (0.25, 0.75), T_min = 450.0)
 
-# Moisture evaporation with state-dependent heat of sorption
-heat_sorption = StateDependentProperty((T, ξ) -> begin
-    MC = 100.0 * ξ[3] / max(ξ[1] + ξ[2], 1.0)
-    (2275.0 + 860.0 * exp(-0.120 * MC)) * 1e3
-end)
-drying = Reaction(:drying, :moisture => :H2O,
-                  A = 5.6e8, E = 43e3, h = heat_sorption)
+# --- Phase change ---------------------------------------------------------
+# The moisture and its vapour exchange toward sorption equilibrium on the
+# softwood isotherm; the virgin wood holds the water, the char none.
+drying = PhaseChange(:moisture, :moisture => :H2O;
+                     activity = CAST_SPRUCE, sorbents = (:virgin,))
 
 # --- Material -------------------------------------------------------------
 wood = Material(
     name = :CharringWood,
     components = (virgin, char, moisture, gas, vapor),   # indices 1..5
-    reactions  = (pyrolysis, drying),
+    reactions  = (pyrolysis,),
+    phase_changes = (drying,),
     mixing = MaterialMixing(
         k = MixingSpec(WEIGHTED, 0.5),
         λ = MixingSpec(PARALLEL),
@@ -789,7 +821,8 @@ wood = Material(
 # --- Inspect ---------------------------------------------------------------
 # All reached via the Materials submodule (none are top-level Pyrolysis exports).
 Pyrolysis.Materials.n_components(wood)              # 5
-Pyrolysis.Materials.n_reactions(wood)               # 2
+Pyrolysis.Materials.n_reactions(wood)               # 1
+Pyrolysis.Materials.n_phase_changes(wood)           # 1
 
 Pyrolysis.Materials.dry_gas_flags(wood)  # (false, false, false, true, false)
 # :gas (4) descends from the solids; :H2O (5) is the moisture's vapour

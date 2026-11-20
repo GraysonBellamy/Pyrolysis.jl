@@ -1,0 +1,4 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+4,"temperature at five times [K]",5.130686986376531e-10,NaN,5.130686986376531e-10,1.6e-9,true
+4,"vapour at five times / reference",1.7738976954007057e-9,NaN,1.7738976954007057e-9,5.4e-9,true
+4,"energy ledger closure (relative)",2.5097618917989675e-9,NaN,2.5097618917989675e-9,7.6e-9,true

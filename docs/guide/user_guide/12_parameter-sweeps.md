@@ -796,9 +796,8 @@ finite-difference solves in parallel (§13.5).
 
 The sweep harness is also the substrate for **global / variance-based (Sobol)**
 sensitivity: you sample the parameter space (the grid), run the sweep, and feed
-the input/output table into a Sobol estimator. See
-`examples/sensitivity_analysis/sensitivity_douglas_fir.jl` and
-`sensitivity_sobol.jl` (§14.8) and Technical Reference §17.5 for that workflow.
+the input/output table into a Sobol estimator. Chapter 13 (§13.8) and Technical
+Reference §17.5 give that workflow.
 
 ---
 

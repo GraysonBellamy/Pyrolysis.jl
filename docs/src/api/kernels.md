@@ -14,6 +14,8 @@ Reached through `Pyrolysis.Kernels` and `Pyrolysis.Closures` or
 
 ```@docs
 Kernels.ReactionKernel
+Kernels.PhaseChangeKernel
+Kernels.phase_change_exchange
 Kernels.ConductionKernel
 Kernels.gradient_support
 Kernels.GasTransportKernel

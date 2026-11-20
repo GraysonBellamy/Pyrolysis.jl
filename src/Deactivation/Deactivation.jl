@@ -5,7 +5,9 @@ The terminal event of a cell: a cell whose reactive inventory, the mass of
 every reaction's condensed reactant, falls below a fraction `ε_m` of its
 reference is deactivated, on a moving mesh wherever it sits, together with the
 cells near the threshold around it, and on a fixed mesh from the exposed side.
-Its inventories go to the live cell beside it (on a fixed mesh its gas is vented
+A phase change adds nothing to the reactive inventory, which reads the
+reactions' reactants alone: water that can condense back neither holds a
+spent cell live nor empties a live one by drying. Its inventories go to the live cell beside it (on a fixed mesh its gas is vented
 to the event instead), the live cells above it move down into its slot with
 every table a solve reads by slot, the outermost slots' rows are masked
 (identity rows of the Newton matrix), and the boundary conditions move to the

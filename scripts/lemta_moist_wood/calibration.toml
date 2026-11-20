@@ -1,7 +1,9 @@
-# Factors on the incident flux and on the conductivity across the grain fitted
-# to each species' dry runs by calibrate_dry.jl (grid 0.95–1.25 × 0.80–1.40,
-# pooled rms over the heating period; spruce_test2_0% left out). Read by
-# problem(...; calibrated = true). Fir has no dry run and keeps its deck.
+# Factors on the incident flux and on the conductivity fitted to each species'
+# dry runs by calibrate_dry.jl (grid 0.95–1.25 × 0.60–1.40, pooled rms over the
+# record; spruce_test2_0% left out): `<species>` across the grain,
+# `<species>_along` along it (calibrate_dry.jl --along). Read by
+# problem(...; calibrated = true). Across the grain fir has no dry run; along it
+# oak and spruce have none. Those keep their deck.
 
 [larch]
 flux_factor = 1.0
@@ -27,3 +29,20 @@ k_factor = 0.95
 rms_K = 3.043
 rms_base_K = 3.311
 
+[fir_along]
+flux_factor = 1.0
+k_factor = 0.95
+rms_K = 3.903
+rms_base_K = 3.922
+
+[larch_along]
+flux_factor = 1.025
+k_factor = 0.9
+rms_K = 1.412
+rms_base_K = 2.575
+
+[poplar_along]
+flux_factor = 1.025
+k_factor = 0.8
+rms_K = 1.717
+rms_base_K = 3.006

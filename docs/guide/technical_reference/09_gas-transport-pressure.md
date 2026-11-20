@@ -205,6 +205,38 @@ resident gas, and the pressure needed to carry a given release scales as
 $1/\Lambda$. That pressure is a transfer potential, and the pore composition
 is meaningful only with $\kappa>0$.
 
+**Wet wood.** Across the grain moisture crosses the cell walls as bound water, in
+series with the vapour in the lumens (Siau 1984, ch. 6). Under the phase change of §6.7
+the water and its vapour stay near sorption equilibrium, so a moisture diffusion
+coefficient $D_X$ carries the same flux as a vapour transfer coefficient
+$\Lambda_{\text{eq}} = \xi_{\mathcal S}\,D_X\,(\partial X/\partial a)/\rho_{v,\text{sat}}$.
+With the slope of `CAST_SPRUCE`, the measured sizes are, in $10^{-6}$ m²·s⁻¹:
+
+| source | 5 % | 10 % | 12 % | 15 % | 18 % |
+|:---|:---|:---|:---|:---|:---|
+| Siau's model (his eqs 6.14, 6.22), specific gravity 0.5, 25–120 °C | 0.05–0.09 | 0.17–0.23 | – | 0.56–0.87 | – |
+| Choong 1965, western fir, 40–60 °C (Keey et al. 2000) | 0.07 | – | – | 1.0–1.3 | – |
+| Biggerstaff 1965, eastern hemlock, 50 and 120 °C (Keey et al. 2000) | – | – | 0.6–0.7 | 1.1 | 1.6–1.9 |
+| Stamm and Nelson 1961, loblolly pine, 50–120 °C (Keey et al. 2000) | – | – | 0.6–1.2 | 1.0–2.2 | – |
+
+The last two are single coefficients fitted to drying from near fibre saturation and
+set against a moisture content by assignment. The coefficient hardly changes with
+temperature and rises about thirtyfold from 5 to 18 % moisture, and Siau notes that his
+equations tend to give low values for drying. The transfer coefficient $\lambda$ of the
+virgin wood in a wet deck stands for this flux, as a constant: $5\times10^{-7}$ m²·s⁻¹
+suits about 10–12 % moisture and is two to four times low at 15–20 %. Along the grain
+the coefficient is 50–100 times larger at 5 % and 2–4 times larger at 30 % (Siau 1984),
+so the end grain of a small block vents more than its one-dimensional path across the
+grain does. The LEMTA blocks dried along the grain lose the measured water at ten times
+the across-grain coefficient, Siau's ratio near 20 % moisture, and fall short at the
+across-grain value by as much as the blocks dried across it (§18.6.3); the drying is set
+by $\lambda$ in both directions, not by the permeability. A
+vapour-pressure gradient is also not quite the driving force of bound water: in sealed
+specimens under a temperature gradient the steady state keeps a higher vapour pressure
+on the warm side (Siau 1984), so this form overstates the hot-to-cold flux there. A
+coefficient that rises with the moisture content would be a property law on this
+transport.
+
 ### 9.2.2 Dusty-gas friction
 
 `DustyGas(...)` distinguishes collisions of molecules with pore walls from
@@ -288,7 +320,10 @@ $\mathcal T$ has zero matrix weight but still occupies physical volume. Gas
 components have zero matrix weight and carry neither $\lambda$ nor $\kappa$.
 
 For every component of $\mathcal T$, the lumped model requires explicit
-$\lambda$ data; $\kappa$ defaults to zero. For either coefficient $a_j$, the mixture
+$\lambda$ data; $\kappa$ defaults to zero. In wet wood the virgin component's
+$\lambda$ stands for the bound-water diffusion along the column, across the grain or along
+it, with the measured sizes
+of §9.2.1; the char's is its own. For either coefficient $a_j$, the mixture
 rules are
 
 $$
@@ -432,6 +467,13 @@ A deck whose kinetics depend on oxygen should therefore give
 `mole_fractions` as a function of time that removes the oxygen after
 ignition; for inert kinetics the composition at the surface reaches nothing
 the test measures.
+
+The reservoir of a wet material names the vapour of its phase change (§6.7). At a
+relative humidity $\mathrm{RH}$ its mole fraction is
+$x_{v,\infty} = \mathrm{RH}\,p_{\text{sat}}(T_\infty)/P$; a deck that starts in
+equilibrium with its surroundings takes $x_{v,\infty} = p_{\text{eq}}(X(0),T_\infty)/P$.
+A reservoir that leaves the vapour out is a perfectly dry sink for it, and `setup` warns
+about it.
 
 ### 9.4.2 The external mass-transfer film
 

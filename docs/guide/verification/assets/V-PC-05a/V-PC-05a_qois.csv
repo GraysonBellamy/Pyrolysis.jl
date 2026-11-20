@@ -1,0 +1,3 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"gain at five times / series (relative)",0.00016829197882028968,NaN,0.00016829197882028968,0.004,true,"observed 1.343e-3 in both forms, at the first time; the mesh's: 4.0e-4 at 100 cells, 1.7e-4 at 200"
+"temperature drift [K]",5.684341886080802e-14,NaN,5.684341886080802e-14,1.0e-10,true,"the step takes no heat; observed 5.7e-14 K (temperature) and 0 (enthalpy)"

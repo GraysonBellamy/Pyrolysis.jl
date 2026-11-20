@@ -38,6 +38,23 @@ MixingSpec
 MaterialMixing
 ```
 
+## Liquids and their vapours
+
+The activity laws and the saturation curve of a [`PhaseChange`](@ref).
+
+```@docs
+Materials.AbstractActivity
+CASTIsotherm
+CAST_SPRUCE
+CAST_BEECH
+FreeLiquid
+ActivityFunction
+Materials.activity
+Materials.sorption_heat
+WATER_SATURATION
+Materials.WaterSaturation
+```
+
 ## Gas transport
 
 ```@docs

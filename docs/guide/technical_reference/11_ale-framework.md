@@ -188,11 +188,12 @@ $(\xi_j\mathbf v_s + \mathbf J_j)\,h_j$, and (11.2) with $\mathbf w = \mathbf v_
 $$
 \frac{dH_i}{dt}
 = -\oint_{\partial\Omega_i}\Big[\mathbf q + \sum_j \big(\mathbf J_j - \xi_j\,\mathbf c\big)\,h_j\Big]\cdot\hat{\mathbf n}\,dA
-+ \int_{\Omega_i}\Big(Q_{\text{rxn}} + Q_{\text{rad}} + \sum_j S_j\,h_j\Big)\,dV ,
++ \int_{\Omega_i}\Big(Q_{\text{rxn}} + Q_{\text{pc}} + Q_{\text{rad}} + \sum_j S_j\,h_j\Big)\,dV ,
 \tag{11.3}
 $$
 with $\mathbf q$ the conductive flux, $Q_{\text{rxn}} = -\sum_r h_r r_r$ the reaction
-heat at the local temperature, $Q_{\text{rad}}$ the absorbed radiation and $S_j$ the
+heat at the local temperature, $Q_{\text{pc}}$ the heat of the phase changes (§6.7),
+$Q_{\text{rad}}$ the absorbed radiation and $S_j$ the
 reaction mass source of component $j$ (the last term converts the heat of reaction,
 quoted at the local temperature, to the sensible-enthalpy datum; Chapter 7). This is
 the row of the **inventory form** (`energy_state = :enthalpy`). The **temperature
@@ -203,7 +204,7 @@ counterpart, per unit volume, is
 $$
 \boxed{\;
 \rho c_p^{\text{eff}}\left.\frac{\partial T}{\partial t}\right|_{\chi}
-= -\nabla\cdot\mathbf q - \sum_g c_{p,g}\,\mathbf J_g\cdot\nabla T + Q_{\text{rxn}} + Q_{\text{rad}}
+= -\nabla\cdot\mathbf q - \sum_g c_{p,g}\,\mathbf J_g\cdot\nabla T + Q_{\text{rxn}} + Q_{\text{pc}} + Q_{\text{rad}}
 \;+\; \rho c_p^{\text{eff}}\,(\mathbf w - \mathbf v_s)\cdot\nabla T
 \;}
 \tag{11.4}
@@ -865,8 +866,8 @@ $\varepsilon_m$ of it once its components are converted completely (`vanishes`).
 fraction each condensed component leaves (`residues`) is the condensed yield of a
 reaction that consumes it, each product weighted by its own residue, the largest over
 the reactions that consume it (competing reactions: the least gasifying bounds what is
-left); it is zero for a component every consuming reaction gasifies and one for an
-inert component. `layers = :all` moves every layer, for decks that exercise the
+left); it is zero for a component every consuming reaction gasifies, and for the liquid of
+a phase change, which can leave completely as vapour, and one for an inert component. `layers = :all` moves every layer, for decks that exercise the
 correction on layers that cannot vanish.
 
 ### 11.7.5 The layer time

@@ -97,9 +97,10 @@ MixingSpec(spec::MixingSpec) = spec
 # ============================================================================
 
 """
-	Material{NC,NR,C,RT,LSL,Pμ,GT}
+	Material{NC,NR,C,RT,LSL,Pμ,GT,PC}
 
-A complete material definition with components, reactions, mixing rules, and gas transport.
+A complete material definition with components, reactions, phase changes,
+mixing rules, and gas transport.
 
 # Type Parameters
 - `NC`: Number of components
@@ -111,6 +112,8 @@ A complete material definition with components, reactions, mixing rules, and gas
   specialize statically — no dynamic dispatch through `Union{Function,Nothing}`.
 - `Pμ`: Pore-gas viscosity property-function type. Parameterized for the same
   reason as `LSL` — `material.gas_viscosity(T)` stays monomorphic.
+- `GT`: Gas transport model type
+- `PC`: Phase-change tuple type
 
 # Fields
 - `name::Symbol`: Material identifier
@@ -123,6 +126,9 @@ A complete material definition with components, reactions, mixing rules, and gas
   anything `to_property` understands — a number, a `(p0, p1)` tuple, a
   `Function`, or a property function. Defaults to
   [`SutherlandProperty`](@ref)`()` (air).
+- `gas_transport::GT`: The gas transport model
+- `phase_changes::PC`: Phase changes of liquids into their vapours
+  ([`PhaseChange`](@ref)), resolved
 
 # Pore-gas viscosity
 μ enters the model *only* as the Darcy mobility κ/μ, so an error in μ is
@@ -184,7 +190,7 @@ pmma = Material(
 )
 ```
 """
-struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,GT<:GasTransport}
+struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,GT<:GasTransport,PC<:Tuple}
     name::Symbol
     components::C
     reactions::RT  # Full tuple type to preserve heterogeneous reaction types
@@ -208,8 +214,11 @@ struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,GT<:GasTransport}
     gas_viscosity::Pμ
     gas_transport::GT
 
+    # Two-way phase changes of liquids into their vapours, resolved.
+    phase_changes::PC
+
     # Inner constructor with validation
-    function Material{NC,NR,C,RT,LSL,Pμ,GT}(
+    function Material{NC,NR,C,RT,LSL,Pμ,GT,PC}(
         name::Symbol,
         components::C,
         reactions::RT,
@@ -218,7 +227,8 @@ struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,GT<:GasTransport}
         depletion_limiter::DepletionLimiter,
         gas_viscosity::Pμ,
         gas_transport::GT,
-    ) where {NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,GT<:GasTransport}
+        phase_changes::PC,
+    ) where {NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,GT<:GasTransport,PC<:Tuple}
         # Validate component count matches
         length(components) == NC || throw(ArgumentError("Component count mismatch"))
         length(reactions) == NR || throw(ArgumentError("Reaction count mismatch"))
@@ -227,7 +237,9 @@ struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,GT<:GasTransport}
             throw(ArgumentError("lateral_shrinkage_law must be a Function or nothing"))
         _validate_gas_viscosity(gas_viscosity, name)
         _validate_transport_inputs(components, gas_transport, mixing)
-        new{NC,NR,C,RT,LSL,Pμ,GT}(
+        all(pc -> pc isa PhaseChange, phase_changes) ||
+            throw(ArgumentError("phase changes must be resolved"))
+        new{NC,NR,C,RT,LSL,Pμ,GT,PC}(
             name,
             components,
             reactions,
@@ -236,6 +248,7 @@ struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,GT<:GasTransport}
             depletion_limiter,
             gas_viscosity,
             gas_transport,
+            phase_changes,
         )
     end
 end
@@ -270,7 +283,7 @@ end
 # ============================================================================
 
 """
-	Material(; name, components, reactions=(),
+	Material(; name, components, reactions=(), phase_changes=(),
 			  mixing = MaterialMixing(),
 			  lateral_shrinkage_law = nothing,
 			  depletion_limiter = DepletionLimiter(),
@@ -283,6 +296,9 @@ Create a material with keyword arguments.
 - `name::Symbol`: Material identifier
 - `components`: Tuple of components
 - `reactions`: Tuple of reactions (can be empty tuple `()`)
+- `phase_changes`: Tuple of [`PhaseChange`](@ref) declarations, at most one
+  per liquid (can be empty tuple `()`); a material without one builds no
+  phase-change kernel
 - `mixing`: A [`MaterialMixing`](@ref). Defaults: k = `WEIGHTED, β=0.5`,
   λ = `PARALLEL, β=0.5` (superficial matrix transfer), κ = `WEIGHTED, β=0.5`.
   `BRUGGEMAN` is rejected for both transport coefficients at construction.
@@ -315,6 +331,7 @@ function Material(;
     name::Symbol,
     components::C,
     reactions::Tuple = (),
+    phase_changes::Tuple = (),
     mixing::MaterialMixing = MaterialMixing(),
     lateral_shrinkage_law::Union{Function,Nothing} = nothing,
     depletion_limiter::DepletionLimiter = DepletionLimiter(),
@@ -322,6 +339,7 @@ function Material(;
     gas_transport::GasTransport = LumpedTransfer(),
 ) where {C<:Tuple}
     resolved = _resolve_reactions(reactions, components)
+    changes = _resolve_phase_changes(phase_changes, components)
     # Function barrier: constructing through a helper whose `LSL` is bound by the
     # argument type makes the `Material{…,LSL}` apply_type monomorphic in each
     # branch, instead of a `Union{Function,Nothing}` split JET flags as a possible
@@ -335,6 +353,7 @@ function Material(;
         depletion_limiter,
         to_property(gas_viscosity),
         gas_transport,
+        changes,
     )
     needs_lineage(material) && lineage_graph(material)
     return material
@@ -349,8 +368,9 @@ function _construct_material(
     depletion_limiter::DepletionLimiter,
     gas_viscosity::Pμ,
     gas_transport::GT,
-) where {C<:Tuple,RT<:Tuple,LSL,Pμ,GT<:GasTransport}
-    Material{length(components),length(resolved),C,RT,LSL,Pμ,GT}(
+    changes::PC,
+) where {C<:Tuple,RT<:Tuple,LSL,Pμ,GT<:GasTransport,PC<:Tuple}
+    Material{length(components),length(resolved),C,RT,LSL,Pμ,GT,PC}(
         name,
         components,
         resolved,
@@ -359,6 +379,7 @@ function _construct_material(
         depletion_limiter,
         gas_viscosity,
         gas_transport,
+        changes,
     )
 end
 
@@ -390,6 +411,13 @@ Get the number of reactions in a material.
 n_reactions(::Material{NC,NR}) where {NC,NR} = NR
 
 """
+	n_phase_changes(m::Material)
+
+Get the number of phase changes in a material.
+"""
+n_phase_changes(m::Material) = length(m.phase_changes)
+
+"""
 	component_index(m::Material, name::Symbol)
 
 Get the index of a component by name.
@@ -406,7 +434,9 @@ end
 # ============================================================================
 
 function Base.show(io::IO, m::Material{NC,NR}) where {NC,NR}
-    print(io, "Material(:$(m.name), $NC components, $NR reactions)")
+    NP = n_phase_changes(m)
+    changes = NP > 0 ? ", $NP phase changes" : ""
+    print(io, "Material(:$(m.name), $NC components, $NR reactions$changes)")
 end
 
 function Base.show(io::IO, ::MIME"text/plain", m::Material{NC,NR}) where {NC,NR}
@@ -419,6 +449,18 @@ function Base.show(io::IO, ::MIME"text/plain", m::Material{NC,NR}) where {NC,NR}
         println(io, "  Reactions ($NR):")
         for (i, r) in enumerate(m.reactions)
             println(io, "    $i. $(r.name): A=$(r.A), E=$(r.E) J/mol")
+        end
+    end
+    if n_phase_changes(m) > 0
+        println(io, "  Phase changes ($(n_phase_changes(m))):")
+        for (i, pc) in enumerate(m.phase_changes)
+            liquid, vapour = m.components[pc.liquid].name, m.components[pc.vapour].name
+            sorbents = join((m.components[j].name for (j, _) in pc.sorbents), ", ")
+            println(
+                io,
+                "    $i. $(pc.name): $liquid ⇄ $vapour, $(nameof(typeof(pc.activity))), " *
+                "sorbents $sorbents, K=$(pc.exchange_rate) 1/s",
+            )
         end
     end
     println(io, "  Conductivity mixing: $(m.mixing.k.rule), β=$(m.mixing.k.β)")
@@ -445,12 +487,14 @@ Flag the dry pyrolysis gases: the gases the solids give off through the
 reaction graph. The lineage starts with every solid component and takes in,
 until nothing changes, the products (yield > 0) of every reaction with a
 reactant in it; its gases are the dry gases. Water released by decomposition
-is dry gas, the vapour a liquid evaporates into is not, and a gas no reaction
-produces is not.
+is dry gas, the vapour a liquid evaporates into is not, whether by a reaction
+or by a phase change, and a gas no reaction produces is not.
 
 A lineage gas that a reaction without a reactant in the lineage also produces
 has no single origin, and the function throws an `ArgumentError` naming the
-gas and the reactions; model it as two species, one per lineage.
+gas and the reactions; model it as two species, one per lineage. So does a
+lineage gas that is the vapour of a phase change, naming the gas and the
+phase change: pyrolysis water is then a species of its own.
 """
 function dry_gas_flags(material::Material{NC}) where {NC}
     comps = material.components
@@ -482,6 +526,19 @@ function dry_gas_flags(material::Material{NC}) where {NC}
                 "$(join(repr.(inside), ", "))) and from outside their lineage " *
                 "(reactions $(join(repr.(outside), ", "))), so whether it is dry " *
                 "pyrolysis gas is ambiguous; split it into one species per lineage",
+            ),
+        )
+    end
+    for pc in material.phase_changes
+        j = pc.vapour
+        j in lineage || continue
+        inside = [r.name for r in rxns if from_lineage(r) && produces(r, j)]
+        throw(
+            ArgumentError(
+                "gas :$(comps[j].name) is produced from the solids (reactions " *
+                "$(join(repr.(inside), ", "))) and is the vapour of phase change " *
+                ":$(pc.name), so whether it is dry pyrolysis gas is ambiguous; split " *
+                "it into one species per origin",
             ),
         )
     end

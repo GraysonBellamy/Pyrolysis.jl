@@ -1,8 +1,11 @@
 # Exact series barriers are discontinuous when their support appears or
 # disappears. Check the channels actually used, while retaining invariant
 # barriers, identically closed mixtures, and purely parallel weighted rules.
+# The liquid of a phase change can condense in any cell: it is available and
+# changed everywhere.
 function validate_transport_support(material, ξ0; moving_support = false)
     has_gas(material) || return nothing
+    liquids = Int[pc.liquid for pc in material.phase_changes]
     participating=[
         j for j in eachindex(material.components) if
         participates_in_transport(material.components[j])
@@ -33,9 +36,10 @@ function validate_transport_support(material, ξ0; moving_support = false)
             available=Set(
                 j for j in eachindex(material.components) if
                 (moving_support ? any(>(0), view(ξ0, j, :)) : ξ0[j, i]>0) ||
-                    is_gas(material.components[j])
+                    is_gas(material.components[j]) ||
+                    j in liquids
             )
-            changed=Set{Int}()
+            changed=Set{Int}(liquids)
             again=true
             while again
                 again=false

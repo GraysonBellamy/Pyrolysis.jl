@@ -68,9 +68,8 @@ residual.
 > constructor. `p_inject` must construct the components, reactions, material,
 > mesh, BCs and problem **from scratch**, substituting the entries of `θ` where
 > they belong — exactly like the `modify` closure for a parameter sweep
-> (Chapter 12), and exactly like the `build_and_solve(θ)` function in
-> `examples/sensitivity_analysis/sensitivity_douglas_fir.jl`. The base problem
-> is only there to supply the parts of the configuration you are *not* varying.
+> (Chapter 12). The base problem is only there to supply the parts of the
+> configuration you are *not* varying.
 
 A minimal, correct `p_inject` for a single charring reaction whose
 pre-exponential `A`, activation energy `E`, and heat of reaction `h` we want to
@@ -161,9 +160,7 @@ virgin = SolidComponent(:virgin; ρ = 1190.0, c = cp, k = 0.20)
 
 `Reaction` accepts a scalar `h` (a constant), a tuple `h = (a, b)` (linear in `T`,
 `a + b*T`), or a property object such as `StateDependentProperty((T, ξ) -> ...)`
-for moisture-dependent heats of sorption (Technical Reference §6.6). The
-`build_and_solve(θ)` in `sensitivity_douglas_fir.jl` demonstrates the
-state-dependent form for heat of sorption.
+for composition-dependent heats (Technical Reference §6.6).
 
 ---
 
@@ -407,7 +404,7 @@ TGA, DSC, MCC, or cone-calorimeter measurements. The pattern is:
 
 The shipped fitting workflow, `examples/inverse_analysis/inverse_white_pine.jl`,
 is derivative-free: `Optim.jl`'s `Fminbox(NelderMead())` on the loss, with a
-`FiniteDiff` Hessian at the optimum for the standard errors (§14.7). It is robust
+`FiniteDiff` Hessian at the optimum for the standard errors (§14.6). It is robust
 to the non-smooth responses of §13.9 and is the recommended starting point.
 
 A gradient-based alternative hands `Optim` a central-difference gradient:
@@ -446,18 +443,13 @@ Variance-based global sensitivity quantifies how much of an output's variance ea
 input (or group of inputs) is responsible for, over a *distribution* of inputs
 rather than at a single point. Pyrolysis.jl has no dedicated Sobol function;
 instead you build a sampling design, run it through `parameter_sweep`
-(Chapter 12), and post-process. The shipped example
-`examples/sensitivity_analysis/sensitivity_douglas_fir.jl` is a complete,
-production-grade realization of this for a 16-parameter Douglas-fir cone model,
-and `examples/sensitivity_analysis/sensitivity_sobol.jl` computes the variance
-decomposition from its output.
+(Chapter 12), and post-process.
 
 The workflow has three stages:
 
-**1. Sample the parameter space.** The example uses Owen-scrambled Sobol
-quasi-random samples from `QuasiMonteCarlo.jl`, transformed to correlated
-multivariate-Normal / Student-t groups whose covariances come from the
-measurement campaign:
+**1. Sample the parameter space.** Owen-scrambled Sobol quasi-random samples
+from `QuasiMonteCarlo.jl` suit this, transformed to each input's distribution
+(correlated groups through the Cholesky factor of their covariance):
 
 ```julia
 using QuasiMonteCarlo, Distributions, LinearAlgebra
@@ -472,8 +464,8 @@ sobol_unit = QuasiMonteCarlo.sample(
 ```
 
 **2. Solve every sample.** Each column of `samples` is a full parameter vector
-`θ`; a `build_and_solve(θ)` function (the example's `p_inject`-equivalent)
-rebuilds the Douglas-fir material and problem and solves it. Because every solve
+`θ`; a `build_and_solve(θ)` function, the `p_inject` of §13.2, rebuilds the
+material and problem and solves it. Because every solve
 is independent, this parallelizes cleanly with `Distributed.jl`:
 
 ```julia
@@ -488,23 +480,20 @@ results = pmap(j -> extract_qois(build_and_solve(samples[:, j])), 1:n_samples)
 This is the same separation as `parameter_sweep`: an immutable base, a `modify`/
 `build_and_solve` that materializes a fresh problem per point, and an `extract`
 that pulls out quantities of interest (peak MLR, time to ignition, total mass
-loss, peak surface temperature, MLR/temperature curves, …). The example's solve
-uses `use_ale = true`, `radiation_model = SURFACE_ABSORPTION`, `abstol = 1e-9`,
-`reltol = 1e-7`, `min_thickness = 0.5e-3` and the default integrator. Its
-`pmap` runs over the sample ids that have no result on disk yet, wraps each
-solve in `try`/`catch` and writes each run's curves as it finishes, so an
-interrupted study resumes where it stopped (§12.7 treats the same fault
-tolerance for sweeps).
+loss, peak surface temperature, MLR/temperature curves, …). For a long study,
+run `pmap` over the sample ids that have no result on disk yet, wrap each solve
+in `try`/`catch` and write each run's results as it finishes, so an interrupted
+study resumes where it stopped (§12.7 treats the same fault tolerance for
+sweeps).
 
-**3. Decompose the variance.** `sensitivity_sobol.jl` fits a Polynomial Chaos
-Expansion (PCE) surrogate to each scalar QoI and reads first-order and total
-*group* Sobol indices analytically from the PCE coefficients, with bootstrap
-confidence intervals. The Douglas-fir study groups the 16 parameters into 7
-measurement sources (HFM/DSC calibration biases, three heat-capacity regressions,
-heat-of-sorption parameters, and five heats of reaction), and reports how much of
-each QoI's variance each *source* explains. A lighter-weight alternative used in
-the same example is **Standardized Rank Regression Coefficients (SRRC)**, which
-need only the sampled `(θ, QoI)` pairs and no surrogate.
+**3. Decompose the variance.** A Polynomial Chaos Expansion (PCE) surrogate
+fitted to each scalar QoI gives first-order and total Sobol indices analytically
+from its coefficients, for single inputs or for *groups* of them (Technical
+Reference §17.5); a bootstrap of the fit gives confidence intervals. Grouping the
+inputs by the measurement that supplied them reports how much of each QoI's
+variance each *source* explains. A lighter-weight alternative is
+**Standardized Rank Regression Coefficients (SRRC)**, which need only the sampled
+`(θ, QoI)` pairs and no surrogate.
 
 > **You do not need PCE to get useful global sensitivity.** SRRC (rank regression
 > of standardized inputs against the QoI) is a few lines on top of the sweep
@@ -578,7 +567,7 @@ Reference §17.6), but several configurations still spoil a derivative:
 | Gradient of a scalar loss | `FiniteDiff.finite_difference_gradient(loss, θ0, Val(:central); relstep)` |
 | Qualify a derivative | `fd_check(y, θ0, k)`: steps 1, 2, 4, 8e-3, `reltol` 1e-7 and 1e-8, Richardson extrapolants within 5 % (§13.4.1) |
 | Perturbed solves in parallel | `parameter_sweep(base, pts; modify = p_inject, extract)` (§13.5) |
-| Global/Sobol | sample → `pmap`/`parameter_sweep` → PCE or SRRC (see examples) |
+| Global/Sobol | sample → `pmap`/`parameter_sweep` → PCE or SRRC (§13.8) |
 
 **Defaults to remember.** Start from `relstep = 1e-4` and check it with steps
 ten times larger and smaller (§13.4); qualify a derivative you rely on, and any

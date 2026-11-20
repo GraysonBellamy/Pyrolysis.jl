@@ -22,9 +22,10 @@ What the kernels return, with the derived state's element type `T`:
   normal (`NC × n_faces`) [kg/(m²·s)]
 - `F_energy`: energy flux per unit face area along the face normal — conduction
   and the enthalpy carried by the mass fluxes (`n_faces`) [W/m²]
-- `S_mass`: reaction mass source of every component, `ωᵢⱼ Vᵢ` (`NC × n_cells`) [kg/s]
-- `S_energy`: cell energy source — reaction heat and absorbed radiation, without
-  the formation term (`n_cells`) [W]
+- `S_mass`: cell mass source of every component from the reactions and the
+  phase changes, `ωᵢⱼ Vᵢ` (`NC × n_cells`) [kg/s]
+- `S_energy`: cell energy source — the heat of the reactions and the phase
+  changes and absorbed radiation, without the formation term (`n_cells`) [W]
 - `θ`: cell strain rate (`n_cells`) [1/s]
 - `M_flux`: the face-flux part of every mass rate, `−Σ_f σ_if F_f A_f`
   (`NC × n_cells`) [kg/s], filled by the assembler

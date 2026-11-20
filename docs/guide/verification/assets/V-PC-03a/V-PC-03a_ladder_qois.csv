@@ -1,0 +1,4 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+10,"|∫q dt − ΔH| / peak rise of H, five times and the end",1.6389931763264049e-10,NaN,1.6389931763264049e-10,4.9e-10,true
+10,"temperature back at the start [K]",2.3396395590680186e-5,NaN,2.3396395590680186e-5,7.1e-5,true
+10,"vapour back at the start (relative)",2.2131502850353257e-6,NaN,2.2131502850353257e-6,6.7e-6,true

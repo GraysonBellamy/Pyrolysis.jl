@@ -178,7 +178,8 @@ quantities divide by the current area of the faces they name unless noted.
 
 | `extras` key | Units | Meaning |
 |---|---|---|
-| `gas_generation_rate` | kg·m⁻²·s⁻¹ | Gas the reactions of the live cells produce, per unit initial area of the `:top` faces |
+| `gas_generation_rate` | kg·m⁻²·s⁻¹ | Gas the reactions and phase changes of the live cells produce, net, per unit initial area of the `:top` faces |
+| `evaporation_rate`, `condensation_rate` | kg·m⁻²·s⁻¹ | Gross exchange of the phase changes of the live cells (§4.14): the liquid that becomes vapour and the vapour that condenses, each non-negative, per unit initial area of the `:top` faces; their difference is the vapour's net production. Zero for a material without phase changes |
 | `back_temperature` | K | Temperature of the `:bottom` faces (`== boundary_T[:bottom]`) |
 | `total_mass` | kg·m⁻² | The summed component masses, per unit initial area of the `:top` faces |
 | `thickness_history` | m | Distance from the first node to the outermost live node |
@@ -219,6 +220,18 @@ T_back    = solution.extras.back_temperature       # K
 mass_m2   = solution.extras.total_mass             # kg/m²
 thickness = solution.extras.thickness_history      # m
 q_net     = solution.extras.surface_heat_flux_net  # W/m²
+```
+
+For a wet material, the share of the evaporated water that condenses again is the
+ratio of the two gross series integrated over the saved times (its resolution is the
+save interval's); `examples/07_douglas_fir_cone.jl` reports it:
+
+```julia
+t    = solution.t
+trap(y) = sum((t[k+1] - t[k]) * (y[k] + y[k+1]) / 2 for k in 1:length(t)-1)
+evaporated = trap(solution.extras.evaporation_rate)     # kg/m²
+condensed  = trap(solution.extras.condensation_rate)    # kg/m²
+condensed / evaporated
 ```
 
 Mind the meaning of `solution.extras.gas_generation_rate`: it is the *volumetric*

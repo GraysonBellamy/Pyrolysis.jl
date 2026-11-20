@@ -1,4 +1,5 @@
-# Poplar (Populus), grain across the heat flux.
+# Poplar (Populus), grain across the heat flux at the top level; [along] holds
+# what changes with the grain along it.
 #   Diarra et al. 2026, Table 1 (density); Flity et al. 2025, Fig. 12 and Table 1.
 species = "poplar"
 genus = "Populus"
@@ -13,3 +14,26 @@ h_rear = 14.6
 # davidiana heartwood, apparent at about 1 atm, T 2.0e-18, R 1.4e-18 (along the
 # grain 5.4e-13).
 permeability = 2.0e-18
+# Sorption isotherm of the phase change: the CAST set of Dietenberger, Glass &
+# Boardman (2024) fitted to beech, taken for this hardwood.
+isotherm = "CAST_BEECH"
+
+# Grain along the heat flux. The optics and the convection stay those of the
+# top level: the same rig and holder, and the end-grain face's optics were not
+# measured.
+[along]
+rho_dry = 341.0          # kg/m³, Diarra et al. 2026 Table 1 (//)
+# Conductivity along the grain, dry [W/(m K)]: Flity et al., Int. J. Therm.
+# Sci. 195 (2024) 108661, Table A.10 (poplar 2, 340 kg/m³), at the
+# temperatures k_T_C [°C], scaled by rho_dry/rho_k (linear in density, their
+# Fig. 9).
+k_T_C = [20.0, 60.0, 110.0, 160.0]
+k = [0.292, 0.294, 0.295, 0.297]
+rho_k = 340.0
+# Darcy permeability along the grain [m²]: Jinman 1991 Table 2, as cited above.
+permeability = 5.4e-13
+# Transfer coefficient [m²/s]: ten times the 1.5e-6 across the grain. Bound
+# water diffuses 50–100 times faster along the grain than across it at 5 %
+# moisture and 2–4 times at 30 % (Siau 1984 p. 206): ten is the ratio near
+# 20 %, about forty near 10 %.
+lambda = 1.5e-5

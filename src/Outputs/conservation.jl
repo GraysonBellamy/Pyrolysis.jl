@@ -9,8 +9,11 @@ The rates the live region's inventories follow, from the derived state `ds`
 and the kernel contributions `c` of one residual evaluation: the enthalpy rate
 [W] (the energy entering through the boundary faces of the live cells, by
 conduction or the boundary condition and with the enthalpy their mass fluxes
-carry, plus the live cells' reaction heat and formation terms `Σⱼ ωⱼ hⱼ`) and
-the mass outflow through those faces [kg/s].
+carry, plus the live cells' heat of the reactions and phase changes and the
+formation terms `Σⱼ ωⱼ hⱼ`) and the mass outflow through those faces [kg/s].
+The heat is booked as the kernels give it, so the ledger closes whatever heat
+a step takes; a closed cycle is what tests a latent heat against the
+components' enthalpies.
 """
 function ledger_rates(def::ResidualDefinition, c, ds)
     topo = def.setup.topology

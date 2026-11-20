@@ -105,19 +105,6 @@ const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
     # Water vapor cp (NIST Shomate fit, matches sensitivity analysis)
     water_vapor_cp = CallableProperty(T -> 1716.7 + 0.4154 * T + 1.530e-4 * T^2)
 
-    # Heat of sorption (state-dependent) — nominal CR2 fit from sensitivity analysis
-    moisture_idx = 7
-    solid_idx = 1:6  # dry solids (DF ... Char), the basis of MC
-    hos_a = 2450.420909987441    # kJ/kg - asymptotic baseline
-    hos_b = 875.6441221735336    # kJ/kg - exponential amplitude
-    hos_c = 0.1121684273316275   # 1/% - exponential decay rate
-    hos = StateDependentProperty(
-        (T, ξ) -> begin
-            MC = 100.0 * ξ[moisture_idx] / max(sum(ξ[j] for j in solid_idx), 1e-12)
-            return (hos_a + hos_b * exp(-hos_c * MC)) * 1e3
-        end,
-    )
-
     # Gas transfer and permeability (physically grounded values)
     # λ: superficial partial-pressure transfer of the condensed matrix
     # κ: intrinsic matrix permeability for Darcy flow
@@ -262,13 +249,16 @@ const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
                 n = 1.0,
                 yields = (0.74, 0.26),
             ),
-            Reaction(
-                :moisture_evaporation,
-                7 => 13,
-                A = 2.997e5,
-                E = 5.0e4,
-                h = hos,
-                n = 1.0,
+        ),
+        # The bound water and its vapour: a two-way phase change toward the
+        # CAST spruce isotherm; the wood and its intermediates sorb, the char
+        # does not
+        phase_changes = (
+            PhaseChange(
+                :moisture,
+                :MOISTURE => :WATER_VAPOR;
+                activity = CAST_SPRUCE,
+                sorbents = (:DF, :DF_int1, :DF_int2, :DF_int3, :DF_int4),
             ),
         ),
         mixing = MaterialMixing(
@@ -289,6 +279,37 @@ const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
     ρ_DF_initial = ρ_DF_oven_dry / (1 + moisture_content_db * ρ_DF_oven_dry / 1000.0)
     ρ_moisture_initial = moisture_content_db * ρ_DF_initial
 
+    # The pore gas at the start: the vapour in equilibrium with the moisture,
+    # the air at the rest of 101325 Pa
+    ξ_condensed_initial = (
+        ρ_DF_initial,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        ρ_moisture_initial,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    )
+    p_vapour_initial = equilibrium_vapour_pressure(material, ξ_condensed_initial, T_ambient)
+    ξ_vapour_initial =
+        equilibrium_vapour_concentration(material, ξ_condensed_initial, T_ambient)
+    ξ_air_initial = background_gas_concentration(
+        material,
+        :AIR,
+        ξ_condensed_initial,
+        T_ambient;
+        P = 101325.0 - p_vapour_initial,
+    )
+    # The ambient humidity that leaves the conditioned sample at rest
+    x_vapour_ambient = p_vapour_initial / 101325.0
+
     mesh = uniform_mesh(sample_thickness, n_cells)
 
     bc_set = BoundaryConditionSet(
@@ -300,7 +321,14 @@ const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
         ),
         mass = (
             top = AmbientGasBC(
-                GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (AIR = 1.0,));
+                GasReservoir(
+                    P = 101325.0,
+                    T = 300.0,
+                    mole_fractions = (
+                        AIR = 1.0 - x_vapour_ambient,
+                        WATER_VAPOR = x_vapour_ambient,
+                    ),
+                );
                 film = MassTransferFilm(0.05*101325.0*0.02897/(8.31446261815324*(300.0))),
             ),
             bottom = ImpermeableBC(),
@@ -321,28 +349,8 @@ const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
         z -> 0.0,
         z -> 0.0,
         z -> 0.0,
-        z -> 0.0,
-        z -> background_gas_concentration(
-            material,
-            :AIR,
-            (
-                ρ_DF_initial,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                ρ_moisture_initial,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-            ),
-            T_ambient,
-        ),
+        z -> ξ_vapour_initial,
+        z -> ξ_air_initial,
     ]
 
     t_end = SMOKE ? 10.0 : 600.0   # [s]
