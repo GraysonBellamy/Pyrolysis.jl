@@ -29,7 +29,7 @@ The whole API assumes four conventions (Technical Reference §2 and §3):
 
 ## 16.1 What `using Pyrolysis` gives you, and what it does not
 
-The top-level `Pyrolysis` module exports a curated surface of 107 names. The
+The top-level `Pyrolysis` module exports a curated surface of 118 names. The
 package is organized in submodules, and most of their names are not
 re-exported at the top level. There are three ways to reach a name:
 
@@ -50,13 +50,14 @@ re-exported at the top level. There are three ways to reach a name:
    `Internal` are not part of the stable API and may move or change between
    minor releases (Chapter 11, §11.9).
 
-The 107 top-level exports, by group:
+The 118 top-level exports, by group:
 
 | Group | Exports | Section |
 |---|---|---|
 | Components and materials | `SolidComponent`, `LiquidComponent`, `GaseousComponent`, `Material`, `phase`, `molar_mass`, `is_gas`, `is_solid`, `is_liquid` | 16.2.1, 16.2.5 |
 | Gas transport | `LumpedTransfer`, `DustyGas`, `LumpedEndpoint`, `DustyEndpoint` | 16.2.5 |
 | Reactions | `Reaction`, `DepletionLimiter` | 16.2.3, 16.2.5 |
+| Phase changes | `PhaseChange`, `CASTIsotherm`, `CAST_SPRUCE`, `CAST_BEECH`, `FreeLiquid`, `ActivityFunction`, `WATER_SATURATION`, `equilibrium_vapour_pressure`, `equilibrium_vapour_concentration` | 16.2.7 |
 | Mixing | `MixingRule`, `PARALLEL`, `SERIES`, `WEIGHTED`, `BRUGGEMAN`, `CARMAN_KOZENY`, `MixingSpec`, `MaterialMixing` | 16.2.4 |
 | Property functions | `ConstantProperty`, `LinearProperty`, `PolynomialProperty`, `SutherlandProperty`, `ArrheniusProperty`, `TableProperty`, `CallableProperty`, `StateDependentProperty` | 16.2.2 |
 | Radiation models | `RadiationModel`, `SURFACE_ABSORPTION`, `RADIATIVE_TRANSFER`, `AngularDistribution`, `Diffuse`, `Collimated`, `Cone` | 16.2.6 |
@@ -69,7 +70,7 @@ The 107 top-level exports, by group:
 | Problem and solve | `PyrolysisProblem`, `validate_problem`, `solve`, `setup`, `integrate`, `PreparedProblem`, `parameter_sweep` | 16.5.1, 16.7, 16.9 |
 | Correction | `NoCorrection`, `EquidistributionCorrection`, `ActivationTime`, `PrescribedCorrection` | 16.11 |
 | Integrator and linear solver | `default_policy`, `rodas5p_policy`, `fbdf_policy`, `kencarp4_policy`, `StructuredKLU` | 16.8 |
-| Solution and accessors | `PyrolysisSolution`, `SolverStatistics`, `succeeded`, `completed`, `get_profile`, `interior_events`, `GasDiagnostics`, `get_gas_composition`, `get_boundary_exchange` | 16.5 |
+| Solution and accessors | `PyrolysisSolution`, `SolverStatistics`, `succeeded`, `completed`, `get_profile`, `interior_events`, `displaced_residue`, `GasDiagnostics`, `get_gas_composition`, `get_boundary_exchange` | 16.5 |
 | Conservation | `ConservationRecorder`, `conservation_audit`, `gas_species_audit` | 16.12 |
 
 **Names that are not top-level exports.** The names below are often needed
@@ -80,7 +81,7 @@ them by name, for example `using Pyrolysis.Problem: initial_fields`.
 |---|---|
 | `initial_fields`, `step_profile`, `linear_profile`, `gaussian_profile`, `tanh_profile` | `Pyrolysis.Problem` |
 | `n_cells`, `n_nodes`, `n_faces`, `boundary_tags`, `boundary_faces`, `is_fixed`, `geometry!` | `Pyrolysis.Meshes` |
-| `n_components`, `n_reactions`, `R_GAS`, `STEFAN_BOLTZMANN`, `T_REF`, `P_REF`, `T_PROPERTY_MIN`, `T_PROPERTY_MAX`, `RHO_CP_FLOOR`, `Phase` (`SOLID`, `LIQUID`, `GAS`) | `Pyrolysis.Materials` |
+| `n_components`, `n_reactions`, `n_phase_changes`, `activity`, `sorption_heat`, `R_GAS`, `STEFAN_BOLTZMANN`, `T_REF`, `P_REF`, `T_PROPERTY_MIN`, `T_PROPERTY_MAX`, `RHO_CP_FLOOR`, `Phase` (`SOLID`, `LIQUID`, `GAS`) | `Pyrolysis.Materials` |
 | `SolutionExtras`, `ledger_rates`, `live_inventories` | `Pyrolysis.Outputs` |
 | `DeactivationEvent`, `CellDeactivation`, `replay_events!`, `top_live_cell`, `threshold_margin` | `Pyrolysis.Deactivation` |
 | `residual!`, `ResidualDefinition`, `ResidualWorkspace`, `NoSources`, `VolumetricSources` | `Pyrolysis.Assembly` |
@@ -88,6 +89,8 @@ them by name, for example `using Pyrolysis.Problem: initial_fields`.
 | `StateLayout`, `state_length`, `mass_index`, `energy_index`, `position_index`, `velocity_index`, `radiation_index`, `is_differential`, `mass_matrix` | `Pyrolysis.States` |
 | `IntegratorPolicy`, `DomainCheck`, `consistent_state!`, `default_linear_solver`, `DT_AFTER_EVENT`, `CORRECTION_BAND`, `MAX_CONSTRAINT_REJECTIONS`, `FAILURE_MEMORY_GROWTH`, `FAILURE_MEMORY_STEPS` | `Pyrolysis.Integration` |
 | `residues`, `vanishes`, `EQUIDISTRIBUTION_TIME`, `ACTIVATION_TIME_FACTOR` | `Pyrolysis.Closures` |
+| `moisture_content`, `phase_change_rate`, `phase_change_heat` | `Pyrolysis.Physics` |
+| `PhaseChangeKernel`, `phase_change_exchange` | `Pyrolysis.Kernels` |
 
 `to_property` is not exported by any submodule; call it as
 `Pyrolysis.Materials.to_property`.
@@ -198,8 +201,8 @@ property bracket `[200, 3000]` K (`T_PROPERTY_MIN`, `T_PROPERTY_MAX` in
 it the nearest end, so a trial temperature far from the physical one never
 reaches a fitted law's extrapolation. `TableProperty` requires strictly
 increasing temperatures (checked at construction). `StateDependentProperty` is
-the type for a composition-dependent quantity such as a moisture-dependent heat
-of sorption.
+the type for a composition-dependent quantity such as a conversion-dependent heat
+of reaction.
 
 ```julia
 # Conductivity rising with temperature:
@@ -308,6 +311,7 @@ mixing = MaterialMixing(
 Material(; name::Symbol,
            components::Tuple,
            reactions::Tuple = (),
+           phase_changes::Tuple = (),
            mixing = MaterialMixing(),
            lateral_shrinkage_law = nothing,
            depletion_limiter = DepletionLimiter(),
@@ -320,6 +324,7 @@ Material(; name::Symbol,
 | `name` | material identifier | required |
 | `components` | tuple of components; the order defines the index `j` | required |
 | `reactions` | tuple of `Reaction`s (names resolved here) | `()` |
+| `phase_changes` | tuple of `PhaseChange`s, at most one per liquid (names resolved here, §16.2.7) | `()` |
 | `mixing` | the `MaterialMixing`, with fields `k`, `λ`, `κ` | `MaterialMixing()` |
 | `lateral_shrinkage_law` | `χ̄ ↦ A/A₀`, a function of the column-average conversion; `nothing` keeps the cross section fixed | `nothing` |
 | `depletion_limiter` | the limiter applied to every reaction rate of the material | `DepletionLimiter()` |
@@ -395,6 +400,50 @@ The model is chosen by `solve`'s `radiation_model` keyword (§16.7; Chapter 8,
 §8.8); the distribution by `RadiativeFluxBC`'s `distribution` keyword, read under
 `RADIATIVE_TRANSFER` only. The convection (`ConvectiveBC`) loss applies at the face
 under every model.
+
+### 16.2.7 Phase changes
+
+```julia
+PhaseChange(name, liquid => vapour; activity, sorbents,
+            saturation = WATER_SATURATION, latent_heat = 2.4417e6,
+            exchange_rate = 1e3)
+```
+
+A two-way phase change of a liquid component into its vapour toward sorption
+equilibrium (§4.14; Technical Reference §6.7). Components are names or indices, resolved
+by `Material`.
+
+| Keyword | Meaning | Units | Default |
+|---|---|---|---|
+| `activity` | the activity law `a(X, T)`: `CASTIsotherm`, `CAST_SPRUCE`, `CAST_BEECH`, `FreeLiquid()` or `ActivityFunction(f)` | – | required |
+| `sorbents` | the sorbing solids, names or indices (weight one) or `name => weight` pairs | – | required |
+| `saturation` | the liquid's saturation pressure as a function of `T`, anything `to_property` takes | Pa | `WATER_SATURATION` |
+| `latent_heat` | the latent heat at 298.15 K | J·kg⁻¹ | `2.4417e6` |
+| `exchange_rate` | `K`, the inverse relaxation time of the pore vapour | s⁻¹ | `1e3` |
+
+| Activity law | Form | Keywords (defaults) |
+|---|---|---|
+| `CASTIsotherm(β₁, …, β₆)` | the CAST isotherm of Dietenberger, Glass and Boardman (2024), times `X/(abs(X) + X0)`, capped at one | `δ = 0.01`, `X0 = 1e-4` |
+| `CAST_SPRUCE`, `CAST_BEECH` | the fitted softwood and hardwood sets, `β = (304.2, 1661, 3.520, 0.3895, 2.886, 0.2006)` and `(46.33, 777.6, 2.028, 0.2210, 1.725, 0.3664)` | – |
+| `FreeLiquid()` | `X/(abs(X) + X0)`: a liquid the solid does not hold; no cap, no heat of sorption | `X0 = 1e-4` |
+| `ActivityFunction(f)` | a measured `f(X, T)`, times `X/(abs(X) + X0)`, capped at one; its heat of sorption by forward differentiation in `T` | `δ = 0.01`, `X0 = 1e-4` |
+
+`WATER_SATURATION(T)` is the saturation pressure of water in Pa, the IAPWS-95
+vapour-pressure equation held in `[255, 640]` K (101 418 Pa at 373.15 K).
+
+```julia
+equilibrium_vapour_pressure(material, ξ, T; phase_change = 1)        # p_eq [Pa]
+equilibrium_vapour_concentration(material, ξ, T; phase_change = 1)   # ξ_v [kg/m³]
+```
+
+give the vapour in equilibrium with the liquid of a material's phase change (its index
+or name) at the condensed composition `ξ` and temperature `T`; they read the condensed
+entries of `ξ` only, for the equilibrium start (§4.14.3). Methods of the same functions
+take the law objects and scalars, `equilibrium_vapour_pressure(activity, saturation, X, T)`.
+The submodules export the rest: `activity(law, X, T)` and `sorption_heat(law, X, T, M)`
+(`Pyrolysis.Materials`), `moisture_content`, `phase_change_rate` and `phase_change_heat`
+(`Pyrolysis.Physics`), and `PhaseChangeKernel` and `phase_change_exchange`
+(`Pyrolysis.Kernels`).
 
 ---
 
@@ -1436,7 +1485,9 @@ Technical Reference chapter.
 | `Reaction` `yields`, `n`, `T_min`, `T_max`, `gate_width`, `basis` | `(1.0,)`, `1.0`, `0.0` K, `Inf`, `1.0` K, `nothing` |
 | `MixingSpec` `β`, `length_scale` | `0.5`, `NaN` |
 | `MaterialMixing` `k`, `λ`, `κ` | `WEIGHTED`, `PARALLEL`, `WEIGHTED`, each `β = 0.5` |
-| `Material` `reactions`, `lateral_shrinkage_law` | `()`, `nothing` |
+| `Material` `reactions`, `phase_changes`, `lateral_shrinkage_law` | `()`, `()`, `nothing` |
+| `PhaseChange` `saturation`, `latent_heat`, `exchange_rate` | `WATER_SATURATION`, `2.4417e6` J·kg⁻¹, `1e3` s⁻¹ |
+| `CASTIsotherm`, `ActivityFunction` `δ`, `X0`; `FreeLiquid` `X0` | `0.01`, `1e-4`; `1e-4` |
 | `Material` `depletion_limiter` | `DepletionLimiter()`: `threshold = 1.0` kg·m⁻³, `join = 1.0`, `base_scale = 1e-8` kg·m⁻³, `enabled = true` |
 | `Material` `gas_viscosity` | `SutherlandProperty()`: `μ_ref = 1.716e-5` Pa·s, `T_ref = 273.15` K, `S = 110.4` K |
 
@@ -1516,6 +1567,7 @@ Technical Reference chapter.
 | You want | Reach it through |
 |---|---|
 | components, `Material`, `Reaction`, `DepletionLimiter`, property types, mixing rules, `RadiationModel` | top level (`using Pyrolysis`) |
+| `PhaseChange`, the activity laws, `WATER_SATURATION`, `equilibrium_vapour_pressure`, `equilibrium_vapour_concentration` | top level |
 | condition types, `BoundaryConditionSet`, blowing models, `GasSpecies`, `background_gas_concentration` | top level |
 | `uniform_mesh`, `stretched_mesh`, `line_mesh`, `box_mesh`, `cell_mesh`, `Planar`, `Cylindrical`, `Spherical` | top level |
 | `PyrolysisProblem`, `validate_problem`, `solve`, `setup`, `integrate`, `PreparedProblem`, `parameter_sweep` | top level |
@@ -1524,7 +1576,8 @@ Technical Reference chapter.
 | `UMFPACKFactorization`, `KLUFactorization` | `LinearSolve` (`using LinearSolve: …`) |
 | `initial_fields`, the profile helpers | `Pyrolysis.Problem` |
 | `n_cells`, `n_nodes`, `n_faces`, `boundary_tags`, `boundary_faces`, `geometry!` | `Pyrolysis.Meshes` |
-| `n_components`, the physical constants, `T_PROPERTY_MIN`, `T_PROPERTY_MAX` | `Pyrolysis.Materials` |
+| `n_components`, `n_phase_changes`, `activity`, `sorption_heat`, the physical constants, `T_PROPERTY_MIN`, `T_PROPERTY_MAX` | `Pyrolysis.Materials` |
+| `moisture_content`, `phase_change_rate`, `phase_change_heat` | `Pyrolysis.Physics` |
 | `SolutionExtras`, `ledger_rates`, `live_inventories` | `Pyrolysis.Outputs` |
 | `DeactivationEvent`, `replay_events!`, `top_live_cell` | `Pyrolysis.Deactivation` |
 | `residual!`, `VolumetricSources`, `NoSources` | `Pyrolysis.Assembly` |

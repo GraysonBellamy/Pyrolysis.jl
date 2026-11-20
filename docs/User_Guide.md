@@ -94,7 +94,7 @@ When transferring an existing model, work through the checks in this order:
 | Check | User Guide setup | Technical Reference comparison |
 |:---|:---|:---|
 | Composition, material density properties and mixing | §§1.3, 3.2–3.5 | §§2, 4.8 and 5.15 |
-| Reaction rate, yields and heat basis | §§4.4–4.9 | §6.9 |
+| Reaction rate, yields and heat basis | §§4.4–4.9 | §6.10 |
 | Thermal boundaries and radiation | §§5.2–5.6 | §§7.8, 8.9, 12.11 |
 | Gas transport, storage and carried energy | §§7.5–7.7 | §9.12 |
 | Deformation and burnout criteria | Chapters 6 and 10 | §§10.11, 11.9, 14.8 |
@@ -121,6 +121,9 @@ To set expectations up front, the model does **not** support:
 - Scattering, spectral bands and a refractive index: radiative transfer in the
   solid is gray, non-scattering, with the interface's transmissivity its cell's
   emissivity (see Technical Reference §8.10).
+- Capillary flow of free water and sorption hysteresis: water above fibre
+  saturation moves only as vapour, and one isotherm serves both sorption and
+  desorption (see §4.14 and Technical Reference §6.7.7).
 
 ---
 
@@ -132,6 +135,7 @@ To set expectations up front, the model does **not** support:
 | Multi-component materials (solid / liquid / gas) | `SolidComponent`, `LiquidComponent`, `GaseousComponent` | TR §4 |
 | Temperature-dependent properties | `LinearProperty`, `PolynomialProperty`, `TableProperty`, … | TR §4 |
 | Multi-step Arrhenius kinetics | A tuple of `Reaction`s on the `Material` | TR §6 |
+| Moisture: two-way evaporation, condensation and sorption toward equilibrium | A tuple of `PhaseChange`s on the `Material`, with `CAST_SPRUCE`, `CAST_BEECH`, `FreeLiquid` or `ActivityFunction` | UG 4.14, TR §6.7 |
 | Effective (mixture) properties, mixing rules | `MixingSpec`, `MaterialMixing` | TR §5 |
 | Surface absorption / radiative transfer in the solid | `solve(...; radiation_model = …)` + `RadiativeFluxBC`, `RadiativeBC` | TR §8 |
 | Pressure-driven gas transport | Set `κ > 0` on a solid/liquid component | TR §9 |
@@ -499,6 +503,10 @@ stable, user-facing API. The top-level exports cover:
 - **Property functions:** `ConstantProperty`, `LinearProperty`,
   `PolynomialProperty`, `ArrheniusProperty`, `TableProperty`, `CallableProperty`,
   `SutherlandProperty`, `StateDependentProperty`.
+- **Phase changes:** `PhaseChange`, the activity laws (`CASTIsotherm`,
+  `CAST_SPRUCE`, `CAST_BEECH`, `FreeLiquid`, `ActivityFunction`), the saturation
+  curve `WATER_SATURATION`, and the equilibrium start
+  (`equilibrium_vapour_pressure`, `equilibrium_vapour_concentration`).
 - **Boundary conditions:** the thermal conditions (`HeatFluxBC`, `ConvectiveBC`,
   `RadiativeBC`, `RadiativeFluxBC`, `CombinedThermalBC`, `DirichletThermalBC`,
   `AdiabaticBC`), the mass conditions (`ImpermeableBC`, `MassFluxBC`,
@@ -579,9 +587,9 @@ with:
 | File | What it demonstrates |
 |---|---|
 | `examples/06_cone_calorimeter.jl` | PMMA, 5.8 mm, at 25 kW/m²: single-step kinetics, temperature-dependent properties, combined thermal conditions, a mesh moving with the solid and cell deactivation; overlays ThermaKin outputs when present |
-| `examples/07_douglas_fir_cone.jl` | Douglas fir, 12 mm, at 75 kW/m²: five-step kinetics with moisture evaporation, gas transport with background pore air, surface absorption, a moving mesh |
+| `examples/07_douglas_fir_cone.jl` | Douglas fir, 12 mm, at 75 kW/m²: five-step kinetics, the two-way phase change of the moisture on the CAST spruce isotherm with its vapour starting in equilibrium and a humid ambient, gas transport with background pore air, surface absorption, a moving mesh |
 | `examples/08_gas_transport.jl` | Lumped and dusty-gas transport with a finite reservoir film |
-| `examples/08_pressure_treated_wood_cone.jl` | Pressure-treated wood with moisture and multi-step Arrhenius kinetics |
+| `examples/08_pressure_treated_wood_cone.jl` | Pressure-treated wood with multi-step Arrhenius kinetics, transcribed from ThermaKin with its one-way drying step |
 | `examples/convergence_douglas_fir.jl` | Grid-convergence study (uses `Distributed`) |
 | `examples/moisture_hos_comparison.jl` | Moisture transport with state-dependent heat of sorption |
 | `examples/export_results_csv.jl` | Writes a solution's series and profiles to CSV files |
@@ -1614,7 +1622,7 @@ solid's radiation travels through the radiation rows at the components' `α`, so
 is the conductive part: do not also add a Rosseland term for that band, and nothing
 is subtracted for you. Radiation across pores smaller than a cell, as in a char,
 is not resolved by the rows and stays in `k` (Technical Reference §5.5, §8.6). Heat capacities `c` are sensible: reaction and latent heats go into
-the reactions, and a `c` law must stay physical over the temperatures a solve
+the reactions and phase changes, and a `c` law must stay physical over the temperatures a solve
 reaches, so continue a fit beyond its measured window at its low-temperature
 slope or hold it constant (Technical Reference §5.4).
 
@@ -1636,7 +1644,9 @@ melt = LiquidComponent(:melt; ρ=900., φ=.02, c=2000., k=.2,
 
 Bound moisture declares neither, so it carries no matrix transport weight; it
 shrinks the wood as it dries, conducts and emits by its volume share, occupies
-skeletal volume and stores heat. The melt declares `λ`, so it joins the
+skeletal volume and stores heat. It leaves and returns through a phase change
+(§4.14), which evaporates it into its vapour and condenses or resorbs the vapour
+toward sorption equilibrium. The melt declares `λ`, so it joins the
 transport matrix and its `λ` enters the gas-transfer mixture. The initialized
 sum of all condensed skeletal volumes must leave resolved positive gas pore
 volume.
@@ -1651,6 +1661,16 @@ dry-basis moisture content, initialize
 ξ_water = MC * ξ_wood
 ```
 
+and give the pore vapour its equilibrium with the water, the air making up the rest
+of the pressure (§4.14):
+
+```julia
+ξc    = (ξ_wood, ξ_water, 0.0, 0.0)            # wood, water, vapour, air
+ξ_v   = equilibrium_vapour_concentration(material, ξc, T₀)
+p_v   = equilibrium_vapour_pressure(material, ξc, T₀)
+ξ_air = background_gas_concentration(material, :air, ξc, T₀; P = 101325.0 - p_v)
+```
+
 Setting `ξ_wood = ρ` and adding the water on top overfills the cell: the slab
 holds more mass than its thickness admits, and it dries to a wood denser than
 `ρ`. On a moving mesh `setup` warns when the condensed occupancies `Σ ξ_j/ρ_j`
@@ -1660,7 +1680,15 @@ condensed volume.
 A liquid is a bound liquid: it holds its own volume, as bound water does below
 the fibre saturation point (a dry-basis moisture content of about 0.3). Above
 it, free water fills existing pores and shrinks nothing as it leaves, so the
-model overstates drying shrinkage there.
+model overstates drying shrinkage there, and vapour that condenses above the
+isotherm's capacity swells a moving mesh.
+
+The moisture model has these limits. Below fibre saturation it is tested by the
+moist-wood suites as far as they go: the temperatures of drying wood and the
+cold-side plateau, but not the water lost across the grain, which the transfer
+coefficient of the wood sets (Technical Reference §18.6.3). Above fibre saturation
+free water evaporates and condenses at the saturation pressure but has no
+capillary flow. One isotherm serves sorption and desorption, with no hysteresis.
 
 ---
 
@@ -1807,17 +1835,19 @@ k = CallableProperty(T -> 0.10 + 3.0e-4 * (T - 300.0))
 
 **`StateDependentProperty(func)`** — a property that depends on both temperature and
 the full cell concentration vector, `f(T, ξ) -> value`. This is the mechanism for
-**composition-dependent heats of reaction**, most importantly the moisture heat of
-sorption, where the sorption enthalpy rises as moisture content falls.
+**composition-dependent heats of reaction**, such as a pyrolysis heat that changes
+as the char forms. (The heat of a liquid's evaporation and sorption is not one of
+these: it belongs to the liquid's phase change, §4.14.)
 
 ```julia
-# Heat of sorption as a function of moisture content (%); ξ is the full
-# mass-concentration tuple, so you index the moisture component yourself.
-MOISTURE_IDX = 3
-heat_sorption = StateDependentProperty((T, ξ) -> begin
-    ξ_solid = ξ[1] + ξ[2]                              # dry-solid concentration
-    MC = 100.0 * ξ[MOISTURE_IDX] / max(ξ_solid, 1.0)   # moisture content [%]
-    (2275.0 + 860.0 * exp(-0.120 * MC)) * 1e3          # [J/kg], endothermic (h > 0)
+# A pyrolysis heat that switches from h₁ to h₂ once the wood has lost the mass
+# fraction x_s; ξ is the full mass-concentration tuple, so you index the wood yourself.
+WOOD_IDX, ρ_dry, γ = 1, 430.0, 0.25            # wood index, oven-dry density, char yield
+h₁, h₂, x_s = 400e3, -200e3, 0.40
+heat_pyrolysis = StateDependentProperty((T, ξ) -> begin
+    x = (1 - γ) * (1 - ξ[WOOD_IDX] / ρ_dry)    # mass lost per kg of dry wood
+    s = 0.5 * (1 + tanh((x - x_s) / 0.01))
+    (1 - γ) * ((1 - s) * h₁ + s * h₂)          # [J/kg], h > 0 endothermic
 end)
 ```
 
@@ -1907,7 +1937,9 @@ suits kinetics that turn on over tens of kelvin; for gates that must act
 nearly as hard switches (melting fronts, phase-change surrogates) use a
 narrower width (e.g. `gate_width = 0.1`) and expect a stiffer Jacobian near
 the gate. On a driving ΔT of only a few kelvin, a 1 K ramp visibly shifts
-the effective switching temperature — narrow the gate accordingly.
+the effective switching temperature — narrow the gate accordingly. A gate is
+not a moisture model: water held in a solid evaporates and condenses with its
+vapour pressure, through a `PhaseChange` (§4.14).
 
 ### 3.4.2 Symbolic vs. index references
 
@@ -1936,7 +1968,7 @@ Pyrolysis.jl uses the **storage convention `h > 0 = endothermic`** (cools the
 material). The volumetric source is `Q_rxn = −Σ h_r r_r`, so an endothermic reaction
 produces `Q_rxn < 0`. This is the *opposite* of the ThermaKin publication
 convention (`h > 0 = exothermic`); when you transcribe ThermaKin parameters, flip
-the sign and normalize the reaction extent (Technical Reference §6.9.1).
+the sign and normalize the reaction extent (Technical Reference §6.10.1).
 Gpyro V2 and FDS use the convention of this package but still require basis and
 unit checks. Examples:
 
@@ -1949,7 +1981,7 @@ When transferring a Gpyro V2 reaction with `CONSTANT_DHVOL=.TRUE.`, combine
 its solid-product and volatile heats on a per-reactant basis; equal `DHS`
 and `DHV` are one simple case. The other setting adds a temperature-dependent
 sensible-enthalpy correction whose sign differs between the V2 user guide
-and source. Technical Reference §6.9.2 gives the implemented conversion.
+and source. Technical Reference §6.10.2 gives the implemented conversion.
 
 See the overload note H1 in the nomenclature and Technical Reference §6.6.
 
@@ -1970,20 +2002,18 @@ Only **single-reactant** reactions are supported (the reactant is consumed with 
 stoichiometry 1.0). Multi-step schemes are modelled as *sequences* of single-reactant
 reactions sharing intermediate components — see Chapter 4.
 
-### 3.4.5 State-dependent heat (moisture sorption)
+### 3.4.5 State-dependent heat
 
 Pass a `StateDependentProperty` (§3.3.2) as `h` to make the heat depend on local
-composition. This is the standard way to model the moisture heat of sorption:
+composition, such as the conversion-dependent pyrolysis heat above:
 
 ```julia
-heat_sorption = StateDependentProperty((T, ξ) -> begin
-    MC = 100.0 * ξ[3] / max(ξ[1] + ξ[2], 1.0)
-    (2275.0 + 860.0 * exp(-0.120 * MC)) * 1e3
-end)
-
-drying = Reaction(:drying, :moisture => :H2O,
-                  A = 5.6e8, E = 43e3, h = heat_sorption)
+pyrolysis = Reaction(:pyrolysis, :wood => (:char, :gas);
+                     A = 1e10, E = 150e3, h = heat_pyrolysis, yields = (0.25, 0.75))
 ```
+
+Moisture is not dried by a reaction: its evaporation, condensation and heat of
+sorption are a `PhaseChange` on the material (§4.14).
 
 ### 3.4.6 Verifying reactions
 
@@ -2169,6 +2199,7 @@ Two physics notes worth remembering (both in Technical Reference §5):
 Material(; name::Symbol,
            components::Tuple,
            reactions::Tuple = (),
+           phase_changes::Tuple = (),
            mixing = MaterialMixing(),
            lateral_shrinkage_law = nothing,
            depletion_limiter = DepletionLimiter(),
@@ -2181,6 +2212,7 @@ Material(; name::Symbol,
 | `name` | material identifier (`Symbol`) | required |
 | `components` | tuple of components | required |
 | `reactions` | tuple of reactions (may be empty `()`) | `()` |
+| `phase_changes` | tuple of phase changes of liquids into their vapours (§4.14; may be empty) | `()` |
 | `mixing` | the `MaterialMixing`, with fields `k`, `λ`, `κ` | `MaterialMixing()` |
 | `lateral_shrinkage_law` | `A(t)/A_0 = law(χ̄)` or `nothing` (identity) | `nothing` |
 | `depletion_limiter` | `DepletionLimiter` applied to every reaction-rate evaluation (a C¹ rate factor that is zero at and below zero concentration and joins `tanh(ξ/threshold)` above it; §4.10) | `DepletionLimiter()` (`threshold = 1.0` kg·m⁻³, `join = 1.0`, `base_scale = 1e-8` kg·m⁻³, enabled) |
@@ -2225,7 +2257,10 @@ Material(; name::Symbol,
 A wood with virgin solid, char solid, liquid moisture, a dry pyrolysis gas, and water
 vapour. The solids carry permeabilities, so the material will run in lumped gas transport mode;
 it uses `WEIGHTED` conductivity and `CARMAN_KOZENY` permeability, with porosity set
-on the solids via `φ`.
+on the solids via `φ`. The moisture dries and condenses through a phase change on the
+softwood isotherm, held by the virgin wood alone; the virgin wood's transfer coefficient
+is the size measured for bound-water diffusion across the grain at about 10 % moisture
+(Technical Reference §9.2.1).
 
 ```julia
 using Pyrolysis
@@ -2233,7 +2268,7 @@ using Pyrolysis
 # --- Components -----------------------------------------------------------
 virgin = SolidComponent(:virgin,
     ρ = 530.0, c = (1500.0, 1.0), k = 0.12,
-    ε = 0.88, λ = 2e-5,
+    ε = 0.88, λ = 5e-7,  # bound-water diffusion across the grain, ~10 % moisture
     κ = 1e-15,           # tight virgin matrix (trips Darcy mode)
     φ = 0.55)            # pure-phase porosity → intrinsic density set internally
 
@@ -2253,19 +2288,18 @@ pyrolysis = Reaction(:pyrolysis, :virgin => (:char, :gas),
                      A = 1e10, E = 140e3, h = 500e3,     # endothermic
                      yields = (0.25, 0.75), T_min = 450.0)
 
-# Moisture evaporation with state-dependent heat of sorption
-heat_sorption = StateDependentProperty((T, ξ) -> begin
-    MC = 100.0 * ξ[3] / max(ξ[1] + ξ[2], 1.0)
-    (2275.0 + 860.0 * exp(-0.120 * MC)) * 1e3
-end)
-drying = Reaction(:drying, :moisture => :H2O,
-                  A = 5.6e8, E = 43e3, h = heat_sorption)
+# --- Phase change ---------------------------------------------------------
+# The moisture and its vapour exchange toward sorption equilibrium on the
+# softwood isotherm; the virgin wood holds the water, the char none.
+drying = PhaseChange(:moisture, :moisture => :H2O;
+                     activity = CAST_SPRUCE, sorbents = (:virgin,))
 
 # --- Material -------------------------------------------------------------
 wood = Material(
     name = :CharringWood,
     components = (virgin, char, moisture, gas, vapor),   # indices 1..5
-    reactions  = (pyrolysis, drying),
+    reactions  = (pyrolysis,),
+    phase_changes = (drying,),
     mixing = MaterialMixing(
         k = MixingSpec(WEIGHTED, 0.5),
         λ = MixingSpec(PARALLEL),
@@ -2276,7 +2310,8 @@ wood = Material(
 # --- Inspect ---------------------------------------------------------------
 # All reached via the Materials submodule (none are top-level Pyrolysis exports).
 Pyrolysis.Materials.n_components(wood)              # 5
-Pyrolysis.Materials.n_reactions(wood)               # 2
+Pyrolysis.Materials.n_reactions(wood)               # 1
+Pyrolysis.Materials.n_phase_changes(wood)           # 1
 
 Pyrolysis.Materials.dry_gas_flags(wood)  # (false, false, false, true, false)
 # :gas (4) descends from the solids; :H2O (5) is the moisture's vapour
@@ -2555,7 +2590,7 @@ product carrying `+yield · r_i`. See Technical Reference §6.5.
 
 - `A` (pre-exponential factor) and `E` (activation energy, J·mol⁻¹) are stored as
   plain scalars (`Float64`). They are **temperature-independent**: a
-  temperature-dependent `A(T)` is not supported directly (see §4.14).
+  temperature-dependent `A(T)` is not supported directly (see §4.15).
 - `A` is in s⁻¹ for every reaction order: the rate constant `A·exp(−E/R_gT)` has
   units s⁻¹ and the rate `r` comes out in kg·m⁻³·s⁻¹ because it carries one
   concentration, the reactant's at first order and its reference at any other.
@@ -2616,7 +2651,7 @@ naming the reaction, when:
 - a positive reference is below `1e-12` of the cell's condensed mass, or `basis` is
   below `1e-6`;
 - the mesh has more than one dimension;
-- the solve has a `correction` (Technical Reference §6.10).
+- the solve has a `correction` (Technical Reference §6.11).
 
 A reaction whose reactant has no initial mass anywhere in its lineage is
 **inactive**: it never runs, and needs no row.
@@ -2679,6 +2714,11 @@ used at all temperatures.
 > Newton-stability reasons above, they are intentional. See Technical Reference
 > §6.2.
 
+A gate is not a moisture model. A drying step gated near the boiling point is still a
+one-way reaction with no vapour pressure in it: it cannot shift its boiling point with
+the pore pressure, and the vapour it drives inward never condenses. Water held in a
+solid is a `PhaseChange` (§4.14).
+
 ---
 
 ## 4.7 The single-reactant restriction and multi-step schemes
@@ -2731,7 +2771,7 @@ as a whole conserves solid + gas mass.
 > flaming-combustion models) cannot currently be expressed as a true bimolecular
 > reaction. You can approximate it with a single-reactant exothermic char-→-ash
 > step gated by temperature (§4.8), but the explicit oxygen dependence is a
-> documented limitation (Technical Reference §6.10).
+> documented limitation (Technical Reference §6.11).
 
 ---
 
@@ -2783,37 +2823,23 @@ any of the property-function types from Chapter 3:
 Reaction(:decomp, :virgin => :gas; A = 8.5e12, E = 188e3, h = (870e3, 100.0))
 ```
 
-### State-dependent heat (moisture sorption)
+### State-dependent heat
 
-For moisture evaporation, the heat of sorption depends on the current moisture
-content, not only on temperature. Use a `StateDependentProperty`, whose closure
-receives both the temperature `T` and the full concentration tuple `ξ`. The
-kinetics evaluator automatically passes `ξ` when the heat is state-dependent.
+A heat that depends on the composition as well as the temperature is a
+`StateDependentProperty`, whose closure receives the temperature `T` and the full
+concentration tuple `ξ`; the kinetics evaluator passes `ξ` automatically. A pyrolysis
+heat that changes with the conversion is the usual case (§3.3.2):
 
 ```julia
-const MOISTURE_IDX = 7        # index of moisture in the components tuple
-const SOLID_IDX    = 1:6      # indices of the dry solids, the basis of the moisture content
-
-# HoS(MC) = 2450.4 + 875.6 * exp(-0.1122 * MC) [kJ/kg], MC = moisture content (% dry basis)
-heat_of_sorption = StateDependentProperty(
-    (T, ξ) -> begin
-        MC = 100.0 * ξ[MOISTURE_IDX] /
-             max(sum(ξ[j] for j in SOLID_IDX), 1e-12)        # water over dry solid mass, %
-        return (2450.420909987441 + 875.6441221735336 *
-                exp(-0.1121684273316275 * MC)) * 1e3          # J/kg (endothermic, h > 0)
-    end,
-)
-
-Reaction(:moisture_evaporation, :moisture => :water_vapor;
-         A = 2.997e5, E = 5.0e4, h = heat_of_sorption, n = 1.0)
+Reaction(:pyrolysis, :wood => (:char, :gas);
+         A = 1e10, E = 150e3, h = heat_pyrolysis, yields = (0.25, 0.75))
 ```
 
-The closure indexes `ξ` by component position, so `MOISTURE_IDX` and `SOLID_IDX`
-must match the slots in the `components` tuple. The moisture content is the
-water's mass over the dry solids' mass, which holds as the cell shrinks; a
-fixed density in the denominator does not. Evaporation is endothermic,
-so the returned value is positive. See Technical Reference §6.6 and Chapter 3 for
-the property-function types.
+The closure indexes `ξ` by component position, so its indices must match the slots in
+the `components` tuple. The heat of drying is not a reaction heat: the phase change of
+§4.14 takes the latent heat at the local temperature from the water's and the vapour's
+heat capacities and adds the heat of sorption of its isotherm. See Technical Reference
+§6.6 and Chapter 3 for the property-function types.
 
 ---
 
@@ -2833,7 +2859,7 @@ A ≈ e · r_p · exp(E / (R_g · T_p))
 ```
 
 where `e ≈ 2.71828` is Euler's number and `R_g = 8.314462618` J·mol⁻¹·K⁻¹
-(Technical Reference §6.9.3 gives the general form with the initial mass
+(Technical Reference §6.10.3 gives the general form with the initial mass
 fraction). As a
 runnable example, suppose the TGA peak is at `T_p = 640 K` with a heating rate of
 10 K·min⁻¹ and a peak fractional mass-loss rate of 0.012 K⁻¹:
@@ -2855,7 +2881,7 @@ These are first-pass estimates (a first-order TGA integrated with these values
 peaks at 640 K with a peak rate about 9 % above `r_p`, the error of the
 approximation behind the formulas); for production fits, refine `A`, `E`, and `h`
 against the measured curve using the sensitivity / inverse-analysis tooling (User
-Guide Chapter 13). See Technical Reference §6.9 for the relationship to the FDS,
+Guide Chapter 13). See Technical Reference §6.10 for the relationship to the FDS,
 ThermaKin, and Gpyro V2 kinetic formulations.
 
 For a transferred reaction, also compare the rate over the relevant
@@ -2863,7 +2889,7 @@ temperature and conversion range. ThermaKin2Ds reaction extent may require
 normalization; Gpyro V2 reaction order can depend on cumulative available
 mass; FDS rates can include oxygen and temperature factors absent here, and its
 order acts on the concentration, not the conversion.
-Technical Reference §6.9 gives the mappings and their limits. A matching
+Technical Reference §6.10 gives the mappings and their limits. A matching
 `A` and `E` pair alone does not establish matching kinetics.
 
 For a published parameter set with `n ≠ 1`, use `A` unchanged from a Kinetics Neo
@@ -2951,8 +2977,8 @@ lacks its reactant (that cell's rates and their derivatives are exactly zero).
 **When to tune:** the default `threshold = 1.0` kg·m⁻³ is appropriate for most
 condensed-phase materials, whose concentrations are hundreds to thousands of
 kg·m⁻³. A lower threshold keeps the kinetics closer to the bare rate law near
-depletion, which matters for genuinely dilute species (e.g. trace moisture at a
-few kg·m⁻³); a higher one damps the stiffness of a vanishing reactant. See
+depletion, which matters for genuinely dilute species (e.g. a trace intermediate at
+a few kg·m⁻³); a higher one damps the stiffness of a vanishing reactant. See
 Technical Reference §6.3.
 
 You can evaluate a single rate with a custom or disabled limiter for testing,
@@ -3028,7 +3054,7 @@ Reaction(:charring, 1 => (2, 3); A = 1e15, E = 200e3, h = 500e3, yields = (0.25,
 
 Mass conservation is enforced by the single-reactant construction convention
 (§4.3), not by a projection during the solve, so the check is for catching setup
-mistakes. See Technical Reference §6.8.
+mistakes. See Technical Reference §6.9.
 
 ---
 
@@ -3073,11 +3099,128 @@ S = (-r, 0.002 * r, 0.998 * r)                     # species sources (virgin, ch
 conserve mass (the products' generation balances the reactant's consumption).
 The solver performs this computation in every cell with the material's
 limiter at the cell's trial temperature and multiplies the sources by the cell
-volume, since the component masses are the states; see Technical Reference §6.7.
+volume, since the component masses are the states; see Technical Reference §6.8.
 
 ---
 
-## 4.14 Summary and limitations
+## 4.14 Wet materials: the phase change of moisture
+
+Water held in wood is not dried by a reaction. A `PhaseChange` exchanges it with its
+vapour in both directions: the water evaporates or desorbs where its vapour stands
+below the equilibrium pressure, and the vapour condenses or is resorbed where it
+stands above, so the vapour driven inward from a drying front returns to the wood
+ahead of it and the cold side holds near the temperature at which the bound water's
+equilibrium pressure meets the pore pressure. The rate relaxes the pore vapour toward
+equilibrium,
+
+```
+ω_v = K (ξ_v_eq − ξ_v),    ξ_v_eq = φ M a(X, T) p_sat(T) / (R T),
+```
+
+with `X` the moisture content (the water over its sorbing solids), `a` the activity of
+the isotherm, `p_sat` the saturation pressure of water and `φ` the pore fraction. The
+heat per kilogram evaporated is the latent heat at the local temperature, built from
+the water's and the vapour's heat capacities, plus the isotherm's heat of sorption;
+condensation returns it (Technical Reference §6.7).
+
+### 4.14.1 Declaring it
+
+```julia
+water  = LiquidComponent(:water; ρ = 1000.0, c = 4180.0, k = 0.60)
+vapour = GaseousComponent(:vapour; M = 0.018015, c = 1900.0, k = 0.025)
+
+drying = PhaseChange(:moisture, :water => :vapour;
+                     activity = CAST_SPRUCE,      # the softwood isotherm
+                     sorbents = (:wood,))         # the solids that hold the water
+
+wet_wood = Material(name = :wet_wood,
+                    components = (wood, char, water, vapour, gas, air),
+                    reactions = (pyrolysis,),
+                    phase_changes = (drying,))
+```
+
+| Keyword | Meaning | Default |
+|---|---|---|
+| `activity` | the isotherm: `CAST_SPRUCE` (softwoods), `CAST_BEECH` (hardwoods), `CASTIsotherm(β₁, …, β₆)` for another fit, `FreeLiquid()` for water the solid does not hold, `ActivityFunction(f)` for a measured `f(X, T)` | required |
+| `sorbents` | the solids that hold the water, as names or indices, or `name => weight` pairs; the moisture content is the water over `Σ weight × ξ` | required |
+| `saturation` | the saturation pressure [Pa] as a function of `T` | `WATER_SATURATION` (IAPWS-95) |
+| `latent_heat` | the latent heat at 298.15 K [J/kg] | `2.4417e6`, water's |
+| `exchange_rate` | `K` [1/s], the inverse relaxation time of the pore vapour | `1e3` |
+
+The sorbents have no default: a wood and its intermediates hold water, a char holds
+little or none, so name them. Building the `Material` refuses a liquid that is not a
+`LiquidComponent`, a vapour that is not a `GaseousComponent` with a molar mass, a
+sorbent that is not a solid or is named twice, and two phase changes of one liquid.
+The vapour of a phase change is not dry pyrolysis gas: if the pyrolysis reactions
+produce water vapour too, give it a species of its own (Technical Reference §4.6.4).
+
+### 4.14.2 The three inputs of a wet deck
+
+1. **The isotherm.** `CAST_SPRUCE` for softwoods and `CAST_BEECH` for hardwoods, the
+   fits of Dietenberger, Glass and Boardman (2024). Above the moisture content at
+   which the isotherm reaches saturation (29 % at 25 °C, 19 % at 100 °C for spruce)
+   the water is free and its vapour saturated.
+2. **The ambient humidity.** An open face exchanges vapour with its reservoir both
+   ways, so the reservoir names the vapour: at a relative humidity `RH` its mole
+   fraction is `RH * WATER_SATURATION(T∞) / P` (§5.3.2). A reservoir in equilibrium
+   with the initial moisture keeps a conditioned sample at rest until the heater acts.
+3. **The transfer coefficient of the wood.** Across the grain the water moves as bound
+   water in the cell walls, and the lumped transfer coefficient `λ` of the virgin wood
+   stands for that flux. Its measured size rises about thirtyfold from 5 to 18 %
+   moisture: about `5e-7` m²/s suits 10–12 %, and 15–20 % wants two to four times that
+   (Technical Reference §9.2.1). It sets the drying rate; the permeability matters
+   less.
+
+### 4.14.3 The equilibrium start
+
+The pore gas starts in equilibrium with the water, the background gas making up the
+pressure:
+
+```julia
+ξc    = (ξ_wood, 0.0, ξ_water, 0.0, 0.0, 0.0)   # the condensed composition
+p_v   = equilibrium_vapour_pressure(wet_wood, ξc, T₀)
+ξ_v   = equilibrium_vapour_concentration(wet_wood, ξc, T₀)
+ξ_air = background_gas_concentration(wet_wood, :air, ξc, T₀; P = 101325.0 - p_v)
+x_v∞  = p_v / 101325.0                           # an ambient in equilibrium with it
+```
+
+The helpers read the condensed entries of `ξc` only; `phase_change = :name` picks one
+when the material has several. A start off equilibrium is admissible and relaxes in
+about `1/K`; `setup` warns when it is more than 1 % off, naming the cell farthest from
+it (Chapter 15).
+
+### 4.14.4 The exchange rate and the cost
+
+Local equilibrium is the model, so `K` has only to be large enough that the results
+stop depending on it. On `examples/07`, `K` from `1e2` to `1e4` 1/s moves the back face
+by at most 0.36 K and leaves the peak mass-loss rate unchanged to five digits; it sets
+how far the vapour runs above equilibrium (59, 11 and 1.5 % at its worst) and the cost
+(0.85 and 1.28 times the steps of the default). Keep the default unless a convergence
+check on your own deck says otherwise; a diffusion time short against the water's own
+response time, as in a thin sorption sample, is where it matters (Technical Reference
+§6.7.5).
+
+A wet deck costs more than a dry one. In `examples/07` the phase change takes about
+twice the steps of the same deck dried by a one-way `Reaction`, each step about 15 %
+dearer. Its ledger closures at the default tolerance are the integration error of the
+trace vapour multiplied by `K`, `1e-6` to `4e-4` on the validation decks; a closure
+meant to say something about a wet deck needs `reltol = 1e-8` or tighter (§9.8). A deck
+whose pores start with one gas alone, at the boiling point or in steam, is fragile in
+the enthalpy form, since the absent gas is held only to the cell's mass tolerance:
+tighten the solve. The solution reports the gross evaporation and condensation
+(`extras.evaporation_rate`, `extras.condensation_rate`, §9.3).
+
+### 4.14.5 A one-way drying reaction
+
+A `Reaction` out of a liquid remains available to transcribe another code's deck
+(`examples/08_pressure_treated_wood_cone.jl` carries ThermaKin's water step). It has no
+vapour pressure in it: it dries whatever the vapour around it, never condenses, and is
+admissible only while its rate at the ambient temperature is negligible over the test
+(Technical Reference §6.11).
+
+---
+
+## 4.15 Summary and limitations
 
 - A `Reaction` is `A·exp(−E/R_gT)·ξ` at first order and
   `A·exp(−E/R_gT)·ξ_ref·xⁿ` on the conversion otherwise, `A` in s⁻¹ for every order,
@@ -3091,7 +3234,7 @@ volume, since the component masses are the states; see Technical Reference §6.7
 - Only **single-reactant** reactions are supported; build multi-step schemes as
   chains of single-reactant reactions. Multi-reactant (e.g. O₂-dependent)
   kinetics, temperature-dependent `A`, and pressure-dependent rates are not
-  supported (Technical Reference §6.10).
+  supported (Technical Reference §6.11).
 - The **depletion limiter** (default `threshold = 1.0` kg·m⁻³, and
   `conversion_threshold = 1e-3` for orders other than one) is applied
   automatically: each reactant's rate factor is exactly zero at and below zero
@@ -3104,7 +3247,13 @@ volume, since the component masses are the states; see Technical Reference §6.7
   a column that burns through. Its threshold reads the reactive inventory, as at
   every order, and defaults to a tenth of the limiter's `conversion_threshold`; a
   cell that would keep 1 % or more of its volume, as a char layer does, is not
-  tested and stays (§7.3.3, §10.4, Technical Reference §6.10). Without deactivation a cell that empties stalls the solve there.
+  tested and stays (§7.3.3, §10.4, Technical Reference §6.11). Without deactivation a cell that empties stalls the solve there.
+- **Moisture is a `PhaseChange`** (§4.14), with these limits: below fibre saturation it
+  is tested on the temperatures of drying wood and the cold-side plateau, not on the
+  water lost across the grain, which the transfer coefficient sets as a constant
+  (Technical Reference §18.6.3); above fibre saturation free water has no capillary
+  flow, and as one inventory with the bound water it swells a moving mesh where it
+  condenses; one isotherm serves sorption and desorption, with no hysteresis.
 
 For the mathematics behind the rate law, the smooth gates, the depletion limiter,
 the stoichiometric sources, and the heat-source assembly, see Technical Reference
@@ -3527,6 +3676,18 @@ An explicit vacuum `GasReservoir(P=0.,T=300.)` may omit composition. Atmospheric
 exchange requires the atmosphere's tracked species and appropriate initial pore
 gas. Both escape and ingress follow the same constitutive path.
 
+A wet material's reservoir names the vapour of its phase change (§4.14), which the
+face exchanges in both directions. At a relative humidity `RH`:
+
+```julia
+RH, T∞, P = 0.5, 300., 101325.
+x_v = RH * WATER_SATURATION(T∞) / P             # 0.0175 at 50 % and 300 K
+reservoir = GasReservoir(P=P, T=T∞, mole_fractions=(air=1. - x_v, vapour=x_v))
+```
+
+A reservoir that leaves the vapour out is a perfectly dry sink for it, and `setup`
+warns about it.
+
 ### 5.3.3 The mass film
 
 An open face exchanges gas with its reservoir through an isobaric
@@ -3891,6 +4052,20 @@ sample, prefer a step on a node: a smooth profile leaves every component present
 in the transition cells, so the interface that `setup` detects moves to wherever
 the profile's tail reaches exactly zero.
 
+A moisture profile carries its vapour. With a phase change on the material, give the
+vapour and the background gas at each depth from the condensed composition there, so
+that the pore gas starts in equilibrium everywhere (§4.14.3):
+
+```julia
+ξc(z)  = (ξ_wood, ξ_moist_initial(z), 0.0, 0.0)         # wood, water, vapour, air
+p_v(z) = equilibrium_vapour_pressure(material, ξc(z), T_initial(z))
+ξ_vapour_initial = z -> equilibrium_vapour_concentration(material, ξc(z), T_initial(z))
+ξ_air_initial    = z -> background_gas_concentration(material, :air, ξc(z), T_initial(z);
+                                                    P = 101325.0 - p_v(z))
+```
+
+`setup` warns when a cell starts more than 1 % off equilibrium.
+
 ---
 
 ## 5.11 Common configurations (worked recipes)
@@ -4012,7 +4187,10 @@ flow measure when the exterior instead has a hydraulic resistance.
   (exported at the top level): a pore space started as a vacuum against a
   101325 Pa boundary draws early product gas inward. For multi-solid or moisture-bearing materials, supply
   `ξ_initial` explicitly so virgin solid, char, moisture, and gases start with
-  the right concentrations.
+  the right concentrations; a wet material's pore vapour starts in equilibrium with
+  its water, the background gas at the rest of the pressure (§5.10.2).
+- **Give a wet material a humid reservoir.** An `AmbientGasBC` whose reservoir does not
+  name the vapour of a phase change dries the face as if the air were bone dry (§5.3.2).
 
 For deeper background on the boundary physics, the surface Newton solve, and the
 radiation models, see Technical Reference §12 (boundary and initial conditions),
@@ -4911,7 +5089,7 @@ events;
 the near-threshold band then defaults to `0.1`. Otherwise (a fixed mesh, deactivation off,
 or a charring layer whose residue stays above the threshold) the solve has no correction
 and a moving mesh moves with the solid. A reaction of order other than one gets no
-correction and refuses one (§4.14).
+correction and refuses one (§4.15).
 
 | Keyword | Effect |
 |---|---|
@@ -5165,7 +5343,7 @@ matching a complete model also requires its other closures (Technical Reference 
 **Reaction heats use the local reaction-temperature convention.** The kernel
 evaluates `h` at the cell temperature. Before importing a DSC or calibrated
 ThermaKin/Gpyro V2 value, check its sign, units, reaction basis and temperature datum
-(Technical Reference §6.9). A heat consistent with this convention already
+(Technical Reference §6.10). A heat consistent with this convention already
 accounts for the products' enthalpies at that temperature. The energy equation therefore has no separate gas-generation enthalpy term. Such
 a term, `−Σ_g Δh_g(T, T_ref)(∇·J_g)`, belongs only with heats referenced to the
 `T_ref ≈ 298.15 K` ambient datum (formation-enthalpy style); with DSC-style heats it would
@@ -6500,7 +6678,8 @@ quantities divide by the current area of the faces they name unless noted.
 
 | `extras` key | Units | Meaning |
 |---|---|---|
-| `gas_generation_rate` | kg·m⁻²·s⁻¹ | Gas the reactions of the live cells produce, per unit initial area of the `:top` faces |
+| `gas_generation_rate` | kg·m⁻²·s⁻¹ | Gas the reactions and phase changes of the live cells produce, net, per unit initial area of the `:top` faces |
+| `evaporation_rate`, `condensation_rate` | kg·m⁻²·s⁻¹ | Gross exchange of the phase changes of the live cells (§4.14): the liquid that becomes vapour and the vapour that condenses, each non-negative, per unit initial area of the `:top` faces; their difference is the vapour's net production. Zero for a material without phase changes |
 | `back_temperature` | K | Temperature of the `:bottom` faces (`== boundary_T[:bottom]`) |
 | `total_mass` | kg·m⁻² | The summed component masses, per unit initial area of the `:top` faces |
 | `thickness_history` | m | Distance from the first node to the outermost live node |
@@ -6541,6 +6720,18 @@ T_back    = solution.extras.back_temperature       # K
 mass_m2   = solution.extras.total_mass             # kg/m²
 thickness = solution.extras.thickness_history      # m
 q_net     = solution.extras.surface_heat_flux_net  # W/m²
+```
+
+For a wet material, the share of the evaporated water that condenses again is the
+ratio of the two gross series integrated over the saved times (its resolution is the
+save interval's); `examples/07_douglas_fir_cone.jl` reports it:
+
+```julia
+t    = solution.t
+trap(y) = sum((t[k+1] - t[k]) * (y[k] + y[k+1]) / 2 for k in 1:length(t)-1)
+evaporated = trap(solution.extras.evaporation_rate)     # kg/m²
+condensed  = trap(solution.extras.condensation_rate)    # kg/m²
+condensed / evaporated
 ```
 
 Mind the meaning of `solution.extras.gas_generation_rate`: it is the *volumetric*
@@ -7444,7 +7635,7 @@ of the peak at 72 cells, 0.03 % at 144, 0.01 % integrated at both. Above order o
 cells decay algebraically and may reach the thickness stop before this default, which
 is not an error; a larger `threshold` makes them leave earlier. At order zero the
 mass-loss rate is a staircase of single-cell burnouts, so its pointwise difference from
-any neighbouring run is a whole step (Technical Reference §6.10).
+any neighbouring run is a whole step (Technical Reference §6.11).
 
 | Keyword | Default | Constraint |
 |---|---|---|
@@ -9458,9 +9649,10 @@ virgin = SolidComponent(:virgin; ρ = 1190.0, c = cp, k = 0.20)
 
 `Reaction` accepts a scalar `h` (a constant), a tuple `h = (a, b)` (linear in `T`,
 `a + b*T`), or a property object such as `StateDependentProperty((T, ξ) -> ...)`
-for moisture-dependent heats of sorption (Technical Reference §6.6). The
+for composition-dependent heats (Technical Reference §6.6). The
 `build_and_solve(θ)` in `sensitivity_douglas_fir.jl` demonstrates the
-state-dependent form for heat of sorption.
+state-dependent form on the heat of sorption of the published study's one-way drying
+step.
 
 ---
 
@@ -9946,9 +10138,9 @@ A roadmap of what each example demonstrates:
 | Example file | Physics highlighted | Modes | §14 |
 |---|---|---|---|
 | `06_cone_calorimeter.jl` | PMMA cone, single-step kinetics, incident flux at the surface (`SURFACE_ABSORPTION`) | ALE, deactivation | 14.1 |
-| `07_douglas_fir_cone.jl` | Wood, multi-step kinetics, lumped gas transport, moisture | ALE, SURFACE_ABSORPTION, LumpedTransfer | 14.2 |
+| `07_douglas_fir_cone.jl` | Wood, multi-step kinetics, lumped gas transport, the phase change of the moisture | ALE, SURFACE_ABSORPTION, LumpedTransfer | 14.2 |
 | `convergence_douglas_fir.jl` | Grid-convergence study | as 07 at 50 kW/m², swept over `n_cells` | 14.3 |
-| `08_pressure_treated_wood_cone.jl` | Treated wood + moisture, lumped gas transport | ALE, SURFACE_ABSORPTION, LumpedTransfer | 14.4 |
+| `08_pressure_treated_wood_cone.jl` | Treated wood transcribed from ThermaKin, its one-way drying step, lumped gas transport | ALE, SURFACE_ABSORPTION, LumpedTransfer | 14.4 |
 | `08_gas_transport.jl` | Lumped and dusty-gas transport, finite film | Moving mesh, both transport models | 14.5 |
 | `moisture_hos_comparison.jl` | State-dependent heat of sorption | ALE, SURFACE_ABSORPTION, LumpedTransfer | 14.6 |
 | `macfp/macfp_gasification.jl` | MaCFP-4 white-pine gasification targets (10/30/60 kW/m², 6/18 mm), the calibrated model of §14.7 at a constant cross section | ALE, SURFACE_ABSORPTION, threads | — |
@@ -9984,12 +10176,29 @@ error budget must be varied jointly when assessing dense-polymer results.
 
 ## 14.2 Douglas fir cone calorimeter (`07_douglas_fir_cone.jl`)
 
-The wood example includes multi-step pyrolysis, absorbed moisture, water
-vapor and inert pore air. Condensed phases provide skeletal densities,
-lumped matrix transfer and permeability. The complete atmospheric reservoir
-has incoming air at the same temperature as the external thermal film.
-The initial air inventory follows the actual pore fraction, net of the
-absorbed water's skeletal occupancy.
+The wood example includes multi-step pyrolysis, bound moisture and its vapour,
+and inert pore air. The moisture and its vapour exchange through a two-way phase
+change on the CAST spruce isotherm, held by the wood and its four intermediates and
+not by the char (§4.14):
+
+```julia
+phase_changes = (
+    PhaseChange(:moisture, :MOISTURE => :WATER_VAPOR;
+                activity = CAST_SPRUCE,
+                sorbents = (:DF, :DF_int1, :DF_int2, :DF_int3, :DF_int4)),
+),
+```
+
+The water evaporates where the wood heats and condenses where the vapour driven
+inward meets cooler wood, so the moisture rises ahead of the drying front and the
+back face holds near the temperature at which the bound water's equilibrium pressure
+meets the pore pressure. The pore vapour starts in equilibrium with the water and the
+air at the rest of 101325 Pa (`equilibrium_vapour_pressure`,
+`equilibrium_vapour_concentration`, `background_gas_concentration`), and the ambient
+air carries the humidity in equilibrium with the initial moisture at 300 K (30.7 %),
+so the conditioned sample is at rest before the heater acts. Condensed phases provide
+skeletal densities, lumped matrix transfer and permeability. The complete atmospheric
+reservoir has incoming air at the same temperature as the external thermal film.
 
 ```bash
 PYROLYSIS_SMOKE=1 julia --project=examples examples/07_douglas_fir_cone.jl
@@ -10000,14 +10209,22 @@ keywords. Use the species boundary diagnostics to separate combustible-gas
 escape from vapor transport and air ingress. Reconstructing flux from the
 initial mesh or only the pressure gradient would omit parts of this balance.
 
+The script reports the water evaporated and condensed over the run from
+`extras.evaporation_rate` and `extras.condensation_rate` (§9.3), and its results CSV
+carries the net water-vapour production (`mlr_gen_water`, evaporation less
+condensation) and the net exchange at the drying front (`phase_change_rate_front`).
+At the default exchange rate about 40 % of the water evaporated condenses again, and
+the vapour runs at most 11 % above its equilibrium pressure; the results are flat in
+the exchange rate from `1e2` to `1e4` 1/s (Technical Reference §6.7.5).
+
 ---
 
 ## 14.3 Grid-convergence study (`convergence_douglas_fir.jl`)
 
 ### What it models
 
-The Douglas fir cone case at 50 kW/m² (13 components: the material of §14.2
-without the background air), solved at six spatial resolutions
+The Douglas fir cone case of §14.2 at 50 kW/m² (14 components, five reactions and
+the phase change of the moisture), solved at six spatial resolutions
 (480, 240, 120, 60, 30, 15 cells → 0.025–0.8 mm cells) to quantify how coarse
 the mesh can be before the quantities of interest (peak MLR, time to ignition,
 total mass loss, peak surface temperature, solve time) drift from the finest-grid
@@ -10023,12 +10240,18 @@ do not share mutable state:
 
 ```julia
 @everywhere function build_and_solve(n_cells::Int)
-    # ... build material (13 components, 6 reactions) and BCs ...
+    # ... build material (14 components, 5 reactions, 1 phase change) and BCs,
+    # the reservoir's humidity in equilibrium with the initial moisture ...
     mesh = uniform_mesh(12.0e-3, n_cells)
     ξ_DF = 530.0 / (1 + 0.06 * 530.0 / 1000.0)   # wood and 6 % bound water fill the cell (§3.2.2)
+    ξc = (ξ_DF, 0.0, 0.0, 0.0, 0.0, 0.0, 0.06 * ξ_DF, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    p_v = equilibrium_vapour_pressure(material, ξc, 300.0)
+    ξ_v = equilibrium_vapour_concentration(material, ξc, 300.0)
+    ξ_air = background_gas_concentration(material, :AIR, ξc, 300.0; P = 101325.0 - p_v)
     ξ_initial_funcs = [z -> ξ_DF, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0,
                        z -> 0.06 * ξ_DF,                          # 6 % moisture, dry basis
-                       z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0]
+                       z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0,
+                       z -> ξ_v, z -> ξ_air]                      # vapour, air
     problem = PyrolysisProblem(mesh = mesh, material = material, bc_set = bc_set,
         T_initial = z -> 300.0, ξ_initial = ξ_initial_funcs,
         tspan = (0.0, 600.0), dt_initial = 1e-3,
@@ -10088,10 +10311,13 @@ package's `parameter_sweep` helper, with a `modify` that replaces the mesh
 ### What it models
 
 Cone pyrolysis of fire-retardant pressure-treated wood (PTW) with moisture, at
-50 kW/m², 12 mm on 240 cells. Structurally similar to Douglas fir but with a
-different component ordering (water and water vapor come first), three solid
-intermediates between the virgin wood and the char instead of four, and five
-reactions. It exercises the same lumped gas transport + surface-absorption + ALE stack.
+50 kW/m², 12 mm on 240 cells, transcribed from a ThermaKin deck (`PTW.cmp`) for
+comparison with it. Structurally similar to Douglas fir but with a different
+component ordering (water and water vapor come first), three solid intermediates
+between the virgin wood and the char instead of four, and five reactions. Its water
+leaves by ThermaKin's one-way drying reaction, not by a phase change, so the vapour it
+drives inward does not condense (§4.14.5). It exercises the same lumped gas transport +
+surface-absorption + ALE stack.
 
 ### Material highlights
 
@@ -10121,8 +10347,9 @@ a melt, declares its transport coefficients explicitly.
 ### Reaction heats and rates
 
 Pyrolysis.jl uses `h > 0` for endothermic reactions and `h < 0` for
-exothermic reactions. Water evaporation and the first decomposition step
-absorb heat; the third decomposition step releases it:
+exothermic reactions. Water evaporation (ThermaKin's step, with its heat sign
+flipped) and the first decomposition step absorb heat; the third decomposition step
+releases it:
 
 ```julia
 Reaction(:water_evaporation, 1 => 2; A = 15532.2434, E = 43528.868,
@@ -10521,7 +10748,7 @@ Reading the examples together, a few idioms recur and are worth internalizing:
   solves, whether on `Distributed` workers or on threads.
 - **Temperature-dependent properties are closures.** `CallableProperty(T -> ...)`
   for `c_p(T)`, `k(T)`; `StateDependentProperty((T, ξ) -> ...)` for properties or
-  reaction heats that depend on local composition (e.g. heat of sorption). A bare
+  reaction heats that depend on local composition (e.g. a conversion-dependent heat). A bare
   number becomes a `ConstantProperty`.
 - **Combine BCs with `+`.** `RadiativeFluxBC(...) + RadiativeBC(...) + ConvectiveBC(...)`
   forms a `CombinedThermalBC`. Assign one complete mass closure to each tag.
@@ -10666,6 +10893,8 @@ solve time.
 | `solve(): cell i is below its threshold beneath live cells it cannot leave through at t = …; the solve ends with outcome :interior` | a cavity: on a fixed mesh an emptied cell roofed by one that holds its material, on a moving mesh a run of porous cells whose gap is wide | §15.4.2 |
 | `solve(): the state after deactivating cell(s) at t = … is inadmissible` | an event left the receiver outside its tolerances; `:Failure` | §15.4.4 |
 | `solve(): no consistent node velocities after deactivating cell(s) at t = …` | the mesh closure has no solution after an event; `:Failure` | §15.4.4 |
+| `setup(): the reservoir of the :tag mass condition does not name :vapour, the vapour of phase change :name, so the face is a perfectly dry sink for it …` | a wet material's `AmbientGasBC` or `ConvectivePressureBC` whose reservoir leaves the vapour out | give its mole fraction, `RH * WATER_SATURATION(T∞) / P`, or zero for a dry ambient (§5.3.2) |
+| `setup(): the pore vapour :vapour starts off equilibrium with the liquid of phase change :name, farthest in cell i: … It relaxes in about 1/K = … s` | the initial vapour of some cell lies more than 1 % from equilibrium with its water | start it with `equilibrium_vapour_concentration` (§4.14.3), or accept the relaxation |
 
 The surface energy balance prints nothing when its Newton iteration does not
 converge (§15.6.2).
@@ -10744,10 +10973,11 @@ a combination it does not implement:
 | `radiative transfer takes beams through :top only` | a collimated or cone `RadiativeFluxBC` on another tag | `distribution = Diffuse()` there |
 | `the lateral shrinkage law must be positive and finite on [-0.001, 1.001]`; `… must equal one at zero conversion` | a law that vanishes or is not one at `χ̄ = 0` | a law such as `χ̄ -> 1 - 0.3χ̄` |
 | `a correction moves the mesh relative to the solid, which needs use_ale = true` | a `correction` other than `NoCorrection()` on a fixed mesh | `use_ale = true` |
-| `reaction :r has an order other than one, whose cells must keep their material, … give no correction` | a `correction` with a reaction of order other than one | give no correction (§4.14) |
-| `a prescribed mesh velocity needs use_ale = true`, and its siblings | `PrescribedCorrection` on a fixed mesh, on a reacting material, or with `deactivation` | `PrescribedCorrection` is a verification hook (§16.7) |
+| `reaction :r has an order other than one, whose cells must keep their material, … give no correction` | a `correction` with a reaction of order other than one | give no correction (§4.15) |
+| `a prescribed mesh velocity needs use_ale = true`, and its siblings | `PrescribedCorrection` on a fixed mesh, on a reacting material or one with phase changes, or with `deactivation` | `PrescribedCorrection` is a verification hook (§16.7) |
 | `the cells beside node(s) … start with different condensed components: give the layer interfaces as lagrangian nodes …` | an explicit `lagrangian` list that omits a layer interface under the equidistribution correction | leave `lagrangian` at its default, which lists the interfaces, or add them |
 | `the mass conditions name the tag :x, which the mesh does not have` | a mass condition keyed by a tag the mesh lacks | key the conditions by the mesh's tags |
+| `gas :x is produced from the solids (reactions …) and is the vapour of phase change :y, so whether it is dry pyrolysis gas is ambiguous` | a lateral-shrinkage law on a material whose pyrolysis water and moisture vapour are one species | split it into one species per origin (§4.14.1) |
 
 `integrate`, which `solve` calls next, refuses an inadmissible initial state ("a
 live component mass below its tolerance, a live cell at or below absolute zero,
@@ -10771,6 +11001,13 @@ The constructors reject a deck before a problem exists:
   800, 1200 and 1800 K.
 - **Reaction.** The order `n ≥ 0`, `gate_width > 0`, one yield per product, yields
   `≥ 0` summing to one.
+- **Phase change.** `PhaseChange` needs at least one sorbent with a positive weight,
+  finite non-negative weights, a positive finite `exchange_rate` and a finite
+  `latent_heat`; `Material` refuses a liquid that is not a `LiquidComponent`, a vapour
+  that is not a `GaseousComponent` with a positive molar mass, a sorbent that is not a
+  `SolidComponent` or is named twice, and two phase changes of one liquid (§4.14.1).
+  `CASTIsotherm` needs positive finite `β`, and every activity law positive finite
+  `δ` and `X0`.
 - **Mixing.** `MixingSpec(CARMAN_KOZENY)` needs a positive `length_scale`;
   `TableProperty` needs strictly increasing temperatures.
 
@@ -11240,7 +11477,37 @@ progress bar unless `progress = true`.
 
 ---
 
-## 15.12 Performance
+## 15.12 Wet materials
+
+- **The sample dries before the heater acts.** A conditioned sample at room
+  temperature should be at rest until the flux arrives. If its mass falls, or its
+  back face cools, from the first seconds, check three things. The reservoir names
+  the vapour at the humidity the sample was conditioned at: a dry reservoir pulls
+  water out of the face, and `setup` warns when the vapour is missing. The pore
+  vapour starts in equilibrium with the water: `setup` warns when it is more than 1 %
+  off. No one-way drying `Reaction` runs at the ambient temperature: an Arrhenius step
+  whose rate is not negligible at 300 K dries the interior before it heats (§4.14.5).
+  `examples/07_douglas_fir_cone.jl` takes the reservoir's humidity in equilibrium with
+  the initial moisture, `p_eq(X₀, T∞) / P`, so its sample stays at rest.
+- **The ledger closes to 1e-4, not 1e-8.** The pore vapour is a trace on its cell's
+  mass scale, and the exchange multiplies its integration error by `K`: at the default
+  `reltol` the closures of a wet deck are the tolerance's, not a conservation defect.
+  Read a closure at `reltol = 1e-8` or tighter (§4.14.4).
+- **The enthalpy form stops on the domain test.** A gas that starts absent, as the
+  air of a deck started at the boiling point or in steam, is held only to the cell's
+  mass tolerance and can go negative enough to fail the domain test. Tighten
+  `reltol`: the drying front of V-PC-04 started at the boiling point solves at
+  `1e-9`.
+- **The steps are many.** A wet deck takes about twice the steps of the same deck dried
+  by a one-way reaction, and a larger `exchange_rate` takes more (1.28 times at `1e4`
+  against the default). Raise `K` only where a convergence check asks for it.
+- **Free water that moved stays.** `FreeLiquid` has an activity of one at every
+  moisture content, so water a heating cycle moved has no vapour-pressure gradient to
+  bring it back; a bank of free water never relaxes. Bound water on an isotherm does.
+
+---
+
+## 15.13 Performance
 
 ### 15.12.1 Checklist
 
@@ -11306,7 +11573,7 @@ error budget and local nonlinear work are part of that comparison.
 
 ---
 
-## 15.13 Where to look next
+## 15.14 Where to look next
 
 - The `solve` keywords and what each does: Chapter 8; every keyword and default:
   Chapter 16.
@@ -11358,7 +11625,7 @@ The whole API assumes four conventions (Technical Reference §2 and §3):
 
 ## 16.1 What `using Pyrolysis` gives you, and what it does not
 
-The top-level `Pyrolysis` module exports a curated surface of 107 names. The
+The top-level `Pyrolysis` module exports a curated surface of 118 names. The
 package is organized in submodules, and most of their names are not
 re-exported at the top level. There are three ways to reach a name:
 
@@ -11379,13 +11646,14 @@ re-exported at the top level. There are three ways to reach a name:
    `Internal` are not part of the stable API and may move or change between
    minor releases (Chapter 11, §11.9).
 
-The 107 top-level exports, by group:
+The 118 top-level exports, by group:
 
 | Group | Exports | Section |
 |---|---|---|
 | Components and materials | `SolidComponent`, `LiquidComponent`, `GaseousComponent`, `Material`, `phase`, `molar_mass`, `is_gas`, `is_solid`, `is_liquid` | 16.2.1, 16.2.5 |
 | Gas transport | `LumpedTransfer`, `DustyGas`, `LumpedEndpoint`, `DustyEndpoint` | 16.2.5 |
 | Reactions | `Reaction`, `DepletionLimiter` | 16.2.3, 16.2.5 |
+| Phase changes | `PhaseChange`, `CASTIsotherm`, `CAST_SPRUCE`, `CAST_BEECH`, `FreeLiquid`, `ActivityFunction`, `WATER_SATURATION`, `equilibrium_vapour_pressure`, `equilibrium_vapour_concentration` | 16.2.7 |
 | Mixing | `MixingRule`, `PARALLEL`, `SERIES`, `WEIGHTED`, `BRUGGEMAN`, `CARMAN_KOZENY`, `MixingSpec`, `MaterialMixing` | 16.2.4 |
 | Property functions | `ConstantProperty`, `LinearProperty`, `PolynomialProperty`, `SutherlandProperty`, `ArrheniusProperty`, `TableProperty`, `CallableProperty`, `StateDependentProperty` | 16.2.2 |
 | Radiation models | `RadiationModel`, `SURFACE_ABSORPTION`, `RADIATIVE_TRANSFER`, `AngularDistribution`, `Diffuse`, `Collimated`, `Cone` | 16.2.6 |
@@ -11398,7 +11666,7 @@ The 107 top-level exports, by group:
 | Problem and solve | `PyrolysisProblem`, `validate_problem`, `solve`, `setup`, `integrate`, `PreparedProblem`, `parameter_sweep` | 16.5.1, 16.7, 16.9 |
 | Correction | `NoCorrection`, `EquidistributionCorrection`, `ActivationTime`, `PrescribedCorrection` | 16.11 |
 | Integrator and linear solver | `default_policy`, `rodas5p_policy`, `fbdf_policy`, `kencarp4_policy`, `StructuredKLU` | 16.8 |
-| Solution and accessors | `PyrolysisSolution`, `SolverStatistics`, `succeeded`, `completed`, `get_profile`, `interior_events`, `GasDiagnostics`, `get_gas_composition`, `get_boundary_exchange` | 16.5 |
+| Solution and accessors | `PyrolysisSolution`, `SolverStatistics`, `succeeded`, `completed`, `get_profile`, `interior_events`, `displaced_residue`, `GasDiagnostics`, `get_gas_composition`, `get_boundary_exchange` | 16.5 |
 | Conservation | `ConservationRecorder`, `conservation_audit`, `gas_species_audit` | 16.12 |
 
 **Names that are not top-level exports.** The names below are often needed
@@ -11409,7 +11677,7 @@ them by name, for example `using Pyrolysis.Problem: initial_fields`.
 |---|---|
 | `initial_fields`, `step_profile`, `linear_profile`, `gaussian_profile`, `tanh_profile` | `Pyrolysis.Problem` |
 | `n_cells`, `n_nodes`, `n_faces`, `boundary_tags`, `boundary_faces`, `is_fixed`, `geometry!` | `Pyrolysis.Meshes` |
-| `n_components`, `n_reactions`, `R_GAS`, `STEFAN_BOLTZMANN`, `T_REF`, `P_REF`, `T_PROPERTY_MIN`, `T_PROPERTY_MAX`, `RHO_CP_FLOOR`, `Phase` (`SOLID`, `LIQUID`, `GAS`) | `Pyrolysis.Materials` |
+| `n_components`, `n_reactions`, `n_phase_changes`, `activity`, `sorption_heat`, `R_GAS`, `STEFAN_BOLTZMANN`, `T_REF`, `P_REF`, `T_PROPERTY_MIN`, `T_PROPERTY_MAX`, `RHO_CP_FLOOR`, `Phase` (`SOLID`, `LIQUID`, `GAS`) | `Pyrolysis.Materials` |
 | `SolutionExtras`, `ledger_rates`, `live_inventories` | `Pyrolysis.Outputs` |
 | `DeactivationEvent`, `CellDeactivation`, `replay_events!`, `top_live_cell`, `threshold_margin` | `Pyrolysis.Deactivation` |
 | `residual!`, `ResidualDefinition`, `ResidualWorkspace`, `NoSources`, `VolumetricSources` | `Pyrolysis.Assembly` |
@@ -11417,6 +11685,8 @@ them by name, for example `using Pyrolysis.Problem: initial_fields`.
 | `StateLayout`, `state_length`, `mass_index`, `energy_index`, `position_index`, `velocity_index`, `radiation_index`, `is_differential`, `mass_matrix` | `Pyrolysis.States` |
 | `IntegratorPolicy`, `DomainCheck`, `consistent_state!`, `default_linear_solver`, `DT_AFTER_EVENT`, `CORRECTION_BAND`, `MAX_CONSTRAINT_REJECTIONS`, `FAILURE_MEMORY_GROWTH`, `FAILURE_MEMORY_STEPS` | `Pyrolysis.Integration` |
 | `residues`, `vanishes`, `EQUIDISTRIBUTION_TIME`, `ACTIVATION_TIME_FACTOR` | `Pyrolysis.Closures` |
+| `moisture_content`, `phase_change_rate`, `phase_change_heat` | `Pyrolysis.Physics` |
+| `PhaseChangeKernel`, `phase_change_exchange` | `Pyrolysis.Kernels` |
 
 `to_property` is not exported by any submodule; call it as
 `Pyrolysis.Materials.to_property`.
@@ -11527,8 +11797,8 @@ property bracket `[200, 3000]` K (`T_PROPERTY_MIN`, `T_PROPERTY_MAX` in
 it the nearest end, so a trial temperature far from the physical one never
 reaches a fitted law's extrapolation. `TableProperty` requires strictly
 increasing temperatures (checked at construction). `StateDependentProperty` is
-the type for a composition-dependent quantity such as a moisture-dependent heat
-of sorption.
+the type for a composition-dependent quantity such as a conversion-dependent heat
+of reaction.
 
 ```julia
 # Conductivity rising with temperature:
@@ -11637,6 +11907,7 @@ mixing = MaterialMixing(
 Material(; name::Symbol,
            components::Tuple,
            reactions::Tuple = (),
+           phase_changes::Tuple = (),
            mixing = MaterialMixing(),
            lateral_shrinkage_law = nothing,
            depletion_limiter = DepletionLimiter(),
@@ -11649,6 +11920,7 @@ Material(; name::Symbol,
 | `name` | material identifier | required |
 | `components` | tuple of components; the order defines the index `j` | required |
 | `reactions` | tuple of `Reaction`s (names resolved here) | `()` |
+| `phase_changes` | tuple of `PhaseChange`s, at most one per liquid (names resolved here, §16.2.7) | `()` |
 | `mixing` | the `MaterialMixing`, with fields `k`, `λ`, `κ` | `MaterialMixing()` |
 | `lateral_shrinkage_law` | `χ̄ ↦ A/A₀`, a function of the column-average conversion; `nothing` keeps the cross section fixed | `nothing` |
 | `depletion_limiter` | the limiter applied to every reaction rate of the material | `DepletionLimiter()` |
@@ -11724,6 +11996,50 @@ The model is chosen by `solve`'s `radiation_model` keyword (§16.7; Chapter 8,
 §8.8); the distribution by `RadiativeFluxBC`'s `distribution` keyword, read under
 `RADIATIVE_TRANSFER` only. The convection (`ConvectiveBC`) loss applies at the face
 under every model.
+
+### 16.2.7 Phase changes
+
+```julia
+PhaseChange(name, liquid => vapour; activity, sorbents,
+            saturation = WATER_SATURATION, latent_heat = 2.4417e6,
+            exchange_rate = 1e3)
+```
+
+A two-way phase change of a liquid component into its vapour toward sorption
+equilibrium (§4.14; Technical Reference §6.7). Components are names or indices, resolved
+by `Material`.
+
+| Keyword | Meaning | Units | Default |
+|---|---|---|---|
+| `activity` | the activity law `a(X, T)`: `CASTIsotherm`, `CAST_SPRUCE`, `CAST_BEECH`, `FreeLiquid()` or `ActivityFunction(f)` | – | required |
+| `sorbents` | the sorbing solids, names or indices (weight one) or `name => weight` pairs | – | required |
+| `saturation` | the liquid's saturation pressure as a function of `T`, anything `to_property` takes | Pa | `WATER_SATURATION` |
+| `latent_heat` | the latent heat at 298.15 K | J·kg⁻¹ | `2.4417e6` |
+| `exchange_rate` | `K`, the inverse relaxation time of the pore vapour | s⁻¹ | `1e3` |
+
+| Activity law | Form | Keywords (defaults) |
+|---|---|---|
+| `CASTIsotherm(β₁, …, β₆)` | the CAST isotherm of Dietenberger, Glass and Boardman (2024), times `X/(abs(X) + X0)`, capped at one | `δ = 0.01`, `X0 = 1e-4` |
+| `CAST_SPRUCE`, `CAST_BEECH` | the fitted softwood and hardwood sets, `β = (304.2, 1661, 3.520, 0.3895, 2.886, 0.2006)` and `(46.33, 777.6, 2.028, 0.2210, 1.725, 0.3664)` | – |
+| `FreeLiquid()` | `X/(abs(X) + X0)`: a liquid the solid does not hold; no cap, no heat of sorption | `X0 = 1e-4` |
+| `ActivityFunction(f)` | a measured `f(X, T)`, times `X/(abs(X) + X0)`, capped at one; its heat of sorption by forward differentiation in `T` | `δ = 0.01`, `X0 = 1e-4` |
+
+`WATER_SATURATION(T)` is the saturation pressure of water in Pa, the IAPWS-95
+vapour-pressure equation held in `[255, 640]` K (101 418 Pa at 373.15 K).
+
+```julia
+equilibrium_vapour_pressure(material, ξ, T; phase_change = 1)        # p_eq [Pa]
+equilibrium_vapour_concentration(material, ξ, T; phase_change = 1)   # ξ_v [kg/m³]
+```
+
+give the vapour in equilibrium with the liquid of a material's phase change (its index
+or name) at the condensed composition `ξ` and temperature `T`; they read the condensed
+entries of `ξ` only, for the equilibrium start (§4.14.3). Methods of the same functions
+take the law objects and scalars, `equilibrium_vapour_pressure(activity, saturation, X, T)`.
+The submodules export the rest: `activity(law, X, T)` and `sorption_heat(law, X, T, M)`
+(`Pyrolysis.Materials`), `moisture_content`, `phase_change_rate` and `phase_change_heat`
+(`Pyrolysis.Physics`), and `PhaseChangeKernel` and `phase_change_exchange`
+(`Pyrolysis.Kernels`).
 
 ---
 
@@ -12765,7 +13081,9 @@ Technical Reference chapter.
 | `Reaction` `yields`, `n`, `T_min`, `T_max`, `gate_width`, `basis` | `(1.0,)`, `1.0`, `0.0` K, `Inf`, `1.0` K, `nothing` |
 | `MixingSpec` `β`, `length_scale` | `0.5`, `NaN` |
 | `MaterialMixing` `k`, `λ`, `κ` | `WEIGHTED`, `PARALLEL`, `WEIGHTED`, each `β = 0.5` |
-| `Material` `reactions`, `lateral_shrinkage_law` | `()`, `nothing` |
+| `Material` `reactions`, `phase_changes`, `lateral_shrinkage_law` | `()`, `()`, `nothing` |
+| `PhaseChange` `saturation`, `latent_heat`, `exchange_rate` | `WATER_SATURATION`, `2.4417e6` J·kg⁻¹, `1e3` s⁻¹ |
+| `CASTIsotherm`, `ActivityFunction` `δ`, `X0`; `FreeLiquid` `X0` | `0.01`, `1e-4`; `1e-4` |
 | `Material` `depletion_limiter` | `DepletionLimiter()`: `threshold = 1.0` kg·m⁻³, `join = 1.0`, `base_scale = 1e-8` kg·m⁻³, `enabled = true` |
 | `Material` `gas_viscosity` | `SutherlandProperty()`: `μ_ref = 1.716e-5` Pa·s, `T_ref = 273.15` K, `S = 110.4` K |
 
@@ -12845,6 +13163,7 @@ Technical Reference chapter.
 | You want | Reach it through |
 |---|---|
 | components, `Material`, `Reaction`, `DepletionLimiter`, property types, mixing rules, `RadiationModel` | top level (`using Pyrolysis`) |
+| `PhaseChange`, the activity laws, `WATER_SATURATION`, `equilibrium_vapour_pressure`, `equilibrium_vapour_concentration` | top level |
 | condition types, `BoundaryConditionSet`, blowing models, `GasSpecies`, `background_gas_concentration` | top level |
 | `uniform_mesh`, `stretched_mesh`, `line_mesh`, `box_mesh`, `cell_mesh`, `Planar`, `Cylindrical`, `Spherical` | top level |
 | `PyrolysisProblem`, `validate_problem`, `solve`, `setup`, `integrate`, `PreparedProblem`, `parameter_sweep` | top level |
@@ -12853,7 +13172,8 @@ Technical Reference chapter.
 | `UMFPACKFactorization`, `KLUFactorization` | `LinearSolve` (`using LinearSolve: …`) |
 | `initial_fields`, the profile helpers | `Pyrolysis.Problem` |
 | `n_cells`, `n_nodes`, `n_faces`, `boundary_tags`, `boundary_faces`, `geometry!` | `Pyrolysis.Meshes` |
-| `n_components`, the physical constants, `T_PROPERTY_MIN`, `T_PROPERTY_MAX` | `Pyrolysis.Materials` |
+| `n_components`, `n_phase_changes`, `activity`, `sorption_heat`, the physical constants, `T_PROPERTY_MIN`, `T_PROPERTY_MAX` | `Pyrolysis.Materials` |
+| `moisture_content`, `phase_change_rate`, `phase_change_heat` | `Pyrolysis.Physics` |
 | `SolutionExtras`, `ledger_rates`, `live_inventories` | `Pyrolysis.Outputs` |
 | `DeactivationEvent`, `replay_events!`, `top_live_cell` | `Pyrolysis.Deactivation` |
 | `residual!`, `VolumetricSources`, `NoSources` | `Pyrolysis.Assembly` |

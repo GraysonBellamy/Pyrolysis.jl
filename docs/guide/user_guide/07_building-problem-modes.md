@@ -247,7 +247,7 @@ events;
 the near-threshold band then defaults to `0.1`. Otherwise (a fixed mesh, deactivation off,
 or a charring layer whose residue stays above the threshold) the solve has no correction
 and a moving mesh moves with the solid. A reaction of order other than one gets no
-correction and refuses one (§4.14).
+correction and refuses one (§4.15).
 
 | Keyword | Effect |
 |---|---|
@@ -501,7 +501,7 @@ matching a complete model also requires its other closures (Technical Reference 
 **Reaction heats use the local reaction-temperature convention.** The kernel
 evaluates `h` at the cell temperature. Before importing a DSC or calibrated
 ThermaKin/Gpyro V2 value, check its sign, units, reaction basis and temperature datum
-(Technical Reference §6.9). A heat consistent with this convention already
+(Technical Reference §6.10). A heat consistent with this convention already
 accounts for the products' enthalpies at that temperature. The energy equation therefore has no separate gas-generation enthalpy term. Such
 a term, `−Σ_g Δh_g(T, T_ref)(∇·J_g)`, belongs only with heats referenced to the
 `T_ref ≈ 298.15 K` ambient datum (formation-enthalpy style); with DSC-style heats it would

@@ -91,6 +91,8 @@ solve time.
 | `solve(): cell i is below its threshold beneath live cells it cannot leave through at t = …; the solve ends with outcome :interior` | a cavity: on a fixed mesh an emptied cell roofed by one that holds its material, on a moving mesh a run of porous cells whose gap is wide | §15.4.2 |
 | `solve(): the state after deactivating cell(s) at t = … is inadmissible` | an event left the receiver outside its tolerances; `:Failure` | §15.4.4 |
 | `solve(): no consistent node velocities after deactivating cell(s) at t = …` | the mesh closure has no solution after an event; `:Failure` | §15.4.4 |
+| `setup(): the reservoir of the :tag mass condition does not name :vapour, the vapour of phase change :name, so the face is a perfectly dry sink for it …` | a wet material's `AmbientGasBC` or `ConvectivePressureBC` whose reservoir leaves the vapour out | give its mole fraction, `RH * WATER_SATURATION(T∞) / P`, or zero for a dry ambient (§5.3.2) |
+| `setup(): the pore vapour :vapour starts off equilibrium with the liquid of phase change :name, farthest in cell i: … It relaxes in about 1/K = … s` | the initial vapour of some cell lies more than 1 % from equilibrium with its water | start it with `equilibrium_vapour_concentration` (§4.14.3), or accept the relaxation |
 
 The surface energy balance prints nothing when its Newton iteration does not
 converge (§15.6.2).
@@ -169,10 +171,11 @@ a combination it does not implement:
 | `radiative transfer takes beams through :top only` | a collimated or cone `RadiativeFluxBC` on another tag | `distribution = Diffuse()` there |
 | `the lateral shrinkage law must be positive and finite on [-0.001, 1.001]`; `… must equal one at zero conversion` | a law that vanishes or is not one at `χ̄ = 0` | a law such as `χ̄ -> 1 - 0.3χ̄` |
 | `a correction moves the mesh relative to the solid, which needs use_ale = true` | a `correction` other than `NoCorrection()` on a fixed mesh | `use_ale = true` |
-| `reaction :r has an order other than one, whose cells must keep their material, … give no correction` | a `correction` with a reaction of order other than one | give no correction (§4.14) |
-| `a prescribed mesh velocity needs use_ale = true`, and its siblings | `PrescribedCorrection` on a fixed mesh, on a reacting material, or with `deactivation` | `PrescribedCorrection` is a verification hook (§16.7) |
+| `reaction :r has an order other than one, whose cells must keep their material, … give no correction` | a `correction` with a reaction of order other than one | give no correction (§4.15) |
+| `a prescribed mesh velocity needs use_ale = true`, and its siblings | `PrescribedCorrection` on a fixed mesh, on a reacting material or one with phase changes, or with `deactivation` | `PrescribedCorrection` is a verification hook (§16.7) |
 | `the cells beside node(s) … start with different condensed components: give the layer interfaces as lagrangian nodes …` | an explicit `lagrangian` list that omits a layer interface under the equidistribution correction | leave `lagrangian` at its default, which lists the interfaces, or add them |
 | `the mass conditions name the tag :x, which the mesh does not have` | a mass condition keyed by a tag the mesh lacks | key the conditions by the mesh's tags |
+| `gas :x is produced from the solids (reactions …) and is the vapour of phase change :y, so whether it is dry pyrolysis gas is ambiguous` | a lateral-shrinkage law on a material whose pyrolysis water and moisture vapour are one species | split it into one species per origin (§4.14.1) |
 
 `integrate`, which `solve` calls next, refuses an inadmissible initial state ("a
 live component mass below its tolerance, a live cell at or below absolute zero,
@@ -196,6 +199,13 @@ The constructors reject a deck before a problem exists:
   800, 1200 and 1800 K.
 - **Reaction.** The order `n ≥ 0`, `gate_width > 0`, one yield per product, yields
   `≥ 0` summing to one.
+- **Phase change.** `PhaseChange` needs at least one sorbent with a positive weight,
+  finite non-negative weights, a positive finite `exchange_rate` and a finite
+  `latent_heat`; `Material` refuses a liquid that is not a `LiquidComponent`, a vapour
+  that is not a `GaseousComponent` with a positive molar mass, a sorbent that is not a
+  `SolidComponent` or is named twice, and two phase changes of one liquid (§4.14.1).
+  `CASTIsotherm` needs positive finite `β`, and every activity law positive finite
+  `δ` and `X0`.
 - **Mixing.** `MixingSpec(CARMAN_KOZENY)` needs a positive `length_scale`;
   `TableProperty` needs strictly increasing temperatures.
 
@@ -665,7 +675,37 @@ progress bar unless `progress = true`.
 
 ---
 
-## 15.12 Performance
+## 15.12 Wet materials
+
+- **The sample dries before the heater acts.** A conditioned sample at room
+  temperature should be at rest until the flux arrives. If its mass falls, or its
+  back face cools, from the first seconds, check three things. The reservoir names
+  the vapour at the humidity the sample was conditioned at: a dry reservoir pulls
+  water out of the face, and `setup` warns when the vapour is missing. The pore
+  vapour starts in equilibrium with the water: `setup` warns when it is more than 1 %
+  off. No one-way drying `Reaction` runs at the ambient temperature: an Arrhenius step
+  whose rate is not negligible at 300 K dries the interior before it heats (§4.14.5).
+  `examples/07_douglas_fir_cone.jl` takes the reservoir's humidity in equilibrium with
+  the initial moisture, `p_eq(X₀, T∞) / P`, so its sample stays at rest.
+- **The ledger closes to 1e-4, not 1e-8.** The pore vapour is a trace on its cell's
+  mass scale, and the exchange multiplies its integration error by `K`: at the default
+  `reltol` the closures of a wet deck are the tolerance's, not a conservation defect.
+  Read a closure at `reltol = 1e-8` or tighter (§4.14.4).
+- **The enthalpy form stops on the domain test.** A gas that starts absent, as the
+  air of a deck started at the boiling point or in steam, is held only to the cell's
+  mass tolerance and can go negative enough to fail the domain test. Tighten
+  `reltol`: the drying front of V-PC-04 started at the boiling point solves at
+  `1e-9`.
+- **The steps are many.** A wet deck takes about twice the steps of the same deck dried
+  by a one-way reaction, and a larger `exchange_rate` takes more (1.28 times at `1e4`
+  against the default). Raise `K` only where a convergence check asks for it.
+- **Free water that moved stays.** `FreeLiquid` has an activity of one at every
+  moisture content, so water a heating cycle moved has no vapour-pressure gradient to
+  bring it back; a bank of free water never relaxes. Bound water on an isotherm does.
+
+---
+
+## 15.13 Performance
 
 ### 15.12.1 Checklist
 
@@ -731,7 +771,7 @@ error budget and local nonlinear work are part of that comparison.
 
 ---
 
-## 15.13 Where to look next
+## 15.14 Where to look next
 
 - The `solve` keywords and what each does: Chapter 8; every keyword and default:
   Chapter 16.

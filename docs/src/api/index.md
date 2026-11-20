@@ -14,9 +14,9 @@ cheat-sheet.
 
 | Page | Covers |
 |:---|:---|
-| [Materials](materials.md) | `Material`, components, phases, mixing rules |
+| [Materials](materials.md) | `Material`, components, phases, mixing rules, activity laws and the saturation curve |
 | [Property functions](properties.md) | The eight property-function types |
-| [Reactions](reactions.md) | `Reaction`, the depletion limiter |
+| [Reactions](reactions.md) | `Reaction`, the depletion limiter, `PhaseChange` |
 | [Boundary conditions](boundary_conditions.md) | Thermal, mass, and pressure conditions; blowing; `BoundaryConditionSet` |
 | [Radiation](radiation.md) | `RadiationModel` selection and the angular distributions of a heater |
 | [Meshes](meshes.md) | The mesh constructors, coordinate systems, topology and geometry |

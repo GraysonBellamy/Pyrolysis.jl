@@ -65,7 +65,7 @@ When transferring an existing model, work through the checks in this order:
 | Check | User Guide setup | Technical Reference comparison |
 |:---|:---|:---|
 | Composition, material density properties and mixing | §§1.3, 3.2–3.5 | §§2, 4.8 and 5.15 |
-| Reaction rate, yields and heat basis | §§4.4–4.9 | §6.9 |
+| Reaction rate, yields and heat basis | §§4.4–4.9 | §6.10 |
 | Thermal boundaries and radiation | §§5.2–5.6 | §§7.8, 8.9, 12.11 |
 | Gas transport, storage and carried energy | §§7.5–7.7 | §9.12 |
 | Deformation and burnout criteria | Chapters 6 and 10 | §§10.11, 11.9, 14.8 |
@@ -92,6 +92,9 @@ To set expectations up front, the model does **not** support:
 - Scattering, spectral bands and a refractive index: radiative transfer in the
   solid is gray, non-scattering, with the interface's transmissivity its cell's
   emissivity (see Technical Reference §8.10).
+- Capillary flow of free water and sorption hysteresis: water above fibre
+  saturation moves only as vapour, and one isotherm serves both sorption and
+  desorption (see §4.14 and Technical Reference §6.7.7).
 
 ---
 
@@ -103,6 +106,7 @@ To set expectations up front, the model does **not** support:
 | Multi-component materials (solid / liquid / gas) | `SolidComponent`, `LiquidComponent`, `GaseousComponent` | TR §4 |
 | Temperature-dependent properties | `LinearProperty`, `PolynomialProperty`, `TableProperty`, … | TR §4 |
 | Multi-step Arrhenius kinetics | A tuple of `Reaction`s on the `Material` | TR §6 |
+| Moisture: two-way evaporation, condensation and sorption toward equilibrium | A tuple of `PhaseChange`s on the `Material`, with `CAST_SPRUCE`, `CAST_BEECH`, `FreeLiquid` or `ActivityFunction` | UG 4.14, TR §6.7 |
 | Effective (mixture) properties, mixing rules | `MixingSpec`, `MaterialMixing` | TR §5 |
 | Surface absorption / radiative transfer in the solid | `solve(...; radiation_model = …)` + `RadiativeFluxBC`, `RadiativeBC` | TR §8 |
 | Pressure-driven gas transport | Set `κ > 0` on a solid/liquid component | TR §9 |
@@ -470,6 +474,10 @@ stable, user-facing API. The top-level exports cover:
 - **Property functions:** `ConstantProperty`, `LinearProperty`,
   `PolynomialProperty`, `ArrheniusProperty`, `TableProperty`, `CallableProperty`,
   `SutherlandProperty`, `StateDependentProperty`.
+- **Phase changes:** `PhaseChange`, the activity laws (`CASTIsotherm`,
+  `CAST_SPRUCE`, `CAST_BEECH`, `FreeLiquid`, `ActivityFunction`), the saturation
+  curve `WATER_SATURATION`, and the equilibrium start
+  (`equilibrium_vapour_pressure`, `equilibrium_vapour_concentration`).
 - **Boundary conditions:** the thermal conditions (`HeatFluxBC`, `ConvectiveBC`,
   `RadiativeBC`, `RadiativeFluxBC`, `CombinedThermalBC`, `DirichletThermalBC`,
   `AdiabaticBC`), the mass conditions (`ImpermeableBC`, `MassFluxBC`,
@@ -550,9 +558,9 @@ with:
 | File | What it demonstrates |
 |---|---|
 | `examples/06_cone_calorimeter.jl` | PMMA, 5.8 mm, at 25 kW/m²: single-step kinetics, temperature-dependent properties, combined thermal conditions, a mesh moving with the solid and cell deactivation; overlays ThermaKin outputs when present |
-| `examples/07_douglas_fir_cone.jl` | Douglas fir, 12 mm, at 75 kW/m²: five-step kinetics with moisture evaporation, gas transport with background pore air, surface absorption, a moving mesh |
+| `examples/07_douglas_fir_cone.jl` | Douglas fir, 12 mm, at 75 kW/m²: five-step kinetics, the two-way phase change of the moisture on the CAST spruce isotherm with its vapour starting in equilibrium and a humid ambient, gas transport with background pore air, surface absorption, a moving mesh |
 | `examples/08_gas_transport.jl` | Lumped and dusty-gas transport with a finite reservoir film |
-| `examples/08_pressure_treated_wood_cone.jl` | Pressure-treated wood with moisture and multi-step Arrhenius kinetics |
+| `examples/08_pressure_treated_wood_cone.jl` | Pressure-treated wood with multi-step Arrhenius kinetics, transcribed from ThermaKin with its one-way drying step |
 | `examples/convergence_douglas_fir.jl` | Grid-convergence study (uses `Distributed`) |
 | `examples/moisture_hos_comparison.jl` | Moisture transport with state-dependent heat of sorption |
 | `examples/export_results_csv.jl` | Writes a solution's series and profiles to CSV files |

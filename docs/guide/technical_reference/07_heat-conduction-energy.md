@@ -323,14 +323,15 @@ $$
 \boxed{\;
 \frac{\partial}{\partial t}\Big(\sum_j \xi_j h_j\Big)
 + \nabla\!\cdot\Big(\mathbf q_{\text{cond}} + \sum_g h_g\,\mathbf J_g\Big)
-\;=\; Q_{\text{rad}} + Q_{\text{rxn}} + \sum_j S_j\,h_j
+\;=\; Q_{\text{rad}} + Q_{\text{rxn}} + Q_{\text{pc}} + \sum_j S_j\,h_j
 \;}
 \tag{7.5}
 $$
 
 with $\mathbf J_g$ the mass flux of gas component $g$ relative to the skeleton,
 $Q_{\text{rxn}} = -\sum_r h_r r_r$ the reaction heat with the heats quoted at the local
-temperature (§6.6), and $S_j = \sum_r \nu_{r,j} r_r$ the reaction source of component $j$;
+temperature (§6.6), $Q_{\text{pc}} = -\sum h_{\text{pc}} r_{\text{pc}}$ the heat of the phase
+changes (§6.7), and $S_j = \sum_r \nu_{r,j} r_r \pm r_{\text{pc}}$ the source of component $j$;
 the last term converts the heat of reaction to the sensible-enthalpy datum (§6.6.3).
 Subtracting $h_j$ times each species balance
 $\partial_t\xi_j + \nabla\!\cdot\mathbf J_j = S_j$ ($\mathbf J_j \equiv 0$ for condensed
@@ -343,7 +344,7 @@ $$
 -\,\nabla\!\cdot\mathbf{q}_{\text{cond}}
 \;-\; \sum_g c_{p,g}\,\mathbf J_g\!\cdot\!\nabla T
 \;+\; Q_{\text{rad}}
-\;+\; Q_{\text{rxn}}
+\;+\; Q_{\text{rxn}} + Q_{\text{pc}}
 \;}
 \tag{7.6}
 $$
@@ -356,6 +357,7 @@ with, term by term,
 | $-\sum_g c_{p,g}\,\mathbf J_g\!\cdot\!\nabla T$ | temperature-form reading of $-\nabla\!\cdot(\sum_g h_g\mathbf J_g)$ | gas sensible-enthalpy transport | 7.4 |
 | $Q_{\text{rad}}$ | model-dependent | volumetric radiation absorption | 7.5, §8 |
 | $Q_{\text{rxn}}$ | $-\sum_r h_r r_r$ | reaction heat | 7.5 |
+| $Q_{\text{pc}}$ | $-\sum h_{\text{pc}} r_{\text{pc}}$ | phase-change heat | 6.7 |
 
 The subscript $g$ runs over the **gas** components only. The storage coefficient
 $\rho c_p^{\text{eff}}$ is the **mixture** volumetric heat capacity, defined next. The code
@@ -698,10 +700,10 @@ reactions, so an exothermic reaction ($h_r<0$) produces $Q>0$.
 
 > **Caution on external conventions.** ThermaKin publishes $h>0=$ *exothermic*, the opposite
 > of the internal storage convention here; Gpyro V2 and FDS use the same sign as Pyrolysis.jl
-> ($h>0$ endothermic, §6.9). With ThermaKin's published $h$ one would write
+> ($h>0$ endothermic, §6.10). With ThermaKin's published $h$ one would write
 > $Q_{\text{rxn}}=+\sum h r$; Pyrolysis.jl stores $h$ with $h>0=$ endothermic and forms
 > $Q_{\text{rxn}}=-\sum h r$, so a user porting a ThermaKin heat of reaction must flip its
-> sign (§6.9.1).
+> sign (§6.10.1).
 
 > **Implementation note.** `reaction_heat_source(rates, heats)` in `src/Physics/kinetics.jl`
 > performs the negated sum. The reaction kernel (`ReactionKernel`, `src/Kernels/reactions.jl`)
@@ -894,7 +896,7 @@ exchange retains gas temperature advection but omits gas storage and gas
 conduction. `FULL_QSG` retains both omitted terms (GP Eq. 65;
 [`GAS_SOLID_THERMAL_EXCHANGE`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L579-L713)).
 Our gas heat storage alone therefore does not make the energy equations
-identical. Reaction-heat basis (§6.9.2), transported enthalpy and boundary
+identical. Reaction-heat basis (§6.10.2), transported enthalpy and boundary
 exchange must also match.
 
 V2 user guide §4.2 describes these exchange choices using `QSG_MODEL`.

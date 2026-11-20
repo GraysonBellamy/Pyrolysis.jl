@@ -218,6 +218,12 @@ radiation (Chapter 8), at the positive-part concentrations. Condensed
 superficial transfer is explicit under the lumped model and uses condensed
 matrix weights. Its value is constitutive data, independent of gas loading.
 
+A phase change (§4.6.6) reads these fields and no others of its own: the liquid's and
+the vapour's heat capacities through their sensible enthalpies (its latent heat at the
+local temperature, §6.7.4), the vapour's `molar_mass` and the sorbents' concentrations.
+Its activity law, saturation curve, latent heat and exchange rate belong to the
+declaration, not to a component.
+
 ### 4.2.2 Bulk density, matrix occupancy and gas loading
 
 The bulk mixture mass density is $\rho_{tot}=\sum_j\xi_j$. Matrix transport
@@ -406,15 +412,16 @@ that every curve a material may carry is protected rather than just this one.
 
 A property that depends on **both** temperature and the full concentration tuple,
 $p(T,\xi)=f(T,\xi)$. Calling it with $T$ alone raises an error (state is
-mandatory). Its canonical use is a moisture-dependent heat of sorption: the heat
-released/absorbed when water desorbs depends on the current moisture content, so
+mandatory). Its canonical use is a heat of reaction that changes with the conversion:
 
 $$
-h(T,\xi) = f\!\left(T,\; \mathrm{MC}(\xi)\right),
+h(T,\xi) = f\!\left(T,\; x(\xi)\right),
 $$
 
-where $\mathrm{MC}$ is, e.g., the moisture content reconstructed from the
-concentration tuple. The kinetics evaluator always passes $\xi$ to the heat
+where $x$ is, e.g., the mass a solid has lost, reconstructed from the concentration
+tuple (§6.6.2). The heat of a liquid's evaporation and sorption is not one of these: it
+belongs to the phase change of §6.7, whose heat of sorption comes from its activity law.
+The kinetics evaluator always passes $\xi$ to the heat
 property (§4.5, Chapter 6), so a `StateDependentProperty` heat is evaluated with
 the live composition.
 
@@ -533,8 +540,8 @@ $p(T, \xi)$ ignores $\xi$, so $\partial p/\partial \xi_j = 0$ exactly. For a
 `StateDependentProperty` the derivative is $\partial f/\partial \xi_j$, propagated by
 AD through $f(T, \xi)$ with the concentration tuple carrying `Dual` entries. The
 kinetics evaluator passes the cell's concentrations to every heat-of-reaction
-property, so a moisture-dependent heat of sorption contributes its composition
-derivative to the rows of the cell's energy source.
+property, so a composition-dependent heat contributes its composition derivative to
+the rows of the cell's energy source.
 
 > **Implementation note.** The call methods `(p)(T)` and `(p)(T, ξ)` are in
 > `src/Materials/property_functions.jl`. The heats are evaluated with the rates by
@@ -700,8 +707,11 @@ dry gas j  ⇔  is_gas(c_j) && j ∈ L
 ```
 
 Water released by decomposition is dry gas, whatever its name; the vapour of an
-evaporating liquid (moisture) is not, because its reactant never enters
-$\mathcal L$; a gas that no reaction produces (a background gas) is not. A gas
+evaporating liquid (moisture) is not, whether a reaction or a phase change (§6.7)
+produces it, because the liquid never enters $\mathcal L$; a gas that no reaction
+produces (a background gas) is not. A gas in $\mathcal L$ that is also the vapour of a
+phase change is refused, naming the gas and the phase change: pyrolysis water is then a
+species of its own. A gas
 in $\mathcal L$ that a reaction without a reactant in $\mathcal L$ also produces
 has no single origin: the set-up throws an `ArgumentError` naming the gas and
 both groups of reactions, and the gas must be modeled as one species per
@@ -748,6 +758,54 @@ evaluation: all composition-dependent dispatch is resolved at compile time, all
 intermediate tuples are statically sized, and there are no dictionary lookups in
 hot paths. `test/jacobian/test_allocations.jl` asserts zero bytes for one
 residual and one colored-Jacobian evaluation on every configuration it builds.
+
+### 4.6.6 Phase changes
+
+A material's `phase_changes` tuple holds its two-way phase changes, each declared as
+
+```julia
+PhaseChange(:moisture, :water => :vapour; activity = CAST_SPRUCE, sorbents = (:wood,),
+            saturation = WATER_SATURATION, latent_heat = 2.4417e6, exchange_rate = 1e3)
+```
+
+with the liquid and its vapour named, or given as indices, like a reaction's
+components. The declaration carries the rest of the closures of §6.7:
+
+- **the sorbents**, the solids whose concentrations carry the liquid in the moisture
+  content (6.10): a tuple of names or indices (weight one) or of `name => weight`
+  pairs. There is no default, because a char, say, does not hold water as the wood it
+  comes from does; at least one weight must be positive;
+- **the activity law** `a(X, T)`, an `AbstractActivity`: `CASTIsotherm` with its six
+  parameters and the two fitted sets `CAST_SPRUCE` and `CAST_BEECH`, `FreeLiquid` for
+  a liquid the solid does not hold, or `ActivityFunction(f)` for an isotherm given as a
+  function (§6.7.2). Every law answers `activity(law, X, T)` and
+  `sorption_heat(law, X, T, M)`, generic in the number type;
+- **the saturation curve** $p_{\text{sat}}(T)$, any property function of temperature,
+  by default `WATER_SATURATION`, the vapour-pressure equation of IAPWS-95 (6.12);
+- **the latent heat** at $T_{\text{ref}}$ and **the exchange rate** $K_{\text{pc}}$
+  (§6.7.4, §6.7.5).
+
+The constructor returns a pending form, resolved when the `Material` is built: the
+names become indices and the vapour's molar mass is copied in. The `Material` refuses,
+naming the phase change, a liquid that is not a `LiquidComponent`, a vapour that is not
+a `GaseousComponent` with a positive molar mass, a sorbent that is not a
+`SolidComponent` or is named twice, and two phase changes of one liquid; the
+constructor refuses a negative or non-finite weight, sorbents none of which has a
+positive weight, an exchange rate that is not positive and finite and a latent heat
+that is not finite. A liquid may also be the reactant or a product of a `Reaction`.
+
+The resolved tuple is the `Material` type parameter `PC`, so the kernel specialises on
+it as on the reactions (§4.6.5); a material with an empty tuple builds no phase-change
+kernel. `n_phase_changes(material)` counts them. Several rules read the phase changes
+beside the reactions: the vapour of a phase change is not dry gas (§4.6.4), its liquid
+is not reactive inventory and leaves no residue (§11.7.4, §14.3.2), and the strain rate
+of a moving mesh reads its mass sources (§10.2).
+
+> **Implementation note.** `PhaseChange` and its resolution:
+> `src/Materials/phase_changes.jl`. The activity laws: `src/Materials/activity.jl`.
+> `WATER_SATURATION`: `src/Materials/saturation.jl`. The rate, heat and moisture content
+> forward from the resolved `PhaseChange` to functions of scalars and law objects
+> (`src/Physics/phase_change.jl`), so every caller evaluates one statement of the law.
 
 ---
 
@@ -879,7 +937,7 @@ FDS accepts temperature ramps for thermal properties. Its
 and constructs component enthalpies. A Pyrolysis.jl function or table must
 match the units, interpolation and enthalpy datum over the temperature
 range used. Reaction heat can also vary with temperature through FDS's
-enthalpy accounting (§6.9.3); it is not generally a transferable scalar.
+enthalpy accounting (§6.10.3); it is not generally a transferable scalar.
 
 ### 4.8.4 Sources and numerical evidence
 
@@ -921,7 +979,9 @@ revisited where the relevant physics is developed.
    segment by segment, so its derivative jumps at every knot and the integrator
    sees a kink in the Jacobian there. `CallableProperty` and `StateDependentProperty`
    are differentiated by propagating `ForwardDiff.Dual` numbers through the user's
-   function, which must therefore be generic in its argument types (§4.5).
+   function, which must therefore be generic in its argument types (§4.5). The function
+   of an `ActivityFunction` is differentiated in $T$ for its heat of sorption inside the
+   dual numbers of the Jacobian, so it must accept nested dual numbers (§6.7.4).
 
 5. **Heterogeneous-tuple compilation cost.** Preserving the exact component and
    reaction tuple types yields allocation-free, type-stable hot paths, but at the
@@ -938,4 +998,4 @@ revisited where the relevant physics is developed.
    endothermic ($Q_\mathrm{rxn}=-\sum_r h_r r_r$), whereas ThermaKin publishes
    $h>0$ as exothermic. Users porting parameters from ThermaKin must flip the
    sign; Gpyro V2 and FDS use the same convention as Pyrolysis.jl, and their heats
-   are entered as published (Chapter 2, overload note H1; Chapter 6, §6.9.2).
+   are entered as published (Chapter 2, overload note H1; Chapter 6, §6.10.2).

@@ -21,7 +21,8 @@ content, the liquid's concentration over the weighted concentration of the
 sorbing solids, `a` the activity law, `p_sat` the saturation curve, `φ` the
 pore fraction, `M` the vapour's molar mass, `h_v` and `h_w` the components'
 sensible enthalpies and `Q_s` the activity law's heat of sorption; see
-[`phase_change_rate`](@ref) and [`phase_change_heat`](@ref).
+[`phase_change_rate`](@ref Pyrolysis.Physics.phase_change_rate) and
+[`phase_change_heat`](@ref Pyrolysis.Physics.phase_change_heat).
 
 [`Material`](@ref) builds it from the declaration of
 [`PhaseChange`](@ref)`(name, liquid => vapour; ...)`, resolving the

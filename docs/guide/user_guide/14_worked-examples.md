@@ -53,9 +53,9 @@ A roadmap of what each example demonstrates:
 | Example file | Physics highlighted | Modes | §14 |
 |---|---|---|---|
 | `06_cone_calorimeter.jl` | PMMA cone, single-step kinetics, incident flux at the surface (`SURFACE_ABSORPTION`) | ALE, deactivation | 14.1 |
-| `07_douglas_fir_cone.jl` | Wood, multi-step kinetics, lumped gas transport, moisture | ALE, SURFACE_ABSORPTION, LumpedTransfer | 14.2 |
+| `07_douglas_fir_cone.jl` | Wood, multi-step kinetics, lumped gas transport, the phase change of the moisture | ALE, SURFACE_ABSORPTION, LumpedTransfer | 14.2 |
 | `convergence_douglas_fir.jl` | Grid-convergence study | as 07 at 50 kW/m², swept over `n_cells` | 14.3 |
-| `08_pressure_treated_wood_cone.jl` | Treated wood + moisture, lumped gas transport | ALE, SURFACE_ABSORPTION, LumpedTransfer | 14.4 |
+| `08_pressure_treated_wood_cone.jl` | Treated wood transcribed from ThermaKin, its one-way drying step, lumped gas transport | ALE, SURFACE_ABSORPTION, LumpedTransfer | 14.4 |
 | `08_gas_transport.jl` | Lumped and dusty-gas transport, finite film | Moving mesh, both transport models | 14.5 |
 | `moisture_hos_comparison.jl` | State-dependent heat of sorption | ALE, SURFACE_ABSORPTION, LumpedTransfer | 14.6 |
 | `macfp/macfp_gasification.jl` | MaCFP-4 white-pine gasification targets (10/30/60 kW/m², 6/18 mm), the calibrated model of §14.7 at a constant cross section | ALE, SURFACE_ABSORPTION, threads | — |
@@ -91,12 +91,29 @@ error budget must be varied jointly when assessing dense-polymer results.
 
 ## 14.2 Douglas fir cone calorimeter (`07_douglas_fir_cone.jl`)
 
-The wood example includes multi-step pyrolysis, absorbed moisture, water
-vapor and inert pore air. Condensed phases provide skeletal densities,
-lumped matrix transfer and permeability. The complete atmospheric reservoir
-has incoming air at the same temperature as the external thermal film.
-The initial air inventory follows the actual pore fraction, net of the
-absorbed water's skeletal occupancy.
+The wood example includes multi-step pyrolysis, bound moisture and its vapour,
+and inert pore air. The moisture and its vapour exchange through a two-way phase
+change on the CAST spruce isotherm, held by the wood and its four intermediates and
+not by the char (§4.14):
+
+```julia
+phase_changes = (
+    PhaseChange(:moisture, :MOISTURE => :WATER_VAPOR;
+                activity = CAST_SPRUCE,
+                sorbents = (:DF, :DF_int1, :DF_int2, :DF_int3, :DF_int4)),
+),
+```
+
+The water evaporates where the wood heats and condenses where the vapour driven
+inward meets cooler wood, so the moisture rises ahead of the drying front and the
+back face holds near the temperature at which the bound water's equilibrium pressure
+meets the pore pressure. The pore vapour starts in equilibrium with the water and the
+air at the rest of 101325 Pa (`equilibrium_vapour_pressure`,
+`equilibrium_vapour_concentration`, `background_gas_concentration`), and the ambient
+air carries the humidity in equilibrium with the initial moisture at 300 K (30.7 %),
+so the conditioned sample is at rest before the heater acts. Condensed phases provide
+skeletal densities, lumped matrix transfer and permeability. The complete atmospheric
+reservoir has incoming air at the same temperature as the external thermal film.
 
 ```bash
 PYROLYSIS_SMOKE=1 julia --project=examples examples/07_douglas_fir_cone.jl
@@ -107,14 +124,22 @@ keywords. Use the species boundary diagnostics to separate combustible-gas
 escape from vapor transport and air ingress. Reconstructing flux from the
 initial mesh or only the pressure gradient would omit parts of this balance.
 
+The script reports the water evaporated and condensed over the run from
+`extras.evaporation_rate` and `extras.condensation_rate` (§9.3), and its results CSV
+carries the net water-vapour production (`mlr_gen_water`, evaporation less
+condensation) and the net exchange at the drying front (`phase_change_rate_front`).
+At the default exchange rate about 40 % of the water evaporated condenses again, and
+the vapour runs at most 11 % above its equilibrium pressure; the results are flat in
+the exchange rate from `1e2` to `1e4` 1/s (Technical Reference §6.7.5).
+
 ---
 
 ## 14.3 Grid-convergence study (`convergence_douglas_fir.jl`)
 
 ### What it models
 
-The Douglas fir cone case at 50 kW/m² (13 components: the material of §14.2
-without the background air), solved at six spatial resolutions
+The Douglas fir cone case of §14.2 at 50 kW/m² (14 components, five reactions and
+the phase change of the moisture), solved at six spatial resolutions
 (480, 240, 120, 60, 30, 15 cells → 0.025–0.8 mm cells) to quantify how coarse
 the mesh can be before the quantities of interest (peak MLR, time to ignition,
 total mass loss, peak surface temperature, solve time) drift from the finest-grid
@@ -130,12 +155,18 @@ do not share mutable state:
 
 ```julia
 @everywhere function build_and_solve(n_cells::Int)
-    # ... build material (13 components, 6 reactions) and BCs ...
+    # ... build material (14 components, 5 reactions, 1 phase change) and BCs,
+    # the reservoir's humidity in equilibrium with the initial moisture ...
     mesh = uniform_mesh(12.0e-3, n_cells)
     ξ_DF = 530.0 / (1 + 0.06 * 530.0 / 1000.0)   # wood and 6 % bound water fill the cell (§3.2.2)
+    ξc = (ξ_DF, 0.0, 0.0, 0.0, 0.0, 0.0, 0.06 * ξ_DF, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    p_v = equilibrium_vapour_pressure(material, ξc, 300.0)
+    ξ_v = equilibrium_vapour_concentration(material, ξc, 300.0)
+    ξ_air = background_gas_concentration(material, :AIR, ξc, 300.0; P = 101325.0 - p_v)
     ξ_initial_funcs = [z -> ξ_DF, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0,
                        z -> 0.06 * ξ_DF,                          # 6 % moisture, dry basis
-                       z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0]
+                       z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0, z -> 0.0,
+                       z -> ξ_v, z -> ξ_air]                      # vapour, air
     problem = PyrolysisProblem(mesh = mesh, material = material, bc_set = bc_set,
         T_initial = z -> 300.0, ξ_initial = ξ_initial_funcs,
         tspan = (0.0, 600.0), dt_initial = 1e-3,
@@ -195,10 +226,13 @@ package's `parameter_sweep` helper, with a `modify` that replaces the mesh
 ### What it models
 
 Cone pyrolysis of fire-retardant pressure-treated wood (PTW) with moisture, at
-50 kW/m², 12 mm on 240 cells. Structurally similar to Douglas fir but with a
-different component ordering (water and water vapor come first), three solid
-intermediates between the virgin wood and the char instead of four, and five
-reactions. It exercises the same lumped gas transport + surface-absorption + ALE stack.
+50 kW/m², 12 mm on 240 cells, transcribed from a ThermaKin deck (`PTW.cmp`) for
+comparison with it. Structurally similar to Douglas fir but with a different
+component ordering (water and water vapor come first), three solid intermediates
+between the virgin wood and the char instead of four, and five reactions. Its water
+leaves by ThermaKin's one-way drying reaction, not by a phase change, so the vapour it
+drives inward does not condense (§4.14.5). It exercises the same lumped gas transport +
+surface-absorption + ALE stack.
 
 ### Material highlights
 
@@ -228,8 +262,9 @@ a melt, declares its transport coefficients explicitly.
 ### Reaction heats and rates
 
 Pyrolysis.jl uses `h > 0` for endothermic reactions and `h < 0` for
-exothermic reactions. Water evaporation and the first decomposition step
-absorb heat; the third decomposition step releases it:
+exothermic reactions. Water evaporation (ThermaKin's step, with its heat sign
+flipped) and the first decomposition step absorb heat; the third decomposition step
+releases it:
 
 ```julia
 Reaction(:water_evaporation, 1 => 2; A = 15532.2434, E = 43528.868,
@@ -628,7 +663,7 @@ Reading the examples together, a few idioms recur and are worth internalizing:
   solves, whether on `Distributed` workers or on threads.
 - **Temperature-dependent properties are closures.** `CallableProperty(T -> ...)`
   for `c_p(T)`, `k(T)`; `StateDependentProperty((T, ξ) -> ...)` for properties or
-  reaction heats that depend on local composition (e.g. heat of sorption). A bare
+  reaction heats that depend on local composition (e.g. a conversion-dependent heat). A bare
   number becomes a `ConstantProperty`.
 - **Combine BCs with `+`.** `RadiativeFluxBC(...) + RadiativeBC(...) + ConvectiveBC(...)`
   forms a `CombinedThermalBC`. Assign one complete mass closure to each tag.

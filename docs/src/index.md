@@ -10,6 +10,8 @@ solid, and lumped or dusty-gas transport through a shared pore state.
 
 - Multi-component materials with temperature-dependent properties
 - Single-step and multi-step Arrhenius decomposition kinetics
+- Moisture that evaporates, condenses and is resorbed toward sorption equilibrium
+  with its vapour, on measured wood isotherms
 - Conservative species transport with lumped transfer or dusty-gas friction
 - Radiative transfer through the solid, absorbed and emitted in depth (or absorption at the surface)
 - Material volume changes — shrinkage, swelling, intumescence

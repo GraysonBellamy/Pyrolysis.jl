@@ -868,8 +868,9 @@ per `setup`: when the reservoir of an open mass condition (`AmbientGasBC`,
 face a perfectly dry sink for it (a reservoir that names it at a mole
 fraction of zero is dry on purpose); and when the initial vapour of some cell
 holding the liquid lies farther than 1 % of the equilibrium concentration
-from it ([`equilibrium_vapour_concentration`](@ref) gives the start in
-equilibrium). On a line the closure is the
+from it
+([`equilibrium_vapour_concentration`](@ref Pyrolysis.Physics.equilibrium_vapour_concentration)
+gives the start in equilibrium). On a line the closure is the
 balance rows of [`BalanceRowClosure`](@ref), and a material with a lateral
 shrinkage law also carries the conversion-history pair and its cross
 section's area and lateral rate. `correction` moves a line's mesh relative

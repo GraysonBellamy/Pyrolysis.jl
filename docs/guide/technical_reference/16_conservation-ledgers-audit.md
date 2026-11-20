@@ -126,15 +126,16 @@ $H=\int_{\Omega}\sum_j \xi_j\,h_j(T)\,dV$. Its balance is
 $$
 \frac{dH}{dt}
 = -\oint_{\partial\Omega}\Big(q_\mathrm{cond}+\sum_j h_j(T)\,J_j\Big)\hat{\mathbf n}\cdot d\mathbf A
-\;+\; \int_{\Omega}\Big(Q_\mathrm{rxn}+Q_\mathrm{rad}+\sum_j \omega_j\,h_j(T)\Big)dV ,
+\;+\; \int_{\Omega}\Big(Q_\mathrm{rxn}+Q_\mathrm{pc}+Q_\mathrm{rad}+\sum_j \omega_j\,h_j(T)\Big)dV ,
 $$
 
 with $q_\mathrm{cond}=-k_\mathrm{eff}\,\partial T/\partial z$ the conducted
 flux, $\sum_j h_j J_j$ the sensible enthalpy the mass fluxes carry,
 $Q_\mathrm{rxn}=-\sum_r h_r r_r$ the reaction heat with each $h_r$ quoted at
-the local temperature (§6.6.3), $\sum_j \omega_j\,h_j(T)$ the **formation
-term** (the sensible enthalpy a reaction moves from its reactant to its
-products at the local temperature), and $Q_\mathrm{rad}$ the radiation the cells
+the local temperature (§6.6.3), $Q_\mathrm{pc}=-\sum h_\mathrm{pc}r_\mathrm{pc}$ the heat
+of the phase changes (§6.7), $\sum_j \omega_j\,h_j(T)$ the **formation
+term** (the sensible enthalpy a reaction or phase change moves from its reactant to
+its products at the local temperature), and $Q_\mathrm{rad}$ the radiation the cells
 absorb less what they emit (nonzero under `RADIATIVE_TRANSFER` only; under
 `SURFACE_ABSORPTION` the absorbed flux is part of the boundary condition's
 flux). At a boundary the signed donor sum $H_r$ uses the surface temperature
@@ -147,6 +148,14 @@ conserved quantity: the change of composition at fixed temperature (the term
 $\sum_j h_j\,\partial\xi_j/\partial t$ of the product-rule expansion of
 $\partial_t\sum_j\xi_j h_j$) is part of it through the formation and
 carried terms, and nothing is approximated.
+
+The ledger books the heats of the reactions and phase changes as the kernels give them,
+so it closes whatever heat a deck declares; it does not test that the heat is a state
+function. A closed cycle does: a phase change that evaporates water at a hot face and
+condenses it again at a cooler one must return the column to the enthalpy it started
+from. V-PC-03a holds that on free water to $10^{-4}$ of the peak enthalpy rise, and
+V-PC-03b leaves 1.71 % of the heat of sorption exchanged on bound water, the excess heat
+capacity of §6.7.4.
 
 ---
 

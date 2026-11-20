@@ -412,6 +412,18 @@ An explicit vacuum `GasReservoir(P=0.,T=300.)` may omit composition. Atmospheric
 exchange requires the atmosphere's tracked species and appropriate initial pore
 gas. Both escape and ingress follow the same constitutive path.
 
+A wet material's reservoir names the vapour of its phase change (§4.14), which the
+face exchanges in both directions. At a relative humidity `RH`:
+
+```julia
+RH, T∞, P = 0.5, 300., 101325.
+x_v = RH * WATER_SATURATION(T∞) / P             # 0.0175 at 50 % and 300 K
+reservoir = GasReservoir(P=P, T=T∞, mole_fractions=(air=1. - x_v, vapour=x_v))
+```
+
+A reservoir that leaves the vapour out is a perfectly dry sink for it, and `setup`
+warns about it.
+
 ### 5.3.3 The mass film
 
 An open face exchanges gas with its reservoir through an isobaric
@@ -776,6 +788,20 @@ sample, prefer a step on a node: a smooth profile leaves every component present
 in the transition cells, so the interface that `setup` detects moves to wherever
 the profile's tail reaches exactly zero.
 
+A moisture profile carries its vapour. With a phase change on the material, give the
+vapour and the background gas at each depth from the condensed composition there, so
+that the pore gas starts in equilibrium everywhere (§4.14.3):
+
+```julia
+ξc(z)  = (ξ_wood, ξ_moist_initial(z), 0.0, 0.0)         # wood, water, vapour, air
+p_v(z) = equilibrium_vapour_pressure(material, ξc(z), T_initial(z))
+ξ_vapour_initial = z -> equilibrium_vapour_concentration(material, ξc(z), T_initial(z))
+ξ_air_initial    = z -> background_gas_concentration(material, :air, ξc(z), T_initial(z);
+                                                    P = 101325.0 - p_v(z))
+```
+
+`setup` warns when a cell starts more than 1 % off equilibrium.
+
 ---
 
 ## 5.11 Common configurations (worked recipes)
@@ -897,7 +923,10 @@ flow measure when the exterior instead has a hydraulic resistance.
   (exported at the top level): a pore space started as a vacuum against a
   101325 Pa boundary draws early product gas inward. For multi-solid or moisture-bearing materials, supply
   `ξ_initial` explicitly so virgin solid, char, moisture, and gases start with
-  the right concentrations.
+  the right concentrations; a wet material's pore vapour starts in equilibrium with
+  its water, the background gas at the rest of the pressure (§5.10.2).
+- **Give a wet material a humid reservoir.** An `AmbientGasBC` whose reservoir does not
+  name the vapour of a phase change dries the face as if the air were bone dry (§5.3.2).
 
 For deeper background on the boundary physics, the surface Newton solve, and the
 radiation models, see Technical Reference §12 (boundary and initial conditions),

@@ -123,8 +123,9 @@ summed over every component with no phase branch, so **gas sensible storage is
 part of the left-hand side of the energy equation**. The units check:
 $[\text{kg}\,\text{m}^{-3}]\cdot[\text{J}\,\text{kg}^{-1}\,\text{K}^{-1}] = [\text{J}\,\text{m}^{-3}\,\text{K}^{-1}]$.
 
-Each $c_{p,j}$ is the *sensible* heat capacity of its component. The reaction and
-latent heats are carried by the source terms (§3.3.3, §6), so a law that includes
+Each $c_{p,j}$ is the *sensible* heat capacity of its component. The reaction heats and
+the latent heat and heat of sorption of a phase change are carried by the source terms
+(§3.3.3, §6, §6.7), so a law that includes
 them, such as the apparent heat capacity a DSC or STA records while the sample
 decomposes, counts that heat twice. Two checks bound a law over the temperatures
 a solve reaches. The Dulong–Petit limit, $3R$ per mole of atoms, is about

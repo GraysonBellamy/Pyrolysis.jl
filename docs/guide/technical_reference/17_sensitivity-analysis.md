@@ -379,7 +379,7 @@ Common $\boldsymbol{\theta}$ entries and how they enter the model:
   matrix is typically ill-conditioned in $(A,E)$ — see §17.7.4. Perturb
   $\log_{10}A_r$, not $A_r$ (§17.2.1).
 - **Heat of reaction** $h_r$ (or a `LinearProperty` $a+bT$, or a
-  `StateDependentProperty` for moisture sorption). It enters only the energy
+  `StateDependentProperty` for a conversion-dependent heat). It enters only the energy
   source $Q_{\text{rxn}}=-\sum_r h_r r_r$ linearly, so
   $\partial Q_{\text{rxn}}/\partial h_r = -r_r$. With the sign convention
   $h>0$ endothermic, increasing $h_r$ *cools* the cell, lowering $T_s$ — the
@@ -785,7 +785,7 @@ nor an apparently good fit guarantees parameter identifiability.
 ### 17.8.3 FDS
 
 Its reference-temperature/rate prescription estimates Arrhenius
-parameters (§6.9.3). That feature is distinct from whole-solve parameter
+parameters (§6.10.3). That feature is distinct from whole-solve parameter
 sensitivities. It is not evidence for a blanket absence of sensitivity or
 optimization workflows around FDS.
 
@@ -794,7 +794,7 @@ optimization workflows around FDS.
 TK's model and examples support its use of fitted parameters, without
 establishing a universal optimizer. GP §7 and V2 user guide §14 are checked
 against the linked property-estimation driver. FDS's kinetic-parameter
-prescription is checked against `READ_MATL` (§6.9.3).
+prescription is checked against `READ_MATL` (§6.10.3).
 Our qualified finite differences are described in §17.2; the white-pine
 inverse example uses Nelder–Mead in
 `examples/inverse_analysis/inverse_white_pine.jl`.

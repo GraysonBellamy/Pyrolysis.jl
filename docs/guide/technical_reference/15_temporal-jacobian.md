@@ -197,7 +197,7 @@ $$
 $$
 
 with $\omega_{j,i}\tilde V_i$ [kg s⁻¹] the cell's reaction source ($\tilde V_i$
-the smoothly floored cell volume, §13.10.3; an external mass source, §13.5.3,
+the smoothly floored cell volume, §13.10.3; an external mass source, §13.5.4,
 adds to it here and in the formation term below), $\dot M_{j,i}$ the face-flux
 part of its mass rate and $s_{if}=\pm1$ the orientation of face $f$ relative to
 cell $i$. With $E_i$ [W] the cell's energy sources plus its face energy fluxes

@@ -161,9 +161,10 @@ virgin = SolidComponent(:virgin; ρ = 1190.0, c = cp, k = 0.20)
 
 `Reaction` accepts a scalar `h` (a constant), a tuple `h = (a, b)` (linear in `T`,
 `a + b*T`), or a property object such as `StateDependentProperty((T, ξ) -> ...)`
-for moisture-dependent heats of sorption (Technical Reference §6.6). The
+for composition-dependent heats (Technical Reference §6.6). The
 `build_and_solve(θ)` in `sensitivity_douglas_fir.jl` demonstrates the
-state-dependent form for heat of sorption.
+state-dependent form on the heat of sorption of the published study's one-way drying
+step.
 
 ---
 
