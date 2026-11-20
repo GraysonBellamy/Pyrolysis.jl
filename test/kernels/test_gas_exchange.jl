@@ -5,6 +5,7 @@ using Pyrolysis.States: mass_index, energy_index
 using Pyrolysis.Meshes: n_faces
 using Pyrolysis.Kernels: find_kernel
 using Pyrolysis.BoundaryConditions: molar_film_flux
+using Pyrolysis.Physics: TransportFailure
 using Pyrolysis.ColoredJacobian:
     dense_jacobian, missing_entries, compare_entries, jac_prototype, jacobian!
 
@@ -17,6 +18,8 @@ function gas_problem(;
     x = (0.7, 0.3),
     cells = 2,
     κ = 0.0,
+    c_a = 1000.0,
+    c_b = 1200.0,
 )
     solid=SolidComponent(
         :matrix;
@@ -27,8 +30,8 @@ function gas_problem(;
         λ = 1e-5,
         κ = κ,
     )
-    a=GaseousComponent(:a; M = 0.028, c = 1000.0, k = 0.03)
-    b=GaseousComponent(:b; M = 0.044, c = 1200.0, k = 0.03)
+    a=GaseousComponent(:a; M = 0.028, c = c_a, k = 0.03)
+    b=GaseousComponent(:b; M = 0.044, c = c_b, k = 0.03)
     mat=Material(name = :gas_exchange, components = (solid, a, b), gas_transport = model)
     ξ=(500.0, 0.5*P*x[1]*0.028/(R_GAS*T), 0.5*P*x[2]*0.044/(R_GAS*T))
     PyrolysisProblem(
@@ -310,6 +313,50 @@ end
         @test cA.F_energy[f]==cN.F_energy[f]
         @test cA.T_face[f]==cN.T_face[f]
     end
+end
+
+@testset "a NaN trial temperature is the surface solve's transport failure: $(energy) form" for energy in
+                                                                                                (
+    :temperature,
+    :enthalpy,
+)
+    res=GasReservoir(P = 1e5, T = 300.0, mole_fractions = (a = 0.4, b = 0.6))
+    conv=ConvectiveBC(h = 20.0, T_inf = 300.0)
+    # Laws of the temperature, so the NaN reaches each of them: the analogy
+    # film's heat capacity, a film conductance and a hydraulic resistance. The
+    # integrator rejects a step whose residual raises a transport failure.
+    for problem in (
+        gas_problem(;
+            mass = AmbientGasBC(res),
+            thermal = conv,
+            c_a = CallableProperty(T->1000.0+0.2T),
+        ),
+        gas_problem(;
+            mass = AmbientGasBC(res; film = MassTransferFilm(T->0.01+1e-6T)),
+            thermal = conv,
+        ),
+        gas_problem(;
+            mass = ConvectivePressureBC(
+                res;
+                resistance = T->1e3+T,
+                flow = :mass,
+                film = nothing,
+            ),
+            thermal = conv,
+            κ = 1e-12,
+        ),
+    )
+        cp=setup(problem; energy_state = energy)
+        u=copy(cp.u0)
+        u[energy_index(cp.def.layout, 2)]=NaN
+        @test_throws TransportFailure residual!(zero(u), u, cp.def, 0.0, cp.ws)
+    end
+    # A reservoir gas without a heat capacity has no analogy film at any state.
+    cp=setup(
+        gas_problem(; mass = AmbientGasBC(res), thermal = conv, c_a = 0.0, c_b = 0.0);
+        energy_state = energy,
+    )
+    @test_throws ArgumentError residual!(zero(cp.u0), cp.u0, cp.def, 0.0, cp.ws)
 end
 
 # A purged face carrying the pooling model: matrix, one volatile and nitrogen,
