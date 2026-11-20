@@ -136,7 +136,10 @@ end
     for k = 1:NG
         cp+=data.Y∞[k]*props[bound.indices[k]].cp
     end
-    primal(cp)>0 ||
+    # A NaN trial temperature gives a NaN heat capacity, which the local solve
+    # reports as a transport failure; only a finite one is the reservoir's.
+    isnan(primal(cp)) ||
+        primal(cp)>0 ||
         throw(ArgumentError("the analogy film needs a reservoir gas with a heat capacity"))
     return _bare_convective_h(thermal, t)/(cp*film.Le^(2/3))
 end
@@ -287,7 +290,10 @@ end
     qres=qsurf+(_has_thermal_film(thermal) ? Hr-Hs : zero(Hr))
     g=film===nothing ? zero(Ts) :
       _film_conductance(film, Tt, Ys, data, bound, material, thermal, t)
-    g>=0 && !isnan(g) ||
+    # A NaN conductance, from a NaN trial state, reaches the local residual,
+    # whose solve reports a transport failure.
+    isnan(primal(g)) ||
+        g>=0 ||
         throw(ArgumentError("mass-film conductance must remain nonnegative"))
     return (; Ts, N, J, Ys, ps, rawPs, v = half.v, qsurf, qres, Hs, Hr, g, face)
 end
@@ -358,11 +364,15 @@ end
                        s.Ys[j]-data.Y∞[j]+zero(s.Ts+m+s.rawPs) : (s.N[j]-F[j])/massscale
             elseif hydraulic && k==nf+1
                 R=evaluate_param_T(bc.resistance, trial_temperature(s.Ts))
-                isfinite(primal(R)) && primal(R)>=0 || throw(
-                    ArgumentError(
-                        "hydraulic resistance must remain finite and nonnegative",
-                    ),
-                )
+                # A NaN resistance, from a NaN trial state, is the local solve's
+                # transport failure.
+                isnan(primal(R)) ||
+                    isfinite(primal(R)) && primal(R)>=0 ||
+                    throw(
+                        ArgumentError(
+                            "hydraulic resistance must remain finite and nonnegative",
+                        ),
+                    )
                 flow=bc.flow===:darcy_velocity ? s.v : m
                 return (s.rawPs-data.Pr-R*flow)/pscale
             elseif thermal isa DirichletThermalBC
