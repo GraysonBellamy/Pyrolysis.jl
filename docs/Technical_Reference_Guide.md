@@ -18177,14 +18177,16 @@ beside it.
   rms there. In the pine the passages of 150 and 200 °C at 20–40 mm are matched within
   1.5 min. The measured interior waits between 100 and 150 °C for 5.5–19.5 min, two to three
   times as long as the dry one; the phase change waits half that, the gated one-way law a
-  sixth to a quarter. The spruce's pore pressure, 106–113 kPa gauge at 30–50 mm, is matched
-  at a tenth of the permeability (111–114 kPa; 70 kPa at Fredlund's value), while the pine's
-  188 kPa at 20 mm is reached only by the one-way law, which cannot condense the vapour it
-  drives inward. The moisture rises ahead of the front to 1.18–1.22 times its start against
-  1.31–1.47 in the 1985 record, which peaks 1.4–5 min before the local 100 °C at 40–85 °C
-  (uncorrected resistance readings); ten times the transfer coefficient gives 1.34, ahead
-  of 100 °C. The wet spruce stays 30–64 K cold at depth: the case's thermal side does not
-  carry, and its plateau lengths may hold the thermal model's error.
+  sixth to a quarter. The measured pressure peaks, 106–113 kPa gauge at 30–50 mm in the
+  spruce and 188 kPa at 20 mm in the pine, come when the needle's depth is at 280–400 °C, in
+  the pyrolysis zone, where the deck holds less than 10 kPa; while the moisture passes, the
+  measured pressure rises to at most 35 kPa in the spruce and about 80 kPa in the pine, and
+  the phase change gives 70 and 68–88 kPa. The moisture rises ahead of the front to
+  1.18–1.22 times its start against 1.31–1.47 in the 1985 record, which peaks 1.4–5 min
+  before the local 100 °C at 40–85 °C (uncorrected resistance readings); ten times the
+  transfer coefficient gives 1.34, ahead of 100 °C. The wet spruce stays 30–64 K cold at depth (its 70 mm thermocouple reads 69 °C
+  at 40 min, the model 24 °C): the case's thermal side does not carry, and its plateau
+  lengths may hold the thermal model's error.
 
 Over the exchange rates $10^2$–$10^4$ s⁻¹ (§6.7.5) the LEMTA and Bilbao scores move by at
 most 0.01 K, the Lee and Fredlund ones by at most 0.2 K and 0.2 min. At the default
@@ -18553,10 +18555,10 @@ The V&V coverage above has gaps that a user should weigh:
 
 7. **Moisture transport is not validated** (§18.6.3): the phase change matches the
    temperatures of the LEMTA drying tests, the water lost along the grain, the cold-side
-   plateau of Bilbao et al., the bottom-face shoulder of Lee et al. at 29 kW·m⁻² (with a
-   permeability ten times the deck's) and the size of Fredlund's pore pressures, but no
-   constant transfer coefficient matches the water lost and the temperatures together in
-   either grain direction, nor the Lee shoulder at both fluxes; the model builds a moisture
+   plateau of Bilbao et al. and the bottom-face shoulder of Lee et al. at 29 kW·m⁻² (with a
+   permeability ten times the deck's), but no constant transfer coefficient matches the
+   water lost and the temperatures together in either grain direction, nor the Lee
+   shoulder at both fluxes; the model builds a moisture
    bank (1.16–1.24 times the unexposed moisture) that no slice profile shows, while Fredlund's
    resistive record shows a larger and wider one (1.31–1.47 times) than the model's
    (1.18–1.22); and the early interior heating of the wettest Bilbao runs and of the Lee
