@@ -7,10 +7,12 @@ with N₂ (O₂ < 1 %); the other faces in fibreglass. The flux rises with the p
 face) and the mass every 60 s. Source: R. Bilbao, J.F. Mastral, J. Ceamanos, M.E. Aldea,
 *J. Anal. Appl. Pyrolysis* 36 (1996) 81–97.
 
-The case scores the evaporation laws of `scripts/lemta_moist_wood` (the shipped Arrhenius
-step, the same step gated at 373 K, and the Chan, Kelbon & Krieger set) where the LEMTA case
-cannot: under pyrolysis, with the interior heating at 10–30 K/min, against a dry run at the
-same flux.
+The case scores the moisture model of `scripts/lemta_moist_wood`, the phase change of the
+bound water and its vapour toward sorption equilibrium, and the one-way evaporation laws
+beside it (the `examples/07` Arrhenius step, the same step gated at 373 K, and the Chan,
+Kelbon & Krieger set) where the LEMTA case cannot: under pyrolysis, with the interior
+heating at 10–30 K/min and vapour driven inward against a sealed back, against a dry run at
+the same flux.
 
 ## Data
 
@@ -32,17 +34,27 @@ The dataset card is `docs/audits/validation/moist_wood/card_bilbao_1996.md` (loc
 ## Running
 
 ```sh
-julia --project=scripts/verification scripts/bilbao_wet_wood/smoke.jl y20_E front=tc1 kinetics=larch shrinkage=0.2 k_scale=1.366 law=gated
+julia --project=scripts/verification scripts/bilbao_wet_wood/smoke.jl y20_E front=tc1 kinetics=larch shrinkage=0.2 k_scale=1.366
 julia --project=scripts/verification scripts/bilbao_wet_wood/calibrate_dry.jl tc1
+julia --project=scripts/verification scripts/bilbao_wet_wood/run_cases.jl tc1/sorption y09_E y20_E y20_E_repeat
 julia --project=scripts/verification scripts/bilbao_wet_wood/run_cases.jl tc1/gated y09_E y20_E y20_E_repeat
 julia --project=scripts/verification scripts/bilbao_wet_wood/compare.jl tc1 [family ...]
 ```
 
+The transfer coefficient's ladder is three variants, `tc1/sorption/lambda1`, `lambda3` and
+`lambda10`, each run on every run; the other tags (`variants.jl`) go the same way. A run
+takes about 100 s (with the 1 mm layer's solve); variants can run side by side as separate
+processes.
+
 `calibrate_dry.jl FAMILY` fits the family's factor to the dry run and writes it to
 `calibration.toml`; `run_cases.jl` takes a variant `family/law[/tag]` (`variants.jl`; the
 `:tc1` families need runs with a 1 mm record, so not `y09_B`);
-`compare.jl` writes `results/metrics.csv`, `results/tables/<family>.md` and
-`results/figures/` (`results/` is generated and ignored).
+`compare.jl` writes `results/metrics.csv`, `results/tables/<family>.md`,
+`<family>_phase_change.md` (the columns of the moisture model: rms, the 9 mm reading at the
+1 mm record's 440 and 530 K marks, crossing times, pressure, p_v/p_eq, moisture content,
+condensation, steps) and `<family>_plateau.md` (the 365→400 K plateau and the crossing times
+at 9 and 19 mm), prints the last two, and draws `results/figures/` (`results/` is generated
+and ignored).
 
 ## Scenario
 
@@ -60,10 +72,27 @@ julia --project=scripts/verification scripts/bilbao_wet_wood/compare.jl tc1 [fam
   converted layer keeps 80 % of its thickness (`shrinkage = 0.2`, measured across the grain
   on other species, Flity 2023); the mesh moves with the solid and each thermocouple is read
   at its material point.
-- **Water**: the LEMTA moist decks' water, vapour, heat of desorption and conductivity
-  convention; the evaporation law is the variant's.
+- **Water**: the LEMTA moist decks' water, vapour and conductivity convention. The law is the
+  variant's:
+  - `sorption` (the default), the moisture model: a `PhaseChange` of the water and its
+    vapour with the three wood components as the sorbing solids (the char holds none),
+    exchanging toward sorption equilibrium on the deck's isotherm (`CAST_SPRUCE`) at the
+    rate `exchange_rate` (10³ s⁻¹), evaporating where the pore vapour is below
+    equilibrium and condensing where it is above; its heat is built from the water's and
+    the vapour's heat capacities and the isotherm. The pore vapour starts in equilibrium
+    with the water and the N₂ makes up the ambient pressure.
+  - `freewater`: the same step with the activity of free water (`FreeLiquid`, no isotherm).
+  - the one-way laws of `LAWS` (`gated`, `chan`, `arrhenius`), with the LEMTA decks' heat of
+    desorption: they evaporate whatever the vapour pressure and cannot condense. They run at
+    the deck's transfer coefficient (5 × 10⁻⁷ m²/s) at every moisture content.
 - **Gas**: volatiles, vapour and N₂; permeability 1e-15 m² (wood), 1e-11 m² (char); out
-  through the exposed face to N₂ at 1 atm; the back is impermeable.
+  through the exposed face to dry N₂ at 1 atm (the reservoir names the vapour at zero); the
+  back is impermeable. The wood's transfer coefficient stands for bound-water diffusion
+  across the grain: 5 × 10⁻⁷ m²/s, times 3 for a run at 15 % moisture or more (`deck.toml`,
+  `wet_moisture`, `transfer_wet_scale`; the moisture diffusion coefficients of Siau 1984 and
+  Keey et al. 2000). The 9 % run takes 5 × 10⁻⁷, the 20 % runs 1.5 × 10⁻⁶; the tags
+  `lambda1`, `lambda3`, `lambda10` set the factor on 5 × 10⁻⁷ for every run. `tortuosity`
+  (tags `dusty4`, `dusty12`) replaces the lumped transfer by the dusty-gas closure.
 - **Top boundary**, by `front`:
   - `:tc1` (the comparison's main mode): the domain is the 18 mm below the 1 mm
     thermocouple, its top held at that thermocouple's measured record; no flux enters. The
@@ -82,7 +111,14 @@ julia --project=scripts/verification scripts/bilbao_wet_wood/compare.jl tc1 [fam
 - **Scoring window**: a run is scored until its measured 19 mm record passes 626 K (the dry
   run's at 24 min, the end of the calibrated range), or to its end.
 
-Results: `docs/audits/validation/moist_wood/Results_Bilbao.md` (local). In short, gated <
-Chan < shipped Arrhenius in rms at 9 and 19 mm in every run and variant; the shipped step
-chills the back 10–17 K below its start; and the wet interior heats faster early and dries
-later than any one-way law gives, the signature of condensation ahead of the drying front.
+Results: `docs/audits/validation/moist_wood/Results_Bilbao.md` (local). In short, the phase
+change brings the back face (19 mm) through 373 K at 10.9 and 13.9 min in the 9 and 20 %
+runs (measured 12.7 and 12.9; the gated law 18.0 and 27.0) and the later 9 mm plateau to
+the measured level (380 and 382 K at the 530 K mark of the 1 mm record, measured 375 and
+378, gated 361–362), with the pore vapour at equilibrium and the moisture rising ahead of the
+front to 1.3–1.4 times its start. The 9 mm rms, set after dry-out by the thermal and
+pyrolysis model, is not improved, and the early heating of the 20 % run's interior (9 mm at
+375 K by 8 min; 339–343 K under every variant of the phase change) is not reproduced.
+Among the one-way laws gated <
+Chan < Arrhenius in rms in every run, and the Arrhenius step chills the back 10–17 K below its
+start.

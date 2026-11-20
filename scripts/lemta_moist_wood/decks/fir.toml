@@ -17,3 +17,6 @@ borrowed = "optics and convection from spruce (fir not in Flity et al. 2025)"
 # R 1.5e-17 (geometric mean 5e-18); sapwood T 1.3e-17, R 7.9e-17. Along the
 # grain: heartwood 4.4e-14, sapwood 8.9e-13.
 permeability = 5.0e-18
+# Sorption isotherm of the phase change: the CAST set of Dietenberger, Glass &
+# Boardman (2024) fitted to spruce, taken for this softwood.
+isotherm = "CAST_SPRUCE"

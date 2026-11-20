@@ -13,3 +13,6 @@ h_rear = 14.5
 # dahurica heartwood, apparent at about 1 atm, T 9.4e-19, R 1.2e-18 (along the
 # grain 2.3e-14); a few transverse discs were impervious.
 permeability = 1.0e-18
+# Sorption isotherm of the phase change: the CAST set of Dietenberger, Glass &
+# Boardman (2024) fitted to spruce, taken for this softwood.
+isotherm = "CAST_SPRUCE"

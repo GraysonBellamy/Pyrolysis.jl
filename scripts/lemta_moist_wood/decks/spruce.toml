@@ -17,3 +17,6 @@ h_rear = 10.0                 # W/(m² K), back face, the whole loss there (no r
 # 2.86e-18 (along the grain 2.25 and 2.65e-14). Comstock 1970 Table 1 (Osnach
 # 1961), spruce heartwood: T 1.2e-19, R 1.3e-18; sapwood T 7.8e-18, R 7.5e-17.
 permeability = 3.0e-18
+# Sorption isotherm of the phase change: the CAST set of Dietenberger, Glass &
+# Boardman (2024) fitted to spruce.
+isotherm = "CAST_SPRUCE"

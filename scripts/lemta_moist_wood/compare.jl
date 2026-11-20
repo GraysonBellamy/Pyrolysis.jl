@@ -1,6 +1,8 @@
 # Score every variant run against the data: per-run metrics
 # (results/metrics_<group>.csv), summary tables in Markdown
-# (results/tables/*.md) and figures (results/figures/).
+# (results/tables/*.md) and figures (results/figures/). The tables of the
+# phase change (its summary on the long and on all runs, its runs and their
+# cooling) are also printed.
 #
 #   julia --project=scripts/verification scripts/lemta_moist_wood/compare.jl
 include(joinpath(@__DIR__, "LemtaMoistWood.jl"))
@@ -18,7 +20,8 @@ mkpath(figdir)
 variants_present() = sort([v for v in keys(VARIANTS) if isdir(joinpath(RESULTS, v))])
 series_of(v) = Dict(
     splitext(f)[1] => read_series(joinpath(RESULTS, v, f)) for
-    f in readdir(joinpath(RESULTS, v)) if endswith(f, ".csv")
+    f in readdir(joinpath(RESULTS, v)) if
+    endswith(f, ".csv") && !endswith(f, "_profiles.csv")
 )
 fmt(x; d = 3) = isnan(x) ? "–" : @sprintf("%.*f", d, x)
 mm(d) = round(Int, 1000d)
@@ -175,8 +178,25 @@ function moist_metrics(r, s)
         out["nrms_$(d)"] = x.nrms
         out["bias_$(d)"] = x.bias
     end
+    # the phase change: the water evaporated and condensed over the record,
+    # the vapour over its equilibrium pressure, the moisture content, the
+    # steps and where it evaporates
+    pc = s.phase_change
+    if pc !== nothing
+        out["evaporated_g"] = trapz(s.t, s.evaporation)
+        out["condensed_g"] = trapz(s.t, pc.condensation)
+        out["pv_peq_max"] = maximum(pc.pv_over_peq)
+        out["X_max"] = maximum(pc.X_max)
+        out["accepted"] = pc.accepted
+        out["rejected"] = pc.rejected
+        for (q, T) in zip((10, 50, 90), pc.T_evap)
+            out["Tevap_p$(q)_C"] = T - 273.15
+        end
+    end
     return out
 end
+
+trapz(t, y) = sum(0.5 * (y[i] + y[i+1]) * (t[i+1] - t[i]) for i = 1:(length(t)-1))
 
 moist_variants = filter(v -> VARIANTS[v].runs == :moist, variants_present())
 M = Dict{Tuple{String,String},Dict{String,Float64}}()
@@ -205,6 +225,15 @@ if !isempty(moist_variants)
         "p_max_bar",
         "pv_psat_max",
         "evap_supersaturated_share",
+        "pv_peq_max",
+        "X_max",
+        "evaporated_g",
+        "condensed_g",
+        "Tevap_p10_C",
+        "Tevap_p50_C",
+        "Tevap_p90_C",
+        "accepted",
+        "rejected",
     ]
     open(joinpath(RESULTS, "metrics_moist.csv"), "w") do io
         println(io, join(["variant", "run", keys_out...], ","))
@@ -215,7 +244,7 @@ if !isempty(moist_variants)
                     [
                         v,
                         "\"$name\"",
-                        (@sprintf("%.5g", get(m, k, NaN)) for k in keys_out)...,
+                        (@sprintf("%.7g", get(m, k, NaN)) for k in keys_out)...,
                     ],
                     ",",
                 ),
@@ -316,7 +345,10 @@ if !isempty(moist_variants)
         ],
         "_onset",
     )
-    base = filter(v -> v in moist_variants, ["arrhenius_cal", "gated_cal", "chan_cal"])
+    base = filter(
+        v -> v in moist_variants,
+        ["sorption_cal", "arrhenius_cal", "gated_cal", "chan_cal"],
+    )
 
     # Summary per variant
     # The runs with a cooling record are the reused-sample tests of Diarra et al.
@@ -368,7 +400,103 @@ if !isempty(moist_variants)
         end
     end
 
-    # Figures: each moist run, data and the three base laws
+    # The phase change: the summary of the model plan's columns on the long
+    # runs and on all, against the gate; its runs and their cooling.
+    pc_variants = filter(
+        v ->
+            startswith(v, "sorption") || v in ("gated_cal", "chan_cal", "arrhenius_cal"),
+        moist_variants,
+    )
+    function pc_summary(sub, file, title)
+        io = IOBuffer()
+        println(
+            io,
+            "| variant | runs | rms (K), median | mass lost by 2.5 h, model/data, mean (range) | 85→115 °C at 10 mm, model − data (min), mean (runs) | rate ratio 100/70 °C at 10 mm, mean | p_max (bar), max | p_v/p_eq, max | X, max | T where it evaporates, p10 / p50 / p90 (°C), median | condensed / evaporated | accepted steps, total |",
+        )
+        println(io, "|---|---|---|---|---|---|---|---|---|---|---|---|")
+        for v in pc_variants
+            ms = [M[(v, n)] for n in sub if haskey(M, (v, n))]
+            isempty(ms) && continue
+            g(k) = [get(m, k, NaN) for m in ms]
+            lr = g("loss_2p5h_mod") ./ g("loss_2p5h_exp")
+            dc = filter(isfinite, g("cross_10_mod") .- g("cross_10_exp"))
+            fl = filter(isfinite, lr)
+            @printf(
+                io,
+                "| %s | %d | %.3f | %.4f (%.3f–%.3f) | %s (%d) | %s | %.3f | %s | %s | %s / %s / %s | %s | %s |\n",
+                v,
+                length(ms),
+                finite_median(g("rms_K")),
+                finite_mean(lr),
+                minimum(fl; init = Inf),
+                maximum(fl; init = -Inf),
+                fmt(finite_mean(dc); d = 3),
+                length(dc),
+                fmt(finite_mean(g("ratio_10_mod")); d = 3),
+                maximum(g("p_max_bar")),
+                fmt(maximum(g("pv_peq_max")); d = 4),
+                fmt(maximum(g("X_max")); d = 4),
+                fmt(finite_median(g("Tevap_p10_C")); d = 1),
+                fmt(finite_median(g("Tevap_p50_C")); d = 1),
+                fmt(finite_median(g("Tevap_p90_C")); d = 1),
+                fmt(sum(g("condensed_g")) / sum(g("evaporated_g")); d = 3),
+                all(isfinite, g("accepted")) ? @sprintf("%d", sum(g("accepted"))) : "–"
+            )
+        end
+        println(
+            io,
+            "\nData: rate ratio $(fmt(finite_mean([M[(pc_variants[1], n)]["ratio_10_exp"] for n in sub if haskey(M, (pc_variants[1], n))]); d = 3)).",
+        )
+        s = String(take!(io))
+        write(joinpath(tables, file), s)
+        println("\n$title\n", s)
+    end
+    if !isempty(pc_variants)
+        pc_summary(long_runs, "phase_change_summary_long.md", "Phase change, long runs")
+        pc_summary(moist_runs, "phase_change_summary.md", "Phase change, all moist runs")
+        pc_shown = filter(
+            v -> v in moist_variants,
+            [
+                "gated_cal",
+                "sorption_cal_lambda5e-7",
+                "sorption_cal",
+                "sorption_cal_lambda5e-6",
+                "sorption_cal_rh0",
+                "sorption_cal_rh65",
+                "sorption_cal_freewater",
+            ],
+        )
+        law_tables(pc_shown, "_phase_change")
+        for f in ("moist_runs_phase_change.md", "moist_cooling_phase_change.md")
+            isfile(joinpath(tables, f)) || continue
+            println("\n$f\n", read(joinpath(tables, f), String))
+        end
+        # each long run under the phase change: rms, mass ratio, transit, steps
+        open(joinpath(tables, "phase_change_runs_long.md"), "w") do io
+            sv = filter(v -> startswith(v, "sorption"), pc_variants)
+            println(
+                io,
+                "| run | variant | rms (K) | mass ratio | 85→115 °C at 10 mm, model − data (min) | accepted steps |",
+            )
+            println(io, "|---|---|---|---|---|---|")
+            for n in long_runs, v in sv
+                haskey(M, (v, n)) || continue
+                m = M[(v, n)]
+                @printf(
+                    io,
+                    "| %s | %s | %.3f | %.4f | %s | %s |\n",
+                    n,
+                    v,
+                    m["rms_K"],
+                    m["loss_2p5h_mod"] / m["loss_2p5h_exp"],
+                    fmt(m["cross_10_mod"] - m["cross_10_exp"]; d = 3),
+                    haskey(m, "accepted") ? @sprintf("%d", m["accepted"]) : "–"
+                )
+            end
+        end
+    end
+
+    # Figures: each moist run, data, the phase change and the three one-way laws
     for name in moist_runs
         r = runs[name]
         local S = Dict(
@@ -378,7 +506,12 @@ if !isempty(moist_variants)
         isempty(S) && continue
         local fig = Figure(size = (1300, 800))
         shown = [d for d in (2, 6, 10, 14, 20, 30, 40) if any(x -> mm(x) == d, r.depths)]
-        styles = Dict("arrhenius_cal" => :dash, "gated_cal" => :dot, "chan_cal" => :dashdot)
+        styles = Dict(
+            "sorption_cal" => :solid,
+            "arrhenius_cal" => :dash,
+            "gated_cal" => :dot,
+            "chan_cal" => :dashdot,
+        )
         for (i, d) in enumerate(shown)
             ax = Axis(
                 fig[cld(i, 4), mod1(i, 4)];

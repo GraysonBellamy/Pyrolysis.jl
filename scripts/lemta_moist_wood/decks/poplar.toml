@@ -13,3 +13,6 @@ h_rear = 14.6
 # davidiana heartwood, apparent at about 1 atm, T 2.0e-18, R 1.4e-18 (along the
 # grain 5.4e-13).
 permeability = 2.0e-18
+# Sorption isotherm of the phase change: the CAST set of Dietenberger, Glass &
+# Boardman (2024) fitted to beech, taken for this hardwood.
+isotherm = "CAST_BEECH"

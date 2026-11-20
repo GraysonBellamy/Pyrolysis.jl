@@ -13,3 +13,6 @@ h_rear = 12.2
 # Quercus alba (white oak), apparent, N₂ at 1.2 atm: sapwood R 9.9e-16, T 2.0e-16;
 # corewood R 3.9e-16, T 2.0e-16 (along the grain 1.3e-12 and 4.4e-14).
 permeability = 3.0e-16
+# Sorption isotherm of the phase change: the CAST set of Dietenberger, Glass &
+# Boardman (2024) fitted to beech, taken for this hardwood.
+isotherm = "CAST_BEECH"

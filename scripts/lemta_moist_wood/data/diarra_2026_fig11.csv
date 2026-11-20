@@ -1,0 +1,31 @@
+# Moisture profiles across the grain of Diarra et al., Fire Saf. J. 165 (2026)
+# 104951, Fig. 11(a): spruce at about 10 % moisture (dry basis), cut into 5 mm
+# slices after 30, 60 and 120 min under the cone. Read from a 300 dpi render of
+# the figure (58.1 px per point of moisture content, 13.92 px per mm): reading
+# error ±0.15 point of moisture content and ±0.5 mm in depth. The profiles end
+# at the unexposed block's level, 10.5 %.
+# time_h: time under the cone [h]; depth_mm: slice centre below the heated
+# face [mm]; moisture_pct: moisture content of the slice [% dry basis].
+time_h,depth_mm,moisture_pct
+0.5,2.6,0.55
+0.5,9.4,4.1
+0.5,15.7,9.0
+0.5,21.9,10.1
+0.5,28.2,10.5
+0.5,34.4,10.7
+0.5,40.6,10.6
+0.5,47.7,10.4
+1.0,2.6,1.35
+1.0,10.4,2.9
+1.0,17.5,6.45
+1.0,24.4,9.5
+1.0,31.4,10.6
+1.0,38.9,10.9
+1.0,47.7,10.4
+2.0,2.4,0.2
+2.0,10.7,0.75
+2.0,17.7,2.95
+2.0,24.7,6.8
+2.0,31.7,9.35
+2.0,39.1,10.3
+2.0,47.8,9.8

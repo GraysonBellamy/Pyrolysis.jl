@@ -1,6 +1,7 @@
 # Run variants (keys of LemtaMoistWood.VARIANTS) on their runs, or on the
-# named ones, writing results/<variant>/<run>.csv. Runs already written are
-# skipped unless --force.
+# named ones, writing results/<variant>/<run>.csv and, for a moist run, its
+# moisture profiles <run>_profiles.csv. Runs already written are skipped
+# unless --force.
 #
 #   julia --project=scripts/verification scripts/lemta_moist_wood/run_cases.jl VARIANT... [RUN ...] [--force]
 include(joinpath(@__DIR__, "LemtaMoistWood.jl"))
@@ -29,6 +30,7 @@ for variant in variants
         end
         s = simulate(r; v.kwargs(r)...)
         write_series(path, s)
+        s.profiles === nothing || write_profiles(profiles_path(variant, r.name), s)
         @printf(
             "%s %s: %s in %.1f s, mass lost %.2f g by %.0f s\n",
             variant,
