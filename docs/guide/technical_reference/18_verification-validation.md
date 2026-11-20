@@ -1073,9 +1073,10 @@ history relative to a lumped wall-only run; `08_gas_transport.jl` isolates the
 pressure-driven transport for a controlled check. Its water step is ThermaKin's one-way
 reaction, transcribed for the comparison.
 
-Two suites run the phase change of §6.7 against measurements; each README
-(`scripts/lemta_moist_wood/`, `scripts/bilbao_wet_wood/`) gives the deck, its sources and
-the one-way drying laws scored beside it.
+Four suites run the phase change of §6.7 against measurements; each README
+(`scripts/lemta_moist_wood/`, `scripts/bilbao_wet_wood/`, `scripts/lee_ptw_capa/`,
+`scripts/fredlund_wet_wood/`) gives the deck, its sources and the one-way drying laws scored
+beside it.
 
 - **LEMTA cone-heater drying** (Diarra et al. 2026; data of Terrei, Diarra and Parent,
   and the authors' along-grain records and slice values, L. Terrei, personal
@@ -1116,11 +1117,48 @@ the one-way drying laws scored beside it.
   times and the pore pressure reaches 144–158 kPa gauge. The early heating at 9 mm in the
   20 % runs (375 K measured at 8 min, when the 1 mm record is at 440 K, against 339–343 K computed) is
   reproduced by no one-dimensional variant (§1.8.1 item 9).
+- **Lee et al. (2025)**, disks of pressure-treated southern pine 9.0 mm thick at 6.2 %
+  moisture, heated in nitrogen at 29 and 63 kW·m⁻² in the Controlled Atmosphere Pyrolysis
+  Apparatus II, with the temperature of the bottom face (an IR camera on a painted copper
+  foil) and the mass loss rate, three tests at each flux, read from the paper's Figs 6 and
+  7. The deck is the material of `examples/08` under the boundary conditions of the
+  authors' ThermaKin2Ds model; with the paper's one-way water step it reproduces that
+  model, each passage of 340, 360, 375 and 400 K within 6 s. The measured bottom face holds
+  a shoulder at 375–385 K for 69 s at 63 kW·m⁻² and 129 s at 29 kW·m⁻², and reaches 340 K at
+  34 s at 63 kW·m⁻², where the one-way step needs 79 s. Under the phase change the vapour
+  driven to the cold back condenses there and the back reaches 340 K at 57 s, but at the
+  deck's permeability, $10^{-15}$ m², its pore pressure rises to 2–3 bar and the shoulder
+  sits at 405–410 K. With $\kappa = 10^{-14}$ m² the 29 kW·m⁻² history is matched to 4.4 K
+  rms, the shoulder's 118 s against 129 s included; at 63 kW·m⁻² only
+  $\lambda = 2\times10^{-5}$ m²·s⁻¹, about 200 times the measured bound-water transfer at
+  6 % (§9.2.1), heats the back as fast as measured, and that value runs 36 s early at
+  29 kW·m⁻². No constant pair of $\lambda$ and $\kappa$ fits both fluxes. The mass lost,
+  3.6 and 3.4 kg·m⁻², is the pyrolysis model's and lies within the tests' (the rig's records,
+  S. Lee, personal communication).
+- **Fredlund (1988, 1985)**, cubes of spruce at 14.5 % and pine at 24 % moisture, 135 mm,
+  heated across the grain at 90 kW·m⁻² in air with flaming, with thermocouples and gauge
+  pore-pressure needles at 10–70 mm, and a pine cube at 14 % with resistive moisture
+  sensors, read from the reports' figures. The deck takes the inputs of Fredlund's model
+  with its permeability, $0.88\times10^{-16}$ m². The flame and the char's oxidation are
+  outside the deck, so the cubes are solved below their measured 10 mm thermocouple, with
+  the conductivities fitted to the oven-dry cube (wood ×0.6, char ×2.7), which leaves 30 K
+  rms there. In the pine the passages of 150 and 200 °C at 20–40 mm are matched within
+  1.5 min. The measured interior waits between 100 and 150 °C for 5.5–19.5 min, two to three
+  times as long as the dry one; the phase change waits half that, the gated one-way law a
+  sixth to a quarter. The spruce's pore pressure, 106–113 kPa gauge at 30–50 mm, is matched
+  at a tenth of the permeability (111–114 kPa; 70 kPa at Fredlund's value), while the pine's
+  188 kPa at 20 mm is reached only by the one-way law, which cannot condense the vapour it
+  drives inward. The moisture rises ahead of the front to 1.18–1.22 times its start against
+  1.31–1.47 in the 1985 record, which peaks 1.4–5 min before the local 100 °C at 40–85 °C
+  (uncorrected resistance readings); ten times the transfer coefficient gives 1.34, ahead
+  of 100 °C. The wet spruce stays 30–64 K cold at depth: the case's thermal side does not
+  carry, and its plateau lengths may hold the thermal model's error.
 
-Neither case moves by more than 0.01 K over the exchange rates $10^2$–$10^4$ s⁻¹ (§6.7.5).
-At the default tolerance their energy and mass closures, $10^{-6}$–$4\times10^{-4}$, are
-the integration error of the trace vapour multiplied by $K_{\text{pc}}$; at reltol
-$10^{-8}$ they fall below $9\times10^{-8}$ (mass) and $2\times10^{-5}$ (energy).
+Over the exchange rates $10^2$–$10^4$ s⁻¹ (§6.7.5) the LEMTA and Bilbao scores move by at
+most 0.01 K, the Lee and Fredlund ones by at most 0.2 K and 0.2 min. At the default
+tolerance the four cases' energy and mass closures, up to $4\times10^{-4}$, are the
+integration error of the trace vapour multiplied by $K_{\text{pc}}$; at reltol $10^{-8}$
+they fall below $2\times10^{-7}$ (mass) and $2\times10^{-5}$ (energy).
 
 ### 18.6.4 Comparison to ThermaKin2Ds, Gpyro V2, and FDS
 
@@ -1482,11 +1520,15 @@ The V&V coverage above has gaps that a user should weigh:
    lean on them inherit that uncertainty.
 
 7. **Moisture transport is not validated** (§18.6.3): the phase change matches the
-   temperatures of the LEMTA drying tests, the water lost along the grain and the
-   cold-side plateau of Bilbao et al., but no constant transfer coefficient matches the
-   water lost and the temperatures together in either grain direction, the model builds a
-   moisture bank (1.16–1.24 times the unexposed moisture) that no measured profile shows,
-   and the early interior heating of the wettest Bilbao runs is open.
+   temperatures of the LEMTA drying tests, the water lost along the grain, the cold-side
+   plateau of Bilbao et al., the bottom-face shoulder of Lee et al. at 29 kW·m⁻² (with a
+   permeability ten times the deck's) and the size of Fredlund's pore pressures, but no
+   constant transfer coefficient matches the water lost and the temperatures together in
+   either grain direction, nor the Lee shoulder at both fluxes; the model builds a moisture
+   bank (1.16–1.24 times the unexposed moisture) that no slice profile shows, while Fredlund's
+   resistive record shows a larger and wider one (1.31–1.47 times) than the model's
+   (1.18–1.22); and the early interior heating of the wettest Bilbao runs and of the Lee
+   disks at 63 kW·m⁻² is open.
 
 8. **Cross-code coverage.** ThermaKin2Ds cannot express V-CPL-01,
    V-RX-02a/c or the pressure-driven gas cases, and its runs can be reproduced

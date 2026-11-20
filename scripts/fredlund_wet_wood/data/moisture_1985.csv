@@ -1,0 +1,22 @@
+# Fredlund, B. (1985), A computer program for the analysis of timber
+# structures exposed to fire, Report LUTVDG/(TVBB-3020), Lund: the moisture
+# content measured by resistive sensors in a 150 mm cube of pine (rho_dry 455
+# kg/m3, 14 % moisture) under a gas-fired radiant panel, Fig. 5.4, against
+# the thermocouples of Fig. 5.3, read from 300-450 dpi renders of the report
+# (PDF pp. 36-38): +-0.3 % in moisture, +-0.5 min, +-10 K; depths after the
+# 1988 report's legend of the same record (its Fig. 8.12).
+# CAVEAT: no temperature correction of the resistance readings is described,
+# and a resistance meter reads high as wood warms; the peaks fall at 40-85 C,
+# where that error acts. The readings above 100 C are outside any normal
+# calibration. One test. Columns: the peak reading [% dry basis] and its
+# time [min], the local temperature at the peak [C], the time the local
+# thermocouple reaches 100 C [min], the time the reading is back at 14 %,
+# and the time it reaches zero (NaN: not reached).
+depth_mm,X_peak_pct,t_peak_min,T_at_peak_C,t_100C_min,t_back_to_14_min,t_zero_min
+10,18.5,1.8,40,3.2,4.3,8.2
+20,18.4,8.3,45,10.6,12.7,16.2
+30,19.5,14.5,60,17.1,21.0,26.0
+40,20.3,22.6,75,25.5,30.0,36.0
+50,20.3,30.8,75,35.9,40.0,48.0
+60,20.6,39.3,85,43.0,49.5,NaN
+70,20.1,48.5,85,NaN,NaN,NaN

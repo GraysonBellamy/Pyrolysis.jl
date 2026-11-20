@@ -1,0 +1,130 @@
+# Wet spruce and pine cubes of Fredlund's Lund tests, after the inputs of his
+# WOOD1 model. Sources:
+#   F88  Fredlund, B. (1988), A model for heat and mass transfer in timber
+#        structures during fire, Report LUTVDG/(TVBB-1003), Lund (printed
+#        pages): the experiment (ch. 6), the measurements (ch. 8) and the
+#        input deck of Example 1, spruce at 14.5 % (pp. 219-223), with the
+#        changes of Examples 2-3 (pp. 230-233);
+#   F85  Fredlund, B. (1985), A computer program for the analysis of timber
+#        structures exposed to fire, Report LUTVDG/(TVBB-3020), Lund (the
+#        pine cube with resistive moisture sensors, ch. 5);
+#   B96  Bilbao et al., J. Anal. Appl. Pyrolysis 36 (1996) 81-97;
+#   Th   H. Flity, PhD thesis, Université de Lorraine (2023).
+# The moisture laws compared are those of scripts/lemta_moist_wood.
+
+# Exposure, by the case's `front`:
+# - "tc10": the column below the 10 mm thermocouple, its top held at that
+#   thermocouple's measured record (data/tc10.csv), open to the air; no flux
+#   enters. The near-surface heating the deck cannot carry (the flame in air,
+#   the char's oxidation and recession, which WOOD1 had) is then in the
+#   boundary. The 10 mm pressure is not scored (it is the boundary's).
+# - "flux": the whole column; the incident flux of data/flux.csv is absorbed at the surface
+# absorptivity (by volume share); the face re-radiates at ε to T_amb and
+# convects at `h_front`. F88 prints no h or ε; the flame in air adds a flux
+# the deck does not carry (the cone's controller cuts power when the flame
+# heats its thermocouple, F88 p.140, so the corrected history is net of
+# part of it). On Table 9.1's flux the interior heats about half as fast as
+# measured. Gas leaves through the top to air at 1 atm.
+T0 = 293.15                   # K, F88 Table 9.1 (20 °C at t = 0)
+T_amb = 293.15
+h_front = 10.0                # W/(m² K)
+wood_emissivity = 0.78        # pine slabs (B96 p.93)
+char_emissivity = 0.95        # Th pp.48-49
+# The back face (135 mm deep, beyond the heat for the whole test) is
+# adiabatic; its needle holes are not sealed in the description (F88 Fig.
+# 6.20a), so it is impermeable here and open under the tag `openback`.
+
+# WOOD1's wood and char (F88 pp.219-222), as tables against T [°C].
+k_wood_T = [0.0, 300.0, 600.0, 900.0, 1200.0]
+k_wood = [0.12, 0.15, 0.18, 0.21, 0.24]       # W/(m K)
+k_char_T = [0.0, 300.0, 600.0, 900.0, 1200.0]
+k_char = [0.05, 0.05, 0.10, 0.15, 0.20]
+c_wood_T = [0.0, 500.0, 2000.0]
+c_wood = [1400.0, 1500.0, 2000.0]             # J/(kg K)
+c_char_T = [0.0, 1000.0, 2000.0]
+c_char = [700.0, 1000.0, 2000.0]
+c_water = 4180.0
+c_vapour_T = [0.0, 1000.0]
+c_vapour = [1852.0, 2450.0]
+rho_char = 120.0              # kg/m³ bulk, the fully charred wood (F88 p.219)
+# The cell-wall density sets the pore fraction (1 − Σ ξ/ρ_s − water's
+# volume): 0.69 for the spruce at 14.5 %, 0.55 for the pine at 24 %. WOOD1
+# takes 0.62 for both, which the pine's density and moisture do not leave.
+skeletal_density = 1500.0     # kg/m³
+
+# Pyrolysis: one first-order step, wood → char + volatiles, ΔH = 0 (F88
+# p.221). b and E are Fredlund's in-situ fit on spruce (F88 Table 8.2, Fig.
+# 8.17), which covers 1/T = 1.2-2.4e-3 1/K (417-833 K); the step is gated off
+# below 417 K, where the fit does not reach (it would otherwise convert 5 % of
+# the wood in 80 min at 20 °C).
+A_pyrolysis = 0.54            # 1/s
+E_pyrolysis = 26.3e3          # J/mol
+T_min_pyrolysis = 417.0       # K
+volatiles_M = 0.076           # kg/mol (F88 p.222)
+volatiles_c = 1500.0          # J/(kg K)
+volatiles_k = 0.025
+air_M = 0.02897
+air_c = 1006.0
+air_k = 0.026
+
+# Gas transport. Permeability (F88 eq. 7.40, p.191): the virgin wood's k_D1 =
+# 0.88e-16 m², anchored to Tveit's transverse values; the char's k_D1 e^11 =
+# 5.3e-12 m², the fitted part. The wood's transfer coefficient stands for the
+# bound water's diffusion across the grain: 5e-7 m²/s near 10-12 % moisture
+# and two to four times that at 15-20 % (Siau 1984 ch. 6; Keey et al. 2000),
+# so a case at `wet_moisture` or more takes it times `transfer_wet_scale`
+# (the Bilbao deck's rule); the char's 1e-5.
+kappa_wood = 0.88e-16         # m²
+kappa_char = 5.3e-12          # m²
+transfer_wood = 5.0e-7        # m²/s
+transfer_char = 1.0e-5        # m²/s
+wet_moisture = 0.15
+transfer_wet_scale = 3.0
+
+# Sorption isotherm of the phase change: the CAST spruce set, for both
+# softwoods. The ambient humidity is the one that leaves the conditioned
+# wood at rest (not recorded).
+isotherm = "CAST_SPRUCE"
+
+# The cases: 135 mm cubes of F88 (heated across the grain, F88 pp. 206, 228)
+# and the 150 mm pine cube of F85. Each is a 1D column across the grain.
+[cases.spruce14]
+thickness = 0.135             # m (F88 p.133)
+rho_dry = 386.0               # kg/m³, "derived from the experiments" (F88 p.219)
+moisture = 0.145              # dry basis (F88 Table 6.1)
+flux = "fredlund1988"         # data/flux.csv: F88 Table 9.1
+t_end = 4800.0                # s of exposure
+t_offset_min = 8.0            # the figures' data clock at exposure start (F88 Fig. 6.26)
+figures = "F88 Figs 9.2, 9.3"
+front = "tc10"                # the measured 10 mm record as the boundary
+
+[cases.pine24]
+thickness = 0.135
+rho_dry = 495.0               # F88 p.233
+moisture = 0.24               # F88 p.233 (Table 6.1: 24.2 %)
+flux = "fredlund1988"
+t_end = 4500.0
+t_offset_min = 8.0
+figures = "F88 Figs 9.11, 9.12"
+front = "tc10"
+
+[cases.pine14_1985]
+thickness = 0.150             # m, "a wooden cube of 150 mm sides" (F85 p.29)
+rho_dry = 455.0               # F85 Fig. 5.4
+moisture = 0.14               # F88 p.206
+flux = "fredlund1985"         # data/flux.csv: F85 Fig. 5.2
+t_end = 3000.0
+t_offset_min = 0.0
+figures = "F85 Figs 5.3, 5.4"
+front = "flux"                # no 10 mm record read; scored on the bank's shape
+
+[cases.spruce_dry]
+thickness = 0.135
+rho_dry = 440.0               # F88 p.230
+moisture = 0.0
+T0 = 323.15                   # K: dried at 105 °C and tested at once (F88 p.135); Fig. 9.8 reads 45-55 °C before exposure
+flux = "fredlund1988"
+t_end = 3720.0
+t_offset_min = 8.0
+figures = "F88 Figs 9.8, 9.9"
+front = "tc10"

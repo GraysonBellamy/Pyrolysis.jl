@@ -190,11 +190,13 @@ isotherm's capacity swells a moving mesh.
 
 The moisture model has these limits. Below fibre saturation it is tested by the
 moist-wood suites as far as they go: the temperatures of drying wood, the cold-side
-plateau and the water lost along the grain. Across the grain the water lost falls short,
-consistent with the water the end grain of the test blocks carries; in both directions the
-model builds a moisture bank that no measured profile shows, and no single transfer
-coefficient matches the water and the temperatures together (Technical Reference
-§18.6.3). Above fibre saturation
+plateau, the water lost along the grain, the back-face shoulder of thin treated-pine disks
+at one flux and the size of the pore pressure in wet cubes. Across the grain the water lost
+falls short, consistent with the water the end grain of the test blocks carries; the model
+builds a moisture bank that the sliced profiles do not show and that is smaller than a
+resistive record shows; and no single transfer coefficient, or pair of transfer
+coefficient and permeability, matches all the measurements of one case together (Technical
+Reference §18.6.3). Above fibre saturation
 free water evaporates and condenses at the saturation pressure but has no
 capillary flow. One isotherm serves sorption and desorption, with no hysteresis.
 

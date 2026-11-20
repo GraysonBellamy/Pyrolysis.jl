@@ -1,0 +1,114 @@
+# Pressure-treated pine in CAPA II, after Lee, De Beer, Sunderland, Gollner &
+# Stoliarov, Fire Mater. 49 (2025) 85-100 ("L25", printed pages), and the
+# material of examples/08_pressure_treated_wood_cone.jl. Sources:
+#   L25    the paper: specimen, rig, Tables 2-5, Figs 6-7;
+#   CND    the paper's ThermaKin2Ds condition file at 62.7 kW/m2
+#          (PTW_CAPA_62_7kWm2.cnd, the authors' model files; its CAPA heat
+#          flux module is equations 29-31 of the ThermaKin2Ds reference and
+#          Boundary2Dax.cpp), read at the centre of its single radial layer,
+#          r = 16.53 mm;
+#   EX08   examples/08_pressure_treated_wood_cone.jl (PTW.cmp transcribed);
+#   REC    the rig's records of the 2023 tests (the balance and the sidewall
+#          thermocouple; S. Lee, personal communication), not distributed.
+
+# Specimen: a disk 7 cm across, 9.0 mm thick, conditioned at 20 % RH to
+# 6.2 ± 0.5 % moisture on the dry mass (L25 p.89). The bottom face carries a
+# copper foil painted at ε = 0.92 and glued on with ≈ 0.2 g of adhesive; the
+# IR camera reads the foil (L25 p.89). No mass flows through it (L25 p.90).
+thickness = 0.009             # m
+diameter = 0.070              # m
+moisture = 0.062              # dry basis
+T0 = 305.2                    # K, CND's initial temperature
+foil_thickness = 5.0e-5       # m, CND's copper layer
+foil_density = 8933.0         # kg/m³ (CND)
+foil_c = 385.0                # J/(kg K) (CND)
+foil_k = 401.0                # W/(m K) (CND)
+foil_emissivity = 0.92        # L25 p.89
+
+# Exposed face (CND, CAPA heat flux module at r = 16.53 mm):
+# - incident radiation: the set flux times 1 − 0.23 r − 36 r² = 0.98636 (the
+#   vertical factor is one: the surface stays at the reference height);
+# - the background at `T_background` adds σT_b⁴ to it and the surface
+#   re-radiates at its emissivity;
+# - convection h = 2.97 + 241.43 r = 6.96 W/(m² K) to the nitrogen at
+#   T_b + a₁ e^(b₁t) + a₂ e^(b₂t) (333 K at the start, 409 K after 400 s).
+# CND checks: 50 217 W/m² net into the face at t = 0, as ThermaKin prints.
+radial_factor = 0.98636
+h_front = 6.96                # W/(m² K)
+T_background = 290.0          # K
+n2_history = [118.97, 9.51e-6, -75.54, -1.29e-2]   # a₁, b₁, a₂, b₂ (K, 1/s)
+
+# Back face (CND): radiation from a background at 295 K plus 239.8 W/m²
+# ramped up over 0-460 s and then held (σ·329.6⁴ = σ·295⁴ + 239.8), and
+# convection to 329.6 K with h ramped from 0 to 4 W/(m² K) over 0-460 s and
+# then held: the water-cooled sidewall below the sample warming from 295 to
+# 329.6 K. REC's sidewall thermocouple in the three 2023 tests at this
+# setting reads 19-20 °C at the start and 57-58 °C after 800 s.
+back_T_start = 295.0          # K
+back_T_end = 329.6            # K
+back_ramp = 460.0             # s
+h_back = 4.0                  # W/(m² K)
+
+# The 29 kW/m² tests. No condition file survives. The front takes the
+# 62.7 kW/m² file's radial factor, convection coefficient and nitrogen history
+# (the flow and the geometry are the same; tag `n2bg` puts the nitrogen at the
+# background instead). The back exchanges by radiation (ε 0.92) and by
+# convection at `h_back` with the sidewall, whose temperature is REC's
+# thermocouple in the two 2023 tests at this setting (gauge 29.9 kW/m²), their
+# mean on the exposure clock (exposure taken where the balance starts to fall).
+back29_t = [0.0, 15.0, 115.0, 215.0, 375.0, 515.0, 715.0, 915.0, 1115.0, 1415.0]
+back29_T = [290.5, 290.9, 295.5, 299.0, 302.6, 304.2, 305.6, 306.8, 307.6, 308.3]
+
+# Material (EX08, from PTW.cmp; L25 Tables 2, 3, 5). Five solids: the dried
+# wood (PTW), three intermediates and the char; product densities are yield
+# times reactant density, so the dry thickness is kept (L25 p.93). Heat
+# capacities c₀ + c₁T [J/(kg K)].
+solids = ["PTW", "PTW1", "PTW2", "PTW3", "Char"]
+rho = [498.46, 364.25, 156.37, 127.83, 98.28]
+c0 = [-302.0, -70.6, 160.8, 392.2, 623.6]
+c1 = [4.93, 4.002, 3.0735, 2.145, 1.217]
+k = [0.145, 0.145, 0.26, 0.8, 1.0]
+emissivity = [0.81, 0.783, 0.755, 0.728, 0.7]
+skeletal = [1500.0, 1610.0, 1725.0, 1835.0, 1950.0]
+# The wood stages hold bound water; the char does not.
+sorbents = ["PTW", "PTW1", "PTW2", "PTW3"]
+isotherm = "CAST_SPRUCE"      # Dietenberger, Glass & Boardman (2024), spruce set, for this softwood
+
+# Reactions 2-5 of L25 Table 2 (EX08): A [1/s], E [J/mol], h [J/kg, positive
+# endothermic], solid yield.
+A = [19175814.8751, 186156937169.7363, 179027.4062, 0.21061]
+E = [106116.6114, 161502.9426, 100963.197, 34426.0053]
+h = [6.82e3, 1.67e5, -1.82e5, -2.02e5]
+yield = [0.73075, 0.4293, 0.81744, 0.76882]
+# Their gases (EX08): M [kg/mol], c [J/(kg K)].
+gas_M = [0.060, 0.110, 0.080, 0.050]
+gas_c = [1500.0, 1300.0, 1500.0, 1600.0]
+
+# The published water step (L25 Table 2, reaction 1; EX08), for the one-way
+# comparison `thermakin`: the kinetics and heat of oriented strand board,
+# one way, no vapour pressure.
+water_A = 15532.2434          # 1/s
+water_E = 43528.868           # J/mol
+water_h = 2.78e6              # J/kg
+
+# Gas transport. EX08: the transfer coefficient of every stage is ThermaKin's
+# 2e-5 m²/s, which has no source. Here the stages that are still wood (PTW,
+# PTW1) take `transfer_wood`, the bound water's transfer across the grain.
+# As a transfer coefficient the measured moisture diffusion is 0.05-0.09e-6
+# m²/s at 5 % moisture and 0.17-0.23e-6 at 10 % (Siau 1984 ch. 6; Choong's
+# drying data in Keey, Langrish & Walker 2000), about 1e-7 at this deck's
+# 6.2 %; 5e-7 is the wet decks' value near 10-12 %. The ladder `lambda*` runs
+# over both; the later stages and the char keep 2e-5. Permeability EX08: 1e-15 m² for
+# the wood stages (within the range across the grain of southern pine,
+# Comstock 1970), 1e-12 m² for the char.
+transfer_wood = 5.0e-7        # m²/s
+transfer_char = 2.0e-5        # m²/s
+kappa_wood = 1.0e-15          # m²
+kappa_char = 1.0e-12          # m²
+# Mixing of k, λ and κ: ThermaKin's parallel weight 0.5 (EX08).
+mixing_weight = 0.5
+
+# Nitrogen, the chamber's gas (185 L/min, < 1 vol% O₂; L25 p.89).
+n2_M = 0.028014
+n2_c = 1040.0
+n2_k = 0.026
