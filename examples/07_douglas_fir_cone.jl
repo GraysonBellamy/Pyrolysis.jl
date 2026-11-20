@@ -8,6 +8,7 @@ to track the material as it decomposes:
 - ALE mesh motion for accurate shrinkage modeling
 - Surface absorption radiation model for efficient opaque material simulation
 - Multi-step pyrolysis kinetics with char formation
+- Bound water in two-way exchange with its pore vapour (a phase change)
 - Sparse Jacobian by colored forward-mode differentiation, with the default
   integrator (Rodas5P with a sparse KLU solve)
 - Blended parallel/series mixing rules for effective properties
@@ -36,10 +37,26 @@ Douglas Fir Properties (from DF.cmp):
 - Virgin wood density: 530 kg/m³
 - Five decomposition steps through four intermediate solids to char
 - Final char density: 150 kg/m³
-- Includes moisture content with evaporation
+- 6% moisture (dry basis), bound in the wood
 - Products: char + various gases + water vapor
 
+Moisture:
+- The bound water and its pore vapour exchange mass toward sorption
+  equilibrium, p_v → a(X, T) p_sat(T), with the activity a of the CAST
+  isotherm for spruce (CAST_SPRUCE). The water evaporates where the wood
+  heats and condenses where the vapour driven inward meets cooler wood, so
+  the moisture rises ahead of the drying front and the back face holds near
+  the temperature at which the bound water's equilibrium pressure meets the
+  pore pressure.
+- The virgin wood and its four intermediate solids hold water; char holds none.
+- The heat of the step is Kirchhoff's latent heat from the water's and the
+  vapour's heat capacities plus the isotherm's heat of sorption.
+- The pore vapour starts in equilibrium with the initial moisture, and the
+  ambient air carries the humidity in equilibrium with it at 300 K (30.7 %),
+  so the conditioned sample is at rest before the heater acts.
+
 New Features Demonstrated:
+- Two-way phase change of the moisture and its vapour (PhaseChange)
 - Surface absorption radiation model (radiation_model=SURFACE_ABSORPTION)
 - Physically-based gas transfer coefficients (λ ~ 1e-5 to 1e-4 m²/s)
 - lumped wall and Darcy gas transport (diffusion + pressure-driven flow)
@@ -62,8 +79,8 @@ Define Douglas Fir material with temperature-dependent properties.
 Douglas Fir undergoes multi-step thermal decomposition:
 	DF → DF_int1 → DF_int2 → DF_int3 → DF_int4 → Char + gases
 
-The material also contains moisture that evaporates:
-	MOISTURE → WATER_VAPOR
+The material also holds moisture, which evaporates and condenses:
+	MOISTURE ⇌ WATER_VAPOR
 
 Heat capacity format from ThermaKin: cp = c0 + c1*T + c2*T^c3
 For most components: cp = c0 + c1*T (linear)
@@ -148,23 +165,6 @@ end)
 # Water vapor heat capacity: fitted to NIST Shomate data (300-1200K)
 # NIST: 1865 (300K), 1955 (500K), 2150 (800K), 2291 (1000K) J/(kg·K)
 water_vapor_cp = CallableProperty(T -> 1716.7 + 0.4154 * T + 1.530e-4 * T^2)
-
-# Moisture-dependent heat of sorption
-# HoS(MC) = 2450.4 + 875.6 * exp(-0.1122 * MC) [kJ/kg]
-# where MC is moisture content (%) on dry basis: the water mass over the dry
-# solid mass, MC = 100 * ξ_moisture / Σ ξ_solid
-# As moisture decreases, more energy is required to release the remaining bound water
-const MOISTURE_IDX = 7           # Component index for moisture
-const SOLID_IDX = 1:6            # Component indices of the dry solids (DF ... Char)
-
-heat_of_sorption = StateDependentProperty(
-    (T, ξ) -> begin
-        # Moisture content on dry basis (%)
-        MC = 100.0 * ξ[MOISTURE_IDX] / max(sum(ξ[j] for j in SOLID_IDX), 1e-12)
-        # # Heat of sorption [J/kg] - increases as moisture decreases
-        return (2450.420909987441 + 875.6441221735336 * exp(-0.1121684273316275 * MC)) * 1e3
-    end,
-)
 
 # ============================================================================
 # Gas Transfer Coefficients and Permeability (Physically Realistic)
@@ -296,8 +296,9 @@ douglas_fir = Material(
             ρ_intrinsic = 1950.0,
         ),
         # 7. Moisture: water bound in the cell walls, a liquid at the density
-        # of water. It holds its own volume, so drying shrinks the wood, and
-        # it adds to k_eff and ε_eff by its volume share.
+        # of water. It holds its own volume, so drying shrinks the wood and
+        # sorption swells it, and it adds to k_eff and ε_eff by its volume
+        # share.
         LiquidComponent(
             :MOISTURE,
             ρ = 1000.0,                    # kg/m³ - liquid water
@@ -352,7 +353,8 @@ douglas_fir = Material(
             k = 0.025,                     # W/(m·K)
             # m²/s - ~2.3e-5 (lighter mix)
         ),
-        # 13. Water vapor - gaseous product from moisture evaporation (lightest, fastest)
+        # 13. Water vapor - the moisture's vapour, made and taken back by the
+        # phase change below (lightest, fastest)
         GaseousComponent(
             :WATER_VAPOR,
             M = 0.018,                     # kg/mol - H₂O (18 g/mol, lightest species)
@@ -423,16 +425,19 @@ douglas_fir = Material(
             n = 1.0,
             yields = (0.74, 0.26),
         ),
-        # Reaction 6: MOISTURE → WATER_VAPOR
-        # Heat of sorption: HoS(MC) = 2450.4 + 875.6 * exp(-0.1122 * MC) [kJ/kg]
-        # Moisture-dependent: increases as moisture content decreases (bound water)
-        Reaction(
-            :moisture_evaporation,
-            7 => 13,
-            A = 2.997e5,                   # s⁻¹
-            E = 5.0e4,                     # J/mol
-            h = heat_of_sorption,          # State-dependent heat [J/kg]
-            n = 1.0,
+    ),
+    # MOISTURE ⇌ WATER_VAPOR: the pore vapour relaxes toward the equilibrium
+    # pressure a(X, T) p_sat(T) of the bound water at the rate ω = K (ξ_eq − ξ_v),
+    # K = 10³ s⁻¹ by default. X is the water over the sorbing solids: the wood
+    # and its intermediates, not the char. The heat per kg evaporated is
+    # 2.4417 MJ/kg at 298.15 K plus the vapour's sensible enthalpy less the
+    # water's, plus the isotherm's heat of sorption.
+    phase_changes = (
+        PhaseChange(
+            :moisture,
+            :MOISTURE => :WATER_VAPOR;
+            activity = CAST_SPRUCE,
+            sorbents = (:DF, :DF_int1, :DF_int2, :DF_int3, :DF_int4),
         ),
     ),
     # Example mixing choices; TK has similar blends but different volume weights
@@ -477,7 +482,8 @@ h_conv = 10.0                # W/(m²·K)
 # - Bound water swells the wood by its own volume, so the dry wood (oven-dry
 #   density 530 kg/m³) and the water share the cell: ξ_DF/530 + ξ_w/1000 = 1
 #   with ξ_w = MC ξ_DF, giving ξ_DF = 513.7 and ξ_w = 30.8 kg/m³ at 6% MC
-# - Background pore air at ~1 atm partial pressure
+# - Pore vapour in equilibrium with the bound water, and pore air making up
+#   the pressure to 101325 Pa
 # - All others initially zero
 moisture_content_db = 0.06  # 6% moisture content on dry basis
 ρ_DF_oven_dry = 530.0       # Oven-dry density: oven-dry mass over oven-dry volume
@@ -485,8 +491,10 @@ moisture_content_db = 0.06  # 6% moisture content on dry basis
 ρ_DF_initial = ρ_DF_oven_dry / (1 + moisture_content_db * ρ_DF_oven_dry / ρ_water)
 ρ_moisture_initial = moisture_content_db * ρ_DF_initial
 
-# Pore air concentration giving P = 101325 Pa in the initial pore space
-# (porosity follows from the condensed composition and intrinsic densities)
+# The pore gas at the start: the vapour in equilibrium with the bound water at
+# T_ambient, and the air at the rest of 101325 Pa. Both helpers read the
+# condensed entries of ξ_condensed_initial only (the porosity follows from the
+# condensed composition and intrinsic densities).
 ξ_condensed_initial = (
     ρ_DF_initial,
     0.0,
@@ -503,8 +511,16 @@ moisture_content_db = 0.06  # 6% moisture content on dry basis
     0.0,
     0.0,
 )
-ξ_air_initial =
-    background_gas_concentration(douglas_fir, :AIR, ξ_condensed_initial, T_ambient)
+p_vapour_initial = equilibrium_vapour_pressure(douglas_fir, ξ_condensed_initial, T_ambient)
+ξ_vapour_initial =
+    equilibrium_vapour_concentration(douglas_fir, ξ_condensed_initial, T_ambient)
+ξ_air_initial = background_gas_concentration(
+    douglas_fir,
+    :AIR,
+    ξ_condensed_initial,
+    T_ambient;
+    P = 101325.0 - p_vapour_initial,
+)
 
 # The initial temperature and concentrations (DF + moisture + pore air, rest
 # zero) come from the problem's T_initial and ξ_initial below.
@@ -522,6 +538,9 @@ println(
 )
 println(
     "  - Initial moisture: $(round(ρ_moisture_initial, digits=1)) kg/m³ ($(round(moisture_content_db*100, digits=1))% dry basis)",
+)
+println(
+    "  - Initial pore vapour: $(round(p_vapour_initial, digits=1)) Pa, in equilibrium with the moisture",
 )
 
 # Diagnostic: Check mass concentrations and fractions
@@ -557,12 +576,22 @@ top_thermal_bc =
     ConvectiveBC(h = h_conv, T_inf = 300)                     # Convective losses
 
 # Top surface mass BC: diffusive gas escape with Darcy flow to atmosphere
-# The air reservoir supplies ingress composition and temperature. The mass
-# film is the twin of the convective film above, with its conductance from
-# h_conv by the heat–mass transfer analogy (the default AnalogyFilm). Interior
-# wall and Darcy transport share the species-flux continuity closure.
-top_mass_bc =
-    AmbientGasBC(GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (AIR = 1.0,)))
+# The reservoir supplies ingress composition and temperature. Its humidity is
+# the one that leaves the conditioned sample at rest: the vapour mole fraction
+# in equilibrium with the initial moisture at the ambient temperature,
+# x_v = p_eq(X₀, T∞)/P (30.7 % relative humidity at 300 K). The mass film is
+# the twin of the convective film above, with its conductance from h_conv by
+# the heat–mass transfer analogy (the default AnalogyFilm), and carries the
+# vapour both ways. Interior wall and Darcy transport share the species-flux
+# continuity closure.
+x_vapour_ambient = p_vapour_initial / 101325.0
+top_mass_bc = AmbientGasBC(
+    GasReservoir(
+        P = 101325.0,
+        T = 300.0,
+        mole_fractions = (AIR = 1.0 - x_vapour_ambient, WATER_VAPOR = x_vapour_ambient),
+    ),
+)
 
 # Bottom surface (:bottom): back face
 bottom_thermal_bc = AdiabaticBC()    # Adiabatic (no heat loss through substrate)
@@ -578,7 +607,9 @@ println("\nBoundary conditions:")
 println(
     "  - Top surface: RadiativeFluxBC ($(q_external/1000) kW/m²) + re-radiation + convection",
 )
-println("  - Top mass: Air reservoir at 101325 Pa with a species film")
+println(
+    "  - Top mass: humid air at 101325 Pa (water vapour mole fraction $(round(x_vapour_ambient, digits=5))) with a species film",
+)
 println("  - Bottom surface: Adiabatic, impermeable")
 
 # ============================================================================
@@ -600,8 +631,8 @@ T_initial_func = z -> T_ambient           # Uniform initial temperature
     z -> 0.0,              # 10. DF_gas3
     z -> 0.0,              # 11. DF_gas4
     z -> 0.0,              # 12. DF_gas5
-    z -> 0.0,              # 13. WATER_VAPOR
-    z -> ξ_air_initial,    # 14. AIR (background pore air at ~1 atm)
+    z -> ξ_vapour_initial, # 13. WATER_VAPOR (in equilibrium with the moisture)
+    z -> ξ_air_initial,    # 14. AIR (background pore air, the rest of 1 atm)
 ]
 
 println("Creating PyrolysisProblem...")
@@ -634,6 +665,9 @@ println(
     "  - Gas transfer mixing: $(douglas_fir.mixing.λ.rule) (β = $(douglas_fir.mixing.λ.β))",
 )
 println("  - Darcy flow: ENABLED (κ_virgin = $(κ_virgin) m², κ_char = $(κ_char) m²)")
+println(
+    "  - Moisture: phase change MOISTURE ⇌ WATER_VAPOR, CAST spruce isotherm, K = $(douglas_fir.phase_changes[1].exchange_rate) s⁻¹",
+)
 
 # ============================================================================
 # Solve with ALE Mesh Motion and Surface Absorption
@@ -733,8 +767,11 @@ println("  - Final conductivity: $(round(k_eff_front[end], digits=4)) W/(m·K)")
 # The solution provides:
 # - solution.extras.surface_mass_flux: Total mass leaving at surface (computed during solve)
 # - solution.extras.gas_generation_rate: Total volumetric gas production (computed during solve)
+# - solution.extras.evaporation_rate, condensation_rate: the phase change's
+#   gross exchange; their difference is the net production of water vapour
 #
-# Component-specific rates still require post-processing to separate by species.
+# The rates of the pyrolysis gases still require post-processing to separate
+# them by species.
 #
 # ============================================================================
 
@@ -753,11 +790,15 @@ mlr_gen_gas2 = zeros(n_times)      # From reaction 2
 mlr_gen_gas3 = zeros(n_times)      # From reaction 3
 mlr_gen_gas4 = zeros(n_times)      # From reaction 4
 mlr_gen_gas5 = zeros(n_times)      # From reaction 5
-mlr_gen_water = zeros(n_times)     # From reaction 6
+
+# Water vapour from the phase change, net: evaporation less condensation
+evaporation = solution.extras.evaporation_rate      # kg/(m²·s)
+condensation = solution.extras.condensation_rate    # kg/(m²·s)
+mlr_gen_water = evaporation .- condensation
 
 # Pre-allocate arrays for reaction rate computation
 NC = 14  # Number of components
-NR = 6   # Number of reactions
+NR = 5   # Number of reactions
 rates = zeros(NR)
 heats = zeros(NR)
 
@@ -799,11 +840,14 @@ for i = 1:n_times
 
         # Reaction 5: DF_int4 → 0.74 Char + 0.26 DF_gas5
         mlr_gen_gas5[i] += douglas_fir.reactions[5].products[2][2] * rates[5] * cell_vol
-
-        # Reaction 6: MOISTURE → WATER_VAPOR (single product reaction)
-        mlr_gen_water[i] += 1.0 * rates[6] * cell_vol  # yield = 1.0 for single product
     end
 end
+
+# Water evaporated and condensed over the run [kg/m²], by the trapezoid rule
+# over the saved times
+trapezoid(y) = sum((times[k+1] - times[k]) * (y[k] + y[k+1]) / 2 for k = 1:(n_times-1))
+water_evaporated = trapezoid(evaporation)
+water_condensed = trapezoid(condensation)
 
 println("\nGas Generation Rates (volumetric source):")
 println(
@@ -821,7 +865,19 @@ println(
 println(
     "  - Peak DF_gas5 generation: $(round(maximum(mlr_gen_gas5)*1000, digits=2)) g/(m²·s)",
 )
-println("  - Peak H₂O generation: $(round(maximum(mlr_gen_water)*1000, digits=2)) g/(m²·s)")
+println(
+    "  - Peak H₂O generation (net): $(round(maximum(mlr_gen_water)*1000, digits=2)) g/(m²·s)",
+)
+
+println("\nMoisture (phase change):")
+println(
+    "  - Initial water: $(round(ρ_moisture_initial * sample_thickness, digits=4)) kg/m²",
+)
+println("  - Water evaporated: $(round(water_evaporated, digits=4)) kg/m²")
+println(
+    "  - Water condensed: $(round(water_condensed, digits=4)) kg/m² ($(round(100 * water_condensed / water_evaporated, digits=1))% of the evaporated)",
+)
+println("  - Peak evaporation: $(round(maximum(evaporation)*1000, digits=2)) g/(m²·s)")
 
 # Find time to ignition (when MLR exceeds critical value)
 mlr_critical = 3e-3  # kg/(m²·s) ≈ 3 g/(m²·s) - approximate ignition threshold
@@ -910,7 +966,7 @@ plot!(
     mlr_gen_water .* 1000,
     linewidth = 1.5,
     linestyle = :dot,
-    label = "H₂O",
+    label = "H₂O (net)",
     color = :cyan,
 )
 
@@ -1106,7 +1162,7 @@ T_75pct = zeros(n_times)  # Temperature at 75% depth from surface
 # Energy balance
 energy_stored = zeros(n_times)         # Total thermal energy in sample [J/m²]
 energy_rate = zeros(n_times)           # dE/dt [W/m²]
-total_rxn_heat_domain = zeros(n_times) # Total reaction heat (integrated over domain) [W/m²]
+total_rxn_heat_domain = zeros(n_times) # Total reaction and phase-change heat (integrated over domain) [W/m²]
 
 # Reaction rate diagnostics at front surface
 rxn1_rate_front = zeros(n_times)
@@ -1114,8 +1170,29 @@ rxn2_rate_front = zeros(n_times)
 rxn3_rate_front = zeros(n_times)
 rxn4_rate_front = zeros(n_times)
 rxn5_rate_front = zeros(n_times)
-rxn6_rate_front = zeros(n_times)
+phase_change_rate_front = zeros(n_times)   # net evaporation [kg/(m³·s)]
 total_rxn_heat_front = zeros(n_times)
+
+# The phase change's net rate ω [kg/(m³·s)] and its heat h_pc [J/kg] in a cell
+# of concentrations ξ at temperature T and pore fraction φ, as the solver
+# evaluates them: the sorbing solids at their positive part, and the heat from
+# the sensible enthalpies the solver builds from the water's and the vapour's
+# heat capacities.
+moisture_change = only(douglas_fir.phase_changes)
+water_enthalpy = Pyrolysis.States.enthalpy_law(
+    douglas_fir.components[moisture_change.liquid].heat_capacity,
+)
+vapour_enthalpy = Pyrolysis.States.enthalpy_law(
+    douglas_fir.components[moisture_change.vapour].heat_capacity,
+)
+function moisture_exchange(ξ, T, φ)
+    pc = moisture_change
+    X = Pyrolysis.Physics.moisture_content(pc, ξ, map(x -> max(x, 0.0), ξ))
+    ω = Pyrolysis.Physics.phase_change_rate(pc, X, T, φ, ξ[pc.vapour])
+    h_v = Pyrolysis.States.sensible_enthalpy(vapour_enthalpy, T)
+    h_w = Pyrolysis.States.sensible_enthalpy(water_enthalpy, T)
+    return ω, Pyrolysis.Physics.phase_change_heat(pc, X, T, h_v, h_w)
+end
 
 # Compute diagnostics for each timestep
 for i = 1:n_times
@@ -1221,8 +1298,8 @@ for i = 1:n_times
             # So heats[i] * rates[i] = W/m³ (volumetric heating rate)
             # Note: In our convention, h < 0 means exothermic (releases heat)
             # So Q = -Σ(h × r) gives positive Q for exothermic reactions
-            local_rates = zeros(6)
-            local_heats = zeros(6)
+            local_rates = zeros(NR)
+            local_heats = zeros(NR)
             Pyrolysis.Physics.evaluate_reactions!(
                 local_rates,
                 local_heats,
@@ -1231,10 +1308,15 @@ for i = 1:n_times
                 douglas_fir,
             )
             # Sum of (-h × r) × dz gives W/m² for each cell contribution
-            for rxn_idx = 1:6
+            for rxn_idx = 1:NR
                 total_rxn_heat_domain[i] +=
                     -local_heats[rxn_idx] * local_rates[rxn_idx] * widths[cell_idx]
             end
+            # The phase change takes h_pc per kg evaporated and returns it on
+            # condensation: -h_pc × ω
+            ω_cell, h_pc_cell =
+                moisture_exchange(ξ_cell, T_cell, solution.gas.porosity[cell_idx, i])
+            total_rxn_heat_domain[i] += -h_pc_cell * ω_cell * widths[cell_idx]
         end
 
         # Energy rate: dE/dt (finite difference)
@@ -1244,8 +1326,8 @@ for i = 1:n_times
         end
 
         # === Reaction Rates at Front Surface ===
-        global rates = zeros(6)
-        global heats = zeros(6)
+        global rates = zeros(NR)
+        global heats = zeros(NR)
         Pyrolysis.Physics.evaluate_reactions!(rates, heats, ξ_front, T_front, douglas_fir)
 
         rxn1_rate_front[i] = rates[1]
@@ -1253,12 +1335,14 @@ for i = 1:n_times
         rxn3_rate_front[i] = rates[3]
         rxn4_rate_front[i] = rates[4]
         rxn5_rate_front[i] = rates[5]
-        rxn6_rate_front[i] = rates[6]
+        ω_front, h_pc_front =
+            moisture_exchange(ξ_front, T_front, solution.gas.porosity[end, i])
+        phase_change_rate_front[i] = ω_front
 
-        # Total reaction heat at front (W/m³)
-        # Q = -Σ(hᵢ × rᵢ) where h < 0 = exothermic gives Q > 0
-        total_rxn_heat_front[i] = 0.0
-        for rxn_idx = 1:6
+        # Total reaction and phase-change heat at front (W/m³)
+        # Q = -Σ(hᵢ × rᵢ) - h_pc × ω, where h < 0 = exothermic gives Q > 0
+        total_rxn_heat_front[i] = -h_pc_front * ω_front
+        for rxn_idx = 1:NR
             total_rxn_heat_front[i] += -heats[rxn_idx] * rates[rxn_idx]
         end
     end
@@ -1350,16 +1434,17 @@ open(results_csv, "w") do io
         "energy_rate",
         "total_rxn_heat_domain",
 
-        # Reaction rates at front
+        # Reaction and phase-change rates at front
         "rxn1_rate_front",
         "rxn2_rate_front",
         "rxn3_rate_front",
         "rxn4_rate_front",
         "rxn5_rate_front",
-        "rxn6_rate_front",
+        "phase_change_rate_front",
         "total_rxn_heat_front",
 
-        # Component-specific gas generation rates (post-processed)
+        # Component-specific gas generation rates (post-processed; water net
+        # of condensation, from the solver's phase-change extras)
         "mlr_gen_gas1",
         "mlr_gen_gas2",
         "mlr_gen_gas3",
@@ -1437,13 +1522,13 @@ open(results_csv, "w") do io
             energy_rate[i],
             total_rxn_heat_domain[i],
 
-            # Reaction rates
+            # Reaction and phase-change rates
             rxn1_rate_front[i],
             rxn2_rate_front[i],
             rxn3_rate_front[i],
             rxn4_rate_front[i],
             rxn5_rate_front[i],
-            rxn6_rate_front[i],
+            phase_change_rate_front[i],
             total_rxn_heat_front[i],
 
             # Component gas generation rates
@@ -1460,7 +1545,7 @@ end
 
 println("Comprehensive CSV output saved to: $(results_csv)")
 println(
-    "  - Total columns: 59 (6 basic + 3 temps + 7 solids + 6 mass + 12 gas + 5 props + 6 heat + 3 energy + 7 rxn + 6 gen)",
+    "  - Total columns: 60 (6 basic + 3 temps + 7 solids + 6 mass + 12 gas + 5 props + 5 heat + 3 energy + 7 reaction and phase-change rates + 6 gen)",
 )
 
 # ============================================================================
@@ -1649,5 +1734,8 @@ println(
     "  ✓ Temperature-dependent permeability (virgin: $(κ_virgin) m², char: $(κ_char) m²)",
 )
 println("  ✓ Species molar masses in the ideal-gas pore pressure (Darcy)")
+println(
+    "  ✓ Two-way phase change of the moisture (CAST spruce isotherm), its vapour starting in equilibrium, humid ambient",
+)
 println("  ✓ ALE mesh motion")
 println("  ✓ Solver-computed boundary fluxes (MLR, heat flux decomposition)")

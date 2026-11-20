@@ -36,8 +36,20 @@ PTW Properties (from PTW.cmp):
 - Virgin wood density: 498.46 kg/m³
 - Four decomposition steps through three intermediate solids to char
 - Final char density: 98.28 kg/m³
-- Includes moisture content with evaporation
+- Includes moisture, which leaves by ThermaKin's one-way water step (below)
 - Products: char + various gases + water vapor
+
+The Water Step Is ThermaKin's:
+- WATER → WATER_VAPOR is the Arrhenius step of PTW.cmp, A = 15 532 s⁻¹,
+  E = 43.5 kJ/mol, with a constant heat of 2.78 MJ/kg. It is kept as
+  ThermaKin has it so that this deck matches the ThermaKin model that
+  ptw_comparison.jl reads beside it.
+- The step runs one way and knows no vapour pressure: the water cannot
+  condense where the vapour meets cooler wood, and it evaporates at a rate
+  set by temperature alone. It is the ThermaKin transcription, not a
+  moisture model. For one, declare the water and its vapour as a
+  PhaseChange (sorption toward an isotherm, two ways, with a heat built from
+  the heat capacities), as examples/07_douglas_fir_cone.jl does.
 
 ThermaKin Temperature Limits:
 - ThermaKin uses "TEMP LIMIT: L T_limit" to prevent reactions below T_limit
@@ -68,7 +80,8 @@ Define PTW material with temperature-dependent properties.
 PTW undergoes multi-step thermal decomposition:
 	PTW → PTW1 → PTW2 → PTW3 → Char + gases
 
-The material also contains moisture that evaporates:
+The material also contains moisture that evaporates by ThermaKin's one-way
+step:
 	WATER → WATER_VAPOR
 
 Heat capacity format from ThermaKin: cp = c0 + c1*T + c2*T^c3
