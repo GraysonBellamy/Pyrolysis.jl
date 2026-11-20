@@ -1,0 +1,143 @@
+# The LEMTA along-grain runs and slice profiles: the workbooks L. Terrei (LEMTA)
+# sent by email on 2026-11-20, behind Diarra et al., Fire Saf. J. 165 (2026)
+# 104951 (Table 1 //, Figs. 6, 7, 8(b), 11 and A.13). Not part of
+# doi:10.57745/CBLZ8P and not published: kept outside git, cited as a personal
+# communication. `archive` and `workbooks` are the files as received;
+# `files` are the CSVs convert_along.py writes from them, one per sheet.
+source = "L. Terrei, LEMTA, personal communication, 2026-11-20"
+
+[archive]
+name = "temperature_mass_parallel.zip"
+sha256 = "1ee1d2c7e49511695543b8d79984dedf8705d361421e1b427dd1c527e24f9b29"
+
+[[workbooks]]
+name = "temperature_mass_parallel/Fir_Para.xlsx"
+sha256 = "076683bf88b320193ba3669a6787fe900d055642182c6a48cb6e13d775720516"
+
+[[workbooks]]
+name = "temperature_mass_parallel/Larch_para.xlsx"
+sha256 = "9670a1ebeca17b20e8e56fc0776d4250e387655b390501663ed9afda135eb535"
+
+[[workbooks]]
+name = "temperature_mass_parallel/Oak_para.xlsx"
+sha256 = "b5dd52a2340fea261d0182bd806814da3190f5a2070e431a7c461077ea2075dc"
+
+[[workbooks]]
+name = "temperature_mass_parallel/Poplar_Para.xlsx"
+sha256 = "3eb56c4afe3ab55e41315fc49b98710dc89e0a747880320dad8c3f1b3a5a0ea2"
+
+[[workbooks]]
+name = "temperature_mass_parallel/Spruce_MC_Profile_10.xlsx"
+sha256 = "54315962821f5e5210521af10642dcac06c28c6f78c264ca3e3ee5d0fe32b22d"
+
+[[workbooks]]
+name = "temperature_mass_parallel/Spruce_MC_Profile_30.xlsx"
+sha256 = "41263fe3d905635b582813a4bae89c715681dd06d6d9e223ddffe1a86a109553"
+
+[[workbooks]]
+name = "temperature_mass_parallel/Spruce_para.xlsx"
+sha256 = "63a559bf7dda70b2ebeda708bc009ab72ae5a29bc50204c702ec210cc54fd1ae"
+
+[[files]]
+name = "csv/Fir_Para__0%.csv"
+sha256 = "fe3f3f579a1a37af5028114625e76bb1fdf5b3cb537b8ca26b16a61a0e3c570c"
+
+[[files]]
+name = "csv/Fir_Para__20,2%.csv"
+sha256 = "34ecb2ce53c7fa6ac41cfaa13746f159a8bc4a9bcea55512ed150bc9a39df27c"
+
+[[files]]
+name = "csv/Fir_Para__9%.csv"
+sha256 = "5d58c586fe58ce9c7b073440c5f2e19106ffb70cf75a1df810b725cae067e94d"
+
+[[files]]
+name = "csv/Larch_para__0%.csv"
+sha256 = "c8e2fabdde744ea29eec721936e2832c81f2c01253d1f733f299e17156b26ff2"
+
+[[files]]
+name = "csv/Larch_para__23.2%.csv"
+sha256 = "f6d7318be80a4052e5cde3fc807951fece154ae956f9615b3b8a948b09b51ab4"
+
+[[files]]
+name = "csv/Larch_para__9.4%.csv"
+sha256 = "9454ff24936c3588ad2d0363c26e44bcc616e989d6154f87d021c0a24999c4f3"
+
+[[files]]
+name = "csv/Oak_para__19.1%.csv"
+sha256 = "d0b227eb23b43cd509c84b973d1fe963b7df5786b7044b8ad93870b8b380e820"
+
+[[files]]
+name = "csv/Oak_para__9.1%.csv"
+sha256 = "f77d844377731db2423e56add481bd1855488b128c2854a75334c38514cb57df"
+
+[[files]]
+name = "csv/Poplar_Para__0%.csv"
+sha256 = "7cfbdb62ad25f5de472e2b8dd775c4c7a24dba6fae5320ac7e6997dcf39ddc40"
+
+[[files]]
+name = "csv/Poplar_Para__10%.csv"
+sha256 = "95963cd44df1817388a99774812a1a359be0953aa13548f4a579ea0695058221"
+
+[[files]]
+name = "csv/Poplar_Para__21.3%.csv"
+sha256 = "12e673e532e93dd2ca8dd3296498f158477f5bde1c841610d2ed4dade5da0bd0"
+
+[[files]]
+name = "csv/Spruce_MC_Profile_10__Para 1h.csv"
+sha256 = "0c0435dd415b17ea8b4b28b6dc9e16061b85ac3b9a9df4eb245e88282fa9fcbe"
+
+[[files]]
+name = "csv/Spruce_MC_Profile_10__Para 2h.csv"
+sha256 = "f29c15e433834d8fed5554b2197b647a7b5e6d1ac47f08b74268f3d1e738103b"
+
+[[files]]
+name = "csv/Spruce_MC_Profile_10__Para 30min.csv"
+sha256 = "05cdc7411f0b1d9c1dd8e44b5290c9e03cb3201936d2e0539a1657de797f25ba"
+
+[[files]]
+name = "csv/Spruce_MC_Profile_10__Perp 1h.csv"
+sha256 = "7de38c219a9046346cd17d3e1e792897396a102092636c9c8c53d7e7f63fbc5b"
+
+[[files]]
+name = "csv/Spruce_MC_Profile_10__Perp 2h.csv"
+sha256 = "59496a0f2ed572b3862458017054df8c037cbc67d6f2d3225dfc2696457ffc0e"
+
+[[files]]
+name = "csv/Spruce_MC_Profile_10__Perp 30min.csv"
+sha256 = "2bb4c576800071f5a9d45340289904aee61f4114d285ea57cbbabd5fb67ccc8c"
+
+[[files]]
+name = "csv/Spruce_MC_Profile_30__Para 1h.csv"
+sha256 = "df7c25b08e520106bf184ce1420c91238cfd8cd652f6faf5d1d6a865be0e0f7e"
+
+[[files]]
+name = "csv/Spruce_MC_Profile_30__Para 2h.csv"
+sha256 = "3a2c6e83292fc3d72175f5827bc812457a5ebbbccc465761edc730cebc68331c"
+
+[[files]]
+name = "csv/Spruce_MC_Profile_30__Para 30min.csv"
+sha256 = "417c0698ffe9284d3217cedc42c666e56bfa917fa72fcb93aea5cd1f2fa6046d"
+
+[[files]]
+name = "csv/Spruce_MC_Profile_30__Perp 1h.csv"
+sha256 = "06a07931658bc477b4571fc34ae6631610691f2a3ee653ccbb215942f6214cab"
+
+[[files]]
+name = "csv/Spruce_MC_Profile_30__Perp 2h.csv"
+sha256 = "7d3ddb2f8c81e0de4fcb8eb454a48e9fe2665183c732456fbbd62f6415759485"
+
+[[files]]
+name = "csv/Spruce_MC_Profile_30__Perp 30min.csv"
+sha256 = "29ee9f2410d0a3d9e544353a8e88c1aa55930a8025a6dab38f65f1432b50955f"
+
+[[files]]
+name = "csv/Spruce_MC_Profile_30__Unexposed.csv"
+sha256 = "f5baa54d6b2280663cc59d731231a0f40fc99ed8b17b678b3cc46500e607862e"
+
+[[files]]
+name = "csv/Spruce_para__20%.csv"
+sha256 = "fdc4b0462d328b2c640e68e13905a333ac9099726eaf29beb639955c97ddcf7d"
+
+[[files]]
+name = "csv/Spruce_para__9%.csv"
+sha256 = "491fafaa2d9183e9941440d25775dc83fdef31d19c17b5423bb9f5f5c4949940"

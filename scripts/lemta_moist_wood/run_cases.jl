@@ -1,20 +1,24 @@
 # Run variants (keys of LemtaMoistWood.VARIANTS) on their runs, or on the
 # named ones, writing results/<variant>/<run>.csv and, for a moist run, its
-# moisture profiles <run>_profiles.csv. Runs already written are skipped
-# unless --force.
+# moisture profiles <run>_profiles.csv. The runs are those across the grain,
+# or with --along those along it and, for a moist variant, the deck-only run
+# of the along-grain slice profiles (slice_runs). Runs already written are
+# skipped unless --force.
 #
-#   julia --project=scripts/verification scripts/lemta_moist_wood/run_cases.jl VARIANT... [RUN ...] [--force]
+#   julia --project=scripts/verification scripts/lemta_moist_wood/run_cases.jl VARIANT... [RUN ...] [--along] [--force]
 include(joinpath(@__DIR__, "LemtaMoistWood.jl"))
 using .LemtaMoistWood
 using Printf
 
 args = filter(a -> !startswith(a, "--"), ARGS)
 force = "--force" in ARGS
+grain = "--along" in ARGS ? :along : :across
 variants = filter(a -> haskey(VARIANTS, a), args)
 names = filter(a -> !haskey(VARIANTS, a), args)
 isempty(variants) && error("give a variant: $(sort(collect(keys(VARIANTS))))")
-check_data()
-all_runs = load_runs()
+check_data(; grain)
+all_runs = load_runs(; grain)
+grain === :along && append!(all_runs, slice_runs())
 unknown = setdiff(names, [r.name for r in all_runs])
 isempty(unknown) || error("unknown variants or runs: $unknown")
 

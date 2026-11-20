@@ -1,6 +1,7 @@
-# Silver fir (Abies), grain across the heat flux. Flity et al. 2025 did not
-# test fir: the optics and convection are spruce's (the closest species in
-# that study: both pale Pinaceae softwoods).
+# Silver fir (Abies), grain across the heat flux at the top level; [along] holds
+# what changes with the grain along it. Flity et al. 2025 did not test fir: the
+# optics and convection are spruce's (the closest species in that study: both
+# pale Pinaceae softwoods).
 #   Diarra et al., Fire Saf. J. 165 (2026) 104951, Table 1 (density).
 species = "fir"
 genus = "Abies"
@@ -20,3 +21,24 @@ permeability = 5.0e-18
 # Sorption isotherm of the phase change: the CAST set of Dietenberger, Glass &
 # Boardman (2024) fitted to spruce, taken for this softwood.
 isotherm = "CAST_SPRUCE"
+
+# Grain along the heat flux. The optics and the convection stay those of the
+# top level: the same rig and holder, and the end-grain face's optics were not
+# measured.
+[along]
+rho_dry = 414.0          # kg/m³, Diarra et al. 2026 Table 1 (//)
+# Conductivity along the grain, dry [W/(m K)]: Flity et al., Int. J. Therm.
+# Sci. 195 (2024) 108661, Table A.10 (fir, 386 kg/m³), at the
+# temperatures k_T_C [°C], scaled by rho_dry/rho_k (linear in density, their
+# Fig. 9).
+k_T_C = [20.0, 60.0, 110.0, 160.0]
+k = [0.308, 0.309, 0.319, 0.293]
+rho_k = 386.0
+# Darcy permeability along the grain [m²]: Comstock 1970 Table 1, heartwood, as
+# cited above.
+permeability = 4.4e-14
+# Transfer coefficient [m²/s]: ten times the 1.5e-6 across the grain. Bound
+# water diffuses 50–100 times faster along the grain than across it at 5 %
+# moisture and 2–4 times at 30 % (Siau 1984 p. 206): ten is the ratio near
+# 20 %, about forty near 10 %.
+lambda = 1.5e-5

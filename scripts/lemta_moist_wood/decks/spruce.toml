@@ -1,4 +1,5 @@
-# Norway spruce (Picea), grain across the heat flux. Sources:
+# Norway spruce (Picea), grain across the heat flux at the top level; [along]
+# holds what changes with the grain along it. Sources:
 #   Diarra et al., Fire Saf. J. 165 (2026) 104951, Table 1 (density);
 #   Flity et al., Int. J. Therm. Sci. 210 (2025) 109545, Fig. 12 (optics, read
 #   from the figure to ±0.002) and Table 1 (convection fitted with the sample in
@@ -20,3 +21,27 @@ permeability = 3.0e-18
 # Sorption isotherm of the phase change: the CAST set of Dietenberger, Glass &
 # Boardman (2024) fitted to spruce.
 isotherm = "CAST_SPRUCE"
+
+# Grain along the heat flux. The optics and the convection stay those of the
+# top level: the same rig and holder, and the end-grain face's optics were not
+# measured.
+[along]
+# Dry density, Diarra et al. 2026 Table 1 (//). The along-grain sample's first
+# masses fit 343 kg/m³ over 500 cm³ (m₀/(1 + MC) = 171 and 163 g); the
+# variant `rho_mass` takes the density the masses give.
+rho_dry = 445.0
+# Conductivity along the grain, dry [W/(m K)]: Flity et al., Int. J. Therm.
+# Sci. 195 (2024) 108661, Table A.10 (spruce 2, 400 kg/m³), at the
+# temperatures k_T_C [°C], scaled by rho_dry/rho_k (linear in density, their
+# Fig. 9).
+k_T_C = [20.0, 60.0, 110.0, 160.0]
+k = [0.352, 0.351, 0.336, 0.34]
+rho_k = 400.0
+# Darcy permeability along the grain [m²]: Ai et al. 2017 Table 3, the mean of
+# 2.25 and 2.65e-14, as cited above.
+permeability = 2.4e-14
+# Transfer coefficient [m²/s]: ten times the 1.5e-6 across the grain. Bound
+# water diffuses 50–100 times faster along the grain than across it at 5 %
+# moisture and 2–4 times at 30 % (Siau 1984 p. 206): ten is the ratio near
+# 20 %, about forty near 10 %.
+lambda = 1.5e-5

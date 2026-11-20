@@ -1,17 +1,19 @@
 # What the dry runs need: per species, the factor on the absorbed flux (α q)
-# and on the conductivity across the grain that minimise the pooled rms of
-# the temperatures over the heating period, on a grid
-# (results/calibration_grid.csv, results/calibration.toml). spruce_test2_0%
-# starts with the inside warmer than its faces and is left out.
+# and on the conductivity that minimise the pooled rms of the temperatures
+# over the record, on a grid (results/calibration_grid.csv,
+# results/calibration.toml; with --along the along-grain dry runs, written to
+# results/calibration_along_grid.csv and results/calibration_along.toml under
+# <species>_along). spruce_test2_0% starts with the inside warmer than its
+# faces and is left out.
 #
-#   julia --project=scripts/verification scripts/lemta_moist_wood/calibrate_dry.jl
+#   julia --project=scripts/verification scripts/lemta_moist_wood/calibrate_dry.jl [--along]
 include(joinpath(@__DIR__, "LemtaMoistWood.jl"))
 using .LemtaMoistWood
 using Printf
 using Statistics
 
 const FQ = 0.95:0.025:1.25
-const FK = 0.80:0.05:1.40
+const FK = 0.60:0.05:1.40
 const LEFT_OUT = ("spruce_test2_0%_343",)
 
 function pooled_rms(r, s)
@@ -24,10 +26,15 @@ function pooled_rms(r, s)
     return sqrt(mean(e .^ 2))
 end
 
-runs = filter(r -> r.mc == 0 && !(r.name in LEFT_OUT), load_runs())
+const ALONG = "--along" in ARGS
+const TAG = ALONG ? "_along" : ""
+runs = filter(
+    r -> r.mc == 0 && !(r.name in LEFT_OUT),
+    load_runs(; grain = ALONG ? :along : :across),
+)
 best = Dict{String,Tuple{Float64,Float64,Float64,Float64}}()
 mkpath(RESULTS)
-open(joinpath(RESULTS, "calibration_grid.csv"), "w") do io
+open(joinpath(RESULTS, "calibration$(TAG)_grid.csv"), "w") do io
     println(io, "species,flux_factor,k_factor,rms_K")
     for species in sort(unique(r.species for r in runs))
         rs = filter(r -> r.species == species, runs)
@@ -55,15 +62,12 @@ open(joinpath(RESULTS, "calibration_grid.csv"), "w") do io
         flush(stdout)
     end
 end
-open(joinpath(RESULTS, "calibration.toml"), "w") do io
-    println(
-        io,
-        "# factor on the absorbed flux and on k across the grain fitted to the dry runs",
-    )
+open(joinpath(RESULTS, "calibration$TAG.toml"), "w") do io
+    println(io, "# factor on the absorbed flux and on k fitted to the dry runs")
     for (sp, (fq, fk, e, base)) in sort(collect(best))
         println(
             io,
-            "[$sp]\nflux_factor = $fq\nk_factor = $fk\nrms_K = $(round(e, digits = 3))\nrms_base_K = $(round(base, digits = 3))\n",
+            "[$sp$TAG]\nflux_factor = $fq\nk_factor = $fk\nrms_K = $(round(e, digits = 3))\nrms_base_K = $(round(base, digits = 3))\n",
         )
     end
 end

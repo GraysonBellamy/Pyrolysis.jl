@@ -1,10 +1,12 @@
-# The LEMTA moist-wood case (doi:10.57745/CBLZ8P; Diarra et al., Fire Saf. J.
-# 165 (2026) 104951): wood blocks at 0–30 % moisture under a cone heater at
-# 4 kW/m² for 2.5 h, then cooling, with temperatures at 12 depths and mass.
-# Data loading and the defect list, species decks to Pyrolysis.jl problems,
-# the moisture model (the phase change of the bound water and its vapour) and
-# the one-way evaporation laws compared with it, model outputs at the
-# thermocouple depths, and the comparison metrics. See README.md.
+# The LEMTA moist-wood case (Diarra et al., Fire Saf. J. 165 (2026) 104951):
+# wood blocks at 0–30 % moisture under a cone heater at 4 kW/m² for 2.5 h, then
+# cooling, with temperatures at 12 depths and mass, the grain across the heat
+# flux (doi:10.57745/CBLZ8P) or along it (the authors' workbooks), and the
+# moisture profiles of spruce blocks sliced after 0.5, 1 and 2 h. Data loading
+# and the defect list, species decks to Pyrolysis.jl problems, the moisture
+# model (the phase change of the bound water and its vapour) and the one-way
+# evaporation laws compared with it, model outputs at the thermocouple depths,
+# and the comparison metrics. See README.md.
 module LemtaMoistWood
 
 using Pyrolysis
@@ -14,13 +16,17 @@ using Statistics
 using TOML
 
 export lemta_data,
+    lemta_along_data,
     check_data,
     Run,
     load_run,
     load_runs,
+    slice_runs,
     run_names,
     deck,
     initial_water_g,
+    measured_water_g,
+    mass_density,
     material,
     problem,
     simulate,
@@ -40,8 +46,12 @@ export lemta_data,
     nrms,
     nrms_by_depth,
     mass_loss,
+    water_fraction_lost,
     crossing_minutes,
     rate_ratio,
+    tc_accuracy,
+    temperature_errors,
+    trapz,
     interp,
     p_sat,
     heat_of_desorption
@@ -58,6 +68,9 @@ const FLUX = 4.0e3              # W/m², incident, set with the fluxmeter at the
 const P_ATM = 101325.0          # Pa
 const SWITCH = 3.0              # s, width of the smooth step when the cone is withdrawn
 const D_VAPOUR_AIR = 2.6e-5     # m²/s, water vapour in air at 25 °C and 1 atm (dusty-gas closure)
+const LAMBDA = 1.5e-6           # m²/s, transfer coefficient across the grain (a deck's `lambda` overrides)
+const MASS_STEP = 1.07          # s, the balance's sampling interval in the along-grain records
+const T_UNRECORDED = 293.15     # K, initial and ambient temperature where no thermocouple recorded them
 
 # ---------------------------------------------------------------------------
 # Data
@@ -65,51 +78,82 @@ const D_VAPOUR_AIR = 2.6e-5     # m²/s, water vapour in air at 25 °C and 1 atm
 
 lemta_data() =
     get(ENV, "LEMTA_DATA", joinpath(homedir(), "Documents", "data", "lemta-CBLZ8P"))
+lemta_along_data() =
+    get(ENV, "LEMTA_ALONG_DATA", joinpath(homedir(), "Documents", "data", "lemta-parallel"))
 
-"""Check every file of the dataset against its pinned SHA-256 (data_files.toml)."""
-function check_data(; root = lemta_data())
-    isdir(root) ||
-        error("LEMTA data not found at $root (set LEMTA_DATA, or run fetch_data.sh)")
-    pinned = TOML.parsefile(joinpath(HERE, "data_files.toml"))["files"]
+"""
+    check_data(; grain = :across, root)
+
+Check the dataset of the grain direction against its pinned SHA-256: across
+the grain every published file (data_files.toml); along it the workbooks as
+received and the CSVs convert_along.py writes from them
+(data_files_along.toml).
+"""
+function check_data(;
+    grain::Symbol = :across,
+    root = grain === :along ? lemta_along_data() : lemta_data(),
+)
+    if grain === :along
+        isdir(root) || error(
+            "LEMTA along-grain data not found at $root (set LEMTA_ALONG_DATA; see README.md)",
+        )
+        manifest = TOML.parsefile(joinpath(HERE, "data_files_along.toml"))
+        pinned = [manifest["workbooks"]; manifest["files"]]
+        hint = "run convert_along.py"
+    else
+        isdir(root) ||
+            error("LEMTA data not found at $root (set LEMTA_DATA, or run fetch_data.sh)")
+        pinned = TOML.parsefile(joinpath(HERE, "data_files.toml"))["files"]
+        hint = "run fetch_data.sh"
+    end
     for f in pinned
         path = joinpath(root, f["name"])
-        isfile(path) || error("missing $(f["name"]) in $root (run fetch_data.sh)")
+        isfile(path) || error("missing $(f["name"]) in $root ($hint)")
         got = bytes2hex(open(sha256, path))
         got == f["sha256"] ||
-            error("$(f["name"]) differs from the published file (SHA-256 $got)")
+            error("$(f["name"]) differs from the pinned file (SHA-256 $got)")
     end
     return root
 end
 
-# Runs the published data cannot support as recorded.
+# Runs the data cannot support as recorded.
 #   :excluded   oak_test2_0%: the channels are not ordered with depth (12 mm at
 #               91 °C, 14 mm at 186 °C, 30 mm at 151 °C at 2.5 h); scrambled.
 #   :loss_only  the two fir files that start at 535–554 g against a dry mass of
 #               about 217 g: the holder was weighed with the sample, so only the
 #               mass lost is read, and the initial water is MC × ρ_dry × V.
+#   :mass_gap   fir_20,2%_para: the balance recorded nothing from 0.93 to 2.50 h;
+#               the cone is taken off at 2.5 h, where the record resumes with
+#               the loss rate already falling.
 const DEFECTS = Dict(
     "oak_test2_0%_511" => :excluded,
     "fir_17,67%_433" => :loss_only,
     "fir_9,1%_433" => :loss_only,
+    "fir_20,2%_para" => :mass_gap,
 )
 
 """
-One test as recorded. `T` is in K, one column per thermocouple at `depths` [m]
-from the heated face; `mass` [g] is empty for the dry runs. `t_off` is when the
+One test as recorded. `grain` is `:across` or `:along` the heat flux. `T` is
+in K, one column per thermocouple at `depths` [m] from the heated face, at the
+times `t` [s]; the along-grain runs at about 20 % have no thermocouples (`T`
+has no columns, `t` is the balance's clock). `mass` [g] is empty for the dry
+runs and is read at `t_mass` [s], the balance's own clock. `t_off` is when the
 cone was withdrawn (Inf when the record ends under the cone). `T_amb` is the
 shallowest thermocouple's first reading, and `T0` the first row, which is the
 initial profile of every run (`spruce_test2_0%` starts with a 20 → 40 °C
-gradient).
+gradient); without thermocouples both are `T_UNRECORDED`.
 """
 struct Run
     name::String
     species::String
+    grain::Symbol
     mc::Float64
     rho::Float64
     repeat::Int
     t::Vector{Float64}
     depths::Vector{Float64}
     T::Matrix{Float64}
+    t_mass::Vector{Float64}
     mass::Vector{Float64}
     t_off::Float64
     T_amb::Float64
@@ -119,7 +163,7 @@ end
 
 Base.show(io::IO, r::Run) = print(
     io,
-    "Run($(r.name): $(r.species), MC $(round(100r.mc, digits = 2)) %, ρ $(r.rho), ",
+    "Run($(r.name): $(r.species) $(r.grain), MC $(round(100r.mc, digits = 2)) %, ρ $(r.rho), ",
     "$(length(r.depths)) TCs, $(round(r.t[end] / 3600, digits = 2)) h)",
 )
 
@@ -133,17 +177,46 @@ function parse_name(name)
     return species, mc, rho, rep
 end
 
-run_names(; root = lemta_data()) =
-    sort([splitext(f)[1] for f in readdir(root) if endswith(f, ".dat")])
+"""
+    run_names(; grain = :across, root) -> names
+
+Across the grain the published files, `<species>_[testN_]<MC>%_<ρ>`; along it
+the workbooks' sheets, `<species>_<MC>%_para`.
+"""
+function run_names(;
+    grain::Symbol = :across,
+    root = grain === :along ? lemta_along_data() : lemta_data(),
+)
+    grain === :along && return sort(collect(keys(along_files(root))))
+    return sort([splitext(f)[1] for f in readdir(root) if endswith(f, ".dat")])
+end
+
+# The along-grain runs by name, each with its CSV (one sheet of a workbook,
+# `<Species>_[Pp]ara__<MC>%.csv`, the decimal written either way).
+function along_files(root)
+    out = Dict{String,String}()
+    for f in readdir(joinpath(root, "csv"))
+        m = match(r"^([A-Za-z]+)_[Pp]ara__([\d.,]+)%\.csv$", f)
+        m === nothing && continue
+        out["$(lowercase(m[1]))_$(replace(m[2], '.' => ','))%_para"] =
+            joinpath(root, "csv", f)
+    end
+    return out
+end
 
 """
     load_run(name; root) -> Run
 
-Parse one file by its own header: the thermocouple columns present (`2mm` …
-`40mm`, some missing), the mass in g (`PM (g)`, written `PM (s)` in two
-files; absent in the dry runs), LF or CRLF endings, `Temps` or `Time`.
+Across the grain, parse one published file by its own header: the
+thermocouple columns present (`2mm` … `40mm`, some missing), the mass in g
+(`PM (g)`, written `PM (s)` in two files; absent in the dry runs), LF or CRLF
+endings, `Temps` or `Time`. Along the grain (a name ending in `_para`), see
+`load_along_run`.
 """
-function load_run(name::AbstractString; root = lemta_data())
+function load_run(name::AbstractString; root = nothing)
+    endswith(name, "_para") &&
+        return load_along_run(name; root = something(root, lemta_along_data()))
+    root = something(root, lemta_data())
     species, mc, rho, rep = parse_name(name)
     lines = readlines(joinpath(root, name * ".dat"))
     header = strip.(split(chomp(replace(lines[1], '\r' => "")), '\t'))
@@ -169,12 +242,14 @@ function load_run(name::AbstractString; root = lemta_data())
     return Run(
         name,
         species,
+        :across,
         mc,
         rho,
         rep,
         t,
         depths,
         T,
+        t,
         mass,
         cone_off(t, T[:, 1]),
         T_amb,
@@ -182,6 +257,138 @@ function load_run(name::AbstractString; root = lemta_data())
         defect,
     )
 end
+
+"""
+    load_along_run(name; root) -> Run
+
+One along-grain sheet: up to two blocks side by side, each opening with its
+own `Time (h)` column, the thermocouples (`2mm` … `40mm`, some missing) at 1 s
+and the mass (`M (g)`) on the balance's clock. The density is the deck's
+along-grain one (Diarra et al. 2026 Table 1, //). Three mass records are
+stamped 1 s apart where the balance logs every 1.07 s (`MASS_STEP`): on their
+stamps poplar_21,3% loses its rate 10 min before its thermocouples show the
+withdrawal, and the records span 7.0–7.1 h of a 7.5 h test. They are
+restamped at `MASS_STEP` from the start of each stretch without a gap. The
+withdrawal is read from the thermocouples, or from the mass where there are
+none (`cone_off_mass`).
+"""
+function load_along_run(name::AbstractString; root = lemta_along_data())
+    m = match(r"^([a-z]+)_([\d,]+)%_para$", name)
+    m === nothing && error("unexpected along-grain run name $name")
+    species = String(m[1])
+    mc = parse(Float64, replace(m[2], ',' => '.')) / 100
+    rho = Float64(deck(species)["along"]["rho_dry"])
+    rows = [split(l, ',') for l in readlines(along_files(root)[name])]
+    header = strip.(rows[1])
+    starts = findall(==("Time (h)"), header)
+    block(i0) =
+        i0:(something(
+            findnext(h->isempty(h)||h=="Time (h)", header, i0+1),
+            length(header)+1,
+        )-1)
+    tcs = Tuple{Int,Int}[]
+    itT = imass = itM = 0
+    for i0 in starts
+        cols = block(i0)
+        k = findfirst(i -> header[i] == "M (g)", cols)
+        if k === nothing
+            itT = i0
+            tcs = [
+                (i, parse(Int, header[i][1:(end-2)])) for
+                i in cols if occursin(r"^\d+mm$", header[i])
+            ]
+        else
+            itM, imass = i0, cols[k]
+        end
+    end
+    value(r, i) = i <= length(r) ? tryparse(Float64, r[i]) : nothing
+    # one block's rows: those where every column of the block parses
+    function read_block(it, cols)
+        t, v = Float64[], Vector{Float64}[]
+        for r in rows[2:end]
+            x = [value(r, i) for i in (it, cols...)]
+            any(isnothing, x) && continue
+            push!(t, 3600 * x[1])
+            push!(v, Float64.(x[2:end]))
+        end
+        return t, v
+    end
+    t_mass, mass = Float64[], Float64[]
+    if imass > 0
+        t_mass, v = read_block(itM, (imass,))
+        mass = first.(v)
+        t_mass = restamp(t_mass)
+    end
+    defect = get(DEFECTS, name, :none)
+    if itT > 0
+        t, v = read_block(itT, first.(tcs))
+        T = reduce(vcat, permutedims.(v)) .+ 273.15
+        depths = [d / 1000 for (_, d) in tcs]
+        T_amb = mean(T[1:min(5, end), 1])
+        T0 = T[1, :]
+        t_off = cone_off(t, T[:, 1])
+    else
+        t, T, depths = t_mass, zeros(length(t_mass), 0), Float64[]
+        T_amb, T0 = T_UNRECORDED, Float64[]
+        t_off = defect === :mass_gap ? 9000.0 : cone_off_mass(t_mass, mass)
+    end
+    return Run(
+        name,
+        species,
+        :along,
+        mc,
+        rho,
+        0,
+        t,
+        depths,
+        T,
+        t_mass,
+        mass,
+        t_off,
+        T_amb,
+        T0,
+        defect,
+    )
+end
+
+# The balance's times restamped at MASS_STEP when the record steps 1 s, from
+# the start of each stretch without a gap (a step over 5 s).
+function restamp(t)
+    length(t) < 2 && return t
+    abs(median(diff(t)) - 1.0) < 0.01 || return t
+    out = similar(t)
+    s = 1
+    for i in eachindex(t)
+        i > 1 && t[i] - t[i-1] > 5 && (s = i)
+        out[i] = t[s] + MASS_STEP * (t[i] - t[s])
+    end
+    return out
+end
+
+"""
+The runs built from a deck alone, for the slice profiles that have no
+recorded run: spruce along the grain at 30 % (Diarra et al. 2026 Fig. 11),
+`T_UNRECORDED` throughout, under the cone for 2.5 h.
+"""
+slice_runs() = [
+    Run(
+        "spruce_30%_para_slices",
+        "spruce",
+        :along,
+        0.30,
+        Float64(deck("spruce")["along"]["rho_dry"]),
+        0,
+        collect(0.0:10.0:9000.0),
+        Float64[],
+        zeros(901, 0),
+        Float64[],
+        Float64[],
+        Inf,
+        T_UNRECORDED,
+        Float64[],
+        :none,
+    ),
+]
 
 # The cone's withdrawal: the first time after 2.3 h at which the shallowest
 # thermocouple falls by more than 6 K within the next 30 s (the withdrawal
@@ -203,28 +410,89 @@ function cone_off(t, Ts)
     return Inf
 end
 
-"""All runs, the excluded one dropped unless `excluded = true`."""
-function load_runs(; root = lemta_data(), excluded = false)
-    runs = [load_run(n; root) for n in run_names(; root)]
+"""
+The cone's withdrawal from the mass alone, for the runs without
+thermocouples: the time in 2.2–3.2 h at which the loss rate, a straight line
+fitted over the `window` after against the `window` before, rises most. On the
+six along-grain runs that have both records it falls within 2 min of the
+thermocouples' withdrawal.
+"""
+function cone_off_mass(t, m; window = 300.0)
+    function slope(a, b)
+        i, j = searchsortedfirst(t, a), searchsortedlast(t, b)
+        j - i < 20 && return NaN
+        x, y = view(t, i:j), view(m, i:j)
+        x̄, ȳ = mean(x), mean(y)
+        return sum((x .- x̄) .* (y .- ȳ)) / sum((x .- x̄) .^ 2)
+    end
+    best, at = -Inf, Inf
+    for x = 7920.0:30.0:11520.0
+        jump = slope(x, x + window) - slope(x - window, x)
+        isfinite(jump) && jump > best && ((best, at) = (jump, x))
+    end
+    return at
+end
+
+"""
+The runs of one grain direction (`:across` or `:along`), the excluded one
+dropped unless `excluded = true`.
+"""
+function load_runs(;
+    grain::Symbol = :across,
+    root = grain === :along ? lemta_along_data() : lemta_data(),
+    excluded = false,
+)
+    runs = [load_run(n; root) for n in run_names(; grain, root)]
     excluded || filter!(r -> r.defect != :excluded, runs)
     return runs
 end
 
 """
-Initial water [g]: MC/(1 + MC) × m₀ (dry basis, Diarra et al. Eq. 1) from the
-run's own first mass, or MC ρ_dry V when the first mass is not the sample's.
+The model's initial water [g] in the 10 × 10 × 5 cm block. Across the grain,
+MC/(1 + MC) × m₀ (dry basis, Diarra et al. Eq. 1) from the run's own first
+mass, or MC ρ_dry V when the first mass is not the sample's. Along the grain
+MC ρ_dry V, at the density `rho`: the first masses are 4–27 % below the
+along-grain density over 500 cm³, so the block starts at the stated moisture
+content and the mass is compared as the share of the water lost
+([`water_fraction_lost`](@ref)).
 """
-function initial_water_g(r::Run)
+function initial_water_g(r::Run; rho = r.rho)
     r.mc == 0 && return 0.0
-    r.defect == :loss_only && return r.mc * r.rho * VOLUME * 1000
+    (r.grain === :along || r.defect == :loss_only) && return r.mc * rho * VOLUME * 1000
     return r.mc / (1 + r.mc) * r.mass[1]
 end
+
+"""
+The water the sample held when the test began [g]: MC/(1 + MC) × m₀, or
+MC ρ_dry V when the first mass is not the sample's; NaN without a mass record.
+"""
+function measured_water_g(r::Run)
+    r.mc == 0 && return 0.0
+    r.defect == :loss_only && return r.mc * r.rho * VOLUME * 1000
+    isempty(r.mass) && return NaN
+    return r.mc / (1 + r.mc) * r.mass[1]
+end
+
+"""
+Dry density the first mass gives over 500 cm³ [kg/m³], m₀/(1 + MC)/V; the
+run's density without a mass record.
+"""
+mass_density(r::Run) = isempty(r.mass) ? r.rho : r.mass[1] / 1000 / (1 + r.mc) / VOLUME
 
 # ---------------------------------------------------------------------------
 # Decks and properties
 # ---------------------------------------------------------------------------
 
 deck(species::AbstractString) = TOML.parsefile(joinpath(DECKS, species * ".toml"))
+
+"""
+The deck of a run: the species' deck, along the grain with the entries of its
+`[along]` table in place of the top level's (the density, the permeability,
+the transfer coefficient `lambda` and the conductivity table `k_T_C`, `k`,
+`rho_k`).
+"""
+deck(r::Run) =
+    r.grain === :along ? merge(deck(r.species), deck(r.species)["along"]) : deck(r.species)
 
 # Piecewise linear, held constant outside the table.
 function interp(xs::AbstractVector, ys::AbstractVector, x::Real)
@@ -241,6 +509,17 @@ Conductivity across the grain [W/(m K)], Flity et al., Int. J. Therm. Sci. 195
 species, fitted to hot-wire data at 20–160 °C (rms 0.0065 W/(m K)).
 """
 k_across(ρ_dry, T) = 0.0386 + 0.1708 * (ρ_dry / 1000) * sqrt(T / 433)
+
+"""
+Conductivity along the grain [W/(m K)] of a deck holding the table `k_T_C`,
+`k` (Flity et al. 2024 Table A.10, dry, measured on a sample of density
+`rho_k`): the table at `T`, scaled by `ρ_dry/rho_k` (the conductivity is
+linear in density at each temperature, their Fig. 9). Flity et al. publish no
+law across species along the grain.
+"""
+k_along(d, ρ_dry, T) =
+    interp(Float64.(d["k_T_C"]) .+ 273.15, Float64.(d["k"]), T) * ρ_dry /
+    Float64(d["rho_k"])
 
 """
 Heat capacity of dry wood [J/(kg K)], Flity et al. 2025 §4.2 (the mean of
@@ -336,6 +615,8 @@ otherwise dry wood, bound water, water vapour and pore air. Under a law of
 `PHASE_CHANGE_LAWS` the water and its vapour exchange two ways toward
 equilibrium at the rate `exchange_rate` [1/s], with the wood the sorbing
 solid; under a law of `LAWS` the water desorbs one way by that rate law.
+The dry wood conducts by [`k_across`](@ref), or by [`k_along`](@ref) when the
+deck holds the along-grain table (`deck(r)` of an along-grain run).
 The dry wood's volume share is one at its dry density; the water holds its
 own volume at 1000 kg/m³, and under `k_rule = PARALLEL` adds to the
 conductivity by that share at 0.6 W/(m K), which gives the +8 to +26 % that
@@ -364,11 +645,12 @@ function material(
     Tε = Float64.(d["emissivity_T_C"]) .+ 273.15
     ε_tab = Float64.(d["emissivity"])
     εlaw = CallableProperty(T -> interp(Tε, ε_tab, T))
+    k_dry = haskey(d, "k_T_C") ? (T -> k_along(d, ρ, T)) : (T -> k_across(ρ, T))
     wood = SolidComponent(
         :WOOD;
         ρ = ρ,
         c = CallableProperty(c_wood),
-        k = CallableProperty(T -> k_scale * k_across(ρ, T)),
+        k = CallableProperty(T -> k_scale * k_dry(T)),
         ε = εlaw,
         λ = λ,
         κ = κ,
@@ -462,24 +744,27 @@ cone_on(t, t_off) = isfinite(t_off) ? 0.5 * (1 - tanh((t - t_off) / SWITCH)) : 1
 """
     problem(r::Run; law = :sorption, cells = 100, t_end, flux = FLUX,
             rear_radiation = false, absorptivity, h_front, h_rear, κ, κ_scale,
-            λ = 1.5e-6, ambient_rh = 0.5, exchange_rate = 1e3, tortuosity,
+            λ, ambient_rh = 0.5, exchange_rate = 1e3, tortuosity, rho,
             sorption, k_rule, A_scale, k_scale) -> (problem, mesh nodes)
 
-The 1D slab of 50 mm across the grain: the exposed face (`:top`, z = 50 mm)
-absorbs `absorptivity × flux` while the cone is on and re-radiates at ε(T_s)
-to the ambient, with convection at the deck's heating and cooling
-coefficients; the back (`:bottom`) loses heat at the deck's `h_rear` (the
-whole loss Flity et al. 2025 fitted there) plus radiation when
-`rear_radiation`. Both faces are open to the ambient air at the relative
-humidity `ambient_rh`, its vapour mole fraction `ambient_rh p_sat(T_a)/P`
-with `WATER_SATURATION`. The initial temperature is the run's first row,
-interpolated in depth; under a phase change the pore vapour starts in
-equilibrium with the water and the air makes up the ambient pressure.
-`κ` defaults to the deck's `permeability`, scaled by `κ_scale`; the other
-keywords are those of [`material`](@ref) or override the deck. With
-`calibrated`, the incident flux and the conductivity take the species'
-factors fitted to its dry runs (calibration.toml; a species without dry runs
-keeps the deck).
+The 1D slab of 50 mm, the grain across or along the heat flux as the run's:
+the exposed face (`:top`, z = 50 mm) absorbs `absorptivity × flux` while the
+cone is on and re-radiates at ε(T_s) to the ambient, with convection at the
+deck's heating and cooling coefficients; the back (`:bottom`) loses heat at
+the deck's `h_rear` (the whole loss Flity et al. 2025 fitted there) plus
+radiation when `rear_radiation`. Both faces are open to the ambient air at the
+relative humidity `ambient_rh`, its vapour mole fraction
+`ambient_rh p_sat(T_a)/P` with `WATER_SATURATION`. The initial temperature is
+the run's first row, interpolated in depth (uniform at `T_amb` without
+thermocouples); under a phase change the pore vapour starts in equilibrium
+with the water and the air makes up the ambient pressure. The deck is the
+run's (`deck(r)`); `rho` replaces its dry density, the conductivity scaling
+with it. `κ` defaults to the deck's `permeability`, scaled by `κ_scale`, and
+`λ` to the deck's `lambda` (along the grain) or `LAMBDA`; the other keywords
+are those of [`material`](@ref) or override the deck. With `calibrated`, the
+incident flux and the conductivity take the factors fitted to the dry runs of
+the species in the run's grain direction (calibration.toml, `<species>` and
+`<species>_along`; without dry runs the deck stays).
 """
 function problem(
     r::Run;
@@ -493,10 +778,11 @@ function problem(
     rear_radiation::Bool = false,
     κ::Union{Nothing,Real} = nothing,
     κ_scale::Real = 1.0,
-    λ::Real = 1.5e-6,
+    λ::Union{Nothing,Real} = nothing,
     ambient_rh::Real = 0.5,
     exchange_rate::Real = 1e3,
     tortuosity::Union{Nothing,Real} = nothing,
+    rho::Union{Nothing,Real} = nothing,
     sorption::Real = 1.0,
     k_rule = PARALLEL,
     A_scale::Real = 1.0,
@@ -504,17 +790,20 @@ function problem(
     calibrated::Bool = false,
     save_every::Real = 10.0,
 )
-    d = deck(r.species)
+    d = deck(r)
+    rho === nothing || (d = merge(d, Dict("rho_dry" => Float64(rho))))
+    ρ = Float64(d["rho_dry"])
     if calibrated
         c = get(
             TOML.parsefile(CALIBRATION),
-            r.species,
+            r.grain === :along ? r.species * "_along" : r.species,
             Dict("flux_factor" => 1.0, "k_factor" => 1.0),
         )
         flux *= c["flux_factor"]
         k_scale *= c["k_factor"]
     end
     κ = κ_scale * something(κ, Float64(get(d, "permeability", 1e-15)))
+    λ = something(λ, Float64(get(d, "lambda", LAMBDA)))
     mat = material(
         d;
         law = r.mc == 0 ? :dry : law,
@@ -548,11 +837,11 @@ function problem(
     mesh = line_mesh(nodes)
     order = sortperm(r.depths)
     dep, T0 = r.depths[order], r.T0[order]
-    Tinit = z -> interp(dep, T0, THICKNESS - z)
+    Tinit = isempty(dep) ? (z -> Ta) : (z -> interp(dep, T0, THICKNESS - z))
 
     if r.mc == 0
         bcs = BoundaryConditionSet(thermal = (top = top, bottom = bottom))
-        ξinit = [z -> Float64(d["rho_dry"])]
+        ξinit = [z -> ρ]
     else
         x_v = ambient_rh * WATER_SATURATION(Ta) / P_ATM
         reservoir = GasReservoir(
@@ -564,8 +853,8 @@ function problem(
             thermal = (top = top, bottom = bottom),
             mass = (top = AmbientGasBC(reservoir), bottom = AmbientGasBC(reservoir)),
         )
-        ρw = initial_water_g(r) / 1000 / VOLUME
-        ξ0 = (Float64(d["rho_dry"]), ρw, 0.0, 0.0)
+        ρw = initial_water_g(r; rho = ρ) / 1000 / VOLUME
+        ξ0 = (ρ, ρw, 0.0, 0.0)
         ξinit = [
             z -> ξ0[1],
             z -> ξ0[2],
@@ -831,6 +1120,19 @@ for (tag, kw) in (
     VARIANTS["sorption_cal_"*tag] =
         (runs = :moist, kwargs = r -> (; law = :sorption, calibrated = true, kw...))
 end
+# Along the grain: the transfer coefficient at the across-grain value and at
+# 5e-5 (with the ladder's 5e-6, a third to three times the along-grain 1.5e-5),
+# the permeability across the grain in place of the along-grain one, and the
+# dry density the first mass gives (`mass_density`) in place of Table 1's.
+for (tag, kw) in (
+    "lambda1.5e-6" => r -> (λ = 1.5e-6,),
+    "lambda5e-5" => r -> (λ = 5e-5,),
+    "kappa_across" => r -> (κ = Float64(deck(r.species)["permeability"]),),
+    "rho_mass" => r -> (rho = mass_density(r),),
+)
+    VARIANTS["sorption_cal_"*tag] =
+        (runs = :moist, kwargs = r -> (; law = :sorption, calibrated = true, kw(r)...))
+end
 # The one-way laws (at the settings of `ONE_WAY`): the deck as published
 # (`<law>`) and with the dry runs' factors (`<law>_cal`); the sensitivities on
 # the calibrated deck.
@@ -947,7 +1249,7 @@ function read_series(path)
     col(name) = [row[findfirst(==(name), header)] for row in data]
     tcs = [h for h in header if occursin(r"^T_[\d.]+mm_K$", h)]
     depths = [parse(Float64, h[3:(end-4)]) / 1000 for h in tcs]
-    T = reduce(hcat, [col(h) for h in tcs])
+    T = isempty(tcs) ? zeros(length(data), 0) : reduce(hcat, [col(h) for h in tcs])
     meta = filter(l -> startswith(l, "# retcode"), all_lines)
     pcline = filter(l -> startswith(l, "# phase_change"), all_lines)
     phase_change = if isempty(pcline)
@@ -1042,15 +1344,64 @@ end
 
 """
 Mass lost [g] by time `t`: in the measurement `m₀ − m(t)`, each the median
-of the record within 30 s (the balance has single-sample spikes of up to
-2 g), or in a model series.
+of the record within 30 s on the balance's clock (the balance has
+single-sample spikes of up to 2 g; NaN where it recorded nothing), or in a
+model series.
 """
 function mass_loss(r::Run, t)
     isempty(r.mass) && return NaN
-    window(t0) = median(r.mass[findall(x -> abs(x - t0) <= 30, r.t)])
+    function window(t0)
+        k = findall(x -> abs(x - t0) <= 30, r.t_mass)
+        return isempty(k) ? NaN : median(r.mass[k])
+    end
     return window(0.0) - window(t)
 end
 mass_loss(s::NamedTuple, t) = s.mass[1] - interp(s.t, s.mass, t)
+
+"""
+Share of the initial water lost by time `t`: the mass lost over
+[`measured_water_g`](@ref) in the measurement, over the water the model
+started with in a model series.
+"""
+water_fraction_lost(r::Run, t) = mass_loss(r, t) / measured_water_g(r)
+water_fraction_lost(s::NamedTuple, t) = mass_loss(s, t) / s.water[1]
+
+"""
+Thermocouple accuracy [K] (the IEC 60584 class Diarra et al. quote): ±2 K up
+to 100 °C, ±1.5 % of the reading in °C above.
+"""
+tc_accuracy(T) = max(2.0, 0.015 * (T - 273.15))
+
+"""
+Temperature errors of a run against a series over `window`: per depth [mm]
+(rms K, bias K, NRMS), all depths pooled (`rms`), and the share of the
+readings the model meets within the thermocouple accuracy (`within`).
+"""
+function temperature_errors(r::Run, s; window = (0.0, Inf))
+    t_hi = min(window[2], s.t[end], r.t[end])
+    keep = findall(t -> window[1] <= t <= t_hi, r.t)
+    per = Dict{Int,NamedTuple}()
+    pooled = Float64[]
+    within = 0
+    for (j, d) in enumerate(r.depths)
+        js = findfirst(x -> isapprox(x, d; atol = 1e-6), s.depths)
+        y = r.T[keep, j]
+        m = [interp(s.t, view(s.T, :, js), t) for t in r.t[keep]]
+        e = m .- y
+        append!(pooled, e)
+        within += count(abs.(e) .<= tc_accuracy.(y))
+        per[round(Int, 1000d)] = (
+            rms = sqrt(mean(e .^ 2)),
+            bias = mean(e),
+            nrms = sqrt(mean(e .^ 2)) / (maximum(y) - minimum(y)),
+        )
+    end
+    isempty(pooled) && return (; per, rms = NaN, within = NaN)
+    return (; per, rms = sqrt(mean(pooled .^ 2)), within = within / length(pooled))
+end
+
+"""Trapezoidal integral of `y` over `t`."""
+trapz(t, y) = sum(0.5 * (y[i] + y[i+1]) * (t[i+1] - t[i]) for i = 1:(length(t)-1))
 
 """
 Minutes to rise from 85 to 115 °C at `depth` [m] within the first `t_max` s

@@ -26,33 +26,6 @@ series_of(v) = Dict(
 fmt(x; d = 3) = isnan(x) ? "–" : @sprintf("%.*f", d, x)
 mm(d) = round(Int, 1000d)
 
-# Thermocouple accuracy (IEC 60584 class quoted by Diarra et al.): ±2 K up to
-# 100 °C, ±1.5 % of the reading in °C above.
-tc_accuracy(T) = max(2.0, 0.015 * (T - 273.15))
-
-"""Temperature errors of a run against a series over `window`: per depth (rms K, bias K, NRMS), all depths pooled."""
-function temperature_errors(r, s; window = (0.0, Inf))
-    t_hi = min(window[2], s.t[end], r.t[end])
-    keep = findall(t -> window[1] <= t <= t_hi, r.t)
-    per = Dict{Int,NamedTuple}()
-    pooled = Float64[]
-    within = 0
-    for (j, d) in enumerate(r.depths)
-        js = findfirst(x -> isapprox(x, d; atol = 1e-6), s.depths)
-        y = r.T[keep, j]
-        m = [interp(s.t, view(s.T, :, js), t) for t in r.t[keep]]
-        e = m .- y
-        append!(pooled, e)
-        within += count(abs.(e) .<= tc_accuracy.(y))
-        per[mm(d)] = (
-            rms = sqrt(mean(e .^ 2)),
-            bias = mean(e),
-            nrms = sqrt(mean(e .^ 2)) / (maximum(y) - minimum(y)),
-        )
-    end
-    return (; per, rms = sqrt(mean(pooled .^ 2)), within = within / length(pooled))
-end
-
 # ---------------------------------------------------------------------------
 # Dry runs
 # ---------------------------------------------------------------------------
@@ -195,8 +168,6 @@ function moist_metrics(r, s)
     end
     return out
 end
-
-trapz(t, y) = sum(0.5 * (y[i] + y[i+1]) * (t[i+1] - t[i]) for i = 1:(length(t)-1))
 
 moist_variants = filter(v -> VARIANTS[v].runs == :moist, variants_present())
 M = Dict{Tuple{String,String},Dict{String,Float64}}()
@@ -534,7 +505,7 @@ if !isempty(moist_variants)
             i == 1 && axislegend(ax; position = :rb, labelsize = 9)
         end
         ax = Axis(fig[2, 4]; title = "mass lost", xlabel = "time (h)", ylabel = "g")
-        lines!(ax, r.t ./ 3600, r.mass[1] .- r.mass; color = :black)
+        lines!(ax, r.t_mass ./ 3600, r.mass[1] .- r.mass; color = :black)
         hlines!(ax, [initial_water_g(r)]; color = :gray, linestyle = :dot)
         for (l, s) in sort(collect(S); by = first)
             lines!(ax, s.t ./ 3600, s.mass[1] .- s.mass; linestyle = styles[l])
