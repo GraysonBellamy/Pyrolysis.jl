@@ -1,0 +1,4 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"|∫q dt − ΔH| / peak rise of H, five times and the end",1.6389931763264049e-10,NaN,1.6389931763264049e-10,4.9e-10,true,"observed 1.64e-10 (temperature) and 5.96e-11 (enthalpy)"
+"temperature back at the start [K]",2.3396395590680186e-5,NaN,2.3396395590680186e-5,7.1e-5,true,"observed 2.34e-5 K in both forms: the water the cycle moved still flows back"
+"vapour back at the start (relative)",2.2131502850353257e-6,NaN,2.2131502850353257e-6,6.7e-6,true,"observed 2.21e-6 in both forms, as the temperature"

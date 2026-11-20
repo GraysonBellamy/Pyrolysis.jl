@@ -1,0 +1,9 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+25,"gain at five times / series (relative)",0.005130071300013417,NaN,0.005130071300013417,0.004,false
+25,"temperature drift [K]",5.684341886080802e-14,NaN,5.684341886080802e-14,1.0e-10,true
+50,"gain at five times / series (relative)",0.0013428693568774408,NaN,0.0013428693568774408,0.004,true
+50,"temperature drift [K]",5.684341886080802e-14,NaN,5.684341886080802e-14,1.0e-10,true
+100,"gain at five times / series (relative)",0.00040292310409639764,NaN,0.00040292310409639764,0.004,true
+100,"temperature drift [K]",5.684341886080802e-14,NaN,5.684341886080802e-14,1.0e-10,true
+200,"gain at five times / series (relative)",0.00016829197882028968,NaN,0.00016829197882028968,0.004,true
+200,"temperature drift [K]",5.684341886080802e-14,NaN,5.684341886080802e-14,1.0e-10,true

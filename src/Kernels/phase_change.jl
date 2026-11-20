@@ -54,14 +54,51 @@ end
 
 @inline function _phase_change!(c, pc, ds, i, ξ, ξ⁺)
     w, v = pc.liquid, pc.vapour
-    T = ds.T_trial[i]
     X = moisture_content(pc, ξ, ξ⁺)
+    ω = _cell_rate(pc, X, ds, i, ξ)
     @inbounds begin
-        ω = phase_change_rate(pc, X, T, ds.φ[i], ξ[v]) * ds.V_eval[i]
-        h = phase_change_heat(pc, X, T, ds.h[v, i], ds.h[w, i])
+        h = phase_change_heat(pc, X, ds.T_trial[i], ds.h[v, i], ds.h[w, i])
         c.S_mass[w, i] -= ω
         c.S_mass[v, i] += ω
         c.S_energy[i] -= h * ω
     end
     return nothing
+end
+
+# The rate [kg/s] at which the liquid of `pc` becomes vapour in cell `i` at
+# moisture content `X`, from the cell's signed concentrations `ξ`.
+@inline _cell_rate(pc, X, ds, i, ξ) =
+    @inbounds phase_change_rate(pc, X, ds.T_trial[i], ds.φ[i], ξ[pc.vapour]) * ds.V_eval[i]
+
+"""
+	phase_change_exchange(material, ds, i) -> (evaporation, condensation)
+
+The gross exchange [kg/s] of the phase changes of cell `i` that
+[`PhaseChangeKernel`](@ref) adds from the derived state `ds`: over the
+material's phase changes, the sums of `max(ω_v Vᵢ, 0)`, the liquid that
+becomes vapour, and of `max(−ω_v Vᵢ, 0)`, the vapour that condenses, each
+rate read as the kernel reads it. Both are zero in a dead cell and for a
+material without phase changes.
+"""
+function phase_change_exchange(material::Material{NC}, ds::DerivedState{NC}, i) where {NC}
+    z = zero(eltype(ds.ξ))
+    ds.active[i] || return (z, z)
+    ξ = ntuple(j -> ds.ξ[j, i], Val(NC))
+    ξ⁺ = ntuple(j -> ds.ξ⁺[j, i], Val(NC))
+    return _exchange(material.phase_changes, ds, i, ξ, ξ⁺, z, z)
+end
+
+@inline _exchange(::Tuple{}, ds, i, ξ, ξ⁺, e, c) = (e, c)
+@inline function _exchange(changes::Tuple, ds, i, ξ, ξ⁺, e, c)
+    pc = first(changes)
+    ω = _cell_rate(pc, moisture_content(pc, ξ, ξ⁺), ds, i, ξ)
+    return _exchange(
+        Base.tail(changes),
+        ds,
+        i,
+        ξ,
+        ξ⁺,
+        e + max(ω, zero(ω)),
+        c + max(-ω, zero(ω)),
+    )
 end

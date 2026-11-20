@@ -1,0 +1,6 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"vapour at five times / quadrature",1.1559739832023297e-9,NaN,1.1559739832023297e-9,7.2e-9,true,"observed 1.16e-9 (temperature) and 2.39e-9 (enthalpy)"
+"vapour at the end / quadrature",3.2089886303765525e-12,NaN,3.2089886303765525e-12,1.0e-11,true,"observed 3.2e-12 (temperature) and 9.0e-13 (enthalpy)"
+"|p_v/p_eq − 1| at the end",7.192100248687439e-10,NaN,7.192100248687439e-10,2.2e-9,true,"observed 7.19e-10 and 7.22e-10: the relaxation left after 21/K, e^(−21) of the way"
+"temperature drift [K]",0.0,NaN,0.0,1.0e-10,true,"the step takes no heat: the temperature stays at its start"
+"accepted steps (|log₂(steps/50)|)",47.0,50.0,0.08926733809708741,0.5,true,"observed 47 (temperature) and 48 (enthalpy); within a factor √2 of 50"

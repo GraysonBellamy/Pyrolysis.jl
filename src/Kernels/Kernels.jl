@@ -44,7 +44,7 @@ include("relative_flux.jl")
 
 export Kernel, Contributions, reset!, contribute!, find_kernel
 export ReactionKernel
-export PhaseChangeKernel
+export PhaseChangeKernel, phase_change_exchange
 export ConductionKernel, normal_conductivity, cell_gradient, gradient_support
 export GasTransportKernel, face_peclet
 export RadiativeTransferKernel, MirrorBack, OpenBack, consistent_radiation!

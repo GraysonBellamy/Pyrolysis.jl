@@ -1,0 +1,6 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"front position, mean error (relative)",-0.0022600217425133005,NaN,0.0022600217425133005,0.0042,true,"observed −1.413e-3 in both forms; +2.17e-4 at 200 cells and −2.26e-3 at 800, toward the exchange rate's error"
+"slope of the front against √t (relative)",-0.0021212039382884074,NaN,0.0021212039382884074,0.004,true,"observed −1.328e-3 in both forms"
+"temperature, largest error [K]",1.0110789927680344,NaN,1.0110789927680344,1.5,true,"observed 1.015 K in both forms, at the front; three times is above the target, 1.5 K"
+"energy ledger closure",4.6564447002696264e-7,NaN,4.6564447002696264e-7,2.0e-6,true,"observed 2.6e-7 (temperature) and 6.6e-7 (enthalpy)"
+"accepted steps / the reference count",12662.0,12661.0,1.000078982702788,1.5,true,"a separate implementation of the model took 4661, 8193 and 12 661 at 200, 400 and 800 cells; observed 8193 (temperature) and 10 949 (enthalpy) at 400"

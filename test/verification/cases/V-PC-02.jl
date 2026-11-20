@@ -139,7 +139,7 @@ function _vpc02_case(member, law, exact_law, pins)
                             label = "temperature",
                             x = sol.t[1:(end-1)],
                             y = vec(sol.T[1, 1:(end-1)]),
-                            exact = t -> last(pc_thermal_history(cell, (t,)))[1],
+                            exact = t -> last(pc_thermal_state(cell, t)),
                         ),
                     ],
                 ),

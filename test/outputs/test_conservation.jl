@@ -560,3 +560,105 @@ end
     @test abs(du[area_index(layout)]) <= 1e-12 * u[area_index(layout)]
     @test maximum(nd -> abs(du[velocity_index(layout, nd)]), nodes) <= 1e-10 * sweep
 end
+
+# Wood holding water in equilibrium with its pore vapour, sealed, heated and
+# cooled through its top face: the water evaporates as the slab heats, the
+# vapour moves inside it and condenses again as it cools.
+function _sealed_wet(n)
+    wood = SolidComponent(
+        :wood;
+        ρ = 400.0,
+        ρ_intrinsic = 1500.0,
+        c = 1500.0,
+        k = 0.12,
+        λ = 5e-7,
+        κ = 1e-15,
+    )
+    water = LiquidComponent(:water; ρ = 1000.0, c = 4180.0, k = 0.6)
+    vapour = GaseousComponent(:vapour; M = 0.018015, c = 1900.0, k = 0.025)
+    air = GaseousComponent(:air; M = 0.02897, c = 1006.0, k = 0.026)
+    material = Material(
+        name = :sealed_wet,
+        components = (wood, water, vapour, air),
+        phase_changes = (
+            PhaseChange(
+                :moisture,
+                :water => :vapour;
+                activity = CAST_SPRUCE,
+                sorbents = (:wood,),
+            ),
+        ),
+        mixing = MaterialMixing(
+            k = MixingSpec(PARALLEL),
+            λ = MixingSpec(PARALLEL),
+            κ = MixingSpec(PARALLEL),
+        ),
+    )
+    T0 = 300.0
+    ξc = (400.0, 40.0, 0.0, 0.0)
+    ξ_v = equilibrium_vapour_concentration(material, ξc, T0)
+    p_v = equilibrium_vapour_pressure(material, ξc, T0)
+    ξ_air = background_gas_concentration(material, :air, ξc, T0; P = 101325.0 - p_v)
+    ambient(t) = t < 100.0 ? 300.0 + 100.0 * sinpi(t / 100.0)^2 : 300.0
+    return PyrolysisProblem(
+        mesh = uniform_mesh(0.002, n),
+        material = material,
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = ConvectiveBC(h = 50.0, T_inf = ambient),
+                bottom = AdiabaticBC(),
+            ),
+            mass = (top = ImpermeableBC(), bottom = ImpermeableBC()),
+        ),
+        T_initial = z -> T0,
+        ξ_initial = [z -> ξc[1], z -> ξc[2], z -> ξ_v, z -> ξ_air],
+        tspan = (0.0, 200.0),
+        output_times = collect(0.0:2.0:200.0),
+    )
+end
+
+# The pore vapour is a trace on its cell's mass scale, and the exchange
+# multiplies the error of its interpolant by the exchange rate: the vapour's
+# production, and the latent heat with it, is integrated to the tolerance only
+# once the vapour is resolved. At a relative tolerance of 1e-6 the energy
+# ledger of this slab closes to 6e-3; the defect falls with the tolerance.
+@testset "the recorder on a sealed wet slab: $(energy) form" for energy in
+                                                                 (:temperature, :enthalpy)
+    runs = map((1e-8, 1e-10)) do reltol
+        rec = ConservationRecorder()
+        sol = Integration.solve(
+            _sealed_wet(8);
+            energy_state = energy,
+            callback = rec,
+            reltol,
+            abstol = reltol / 100,
+        )
+        @test sol.retcode === :Success
+        @test rec.steps == sol.statistics.accepted
+        (;
+            sol,
+            audit = conservation_audit(sol, rec),
+            vapour = gas_species_audit(sol, rec).species.vapour,
+        )
+    end
+    coarse, fine = runs
+    @info "sealed wet slab ($energy), reltol 1e-8 and 1e-10" coarse.audit.energy fine.audit.energy coarse.vapour fine.vapour
+    x = fine.sol.extras
+    # The water moved both ways.
+    @test maximum(x.evaporation_rate) > 0 && maximum(x.condensation_rate) > 0
+    for run in runs
+        # Nothing crosses the faces: the mass is the start's to round-off.
+        @test run.audit.mass.inflow == 0
+        @test abs(run.audit.mass.defect) <= 1e-12 * run.audit.mass.initial
+        @test run.vapour.escape == 0 && run.vapour.ingress == 0
+    end
+    # The heat through the face is what the slab's energy gained, the phase
+    # change's heat included; the defect is the integrator's.
+    @test abs(fine.audit.energy.inflow) > 0
+    @test abs(fine.audit.energy.defect) < abs(coarse.audit.energy.defect) / 10
+    @test abs(fine.audit.energy.relative) <= 3e-6
+    # The vapour's change is its production.
+    @test abs(fine.vapour.production) > 0
+    @test abs(fine.vapour.defect) < abs(coarse.vapour.defect) / 10
+    @test abs(fine.vapour.relative) <= 1e-3
+end

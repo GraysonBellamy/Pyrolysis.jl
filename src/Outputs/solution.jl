@@ -39,6 +39,11 @@ area of the faces they name unless noted.
 
 - `gas_generation_rate`: the gas the reactions and phase changes of the live
   cells produce, net, per unit initial area of the `:top` faces [kg/(m²·s)]
+- `evaporation_rate`, `condensation_rate`: the gross exchange of the phase
+  changes of the live cells, the liquid that becomes vapour and the vapour
+  that condenses, each non-negative, per unit initial area of the `:top`
+  faces [kg/(m²·s)] ([`phase_change_exchange`](@ref)); their difference is
+  the vapours' net production. Zero for a material without phase changes
 - `back_temperature`: the temperature of the `:bottom` faces [K]
 - `total_mass`: the summed component masses, per unit initial area of the
   `:top` faces [kg/m²]
@@ -93,6 +98,8 @@ area of the faces they name unless noted.
 """
 const SolutionExtras = @NamedTuple{
     gas_generation_rate::Vector{Float64},
+    evaporation_rate::Vector{Float64},
+    condensation_rate::Vector{Float64},
     back_temperature::Vector{Float64},
     total_mass::Vector{Float64},
     thickness_history::Vector{Float64},
@@ -204,6 +211,8 @@ end
 # The extras of `nt` saved times: every series zero except the blowing
 # diagnostics, which start at their no-outflow values.
 _extras(nt::Int) = SolutionExtras((
+    zeros(nt),
+    zeros(nt),
     zeros(nt),
     zeros(nt),
     zeros(nt),
@@ -384,8 +393,13 @@ function PyrolysisSolution(
             for j = 1:NC
                 gas[j] && (x.gas_generation_rate[k] += c.S_mass[j, i])
             end
+            evaporation, condensation = phase_change_exchange(material, ds, i)
+            x.evaporation_rate[k] += evaporation
+            x.condensation_rate[k] += condensation
         end
         x.gas_generation_rate[k] /= exposed_area
+        x.evaporation_rate[k] /= exposed_area
+        x.condensation_rate[k] /= exposed_area
         x.min_cell_thickness[k] = isfinite(thinnest) ? thinnest : NaN
         x.live_cells[k] = count(ds.active)
         top_node = has_top ? live_face(topo, ds.active, only(top)) : n_nodes(layout)

@@ -1,0 +1,6 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+4,"temperature at five times [K]",5.13409759150818e-10,NaN,5.13409759150818e-10,1.6e-9,true
+4,"vapour at five times / reference",9.726777161489508e-10,NaN,9.726777161489508e-10,3.0e-9,true
+4,"energy ledger closure (relative)",2.030557766076724e-9,NaN,2.030557766076724e-9,6.1e-9,true
+4,"temperature at the end / mass and enthalpy [K]",349.46973861180777,349.4697386118019,5.8548721426632255e-12,3.3e-11,true
+4,"vapour at the end / mass and enthalpy",0.1751585952627809,0.17515859526274113,2.2715163083830703e-13,1.3e-12,true

@@ -1,0 +1,4 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"temperature at five times [K]",5.354650056688115e-10,NaN,5.354650056688115e-10,1.7e-9,true,"observed 5.35e-10 K (temperature) and 3.38e-10 K (enthalpy)"
+"vapour at five times / reference",1.8959083192271464e-9,NaN,1.8959083192271464e-9,6.6e-9,true,"observed 1.90e-9 (temperature) and 2.17e-9 (enthalpy)"
+"energy ledger closure (relative)",2.5072674877234777e-9,NaN,2.5072674877234777e-9,7.6e-9,true,"observed 2.51e-9 (temperature) and 1.09e-9 (enthalpy)"

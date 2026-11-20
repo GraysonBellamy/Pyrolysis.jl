@@ -7,7 +7,13 @@ using Pyrolysis.Materials: n_components
 using Pyrolysis.Physics: moisture_content, phase_change_rate, phase_change_heat
 using Pyrolysis.States: derive!
 using Pyrolysis.Kernels:
-    PhaseChangeKernel, ReactionKernel, Contributions, contribute!, reset!, find_kernel
+    PhaseChangeKernel,
+    ReactionKernel,
+    Contributions,
+    contribute!,
+    reset!,
+    find_kernel,
+    phase_change_exchange
 using Pyrolysis.Integration: setup
 
 # A charring wood holding water and an oil, each with its vapour, in air: two
@@ -169,6 +175,25 @@ _allocated(c, kernel, ds, topo, mat) = @allocated contribute!(c, kernel, ds, top
         @test _allocated(c, kernel, ds, topo, mat) == 0
     end
 
+    @testset "the gross exchange is what the kernel adds" begin
+        _kernel_contribution(c, kernel, ds, topo, mat)
+        for i = 1:6
+            e, d = @inferred phase_change_exchange(mat, ds, i)
+            # the vapour rows hold each phase change's ω V alone
+            ω = (c.S_mass[5, i], c.S_mass[6, i])
+            @test e == max(ω[1], 0.0) + max(ω[2], 0.0)
+            @test d == max(-ω[1], 0.0) + max(-ω[2], 0.0)
+            @test e - d ≈ ω[1] + ω[2] rtol = 1e-14
+        end
+        @test any(i -> phase_change_exchange(mat, ds, i)[1] > 0, 1:6)
+        @test any(i -> phase_change_exchange(mat, ds, i)[2] > 0, 1:6)
+        ds.active[3] = false
+        @test phase_change_exchange(mat, ds, 3) === (0.0, 0.0)
+        ds.active[3] = true
+        phase_change_exchange(mat, ds, 2)
+        @test (@allocated phase_change_exchange(mat, ds, 2)) == 0
+    end
+
     @testset "the reaction kernel's sources are its own" begin
         # the full assembly's sources are the two kernels' sums
         cr = Contributions{Float64}(NC, 1, 6, 7, 7)
@@ -208,5 +233,8 @@ end
             ),
         )
         @test find_kernel(PhaseChangeKernel, cp.def.kernels) === nothing
+        ds = cp.ws.derived
+        derive!(ds, cp.u0, cp.def.layout, cp.def.setup)
+        @test all(i -> phase_change_exchange(mat, ds, i) === (0.0, 0.0), 1:4)
     end
 end

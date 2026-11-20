@@ -1177,6 +1177,18 @@ end
             @test maximum(abs.(T1 .- T2)) <= 1e-10
             @test all(<(350.0), T1)
         end
+        # at any time: equal steps no longer than the reference's, the same
+        # values at its whole steps and continuous between them
+        c = cell((:cast, CAST_TABLE3.spruce))
+        xs, Ts = pc_thermal_history(c, (0.5, 2.0) ./ c.K)
+        for (t, x, T) in zip((0.5, 2.0) ./ c.K, xs, Ts)
+            @test pc_thermal_state(c, t)[1] ≈ x rtol = 1e-12
+            @test pc_thermal_state(c, t)[2] ≈ T rtol = 1e-14
+        end
+        @test pc_thermal_state(c, 0.0) == (c.ξ_v0, c.T0)
+        t = 0.7031 / c.K
+        a, b = pc_thermal_state(c, t), pc_thermal_state(c, t * (1 + 1e-9))
+        @test abs(a[1] - b[1]) <= 1e-9 * a[1] && abs(a[2] - b[2]) <= 1e-9
         c = cell((:free,))
         x, T = pc_thermal_history(c, (40.0 / c.K,))
         x∞, T∞ = pc_free_water_end(c)
@@ -1186,5 +1198,180 @@ end
         @test pc_total_enthalpy(c, x∞, T∞) ≈ pc_total_enthalpy(c, 0.0, 350.0) rtol = 1e-14
         @test pc_total_enthalpy(c, only(x), only(T)) ≈ pc_total_enthalpy(c, 0.0, 350.0) rtol =
             1e-12
+    end
+end
+
+@testset "Phase change: the drying front and sorption into a slab (exact/phase_change.jl)" begin
+    @testset "boiling temperature and Kirchhoff's latent heat" begin
+        P = 101325.0
+        T_b = pc_boiling_temperature((:free,), 0.25, P)
+        @test abs(pc_activity((:free,), 0.25, T_b) * pc_saturation(T_b) / P - 1) <= 1e-12
+        @test T_b ≈ 373.1355 atol = 1e-4
+        # water alone boils at 373.124 K under 1 atm (Wagner and Pruß 2002)
+        @test pc_boiling_temperature((:free,), 1e8, P) ≈ 373.124 atol = 1e-3
+        @test pc_latent_heat(2.4417e6, 4180.0, 1.0, PC_T_REF) == 2.4417e6
+        @test pc_latent_heat(2.4417e6, 4180.0, 1.0, T_b) ≈
+              2.4417e6 - 4179.0 * (T_b - PC_T_REF)
+    end
+
+    @testset "the drying front as a Neumann problem" begin
+        T_s, T_i, ξ_w = 473.15, 323.15, 100.0
+        T_b = pc_boiling_temperature((:free,), 0.25, 101325.0)
+        L = pc_latent_heat(2.4417e6, 4180.0, 1.0, T_b)
+        k_d, k_w, C_d, C_w = 0.15, 0.19, 6.0e5, 6.0e5 + ξ_w * 4180.0
+        front(T_i) = pc_drying_front(
+            k_dry = k_d,
+            k_wet = k_w,
+            C_dry = C_d,
+            C_wet = C_w,
+            ξ_w = ξ_w,
+            L = L,
+            T_s = T_s,
+            T_b = T_b,
+            T_i = T_i,
+        )
+        p = front(T_i)
+        λ = stefan_lambda(p)
+        # the eigencondition of the drying front, written out
+        α_d, α_w = k_d / C_d, k_w / C_w
+        ν = sqrt(α_d / α_w)
+        drying(λ) =
+            exp(-λ^2) / erf(λ) -
+            (k_w / k_d) * ν * (T_b - T_i) / (T_s - T_b) * exp(-λ^2 * ν^2) / erfc(λ * ν) -
+            sqrt(π) * λ * ξ_w * L / (C_d * (T_s - T_b))
+        @test abs(drying(λ)) <= 1e-12
+        @test α_solid(p) == α_d && α_liquid(p) == α_w
+        # the face, the front and the far field
+        t = 600.0
+        s = stefan_front(t; λ, αs = α_d)
+        @test stefan_T(0.0, t, p, λ) ≈ T_s rtol = 1e-14
+        @test stefan_T(s, t, p, λ) ≈ T_b rtol = 1e-12
+        @test stefan_T(1.0, t, p, λ) ≈ T_i rtol = 1e-12
+        # the front takes the latent heat of the water it passes:
+        # −k_d ∂T/∂x below it, less −k_w ∂T/∂x above it, is ξ_w L ds/dt
+        h = 1e-7
+        q_d = -k_d * (stefan_T(s, t, p, λ) - stefan_T(s - h, t, p, λ)) / h
+        q_w = -k_w * (stefan_T(s + h, t, p, λ) - stefan_T(s, t, p, λ)) / h
+        @test q_d - q_w ≈ ξ_w * L * λ * sqrt(α_d / t) rtol = 1e-5
+        # from the boiling temperature the wet zone stays there: the one-phase
+        # problem, √π λ e^(λ²) erf λ = C_d (T_s − T_b)/(ξ_w L)
+        q = front(T_b)
+        λ1 = stefan_lambda(q)
+        @test sqrt(π) * λ1 * exp(λ1^2) * erf(λ1) ≈ C_d * (T_s - T_b) / (ξ_w * L) rtol =
+            1e-12
+        @test stefan_T(0.01, t, q, λ1) == T_b
+    end
+
+    @testset "the linear law and its inverse" begin
+        law = (:linear, 0.2, 1e-7)
+        package = ActivityFunction((X, T) -> X / 0.2; X0 = 1e-7)
+        for X in (-0.01, 0.0, 1e-8, 0.05, 0.1, 0.11, 0.15)
+            @test pc_activity(law, X, 298.15) ≈
+                  Pyrolysis.Materials.activity(package, X, 298.15) rtol = 1e-14 atol = 1e-18
+        end
+        for a in (0.1, 0.5, 0.55)
+            X = pc_linear_moisture(a, 0.2, 1e-7)
+            @test pc_activity(law, X, 298.15) ≈ a rtol = 1e-14
+        end
+        # with X₀ = 1e-7 the law is linear in its slope to 1e-12
+        a1, a2 = 0.5, 0.55
+        slope =
+            (pc_linear_moisture(a2, 0.2, 1e-7) - pc_linear_moisture(a1, 0.2, 1e-7)) /
+            (a2 - a1)
+        @test slope ≈ 0.2 rtol = 1e-11
+    end
+
+    @testset "uptake through a face held at a fixed value" begin
+        @test pc_slab_uptake(0.0) == 0
+        @test pc_slab_uptake(10.0) ≈ 1 - 8 / π^2 * exp(-π^2 * 10 / 4) rtol = 1e-15
+        # short times: the semi-infinite uptake 2 √(Fo/π)
+        for Fo in (1e-4, 1e-3)
+            @test pc_slab_uptake(Fo) ≈ 2 * sqrt(Fo / π) rtol = 1e-10
+        end
+        # the convective slab of exact/slab_series.jl in the limit Bi → ∞,
+        # its mean temperature by Gauss–Legendre quadrature
+        λs = biot_eigenvalues(1e10, 400)
+        nodes, weights = _gauss_legendre(10)
+        panels = 200
+        mean_theta(Fo) = sum(
+            1 / (2panels) * sum(
+                w * slab_convective_theta((p - 0.5 + ξ / 2) / panels, Fo, λs) for
+                (ξ, w) in zip(nodes, weights)
+            ) for p = 1:panels
+        )
+        for Fo in (0.02, 0.1, 0.5)
+            @test pc_slab_uptake(Fo) ≈ 1 - mean_theta(Fo) rtol = 1e-8
+        end
+    end
+
+    @testset "dusty-gas transfer of a vapour through stagnant air" begin
+        args = (
+            φ = 0.69,
+            τ = 4.0,
+            d = 1e-5,
+            D_ref = 2.6e-5,
+            T_ref = 298.15,
+            P_ref = 101325.0,
+            T = 298.15,
+            P = 101325.0,
+            M = 0.018015,
+        )
+        x_a = 0.984
+        Λ = pc_dusty_gas_transfer(; args..., x_a)
+        # the dusty-gas equations of the two species, N/D_K + Σ (x_j N − x N_j)/D_m
+        # = −∇p/(R T), solved for the vapour's flux with the air's gradient
+        # that leaves the air at rest
+        D_K(M) = args.φ * args.d / (3args.τ) * sqrt(8 * PC_R * args.T / (π * M))
+        D_m = args.φ / args.τ * args.D_ref
+        x_v = 1 - x_a
+        a11, a12 = 1 / D_K(args.M) + x_a / D_m, -x_v / D_m
+        a21, a22 = -x_a / D_m, 1 / D_K(0.02897) + x_v / D_m
+        g_v = -1.0
+        flux(g_a) = begin
+            b1, b2 = -g_v / (PC_R * args.T), -g_a / (PC_R * args.T)
+            det = a11 * a22 - a12 * a21
+            ((b1 * a22 - a12 * b2) / det, (a11 * b2 - a21 * b1) / det)
+        end
+        g_a = bisect_root(g -> flux(g)[2], -10.0, 10.0)
+        N = flux(g_a)
+        @test abs(N[2]) <= 1e-12 * abs(N[1])
+        # J = M N against −Λ ∂ρ_v/∂z, ∂ρ_v/∂z = M ∂p_v/∂z/(R T)
+        @test N[1] * PC_R * args.T / (-g_v) ≈ Λ rtol = 1e-10
+        # the limits: Knudsen alone without a background gas, molecular alone
+        # in wide pores
+        @test pc_dusty_gas_transfer(; args..., x_a = 0.0) ≈ D_K(args.M) rtol = 1e-14
+        @test pc_dusty_gas_transfer(; args..., d = 1e3, x_a) ≈ D_m / x_a rtol = 1e-6
+        # the package's coefficients of the same closure
+        wood = SolidComponent(
+            :wood;
+            ρ = 400.0,
+            ρ_intrinsic = 1500.0,
+            c = 1500.0,
+            k = 0.12,
+            κ = 0.0,
+        )
+        material = Material(
+            name = :dusty,
+            components = (
+                wood,
+                GaseousComponent(:vapour; M = args.M, c = 1900.0, k = 0.025),
+                GaseousComponent(:air; M = 0.02897, c = 1006.0, k = 0.026),
+            ),
+            gas_transport = DustyGas(
+                tortuosity = args.τ,
+                D_ref = args.D_ref,
+                T_ref = args.T_ref,
+                P_ref = args.P_ref,
+                pore_diameter = args.d,
+            ),
+        )
+        c = Pyrolysis.Properties.transport_coefficients(
+            (400.0, 0.01, 1.0),
+            args.T,
+            material,
+            args.φ,
+        )
+        @test c.K[2] ≈ D_K(args.M) rtol = 1e-14
+        @test 1 / (c.t * args.P) ≈ D_m rtol = 1e-14
     end
 end

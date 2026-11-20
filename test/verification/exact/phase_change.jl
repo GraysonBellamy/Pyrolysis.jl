@@ -92,11 +92,13 @@ pc_vanishing(X) = X / (abs(X) + PC_X0)
 
 The activity of `law`: `(:cast, β)`, the CAST isotherm of the set `β`;
 `(:frozen, β, T_f)`, the CAST isotherm of `β` held at `T_f` whatever the
-temperature; `(:free,)`, free water.
+temperature; `(:free,)`, free water; `(:linear, X_s, X0)`, the linear law
+X/X_s with the vanishing factor of scale `X0` and the cap.
 """
 function pc_activity(law, X, T)
     kind = first(law)
     kind === :free && return pc_vanishing(X)
+    kind === :linear && return pc_cap(max(X, 0.0) / law[2] * X / (abs(X) + law[3]))
     T_law = kind === :frozen ? law[3] : T
     return pc_cap(
         exp(-cast_gibbs(law[2], max(X, 0.0), T_law) / (PC_R * T_law)) * pc_vanishing(X),
@@ -228,18 +230,40 @@ function pc_thermal_history(cell::SealedCell, times; steps_per::Int = 1000)
         abs(n * dt - (target - t)) <= 1e-9 * max(target, dt) ||
             throw(ArgumentError("time $target is not a whole number of steps"))
         for _ = 1:n
-            k1 = _pc_rates(cell, x, T)
-            k2 = _pc_rates(cell, x + dt / 2 * k1[1], T + dt / 2 * k1[2])
-            k3 = _pc_rates(cell, x + dt / 2 * k2[1], T + dt / 2 * k2[2])
-            k4 = _pc_rates(cell, x + dt * k3[1], T + dt * k3[2])
-            x += dt / 6 * (k1[1] + 2k2[1] + 2k3[1] + k4[1])
-            T += dt / 6 * (k1[2] + 2k2[2] + 2k3[2] + k4[2])
+            x, T = _pc_rk4_step(cell, x, T, dt)
         end
         t = target
         push!(out_x, x)
         push!(out_T, T)
     end
     return out_x, out_T
+end
+
+# One classical Runge–Kutta step of the thermal cell from (x, T).
+function _pc_rk4_step(cell::SealedCell, x, T, dt)
+    k1 = _pc_rates(cell, x, T)
+    k2 = _pc_rates(cell, x + dt / 2 * k1[1], T + dt / 2 * k1[2])
+    k3 = _pc_rates(cell, x + dt / 2 * k2[1], T + dt / 2 * k2[2])
+    k4 = _pc_rates(cell, x + dt * k3[1], T + dt * k3[2])
+    return x + dt / 6 * (k1[1] + 2k2[1] + 2k3[1] + k4[1]),
+    T + dt / 6 * (k1[2] + 2k2[2] + 2k3[2] + k4[2])
+end
+
+"""
+    pc_thermal_state(cell, t; steps_per = 1000) -> (ξ_v, T)
+
+The vapour [kg/m³] and temperature [K] of the thermal cell at any time `t`,
+by classical Runge–Kutta in the fewest equal steps no longer than
+1/(steps_per K).
+"""
+function pc_thermal_state(cell::SealedCell, t; steps_per::Int = 1000)
+    n = ceil(Int, t * steps_per * cell.K - 1e-9)
+    n <= 0 && return cell.ξ_v0, cell.T0
+    x, T = cell.ξ_v0, cell.T0
+    for _ = 1:n
+        x, T = _pc_rk4_step(cell, x, T, t / n)
+    end
+    return x, T
 end
 
 """The total enthalpy [J/m³] of the cell, Σ ξ_j c_j (T − T_REF) + L_ref ξ_v."""
@@ -273,4 +297,135 @@ function pc_free_water_end(cell::SealedCell)
         cell.ξ_v0 + 1.01 * pc_equilibrium_vapour(cell, cell.ξ_w0, cell.T0),
     )
     return x, temperature(x)
+end
+
+# =============================================================================
+# The drying front of free water
+# =============================================================================
+#
+# A slab of wood holding free water at moisture X, at T_i, has its face raised
+# to T_s. The vapour leaves through the face at a total pressure P and carries
+# no sensible heat. In the stiff limit the water leaves at a front held at the
+# boiling temperature T_b, where a(X, T_b) p_sat(T_b) = P, and takes there the
+# latent heat L(T_b) = L_ref + (c_v − c_w)(T_b − T_REF) per kilogram. Between
+# the face and the front the slab is dry, of conductivity k_d and volumetric
+# heat capacity C_d; beyond the front it is wet, k_w and C_w. This is the
+# Neumann problem of exact/stefan.jl with the dry zone as its solid next to the
+# wall at T∞ = T_s, the wet zone as its liquid at T0 = T_i, T_m = T_b, a unit
+# density with the volumetric heat capacities, and ΔH_m = −ξ_w L(T_b): the
+# front takes up, as it advances into the wet zone, the heat a solidification
+# front gives out. Its eigencondition then reads
+#
+#   e^(−λ²)/erf λ − (k_w/k_d) ν (T_b − T_i)/(T_s − T_b) e^(−λ²ν²)/erfc(λν)
+#       = √π λ ξ_w L(T_b) / (C_d (T_s − T_b)),   ν = √(α_d/α_w),
+#
+# with the front at s(t) = 2 λ √(α_d t) from the face.
+
+"""
+    pc_boiling_temperature(law, X, P) -> T_b [K]
+
+The temperature at which water of moisture `X` under the activity `law` boils
+at the total pressure `P` [Pa]: the root of a(X, T) p_sat(T) = P.
+"""
+pc_boiling_temperature(law, X, P) =
+    bisect_root(T -> pc_activity(law, X, T) * pc_saturation(T) - P, 300.0, 500.0)
+
+"""Kirchhoff's latent heat [J/kg] at `T` for the constant heat capacities `c_w` and `c_v`."""
+pc_latent_heat(L_ref, c_w, c_v, T) = L_ref + (c_v - c_w) * (T - PC_T_REF)
+
+"""
+    pc_drying_front(; k_dry, k_wet, C_dry, C_wet, ξ_w, L, T_s, T_b, T_i) -> StefanProblem
+
+The drying front as the Neumann problem of [`StefanProblem`](@ref): the dry
+zone of conductivity `k_dry` and volumetric heat capacity `C_dry` between the
+face at `T_s` and the front at `T_b`, the wet zone (`k_wet`, `C_wet`) at `T_i`
+beyond it, and the water at `ξ_w` [kg/m³] taking the latent heat `L` [J/kg]
+at the front. [`stefan_lambda`](@ref), [`stefan_front`](@ref) and
+[`stefan_T`](@ref) then give the front and the temperatures, with depth
+measured from the face.
+"""
+pc_drying_front(; k_dry, k_wet, C_dry, C_wet, ξ_w, L, T_s, T_b, T_i) = StefanProblem(
+    k_s = k_dry,
+    k_l = k_wet,
+    ρ = 1.0,
+    c_s = C_dry,
+    c_l = C_wet,
+    T_m = T_b,
+    ΔH_m = -ξ_w * L,
+    T0 = T_i,
+    T∞ = T_s,
+)
+
+# =============================================================================
+# Sorption into a slab through a face in contact with a humid reservoir
+# =============================================================================
+#
+# A slab of thickness L, sealed at its back, holds water in equilibrium with
+# its pore vapour at the activity a₀ and a uniform temperature. At t = 0 the
+# face meets a reservoir at the activity a∞. The vapour moves by J = −Λ ∂ρ_v/∂z,
+# ρ_v = a ρ_sat the vapour's density in the pores, and in the stiff limit the
+# water follows it through the isotherm. Under the linear law a = X/X_s the
+# water and its vapour, S X(a) + φ a ρ_sat per unit volume with S the sorbent
+# concentration, are linear in ρ_v but for the pore fraction φ, which falls as
+# the water's volume grows. With φ held, ρ_v obeys a diffusion equation of
+#
+#   D = Λ Δρ_v / (ΔW),   ΔW = S ΔX + Δ(φ ρ_v),
+#
+# the chord of the gain ΔW per unit volume against the step of the vapour,
+# and the slab's gain per unit area is ΔW L times the uptake of a slab held at
+# a fixed value at its face (Crank 1975, eq. 4.18),
+#
+#   M(t)/M∞ = 1 − Σ_{n≥0} 2/μₙ² exp(−μₙ² D t/L²),   μₙ = (2n + 1) π/2,
+#
+# the limit Bi → ∞ of the convective slab of exact/slab_series.jl. Under the
+# dusty-gas closure the vapour, diffusing through air that does not move
+# (Mason and Malinauskas 1983), has
+#
+#   1/Λ = 1/D_K + x_a/D_m,   D_K = (φ d/(3τ)) √(8 R T/(π M)),
+#   D_m = (φ/τ) D_ref (T/T_ref)^1.75 P_ref/P,
+#
+# with x_a the air's mole fraction, d the pore diameter and τ the tortuosity.
+
+"""
+    pc_linear_moisture(a, X_s, X0) -> X
+
+The moisture content at which the linear law `(:linear, X_s, X0)` reaches the
+activity `a` below its cap: the positive root of X²/(X_s (X + X0)) = a.
+"""
+pc_linear_moisture(a, X_s, X0) = (a * X_s + sqrt((a * X_s)^2 + 4 * a * X_s * X0)) / 2
+
+"""
+    pc_slab_uptake(Fo) -> M/M∞
+
+The fraction of its final gain that a slab sealed at its back has taken up
+through a face held at a fixed value, at the Fourier number `Fo = D t/L²`
+(Crank 1975, eq. 4.18). Summed until a term falls below 1e-17 with
+μₙ² Fo > 50.
+"""
+function pc_slab_uptake(Fo)
+    Fo <= 0 && return 0.0
+    s = 0.0
+    for n = 0:(10^7)
+        μ = (2n + 1) * π / 2
+        term = 2 / μ^2 * exp(-μ^2 * Fo)
+        s += term
+        term < 1e-17 && μ^2 * Fo > 50 && break
+    end
+    return 1 - s
+end
+
+"""
+    pc_dusty_gas_transfer(; φ, τ, d, D_ref, T_ref, P_ref, T, P, M, x_a) -> Λ [m²/s]
+
+The coefficient of the vapour's mass flux, J = −Λ ∂ρ_v/∂z, under the dusty-gas
+model with one molecular diffusivity, the vapour (molar mass `M`) diffusing
+through a background gas of mole fraction `x_a` that does not move:
+1/Λ = 1/D_K + x_a/D_m, with the Knudsen coefficient of pores of diameter `d`
+and the molecular diffusivity `D_ref` at `T_ref` and `P_ref`, both reduced by
+`φ/τ`.
+"""
+function pc_dusty_gas_transfer(; φ, τ, d, D_ref, T_ref, P_ref, T, P, M, x_a)
+    D_K = φ * d / (3τ) * sqrt(8 * PC_R * T / (π * M))
+    D_m = φ / τ * D_ref * (T / T_ref)^1.75 * P_ref / P
+    return 1 / (1 / D_K + x_a / D_m)
 end

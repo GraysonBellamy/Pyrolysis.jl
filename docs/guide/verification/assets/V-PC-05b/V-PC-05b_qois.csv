@@ -1,0 +1,3 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"gain at five times / series (relative)",0.001166886103734499,NaN,0.001166886103734499,0.0069,true,"observed 2.309e-3 in both forms, at the first time; with the coefficient's trace limit, x_a = 1, it would be 7.6e-3"
+"temperature drift [K]",5.684341886080802e-14,NaN,5.684341886080802e-14,1.0e-10,true,"the step takes no heat; observed 5.7e-14 K (temperature) and 0 (enthalpy)"

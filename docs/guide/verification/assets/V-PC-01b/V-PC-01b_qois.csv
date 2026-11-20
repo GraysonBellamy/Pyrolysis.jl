@@ -1,0 +1,6 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"vapour at five times / quadrature",2.0220755070354812e-9,NaN,2.0220755070354812e-9,7.2e-9,true,"observed 2.02e-9 (temperature) and 2.39e-9 (enthalpy)"
+"vapour at the end / quadrature",1.1102230246251565e-15,NaN,1.1102230246251565e-15,1.0e-13,true,"observed 1.1e-15 and 1.3e-15, round-off"
+"|p_v/p_eq − 1| at the end",1.1102230246251565e-15,NaN,1.1102230246251565e-15,1.0e-13,true,"observed 1.1e-15 and 5.6e-16, round-off"
+"temperature drift [K]",0.0,NaN,0.0,1.0e-10,true,"the step takes no heat: the temperature stays at its start"
+"accepted steps (|log₂(steps/50)|)",51.0,50.0,0.02856915219677092,0.5,true,"observed 51 (temperature) and 52 (enthalpy); within a factor √2 of 50"

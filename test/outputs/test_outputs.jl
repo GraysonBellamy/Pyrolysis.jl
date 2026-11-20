@@ -45,6 +45,89 @@ end
 
 const _TOL = (abstol = 1e-7, reltol = 1e-5)
 
+# Wood holding water in equilibrium with its pore vapour, heated through its
+# top face, which is open to a reservoir at the start's humidity: the water
+# evaporates near the face, part of the vapour leaves and part condenses deeper.
+function _wet_slab(n; t_end = 60.0)
+    wood = SolidComponent(
+        :wood;
+        ρ = 400.0,
+        ρ_intrinsic = 1500.0,
+        c = 1500.0,
+        k = 0.12,
+        λ = 5e-7,
+        κ = 1e-15,
+    )
+    water = LiquidComponent(:water; ρ = 1000.0, c = 4180.0, k = 0.6)
+    vapour = GaseousComponent(:vapour; M = 0.018015, c = 1900.0, k = 0.025)
+    air = GaseousComponent(:air; M = 0.02897, c = 1006.0, k = 0.026)
+    material = Material(
+        name = :wet_wood,
+        components = (wood, water, vapour, air),
+        phase_changes = (
+            PhaseChange(
+                :moisture,
+                :water => :vapour;
+                activity = CAST_SPRUCE,
+                sorbents = (:wood,),
+            ),
+        ),
+        mixing = MaterialMixing(
+            k = MixingSpec(PARALLEL),
+            λ = MixingSpec(PARALLEL),
+            κ = MixingSpec(PARALLEL),
+        ),
+    )
+    T0, T∞, P = 300.0, 450.0, 101325.0
+    ξc = (400.0, 40.0, 0.0, 0.0)
+    ξ_v = equilibrium_vapour_concentration(material, ξc, T0)
+    p_v = equilibrium_vapour_pressure(material, ξc, T0)
+    ξ_air = background_gas_concentration(material, :air, ξc, T0; P = P - p_v)
+    reservoir =
+        GasReservoir(P = P, T = T∞, mole_fractions = (vapour = p_v / P, air = 1 - p_v / P))
+    return PyrolysisProblem(
+        mesh = uniform_mesh(0.004, n),
+        material = material,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = ConvectiveBC(h = 50.0, T_inf = T∞), bottom = AdiabaticBC()),
+            mass = (top = AmbientGasBC(reservoir), bottom = ImpermeableBC()),
+        ),
+        T_initial = z -> T0,
+        ξ_initial = [z -> ξc[1], z -> ξc[2], z -> ξ_v, z -> ξ_air],
+        tspan = (0.0, t_end),
+        output_times = collect(0.0:5.0:t_end),
+    )
+end
+
+@testset "evaporation and condensation series: $form" for form in (:temperature, :enthalpy)
+    dry = Integration.solve(_ablator(6; t_end = 0.1); energy_state = form, _TOL...)
+    @test length(dry.extras.evaporation_rate) == length(dry.t)
+    @test length(dry.extras.condensation_rate) == length(dry.t)
+    @test all(iszero, dry.extras.evaporation_rate)
+    @test all(iszero, dry.extras.condensation_rate)
+
+    sol = Integration.solve(_wet_slab(12); energy_state = form, _TOL...)
+    @test sol.retcode === :Success
+    x = sol.extras
+    v = findfirst(==(:vapour), sol.gas.species)
+    area = sum(sol.m[:, :, 1]) / x.total_mass[1]
+    @test all(>=(0), x.evaporation_rate) && all(>=(0), x.condensation_rate)
+    # Water leaves near the heated face while vapour condenses deeper.
+    @test count(
+        k -> x.evaporation_rate[k] > 0 && x.condensation_rate[k] > 0,
+        2:length(sol.t),
+    ) >= length(sol.t) ÷ 2
+    @test maximum(x.condensation_rate) > 1e-3 * maximum(x.evaporation_rate)
+    # Their difference is the vapour's net production at every saved time.
+    for k in eachindex(sol.t)
+        net = (x.evaporation_rate[k] - x.condensation_rate[k]) * area
+        gross = (x.evaporation_rate[k] + x.condensation_rate[k]) * area
+        @test isapprox(net, sol.gas.production[v, k]; rtol = 0, atol = 1e-12 * gross)
+    end
+    # The vapour that leaves comes from the net evaporation.
+    @test x.evaporation_rate[end] > x.condensation_rate[end]
+end
+
 @testset "accessors on a moving deactivating deck: $form" for form in
                                                               (:temperature, :enthalpy)
     problem = _ablator(12)
