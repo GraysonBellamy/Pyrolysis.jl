@@ -18114,8 +18114,9 @@ the one-way drying laws scored beside it.
   communication). Blocks of 10 × 10 × 5 cm of five species at 0–30 % moisture, the grain
   across or along the flux, heated at 4 kW·m⁻² for 2.5 h and then cooled, with
   thermocouples from 2 to 40 mm and the mass, and spruce blocks at about 10 and 30 %
-  sliced after 0.5, 1 and 2 h. The deck takes `CAST_SPRUCE` and an ambient of 50 %
-  relative humidity, and for the virgin wood $\lambda = 1.5\times10^{-6}$ m²·s⁻¹ across
+  sliced after 0.5, 1 and 2 h. The decks take `CAST_SPRUCE` for the softwoods and
+  `CAST_BEECH` for oak and poplar, an ambient of 50 % relative humidity, and for the virgin
+  wood $\lambda = 1.5\times10^{-6}$ m²·s⁻¹ across
   the grain and ten times that along it, Siau's ratio near 20 % moisture (§9.2.1), with
   the along-grain densities of Diarra et al. (2026) and conductivities of Flity et al.
   (2024).
@@ -18519,7 +18520,7 @@ The V&V coverage above has gaps that a user should weigh:
    moisture bank (1.16–1.24 times the unexposed moisture) that no measured profile shows,
    and the early interior heating of the wettest Bilbao runs is open.
 
-7. **Cross-code coverage.** ThermaKin2Ds cannot express V-CPL-01,
+8. **Cross-code coverage.** ThermaKin2Ds cannot express V-CPL-01,
    V-RX-02a/c or the pressure-driven gas cases, and its runs can be reproduced
    only where its non-redistributable source is available. FDS has no
    gas-transport comparison. The MaCFP-2 PMMA community submissions, committed under
